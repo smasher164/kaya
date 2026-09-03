@@ -1,18 +1,5 @@
-// The milestone-2 scene from Swift, on the construction sugar. The wire
-// vocabulary underneath (KayaWire.swift) is generated from kaya::spec by
-// kaya-bindgen; the C declarations come from kaya.h via
-// -import-objc-header.
-//
-// WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and only
-// that. The remove button is a STAMPED copy, so its handler registers
-// CENTRALLY against the template node and receives that copy's key
-// path — the only way to know WHICH remove was clicked. The live step
-// button rides its constructor instead; both put the same closure in
-// the same table.
-//
-// AND THE APP NAMES EVERY KEY HERE: g1 and a are the app's own
-// identity, re-addressed later by name. insertFresh answers the
-// opposite case (docs/fresh-key-plan.md).
+// The milestone2 scene, Swift port — guests/rust/milestone2.rs,
+// tools/scenes/milestone2.steps.
 
 import Foundation
 
@@ -26,9 +13,8 @@ let (status, items, removeButton) = app.build {
     let stepCount = tx.signal(.i64(0))
     let groups = tx.collection()
 
-    // The two handles the central registration below needs. A node
-    // parents at CREATION, so both are built inside the template bodies
-    // that hold them (docs/traps.md, result builders).
+    // A node parents at CREATION, so both handles are built inside the
+    // template bodies (docs/traps.md, result builders).
     var items: KayaCollection! = nil
     var removeButton: KayaNodeHandle! = nil
 
@@ -52,8 +38,6 @@ let (status, items, removeButton) = app.build {
         tx.when(stepCount == 1) { t in t.label("extras on") }.0
         tx.each(groups) { g in
             _ = g.column {
-                // A scalar collection's element IS its one wire field, so
-                // the row's label addresses field 0.
                 g.label(KayaField<String>(index: 0))
                 let todos = g.collection()
                 items = todos

@@ -1,16 +1,10 @@
 // UndoProbe (macOS) — does a kaya programmatic text write land in the
 // field's native undo stack, and which NSUndoManager answers for a
-// focused kaya TextField?
-//
-// The questions that decide D7's and D6's mac spelling, and what they
-// answered, are docs/undo-plan.md §0. This file mirrors kaya's ACTUAL
-// lowering — KayaEntry is a SwiftUI TextField over an @Observable node,
-// and the SetProp path writes `node.text = …` and nothing else.
-// Measuring `NSTextField.stringValue` instead would answer a question
-// kaya never asks.
-//
-// Answers land on stdout under "PROBE". Not a lane; nothing builds it
-// but build.sh beside it. THROWAWAY.
+// focused kaya TextField? Answers: docs/undo-plan.md §0.
+// It MIRRORS kaya's actual lowering (a SwiftUI TextField over an
+// @Observable node, SetProp writing `node.text`); measuring
+// `NSTextField.stringValue` would answer a question kaya never asks.
+// THROWAWAY; nothing builds it but build.sh beside it.
 import AppKit
 import SwiftUI
 

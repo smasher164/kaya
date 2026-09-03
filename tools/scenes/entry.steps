@@ -1,10 +1,5 @@
-# The entry round trip: type through the control's own change path —
-# exactly what a keystroke produces — click add, read the status label.
-# Then the command half: add must have cleared the field on screen,
-# put focus back in it, and emptied the app's draft through the
-# clear's own text_changed("") occurrence — so a second add finds
-# nothing to add (a stale draft would read "added milk, 2 total").
-# The opening expect doubles as the scene-ready wait
+# The second add pins the clear's draft reset: a stale draft reads
+# "added milk, 2 total" here instead.
 expect label#0 "no todos"
 set_text entry#0 "milk"
 click button#0

@@ -1,9 +1,5 @@
-(* The confirm conformance scene, OCaml port — the modal-alert grammar
-   via labeled arguments. The three rounds take the three answer paths
-   (action 0, action 1, and [alert_cancel], which is every
-   platform-native dismissal). The result handler rides the REQUEST
-   (~on_result) and retires with its one answer. See
-   guests/rust/confirm.rs and tools/scenes/confirm.steps. *)
+(* The confirm scene, OCaml port — guests/rust/confirm.rs,
+   tools/scenes/confirm.steps. *)
 
 open Kaya_wire
 open Kaya_app

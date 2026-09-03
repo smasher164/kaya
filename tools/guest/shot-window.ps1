@@ -1,17 +1,9 @@
-# Photograph the GUEST'S OWN WINDOW, not the desktop it sits on.
-#
-# shot.ps1 beside this one grabs the whole virtual screen, which is what
-# you want when the question is "what is covering my app" — a toast
-# holding the foreground, a sign-in prompt. It is the wrong tool for a
-# picture OF the app: the caller then has to crop by guesswork, and a
-# hardcoded rectangle silently becomes a photograph of the wallpaper the
-# moment the window moves or the guest is slow to start. Both happened
-# (docs/traps.md).
-#
-# So this one WAITS for the window to exist and asks the platform where
-# it is. No fixed sleep, no fixed crop. If the window never appears it
-# says so and exits nonzero rather than saving a picture of the desktop
-# and letting the caller believe it.
+# Photograph the GUEST'S OWN WINDOW, not the desktop it sits on
+# (shot.ps1 beside this grabs the whole virtual screen, for "what is
+# covering my app"). It WAITS for the window and asks the platform where
+# it is — no fixed sleep, no fixed crop, both of which have shipped
+# photographs of the wallpaper (docs/traps.md) — and exits nonzero
+# rather than saving one.
 param(
     [string]$Process = "python",
     [int]$TimeoutSeconds = 60,
@@ -28,9 +20,8 @@ public class KayaWin {
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
-    // GetWindowRect INCLUDES THE DWM SHADOW, so a capture of that rect
-    // carries a sliver of wallpaper down both edges. The extended frame
-    // bounds are the window as a person sees it.
+    // GetWindowRect INCLUDES THE DWM SHADOW, so its rect carries a
+    // sliver of wallpaper down both edges.
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(
         IntPtr hWnd, int attr, out RECT value, int size);
@@ -58,8 +49,8 @@ $r = New-Object KayaWin+RECT
 $dwm = [KayaWin]::DwmGetWindowAttribute(
     $handle, [KayaWin]::ExtendedFrameBounds, [ref]$r, [System.Runtime.InteropServices.Marshal]::SizeOf($r))
 if ($dwm -ne 0) {
-    # Pre-DWM or a composition-less session: the shadow-inclusive rect is
-    # still a picture of the window, just a looser one.
+    # Pre-DWM or a composition-less session: the shadow-inclusive rect
+    # is a looser picture of the same window.
     if (-not [KayaWin]::GetWindowRect($handle, [ref]$r)) {
         Write-Error "shot-window: neither DwmGetWindowAttribute nor GetWindowRect answered"
         exit 1

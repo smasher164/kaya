@@ -1,14 +1,5 @@
-// The app-identity conformance scene, C# port: an app declares what it
-// is called and what it looks like, and the platform shows both.
-// Canonical semantics in guests/rust/identity.rs; the byte-frozen
-// contract in tools/scenes/identity.steps.
-//
-// THE MARK IS THE VENDORED ONE (four flat quadrants) because no
-// platform's own default icon can land on four declared colours, so a
-// lowering that never applied can never read as a pass.
-//
-// THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
-// blank an app's NAME fills on every platform.
+// The identity scene, C# port — guests/rust/identity.rs,
+// tools/scenes/identity.steps.
 
 using System;
 
@@ -23,18 +14,12 @@ static class IdentityScene
 
         app.Build(tx =>
         {
-            // BEFORE THE FIRST MOUNT, per the declared-once wall. The
-            // asset's bytes go from the core's read straight to the
-            // platform's icon sink; the `using` releases the core's
-            // handle on the way out.
+            // BEFORE THE FIRST MOUNT, per the declared-once wall.
             using var icon = tx.Asset("icons/kaya-mark.png");
             tx.AppIdentity("Aurora Notes", icon);
 
-            // ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows
-            // mints its custom caption from the first promotion and from
-            // nothing else, and a custom caption REPLACES the system one
-            // — taking the system-drawn app icon with it. A scene with no
-            // promotion anywhere would leave that sink's arm unreached.
+            // ONE PROMOTED COMMAND, and not about commands: Windows mints its
+            // custom caption from the first promotion, taking the system icon.
             var file = tx.Menu("File", items: new[]
             {
                 tx.Item("Save", symbol: Symbol.Done, primary: true),
@@ -54,15 +39,8 @@ static class IdentityScene
                     onClick: t => t.Write(status, $"clicked {draft}"));
             }));
 
-            // THE UNTITLED WINDOW. It declares no title at all rather
-            // than an empty one: an empty string is a title an app
-            // WROTE, and the rule under test is what a window with
-            // nothing written shows.
-            //
-            // THE HOST IS ASKED, in all eight ports of this scene, even
-            // where the answer is never no: the eight ports are one
-            // scene, and a binding surface no guest calls is one no lane
-            // exercises.
+            // No title at all rather than an empty one: an empty string is a
+            // title an app WROTE.
             if (KayaApp.Capabilities().AuxWindows)
             {
                 tx.CreateWindow(1, width: 360, height: 240);

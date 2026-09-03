@@ -1,8 +1,4 @@
-// The nav conformance scene, Swift port — the serial navigation grammar.
-// The covered root is RETAINED (status keeps taking writes while
-// covered); a programmatic popEntry does not echo entry_popped, so the
-// settings round's final status stays "back requested". See
-// guests/rust/nav.rs and tools/scenes/nav.steps.
+// The nav scene, Swift port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 import Foundation
 
@@ -34,7 +30,7 @@ app.build { tx in
         tx.button(
             "open settings",
             onClick: { inner in  // button#1
-            // The veto class: nothing has popped; agree and confirm.
+            // Nothing has popped, so the handler agrees and confirms.
             inner.pushEntry(
                 SETTINGS, title: "settings", interceptBack: true,
                 onBackRequested: { tx2 in

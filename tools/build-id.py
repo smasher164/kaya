@@ -5,27 +5,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT
 
-# The identity of a build's INPUTS — a hash over every source file that
-# feeds an artifact, and a way to ask a built file which sources it came
-# from. Two modes, one implementation:
-#
-#   tools/build-id.py core             prints the id; crates/kaya/build.rs
-#                                      bakes it into the library
-#   tools/build-id.py --verify FILE…   each file must CARRY the current
-#                                      id, or the build that produced it
-#                                      never happened
-#
-# Why: a masked build failure leaves the PREVIOUS artifact in place and
-# the lane runs green against code nobody wrote today (docs/traps.md has
-# both times it happened).
-#
-# The id fingerprints INPUTS, not output. Two builds from one id can
-# differ byte-for-byte; what it promises is the other direction — a
-# DIFFERENT id means different sources, always.
+# A hash over an artifact's INPUT sources, and `--verify` to ask a built
+# file which sources it came from (docs/traps.md: "A failed build must not
+# leave a usable artifact", "An unchecked interpreter build degrades to
+# yesterday's dylib").
 #
 # NO dev_shell_or_die, deliberately: this runs on the host, inside the
-# Linux container, and out of build.rs during cross-compiles — the one
-# converted body whose callers are not all inside the dev shell.
+# Linux container, and out of build.rs during cross-compiles.
 
 import hashlib
 import os
@@ -35,18 +21,15 @@ import zipfile
 root = ROOT
 
 # What each artifact is BUILT FROM. Cargo.lock is an input, not an
-# output: the resolved dependency graph is compiled into the library, so
-# a lockfile change is a source change.
+# output: the resolved dependency graph is compiled into the library.
 COMPONENTS = {
     "core": ["crates", "Cargo.toml", "Cargo.lock"],
-    # The SwiftUI interpreter: separately compiled, goes stale on its
-    # own. Its inputs are its own sources plus the INTERFACE it compiles
-    # against (kaya.h), not the core's implementation — a gtk.rs edit
-    # does not change this dylib.
+    # The INTERFACE it compiles against (kaya.h), not the core's
+    # implementation — a gtk.rs edit does not change this dylib.
     "swiftui": ["swift", "crates/kaya/include"],
-    # The Compose interpreter. android/kaya/src holds only sources
-    # (gradle's outputs are in android/*/build, a SIBLING of src), so the
-    # generated marker this id feeds cannot land inside its own inputs.
+    # android/kaya/src holds only sources (gradle's outputs are in
+    # android/*/build, a SIBLING of src), so the marker this id feeds
+    # cannot land inside its own inputs.
     "compose": ["android/kaya/src", "bindings/java"],
 }
 
@@ -59,56 +42,39 @@ COMPONENTS = {
 # much costs a re-run nobody notices; naming too little hands back a
 # PASS about code that changed since.
 #
-# Gates whose verdict depends on a BUILT ARTIFACT carry that artifact
-# in ARTIFACT_GATES below, and their key mixes in the artifact's ACTUAL
-# BYTES (ratified 2026-08-20): an unchanged source tree does not mean
-# an unchanged answer, but unchanged sources AND unchanged artifact
-# bytes do — the loophole the old never-key rule guarded is closed by
-# hashing the real file instead of trusting the sources it claims to
-# come from. check-build-id alone stays absent forever: its whole job
-# is catching a stale artifact, and any cache of that answer is the
-# defect it exists to find.
+# check-build-id stays absent forever: its whole job is catching a stale
+# artifact, and any cache of that answer is the defect it exists to find.
 GATES = {
     "gen-header": ["crates", "Cargo.toml", "Cargo.lock"],
     "gen-bindings": ["crates", "bindings"],
     "gen-guests": ["crates", "bindings", "guests"],
-    # The backends are inputs because check-steps stops demanding a
-    # runner's legs where that runner's backend declares a depth stub, so
-    # REMOVING a declaration is what makes the missing legs a failure.
+    # The backends: check-steps stops demanding a runner's legs where that
+    # backend declares a depth stub, so REMOVING one must fail.
     "check-steps": ["guests", "crates", "swift", "android"],
     "check-shell": [],
-    # Everything it reads — tools/lib/kaya_gate.py, every tools/check-*.py
-    # and every shim — is under tools/, which rides EVERY gate key
-    # implicitly (see gate_key). check-shell's shape, for the same reason.
+    # Everything it reads is under tools/, which rides every key (gate_key).
     "check-python": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
-    # AGENTS.md is declared although this gate does not read it, per the
-    # over-approximate rule: check-mirror holds the two identical.
+    # AGENTS.md is declared unread, per the over-approximate rule.
     "check-gates": ["CLAUDE.md", "AGENTS.md"],
     "check-ledger": ["docs"],
-    # bindings/ and go.mod: the go-android clause cross-builds a
-    # single-main fixture against bindings/go, in its own module that
-    # resolves dev.kaya through a filesystem replace.
+    # bindings/ and go.mod: the go-android clause cross-builds a fixture
+    # against bindings/go through a filesystem replace.
     "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo",
                       "bindings", "go.mod"],
-    # guests/: the SCENE-TIER clause reads guests/*/entry.*.
-    # docs/ on all three of these per the over-approximate rule:
-    # their refusal sentences cite plan/ledger paths in code
-    # position, and keyed-inputs cannot tell a citation from a
-    # read — a docs edit re-running a fast gate costs nothing.
+    # guests/: the SCENE-TIER clause reads guests/*/entry.*. docs/ here and
+    # below: keyed-inputs cannot tell a cited path from a read one.
     "check-sugar-surface": ["crates", "bindings", "guests", "docs"],
     "check-universal-props": ["crates", "bindings", "swift", "android"],
-    # No binding sits between an authored role and the backends, so the
-    # bindings are not inputs here. Same for check-native-undo.
+    # No binding sits between an authored role and the backends; same for
+    # check-native-undo.
     "check-roles": ["crates", "swift", "android"],
     "check-native-undo": ["crates", "swift", "android"],
-    # No binding either: the card is a lowering. swift/ IS an input since
-    # 2026-08-25 — the iOS synthesized tier draws the inset-grouped card,
-    # and the clause holding it off the mac reads that same file.
+    # No binding: the card is a lowering. swift/ is an input because the
+    # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],
-    # Every source root the diagnostic census walks: the gate notices a
-    # NEW why-not by its name alone, so a key blind to one root would
-    # hand back a stale PASS for the file that just grew one.
+    # Every root the census walks: it finds a why-not by name alone, so a
+    # key blind to one root passes stale for the file that just grew one.
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
@@ -117,55 +83,42 @@ GATES = {
     "check-file-modes": ["crates", "bindings", "swift", "android"],
     "check-go-env": ["bindings", "guests"],
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],
-    # docs/: a depth stub is sanctioned only while docs/deferred.md holds
-    # an OPEN entry for it, so STRIKING an entry through must fail.
+    # docs/: a stub is sanctioned only while its ledger entry is unstruck.
     "check-stubs": ["crates", "swift", "android", "docs"],
     "check-staging": ["guests"],
-    # Its walk is guests/**/*.c, not guests/c alone: a C guest that
-    # appears in a new directory must not be invisible to it, and a key
-    # narrower than the walk hands back a stale PASS for exactly that.
+    # Its walk is guests/**/*.c, not guests/c alone; a key narrower than
+    # the walk passes stale for a C guest in a new directory.
     "check-c-ids": ["guests"],
     # bindings/ for the generated header it reads, tools/checks/ for the
     # probe it compiles, guests/ for the Makefile flag clause.
     "check-c-bounds": ["bindings", "guests", "tools/checks"],
-    # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
-    # else outside android/.
+    # gradle's :kaya sourceSet reaches nothing else outside android/.
     "check-compose": ["android", "bindings/java"],
     "check-detekt": ["android"],
     "check-compose-state": ["android", "docs"],
     "check-pins": ["android"],
-    # The INTERFACE, not the implementation: kaya.h and the swift
-    # sources, never a backend. Sound because the header's own freshness
-    # is gated by gen-header, which IS keyed on all of crates/.
+    # The INTERFACE, not the implementation: kaya.h's own freshness is
+    # gated by gen-header, which is keyed on all of crates/.
     "swift-typecheck": ["crates/kaya/include", "bindings/swift",
                         "guests/swift", "swift"],
     "java-typecheck": ["bindings/java", "bindings/java-desktop", "guests/java"],
     "js-typecheck": ["bindings/js", "guests/js"],
-    # The five ARTIFACT gates (see ARTIFACT_GATES): sources here, the
-    # built bytes below, both in the key.
+    # The five ARTIFACT gates: sources here, the built file below.
     "check-abort": ["crates", "bindings", "guests"],
     "check-wheel": ["crates", "bindings/python"],
     "check-empty-child": ["crates", "swift", "android"],
     "check-pane-ladder": ["crates", "swift", "docs"],
     "check-table-tier": ["crates", "swift", "docs"],
-    # The fixture tools/check-keyed.py exercises. A REAL entry on
-    # purpose: a self-test stamping under a live gate's name would make
-    # the next KAYA_FAST run skip that gate.
+    # check-keyed's fixture. A REAL entry on purpose: a self-test stamping
+    # under a live gate's name would make the next KAYA_FAST run skip it.
     "keyed-selftest": [],
 }
 
 # The BUILT files each artifact gate reads. The key mixes each one's
-# EMBEDDED build-id marker — the fingerprint of the sources it was
-# really built from — never the raw bytes: every relink mints a fresh
-# LC_UUID, and gen-guests' every-sweep snapshot-restore touches source
-# mtimes and triggers exactly such a relink, so a raw-byte key was
-# measured never hitting at all (2026-08-20, keys fc2c5a7f ->
-# 46f098b5 across one restore-and-noop-rebuild). A file with no marker
-# or no file at all keys as that fact, and the gate then runs and
-# fails its own checks loudly. KAYA_GATE_ARTIFACT_ROOT is check-keyed's
-# self-test seam and nothing else's: it re-roots these paths so the
-# negative can prove a marker flip busts the key without rebuilding a
-# dylib.
+# EMBEDDED build-id marker, never its raw bytes — a raw-byte key was
+# measured never hitting at all (docs/deferred.md's 2026-08-20 keyed-cache
+# entry). KAYA_GATE_ARTIFACT_ROOT re-roots these paths for check-keyed's
+# self-test and nothing else.
 ARTIFACT_GATES = {
     "check-abort": ["target/debug/libkaya.dylib"],
     "check-wheel": ["target/debug/libkaya.dylib"],
@@ -178,8 +131,7 @@ PREFIX = b"kaya-build-id:"
 
 
 def embedded_ids(p):
-    """Every build-id marker in the file, sorted — the artifact's own
-    statement of the sources it came from."""
+    """Every build-id marker in the file, sorted."""
     blob = p.read_bytes()
     found, at = set(), 0
     while (at := blob.find(PREFIX, at)) != -1:
@@ -188,19 +140,14 @@ def embedded_ids(p):
     return sorted(found)
 
 
-# Anything skipped here is invisible to the id, so the list stays short:
-# over-skipping is how an id starts lying.
+# Anything skipped here is invisible to the id, so the list stays short.
 SKIP_DIRS = {"target", "target-linux", "__pycache__", ".git"}
 
 
 def git_files(names):
     """The tracked and not-ignored files under `names`, or None if git
-    cannot answer. Preferred over walking for GATE keys, whose roots
-    (tools/, android/, guests/) hold build directories that a hand-kept
-    denylist would have to chase forever — tools/ alone walks to 53k
-    files and 213 tracked ones. Letting .gitignore decide means a source
-    directory can never be hidden by a name that happens to look like an
-    output (`bin/`, `build/`).
+    cannot answer. Preferred over walking for GATE keys, whose roots hold
+    build directories a hand-kept denylist would have to chase forever.
 
     safe.directory: inside the container the repo is mounted with a
     foreign owner, and git refuses to operate on it otherwise."""
@@ -213,9 +160,7 @@ def git_files(names):
         return None
     if out.returncode != 0:
         return None
-    # `-c` reports index entries whose worktree file is gone; a deletion
-    # changes the digest by its bytes leaving, so dropping them here is
-    # right.
+    # `-c` reports index entries whose worktree file is gone.
     return sorted(p for p in (root / n for n in
                               out.stdout.decode().split("\0") if n)
                   if p.is_file())
@@ -244,8 +189,8 @@ def digest(paths):
     for f in paths:
         rel = str(f.relative_to(root)).replace("\\", "/")
         body = f.read_bytes()
-        # Length-delimited: a rename or a byte moving across a file
-        # boundary has to change the digest.
+        # Length-delimited: a rename or a byte crossing a file boundary
+        # has to change the digest.
         h.update(f"{rel}\0{len(body)}\0".encode())
         h.update(body)
     return h.hexdigest()[:16]
@@ -256,21 +201,16 @@ def build_id(component):
 
 
 def gate_key(name):
-    # tools/ rides every gate key: a gate whose own script changed must
-    # not report the verdict its old self reached. The flake rides it too
-    # — a gate's answer depends on the toolchain the dev shell supplied,
-    # and a stamp says nothing about which shell wrote it.
+    # tools/ and the flake ride every gate key: a changed script, or a
+    # changed toolchain, must not report the verdict its old self reached.
     names = ["tools", "flake.nix", "flake.lock"] + GATES[name]
     paths = git_files(names)
     if paths is None:
-        # No git: fall back to the walk. The key differs from git's and
-        # includes build output, so the cache stops hitting — slow, never
-        # wrong, which is the direction a fallback has to fail in.
+        # No git: the walk's key differs from git's and includes build
+        # output, so the cache stops hitting — slow, never wrong.
         paths = files([n for n in names if (root / n).exists()])
     h = hashlib.sha256(digest(paths).encode())
-    # The artifact half: the built file's EMBEDDED build-id — what it
-    # was really built from — see ARTIFACT_GATES for why never the raw
-    # bytes.
+    # The artifact half: see ARTIFACT_GATES for why never the raw bytes.
     artifact_root = pathlib.Path(
         os.environ.get("KAYA_GATE_ARTIFACT_ROOT", root))
     for rel in ARTIFACT_GATES.get(name, []):
@@ -313,14 +253,11 @@ def main(args):
         print(build_id(args[0]))
         return 0
 
-    # --verify: the artifact must carry the marker its builder baked in
-    # — crates/kaya/build.rs for the core, tools/swiftui/build-dylib.sh
-    # for the interpreter.
-    #
-    # One PREFIX for every component, and --component says which hash to
-    # expect. Per-component prefixes would let a file carrying the wrong
-    # component's marker read as "no build id" rather than as a
-    # mismatch.
+    # The marker is baked in by crates/kaya/build.rs for the core and
+    # tools/swiftui/build-dylib.sh for the interpreter. ONE prefix for
+    # every component, with --component saying which hash to expect:
+    # per-component prefixes would read a wrong-component marker as "no
+    # build id" rather than as a mismatch.
     component = "core"
     if len(args) > 2 and args[1] == "--component":
         component = args[2]
@@ -337,9 +274,8 @@ def main(args):
                   f"it did not run", file=sys.stderr)
             status = 1
             continue
-        # An apk is a zip and its dex members are compressed, so the
-        # marker is invisible in the raw file. Which classes*.dex a
-        # string lands in is not stable either, so read them all.
+        # An apk's dex members are compressed, and which classes*.dex a
+        # string lands in is not stable, so read them all.
         if zipfile.is_zipfile(p):
             with zipfile.ZipFile(p) as z:
                 blob = b"".join(z.read(n) for n in z.namelist()
@@ -357,11 +293,8 @@ def main(args):
             print(f"build-id: {name}: NO build id — nothing here was "
                   f"built from {component}", file=sys.stderr)
         else:
-            # Before crying STALE, check whether the file belongs to a
-            # DIFFERENT component and is current there: a bare --verify
-            # defaults to core, so running it on the swiftui dylib can
-            # never pass, and the message must say which question to ask
-            # instead.
+            # A bare --verify defaults to core, so running it on the
+            # swiftui dylib can never pass: say which question to ask.
             others = [c for c in COMPONENTS if c != component
                       and build_id(c).encode() in found]
             carried = ", ".join(sorted(f.decode("ascii", "replace")
@@ -387,8 +320,7 @@ def main(args):
     return status
 
 
-# Importable on purpose: tools/lib/keyed-inputs.py loads this module
-# for GATES/ARTIFACT_GATES instead of parsing the text — the tables are
-# data now, which is the point of the module.
+# Importable on purpose: tools/lib/keyed-inputs.py loads this module for
+# GATES/ARTIFACT_GATES rather than parsing the text.
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))

@@ -1313,11 +1313,8 @@ static inline void kaya_tx_set_menu_primary(KayaTx *tx, uint64_t item, int prima
  * exists at the C floor by design: write the canonical wire spelling
  * yourself — lowercase '+'-joined tokens, modifiers in primary,
  * shift, alt order, then exactly one key (a-z, 0-9, or the closed
- * named set: enter, delete, f1..f12, left, right, up, down), e.g.
- * "primary+shift+s". The core validates spelling and policy at the
- * root and REJECTS non-canonical forms rather than rewriting them —
- * the same root errors every generated binding gets after its
- * canonicalizer (DESIGN.md, Menus). */
+ * named set), e.g. "primary+shift+s". The core REJECTS non-canonical
+ * forms rather than rewriting them (DESIGN.md, Menus). */
 static inline void kaya_tx_set_menu_shortcut(KayaTx *tx, uint64_t item, const char *shortcut) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);

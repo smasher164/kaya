@@ -1,6 +1,5 @@
--- The panels conformance scene, Haskell port — the auxiliary-window
--- grammar via the config-list spelling. See guests/rust/panels.rs
--- and tools/scenes/panels.steps.
+-- The panels scene, Haskell port — guests/rust/panels.rs,
+-- tools/scenes/panels.steps.
 
 import KayaApp
 import KayaWire (Value (..))

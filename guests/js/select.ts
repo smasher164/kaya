@@ -1,5 +1,4 @@
-// The select conformance scene, JS port. See guests/rust/select.rs and
-// tools/scenes/select.steps.
+// The select conformance scene (tools/scenes/select.steps).
 
 import * as kaya from "kaya-gui";
 

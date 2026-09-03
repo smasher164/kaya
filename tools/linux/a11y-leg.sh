@@ -1,27 +1,20 @@
 #!/usr/bin/env bash
 # The accessibility leg's OWN session, then the guest.
 #
-# GTK publishes an accessibility tree only when GTK_A11Y=atspi, which
-# needs a session bus for the a11y bus launcher to sit on. Both are
-# PER-LEG: exported lane-wide they timed out eleven legs at 180s that
-# never asked for accessibility (measured 2026-07-25 —
-# python/go/csharp/ocaml died, rust and c survived; docs/HACKING.md).
-#
-# Runs on the runner's claimed pool display (xvfb-run under
-# KAYA_RECORD), like any other leg command.
+# GTK publishes an accessibility tree only under GTK_A11Y=atspi, which
+# needs a session bus. Both are PER-LEG: exported lane-wide they timed
+# out eleven legs at 180s that never asked for accessibility (measured
+# 2026-07-25 — python/go/csharp/ocaml died, rust and c survived;
+# docs/HACKING.md).
 set -uo pipefail
 
-# A PRIVATE RUNTIME DIR, because the accessibility bus's socket path is
-# derived from it: at-spi-bus-launcher puts its socket at
-# $XDG_RUNTIME_DIR/at-spi/bus, so concurrent legs sharing one runtime
-# dir fight over one socket and an app can end up registered on a bus
-# its reader is not watching. Measured 2026-07-25: every X11 leg passed
-# and every WAYLAND leg failed with an empty tree — X11 hid the clash
-# because xvfb-run gives each leg its own display, and under X the bus
-# address is discovered per display.
-#
-# The compositor socket is symlinked back in, since a Wayland client
-# finds it through this same variable.
+# A PRIVATE RUNTIME DIR, because at-spi-bus-launcher derives its socket
+# from it ($XDG_RUNTIME_DIR/at-spi/bus): concurrent legs sharing one dir
+# fight over one socket and an app registers on a bus its reader is not
+# watching. Measured 2026-07-25: every X11 leg passed and every WAYLAND
+# leg failed with an empty tree, because under X the bus address is
+# discovered per display. The compositor socket is symlinked back in,
+# since a Wayland client finds it through this same variable.
 kaya_run_dir="$(mktemp -d)"
 if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
     ln -sf "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$kaya_run_dir/$WAYLAND_DISPLAY"

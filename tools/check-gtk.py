@@ -7,12 +7,10 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The GTK compile check that check-targets.py cannot do: gtk-sys needs
-# the distro's pkg-config world, so the Linux backend builds nowhere but
-# the container. A `cargo check` in the cached image, seconds warm.
-#
-# It never skips — a gate that quietly passes when docker is down reads
-# as "GTK is fine".
+# The GTK compile check check-targets.py cannot do (CLAUDE.md's gate
+# list): gtk-sys needs the distro's pkg-config world, so the Linux
+# backend builds nowhere but the container. It never skips — a gate that
+# quietly passes when docker is down reads as "GTK is fine".
 
 import subprocess
 
@@ -41,19 +39,12 @@ if subprocess.run(["docker", "image", "ls", "-q", "kaya-linux"],
           "tools/validate-linux.py once to build it.", file=sys.stderr)
     sys.exit(1)
 
-# THE LAYOUT CENSUS. gtk::flex::tests exercise the PURE arithmetic
-# (main_axis_measure, grow_shares, required_grow_pool,
-# table_horizontal_issue) and would stay green while the harness stopped
-# CALLING it, called it with the wrong extremes, or stopped measuring
-# what it passes — so the production callsites are held here by name.
-#
-# EVERY entry is watched, in tools/check-steps.py's target_watch shape:
-# a doctored COPY on disk, the substitution count printed, the REAL
-# census re-run against that copy, and the exact finding demanded. The
-# perturbation is the change that would otherwise be silent, never the
-# deletion of the counted string — deleting the string the census counts
-# and asserting the count moved proves only that str.count works, which
-# is what this replaced (the review of 01dd633).
+# THE LAYOUT CENSUS: gtk::flex::tests exercise the PURE arithmetic and
+# stay green while the harness stops CALLING it or measures the wrong
+# thing, so the production callsites are held here by name. Every entry
+# is watched in check-steps.py's target_watch shape, and THE
+# PERTURBATION IS THE CHANGE THAT WOULD OTHERWISE BE SILENT — never the
+# deletion of the counted string, which proves only that str.count works.
 
 # (label, needle, the perturbation that would otherwise be silent)
 ENTRIES = (
@@ -70,11 +61,8 @@ ENTRIES = (
      "fn gtk_table_padded_card_convicts_nothing()",
      "fn gtk_table_padded_card_convicts_nothing_disabled()"),
     # THE VIEWPORT'S FLOOR (docs/deferred.md, closed 2026-08-25): a
-    # vertical scrollbar's own 58px minimum reaches the scroller through
-    # the POLICY, so a table that cannot need a bar stops claiming one.
-    # Both deciding numbers are already owned — the core's extent and the
-    # flex contract's grow weight — and a policy pinned open is the shape
-    # that would silently bring the empty card back.
+    # scrollbar's own 58px minimum reaches the scroller through the
+    # POLICY, so a policy pinned open silently brings the empty card back.
     ("the hug's policy write",
      "set_table_scrolling(&body, grown || band.extent > "
      "f64::from(TABLE_MAX_CONTENT));",
@@ -116,28 +104,20 @@ ENTRIES = (
      "assigned, reach);",
      "table_horizontal_issue(0.0, min_drawn, max_drawn, viewport, "
      "viewport, reach);"),
-    # THE OVERFLOW RULING'S OWN NUMBER (2026-08-29): cells past the
-    # viewport are what a scrolling table looks like, so the classifier
-    # convicts on the SCROLL RANGE and a range read as unbounded would
-    # make the trailing-edge clause dead with every scene still green.
+    # THE OVERFLOW RULING (2026-08-29): cells past the viewport are what
+    # a scrolling table looks like, so the classifier convicts on the
+    # SCROLL RANGE — a range read as unbounded makes the trailing-edge
+    # clause dead with every scene still green.
     ("the scroll range the overflow clause consults",
      "let reach = table_body_view(&column).map_or(0.0, |view| {",
      "let reach = f64::MAX; let _ = table_body_view(&column).map(|view| {"),
-    # THE ROW WINDOW'S THREE LINKS, NONE OF WHICH ANY SCENE CAN SEE.
-    # MEASURED 2026-08-25 on the real X11 leg, each perturbed alone with
-    # the substitution count printed: with the range report gone, with
-    # the height report gone, and with the top spacer's core-supplied
-    # size gone, `windowed.steps` PASSED every time — because
-    # expect_window reads the FIRST VISIBLE row, which is a fact about
-    # the viewport and stays true whether or not the band ever narrowed
-    # (the ruling of 2026-08-25 took the band's width out of the verb on
-    # purpose, docs/virtualization-plan.md §5). The mac tier hit the same
-    # wall and answered it the same way, in check-table-tier. So they are
-    # held here or nowhere.
-    #
-    # Each perturbation below is a plausible SILENT bug rather than a
-    # deletion: a report that always says "all of it", heights filed
-    # against the wrong rows, a spacer that forgets the offset.
+    # THE ROW WINDOW'S THREE LINKS, NONE OF WHICH ANY SCENE CAN SEE:
+    # `windowed.steps` passes with each of them cut, because expect_window
+    # reads the FIRST VISIBLE row and the band's width deliberately left
+    # the verb (docs/virtualization-plan.md §5; docs/traps.md: The GTK row
+    # window's three links are invisible to every scene). check-table-tier
+    # answers the same wall on the mac tier. Each perturbation below is a
+    # plausible SILENT bug rather than a deletion.
     ("window range reported to the core",
      "scene.window_moved(id, first, count)",
      "scene.window_moved(id, 0, usize::MAX)"),
@@ -204,7 +184,7 @@ with scratch_dir("check-gtk-") as work:
 
 # Same target dir the suite uses; never the mac one, which holds
 # host-arch artifacts. The in-container payload is a LAUNCHER and stays
-# shell (the conversion ruling's boundary); python decides around it.
+# shell (CLAUDE.md's python-first boundary).
 CONTAINER = """
     cd /work || exit 1
     export CARGO_TARGET_DIR=/work/target-linux

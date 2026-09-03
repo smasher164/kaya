@@ -1,14 +1,8 @@
 // The DYNAMIC-TABLE surface, Swift arm: the one place this binding's
-// nested-table spelling is COMPILED. No guest ships a table-per-row
-// scene in Swift, so without this pass the surface is held by
-// tools/tpl-surfaces.py alone — and a census reads text, not types.
-// Typecheck-only, as one module with the bindings; tools/swift-typecheck.sh
-// runs it:
-//
-//   swiftc -typecheck -import-objc-header crates/kaya/include/kaya.h \
-//     bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
-//     bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
-//     tools/checks/swift-nested-table.swift
+// nested-table spelling is COMPILED (tools/swift-typecheck.sh runs it).
+// No guest ships a table-per-row scene in Swift, so without this pass the
+// surface is held by tools/tpl-surfaces.py alone — and a census reads
+// text, not types.
 
 import Foundation
 
@@ -62,12 +56,9 @@ func kayaNestedTableSurface(_ app: KayaApp) {
                     // open scope: where this op finds its For.
                     account.columns(table, kayaPositionTitles, .none)
                     app.onSort(table) { tx, keys, column in
-                        // The copy's key path IS the message: reorder
-                        // THAT copy's instance and move THAT copy's
-                        // indicator — a sibling's bar does not stir.
-                        // `at` KEEPS THE RECORD TYPE, so the mutations
-                        // below are the record ones; a KayaCollection
-                        // here would take a bare KayaValue and the row's
+                        // The copy's key path IS the message, and `at`
+                        // KEEPS THE RECORD TYPE: a KayaCollection here
+                        // would take a bare KayaValue and the row's
                         // fields would be unreachable.
                         let instance = positions.at(keys[0])
                         for entry in instance.items(tx) {

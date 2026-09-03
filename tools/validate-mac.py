@@ -7,14 +7,10 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# Run every milestone-0 validation natively on macOS. Run inside the
-# dev shell, with a logged-in GUI session; each suite opens a window
-# briefly.
-#
-# The scene lists, the queue (language order per scene, drain barriers,
-# the panel-mode rotation points, the serial families) and the C-floor
-# roster are DATA: tools/lib/lanes/mac.py, the one source the gates
-# import too (docs/runner-conversion-plan.md §2, stage 4).
+# Every validation natively on macOS; needs a logged-in GUI session.
+# The scene lists, the queue and the C-floor roster are DATA:
+# tools/lib/lanes/mac.py, the one source the gates import too
+# (docs/runner-conversion-plan.md §2, stage 4).
 
 import atexit
 import hashlib
@@ -72,9 +68,7 @@ def kaya_swiftc(args, **kw):
 
 
 # --lib as well as --example: the foreign guests load the cdylib, and
-# --example alone would leave a stale libkaya.dylib in place. The scene
-# list and the depth list are the lane module's; the leg blocks stay
-# explicit there because they encode per-language coverage decisions.
+# --example alone would leave a stale libkaya.dylib in place.
 BUILD_EXAMPLES = []
 for _s in [*lane.SCENES, *lane.DEPTH_SCENES]:
     BUILD_EXAMPLES += ["--example", _s]
@@ -88,14 +82,10 @@ if run([str(ROOT / "tools/build-id.py"), "--verify",
         "target/debug/libkaya.dylib"]).returncode != 0:
     sys.exit(1)
 
-# STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY, and run them from
-# here. Not tidiness — launching an unbundled executable makes
-# LaunchServices enumerate its CONTAINING DIRECTORY, and the same
-# binary took 7.7s from a 776,613-entry target/debug/examples against
-# 0.13s from a two-entry directory (measured 2026-08-10,
-# docs/deferred.md). The staged list DERIVES from the module's lists,
-# so a new scene cannot be built and then left running out of the
-# build directory.
+# STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY: launching an
+# unbundled executable makes LaunchServices enumerate its CONTAINING
+# directory — 7.7s from a 776,613-entry target/debug/examples against
+# 0.13s from a two-entry one (measured 2026-08-10, docs/deferred.md).
 RUST_GUESTS = ROOT / "target/rust-guests"
 shutil.rmtree(RUST_GUESTS, ignore_errors=True)
 RUST_GUESTS.mkdir(parents=True)
@@ -110,11 +100,10 @@ if _staged > 64:
         f"walk was 7.7s per leg when this was target/debug/examples. "
         f"Stage somewhere clean.")
 
-# ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed
-# (guests/assets/market/README.md), so the root a fresh clone has is
-# incomplete until this runs. The gate sweep runs it too; a lane may
-# not depend on the sweep having run, since this one can skip it (the
-# matrix handshake below) and the other four never call it.
+# ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed, so a
+# fresh clone's root is incomplete until this runs. A lane may not
+# depend on the gate sweep having run it: this one can skip the sweep
+# (the matrix handshake below) and the other four never call it.
 if run([sys.executable, str(ROOT / "tools/gen-market.py"),
         "--ensure"]).returncode != 0:
     print("validate-mac: python3 tools/gen-market.py --ensure failed — "
@@ -125,13 +114,11 @@ if run([sys.executable, str(ROOT / "tools/gen-market.py"),
           "closure", file=sys.stderr)
     sys.exit(1)
 
-# NOTHING TO STAGE FOR ASSETS, AND HERE IS WHY, CHECKED: the guests
-# call `asset(name)`; with no KAYA_ASSET_DIR set the core falls
-# through to the compile-time repo-relative default, and this lane
-# runs from the repo root, so guests/assets is exactly where that
-# points. LOUD, AND BEFORE ANY LEG RUNS: without the root, every guest
-# that names an asset dies inside its build closure on eight legs at
-# once (docs/assets-plan.md A5.4).
+# NOTHING TO STAGE FOR ASSETS, AND HERE IS WHY, CHECKED: with no
+# KAYA_ASSET_DIR the core falls through to its repo-relative default and
+# this lane runs from the repo root. LOUD BEFORE ANY LEG: without the
+# root, eight legs die inside their build closures at once
+# (docs/assets-plan.md A5.4).
 if not (ROOT / "guests/assets/fonts/sora-wght.ttf").is_file():
     print("validate-mac: the asset root guests/assets is not where the "
           "core's", file=sys.stderr)
@@ -145,14 +132,10 @@ _asset_count = sum(1 for f in (ROOT / "guests/assets").rglob("*")
 print(f"assets: the root resolves by the repo-relative default "
       f"({_asset_count} files)")
 
-# THE MATRIX HANDSHAKE (ratified 2026-08-20): when validate-all just
-# ran the gate sweep in this same invocation, a MATCHING fingerprint
-# means re-running it here would repeat work the matrix did seconds
-# ago under contention. NOT a cache — the token never outlives one
-# validate-all run, a hand-run of this script sees no token and runs
-# everything, and a MISMATCH falls through to the full sweep. The
-# interpreter still gets built and verified on the skip path: the legs
-# run it, and gates.py was the builder this lane relied on.
+# THE MATRIX HANDSHAKE (ratified 2026-08-20). NOT a cache: the token
+# never outlives one validate-all run, a hand-run sees none and sweeps,
+# and a MISMATCH falls through to the full sweep. The interpreter is
+# still built and verified on the skip path — the legs run it.
 _token = os.environ.get("KAYA_MATRIX_GATES_TOKEN", "")
 if _token and out_of([str(ROOT / "tools/gates.py"),
                       "--fingerprint"]).strip() == _token:
@@ -172,37 +155,20 @@ timing("core-build+gates")
 
 status = 0
 
-# Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for the
-# old serial behavior): every guest is its own process with a
-# self-contained selftest, so nothing couples one leg to another. Each
-# leg logs to its own file; verdicts print in submission order at
-# drain, and a FAIL prints its log.
+# Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 serial).
 JOBS = int(os.environ.get("KAYA_JOBS", "8"))
 LEGS_DIR = pathlib.Path(tempfile.mkdtemp())
 
-# The flight recorder: one journal outside the build tree for every
-# leg, and a capture bundle for every FAIL. The mac half — the per-leg
-# sampler and the window-scoped capture — is
-# tools/lib/flightrec_lane.py's MacRecorder since the runner
-# conversion; a runner that cannot open the journal prints the miss
-# once and still runs every leg.
+# The flight recorder: tools/lib/flightrec_lane.py's MacRecorder.
 FR = flightrec_lane.MacRecorder(ROOT)
 FLIGHTREC_SCRATCH = pathlib.Path(tempfile.mkdtemp())
 
-# ── THE MAC FILE-PANEL VIEW MODE, ROTATED RATHER THAN INHERITED ─────
-# NSOpenPanel's file browser publishes a DIFFERENT accessibility
-# identifier per view mode, and the mode is machine-wide
-# (`NSGlobalDomain NSNavPanelFileListModeForOpenMode2`: 1 columns, 2
-# list, 3 icons), written by any application's open panel for every
-# application on the box (docs/traps.md). The interpreter reads all
-# three shapes (KayaPanelShape); the lane sets the mode itself and
-# splits the filedialog legs across the three, or one of the three
-# readers is dead code on any given run.
-#
-# WRITING A MACHINE-WIDE USER PREFERENCE IS A SIDE EFFECT ON THE
-# DEVELOPER'S BOX. The original is captured before the first change,
-# restored on EXIT/INT/TERM, and — because SIGKILL runs no trap —
-# written to a stamp file the next run restores from first.
+# THE MAC FILE-PANEL VIEW MODE, ROTATED RATHER THAN INHERITED, so all
+# three of the interpreter's readers stay live (docs/traps.md, "The mac
+# open panel has THREE shapes"). The mode is a MACHINE-WIDE user
+# preference (`NSGlobalDomain NSNavPanelFileListModeForOpenMode2`: 1
+# columns, 2 list, 3 icons), so the original is restored on
+# EXIT/INT/TERM and, since SIGKILL runs no trap, from a stamp file.
 PANEL_MODE_KEY = "NSNavPanelFileListModeForOpenMode2"
 PANEL_MODE_STAMP = ROOT / "target/panel-mode.orig"
 
@@ -310,11 +276,10 @@ signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
 
 # Recording mode (KAYA_RECORD=1): ONE suite-long ScreenCaptureKit
-# stream films every leg. The filter is display-scoped but
-# include-listed — only guest windows are composited — and parallel
-# legs tile into slots (KAYA_WIN_SLOT) so their crops never overlap.
-# One stream on purpose: concurrent SCK window streams starve and die
-# where a single stream is reliable.
+# stream films every leg, and parallel legs tile into slots
+# (KAYA_WIN_SLOT) so their crops never overlap. One stream on purpose:
+# concurrent SCK window streams starve and die where a single stream is
+# reliable.
 RECORDINGS = ROOT / "target/recordings/mac"
 REC_PROC = None
 PIDFILE = RECORDINGS / "pids"
@@ -327,12 +292,10 @@ if os.environ.get("KAYA_RECORD"):
         sys.exit(1)
     shutil.rmtree(RECORDINGS, ignore_errors=True)
     RECORDINGS.mkdir(parents=True)
-    # The binary's path+content is its identity to the capture stack,
-    # and REBUILDING IN PLACE POISONS IT: after enough rebuilds at one
-    # path, shareable-content queries for that identity hang or return
-    # bogus TCC declines, and the poisoned state survives reboots. A
-    # content-hashed name gives each source version one stable, fresh
-    # identity.
+    # REBUILDING IN PLACE POISONS THE CAPTURE STACK'S IDENTITY for this
+    # binary: shareable-content queries then hang or return bogus TCC
+    # declines, and the state survives reboots. A content-hashed name
+    # gives each source version a fresh identity.
     _rec_src = ROOT / "tools/record-suite/main.swift"
     _rec_hash = hashlib.sha1(_rec_src.read_bytes()).hexdigest()[:12]
     REC_BIN = ROOT / f"target/tools/record-suite-{_rec_hash}"
@@ -629,12 +592,11 @@ def drain():
                       f"exited nonzero: the guest's exit path, or a "
                       f"wrapper clause failing after the verdict — its "
                       f"sentence, if any, is above")
-            # A SILENT leg has two very different meanings — split by
-            # duration because the mac timeout is a KILL: a killed
-            # guest loses whatever its block-buffered stdout was
-            # holding, so an empty log there means "hung with its
-            # trace in the buffer", not "never started" (read the
-            # wrong way 2026-07-25; docs/traps.md).
+            # A SILENT leg has two meanings, split by duration because
+            # the mac timeout is a KILL: a killed guest loses its
+            # block-buffered stdout, so an empty log there means "hung
+            # with its trace in the buffer", not "never started" (read
+            # the wrong way 2026-07-25; docs/traps.md).
             if "KAYA_HARNESS" not in log_text:
                 if secs != "?" and int(secs) >= 115:
                     print(f"{name}: note — NO OUTPUT, and it ran to "
@@ -655,10 +617,8 @@ def drain():
     _leg_names.clear()
 
 
-# The guest builds are per-language INDEPENDENT, so they run as a pool
-# (measured 2026-07-22: 29-38s serial, bounded by the slowest language
-# when pooled). Each job logs to its own file; any failure prints its
-# log and dies — no silent partial builds.
+# The guest builds are per-language INDEPENDENT, so they pool (measured
+# 2026-07-22: 29-38s serial, bounded by the slowest language pooled).
 BUILDS_DIR = pathlib.Path(tempfile.mkdtemp())
 
 
@@ -757,8 +717,7 @@ def build_swift():
 def build_c():
     # THE C FLOOR, THE SCENES THIS LANE ACTUALLY RUNS: the module's
     # C_SCENES, which check-steps' sweep_c_floor reads from the other
-    # side — a guest built here and run nowhere is the false-coverage
-    # shape that census was written against.
+    # side — a guest built here and run nowhere is false coverage.
     return run(["make", "-C", "guests/c",
                 f"SCENES={' '.join(lane.C_SCENES)}",
                 f"TARGET_DIR={ROOT}/target/debug",
@@ -848,10 +807,8 @@ if run([str(ROOT / "tools/bench-encode.sh")],
     sys.exit(1)
 timing("guest-builds+bench")
 
-# Every guest against the SwiftUI backend, the one macOS backend. The
-# interpreter build's exit status was load-bearing enough to move into
-# gates.py/build-dylib above; KAYA_SWIFTUI_LIB is what every leg
-# loads.
+# Every guest against the SwiftUI backend, the one macOS backend;
+# KAYA_SWIFTUI_LIB is what every leg loads.
 os.environ["KAYA_SWIFTUI_LIB"] = str(
     ROOT / "target/swiftui/libkaya_swiftui.dylib")
 
@@ -883,8 +840,8 @@ def leg_argv(scene, lang):
 
 
 def leg_env(scene, lang, appearance=""):
-    """Per-leg env, never a persisting export (the shell's one
-    KAYA_SELFTEST_SCRIPT export once ran another scene's steps)."""
+    """Per-leg env, never a persisting export: one KAYA_SELFTEST_SCRIPT
+    export once ran another scene's steps."""
     env = lane.leg_env(ROOT, scene, lang, appearance)
     # The lane's own script cache; the module's loader re-reads.
     env["KAYA_SELFTEST_SCRIPT"] = scene_script(scene)

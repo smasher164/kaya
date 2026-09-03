@@ -1,13 +1,9 @@
-//! The JVM guest tier's transport, everywhere a JVM runs: the
-//! KayaRing natives, shared between Android (android.rs's attach
-//! registers them alongside the Compose pump) and the desktops (this
-//! module's own attach export).
-//!
-//! dev.kaya.KayaRing exists twice by design — Kotlin in android/kaya,
-//! Java in bindings/java-desktop — and registration matches by
-//! name+signature against whichever class loaded this library. A
-//! native the class declares and no list registers fails only at FIRST
-//! USE; tools/check-jni.py closes that direction statically.
+//! The JVM guest tier's transport, everywhere a JVM runs: the KayaRing
+//! natives, shared between Android (android.rs's attach registers them
+//! beside the Compose pump) and the desktops (this module's own attach).
+//! dev.kaya.KayaRing exists twice — Kotlin in android/kaya, Java in
+//! bindings/java-desktop — and registration matches by name+signature
+//! against whichever loaded; tools/check-jni.py holds the other direction.
 
 use jni::objects::{JByteArray, JClass};
 use jni::sys::{jint, jlong};
@@ -15,8 +11,7 @@ use jni::NativeMethod;
 use jni::JNIEnv;
 
 /// Register the ring natives on dev.kaya.KayaRing — the portable
-/// surface both JVMs share. Everything here is shared by rule: the JVM
-/// guest tier is ONE tier (tools/check-jni.py).
+/// surface both JVMs share.
 pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaRing")?;
     env.register_native_methods(
@@ -131,8 +126,8 @@ extern "system" fn ring_wait(_env: JNIEnv, _class: JClass) -> jni::sys::jboolean
     crate::capi::kaya_wait_occurrences() as jni::sys::jboolean
 }
 
-// Posted work is not an occurrence and never enters the ring, so this
-// is how a background thread says it queued something. Any thread.
+// Posted work is not an occurrence and never enters the ring; any
+// thread may call this.
 extern "system" fn ring_wake(_env: JNIEnv, _class: JClass) {
     crate::capi::kaya_wake()
 }
@@ -141,8 +136,8 @@ pub(crate) extern "system" fn ring_spec_hash(_env: JNIEnv, _class: JClass) -> jl
     crate::spec::hash() as jlong
 }
 
-/// KayaRing.capabilities: the host capability word. Rides as a jlong
-/// because JNI has no unsigned types; the bits are the same bits.
+/// KayaRing.capabilities: the host capability word, as a jlong because
+/// JNI has no unsigned types; the bits are the same bits.
 pub(crate) extern "system" fn ring_capabilities(_env: JNIEnv, _class: JClass) -> jlong {
     crate::capi::kaya_capabilities() as jlong
 }
@@ -169,8 +164,7 @@ extern "system" fn ring_blob_register(
 /// Redeem an occurrence blob for its bytes, and release it.
 ///
 /// COPY THEN RELEASE, in that order: the pointer borrows core memory
-/// that the release frees. Nothing retires an occurrence blob but this,
-/// so the decoder lets go of it before any handle reaches an app.
+/// that the release frees.
 extern "system" fn ring_occurrence_blob<'a>(
     env: JNIEnv<'a>,
     _class: JClass<'a>,
@@ -204,8 +198,7 @@ extern "system" fn ring_asset_open(env: JNIEnv, _class: JClass, name: JByteArray
 }
 
 /// One copy out of core memory: the pointer borrows the core's Arc and
-/// stays valid only until release, so nothing the JVM holds outlives
-/// the handle. An empty array for a dead handle.
+/// is valid only until release. An empty array for a dead handle.
 extern "system" fn ring_asset_bytes<'a>(
     env: JNIEnv<'a>,
     _class: JClass<'a>,
@@ -291,12 +284,9 @@ extern "system" fn ring_run(_env: JNIEnv, _class: JClass) -> jint {
 /// KayaRing.openPicked: redeem a picked handle and hand Java a
 /// FileDescriptor it owns.
 ///
-/// THE FIELD IS SET FROM NATIVE CODE BECAUSE JAVA CANNOT — the
-/// reflective route needs `--add-opens java.base/java.io` and JNI does
-/// not (docs/file-dialogs-plan.md §6f).
-///
-/// NO CLEANER IS REGISTERED, deliberately: one attached here would let
-/// the collector close a descriptor the GUEST owns.
+/// THE FIELD IS SET FROM NATIVE CODE BECAUSE JAVA CANNOT — the reflective
+/// route needs `--add-opens java.base/java.io` (docs/file-dialogs-plan.md
+/// §6f). NO CLEANER IS REGISTERED: one would close the GUEST's descriptor.
 extern "system" fn ring_open_picked(
     mut env: JNIEnv,
     _class: JClass,
@@ -318,10 +308,8 @@ extern "system" fn ring_open_picked(
     let build = |env: &mut JNIEnv| -> jni::errors::Result<jni::sys::jobject> {
         let class = env.find_class("java/io/FileDescriptor")?;
         let fd = env.new_object(&class, "()V", &[])?;
-        // Three spellings of the same private field, one per runtime.
-        // ART's `descriptor` is a non-SDK member behind hidden-API
-        // enforcement, measured admitted on API 35; the successor if a
-        // future image blocks it is the NDK's AFileDescriptor_create
+        // Three spellings of one private field; ART's is a non-SDK
+        // member admitted by hidden-API enforcement
         // (docs/clipboard-plan.md §6).
         if cfg!(target_os = "android") {
             env.set_field(&fd, "descriptor", "I", jni::objects::JValue::Int(raw as jint))?;

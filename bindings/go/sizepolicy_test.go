@@ -1,7 +1,6 @@
 package kaya
 
-// The canvas SIZE POLICY (docs/canvas-plan.md §3.2.1). Headless, beside
-// the abort pin — tools/check-abort.py runs this package.
+// The canvas SIZE POLICY (docs/canvas-plan.md §3.2.1).
 
 import (
 	"encoding/binary"
@@ -25,8 +24,8 @@ func policies(records [][]byte) []uint32 {
 }
 
 // REGISTERING AND DECLARING ARE ONE ACT: a handler that reached no wire
-// record is a handler nothing ever calls, and `scale` is spelled by
-// writing nothing at all.
+// record is a handler nothing ever calls, and `scale` is spelled by writing
+// nothing at all.
 func TestEachSizePolicyRidesItsDeclaration(t *testing.T) {
 	app := NewApp()
 	var scale, fixed, redraw, tick uint64
@@ -65,13 +64,10 @@ func TestEachSizePolicyRidesItsDeclaration(t *testing.T) {
 	}
 }
 
-// THE HANDLER ARITY IS THE REGISTERED POLICY'S, NEVER THE RECORD KIND'S.
-// A tick canvas is a redraw canvas too: the core asks it once, as a
-// draw_requested, BEFORE its first frame, so it draws at frame 0 instead
-// of staying empty until the clock moves. Measured in another binding on
-// 2026-08-28, where dispatching on the kind called the tick handler with
-// the wrong arity, the handler guard swallowed it, and the scene still
-// passed — it asserts the clock canvas only AFTER a frame.
+// THE HANDLER ARITY IS THE REGISTERED POLICY'S, NEVER THE RECORD KIND'S: a
+// tick canvas is a redraw canvas too, asked once as a draw_requested BEFORE
+// its first frame (docs/canvas-plan.md: WIDEN THE HANDLER AT REGISTRATION,
+// do not switch on the record).
 func TestATickCanvasIsAskedAsARedrawCanvasToo(t *testing.T) {
 	app := NewApp()
 	var canvas uint64
@@ -88,9 +84,9 @@ func TestATickCanvasIsAskedAsARedrawCanvasToo(t *testing.T) {
 			}).id
 	})
 
-	// The pre-frame ask: a draw_requested, whose tail is the size alone.
+	// A draw_requested's tail is the size alone; a frame's carries the
+	// platform's time as well.
 	app.answerCanvasAsk(occDrawRequested, canvas, nil, []any{461.0, 87.0})
-	// And a frame, whose tail carries the platform's time as well.
 	app.answerCanvasAsk(occTick, canvas, nil, []any{461.0, 87.0, 0.05})
 
 	if len(calls) != 2 {
@@ -110,14 +106,13 @@ func TestATickCanvasIsAskedAsARedrawCanvasToo(t *testing.T) {
 			t.Fatalf("ask %d handed the handler %v, want the assigned 461x87", i, c.size)
 		}
 		// THE ASSIGNED SIZE IS THE NEXT VIEWBOX: the drawing the binding
-		// submits is written in it, so the guest's fractions land on the
-		// track it was given.
+		// submits is written in it, so the guest's fractions land on the track
+		// it was given.
 		if c.viewbox != c.size {
 			t.Fatalf("ask %d drew into viewbox %v while it was assigned %v",
 				i, c.viewbox, c.size)
 		}
 	}
-	// And a later plain Draw on that canvas uses it too.
 	app.Build(func(tx *Tx) {
 		tx.Draw(Widget{id: canvas, tx: tx}, func(d *Draw) {
 			if d.Viewbox() != (Viewbox{W: 461, H: 87}) {
@@ -128,9 +123,7 @@ func TestATickCanvasIsAskedAsARedrawCanvasToo(t *testing.T) {
 	})
 }
 
-// An unclaimed ask drops like any other occurrence, and a stamped copy's
-// canvas is never asked at all (docs/deferred.md, the template-zone size
-// policy entry).
+// docs/deferred.md, the template-zone size policy entry.
 func TestAnUnclaimedAskDropsAndAStampedOneIsRefused(t *testing.T) {
 	app := NewApp()
 	app.answerCanvasAsk(occDrawRequested, 99, nil, []any{10.0, 10.0})
@@ -145,9 +138,9 @@ func TestAnUnclaimedAskDropsAndAStampedOneIsRefused(t *testing.T) {
 	app.answerCanvasAsk(occDrawRequested, 99, []any{"row"}, []any{10.0, 10.0})
 }
 
-// A registration through a dead transaction must die BEFORE the table
-// moves: the emit comes first, so nothing is left registered against a
-// canvas whose declaration never shipped.
+// The emit comes FIRST, so a registration through a dead transaction dies
+// before the table moves and nothing is left registered against a canvas
+// whose declaration never shipped.
 func TestARegistrationThroughAClosedTransactionLeavesNothingBehind(t *testing.T) {
 	app := NewApp()
 	var canvas Widget

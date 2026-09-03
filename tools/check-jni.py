@@ -8,18 +8,10 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 
-# The JNI registration gate. JNI's own check runs one way only: it fails
-# at attach for a registered native the class lacks, but a
-# declared-and-unregistered one waits and throws UnsatisfiedLinkError at
-# FIRST USE. So this closes the other direction, statically:
-#   - every external fun in android/kaya's KayaRing.kt, KayaPresent.kt
-#     and Kaya.kt is on the ANDROID attach path (the shared ring list,
-#     the present list) or is a Java_dev_kaya_* export in android.rs;
-#   - every native in bindings/java-desktop's KayaRing.java is on the
-#     DESKTOP attach path or exported in jvm.rs;
-#   - every registered name is declared where its list targets.
-#
-# Name-level on purpose: a signature mismatch DOES fail at attach. The
+# The JNI registration gate (CLAUDE.md's gate list: JNI fails at attach
+# for a registered native the class lacks, while a declared-and-
+# unregistered one throws only at FIRST USE).
+# Name-level on purpose: a signature mismatch DOES fail at attach; the
 # silent hole is coverage.
 
 import re
@@ -105,7 +97,6 @@ def check(src):
     exp_android_kaya    = exports(src["android.rs"], "Kaya")
     exp_jvm_ring        = exports(src["jvm.rs"], "KayaRing")
 
-    # Android attach path.
     for name in sorted(kt_ring - ring - exp_android_ring):
         errs.append(f"KayaRing.kt declares external fun {name} but the android "
                     f"attach path never registers it (register_ring_natives in "
@@ -117,7 +108,6 @@ def check(src):
         errs.append(f"Kaya.kt declares external fun {name} with no "
                     f"Java_dev_kaya_Kaya_* export in android.rs")
 
-    # Desktop attach path.
     for name in sorted(java_ring - ring - desktop - exp_jvm_ring):
         errs.append(f"KayaRing.java declares native {name} but the desktop "
                     f"attach path never registers it (register_ring_natives or "
@@ -146,8 +136,7 @@ def check(src):
 
 src = {name: path.read_text(encoding="utf-8") for name, path in FILES.items()}
 
-# ---- Self-tests: perturb a copy, prove the perturbation applied,
-# demand red. ----
+# Self-tests: perturb a copy, prove the perturbation applied, demand red.
 
 def perturbed(base, name, pattern, repl):
     text, n = re.subn(pattern, repl, base[name], flags=re.S)
@@ -160,13 +149,10 @@ def perturbed(base, name, pattern, repl):
     return out
 
 selftests = [
-    # The entry vanishes from the shared list while both classes still
-    # declare it.
     ("openPicked entry dropped from register_ring_natives",
      perturbed(src, "jvm.rs",
                r'NativeMethod \{\s*name: "openPicked"\.into\(\),.*?\},', ""),
      "openPicked"),
-    # The other direction: a declaration vanishes under a live entry.
     ("emitPasted declaration dropped from KayaPresent.kt",
      perturbed(src, "KayaPresent.kt",
                r"external fun emitPasted", "fun emitPastedGone"),
@@ -189,7 +175,6 @@ for label, mutated, needle in selftests:
         sys.exit(1)
 print(f"check-jni: self-tests OK ({len(selftests)} perturbations, all red)")
 
-# ---- The real check. ----
 errs = check(src)
 if errs:
     for e in errs:

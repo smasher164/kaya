@@ -1,8 +1,5 @@
-// The accessibility conformance scene from Go: the two universal props
-// (A11yID, A11yLabel), read back out of the PLATFORM'S OWN
-// accessibility tree rather than kaya's model. Keep exactly ONE
-// container of each kind — container targets are ordinal. See
-// guests/rust/a11y.rs and tools/scenes/a11y.steps.
+// The a11y conformance scene (tools/scenes/a11y.steps). Keep exactly ONE
+// container of each kind: container targets are ordinal.
 package a11y
 
 import (
@@ -14,14 +11,11 @@ func App() *kaya.App {
 
 	app.Build(func(tx *kaya.Tx) {
 		tx.Mount(tx.Column(func() {
-			// Caption-bearing: identified but deliberately NOT
-			// labelled — the platform must speak the caption.
+			// Deliberately NOT labelled: the platform speaks the caption.
 			tx.Button("Save", nil).A11yID("save").A11yHint("save the draft")
 			tx.Checkbox("Details", nil).A11yID("details").A11yHint("show more detail")
 			tx.Button("Reset", nil).A11yID("reset")
 			tx.LabelText("Ready").A11yID("status")
-			// Caption-less: an app MUST name these, and the tree must
-			// report the authored name.
 			tx.Entry(nil).A11yID("name").A11yLabel("Full name")
 			tx.Textarea(nil).A11yID("notes").A11yLabel("Notes")
 			tx.Slider(0.0, 1.0, 0.5, nil).A11yID("volume").A11yLabel("Volume")
@@ -43,8 +37,6 @@ func App() *kaya.App {
 				tx.Button("Cancel", nil).A11yID("cancel")
 				tx.Button("OK", nil).A11yID("ok")
 			}).A11yID("actions").A11yLabel("Actions")
-			// A spoken name that FOLLOWS A SIGNAL: the live trio's
-			// Bind forms, the template zone's shape in the live zone.
 			spoken := tx.Signal("Before")
 			tx.LabelText("Spoken").A11yID("spoken").BindA11yLabel(spoken)
 			tx.Button("Rename", func(tx *kaya.Tx) {

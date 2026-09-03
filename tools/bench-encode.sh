@@ -9,14 +9,10 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The encode-benchmark leg (DESIGN.md, milestone 3: "derives target the
-# encoder, not a value tree"): each FFI binding encodes 200k
-# collection_insert records through its generated wire encoder and must
-# clear a floor rate with ~10x headroom. Rust is exempt — its guest
-# surface never serializes; C is the floor.
-#
-# Expects the guests already built; each prints
-# "ENCODE_BENCH: OK (<lang>: <rate> rec/s)".
+# The encode-benchmark leg (DESIGN.md, milestone 3): each FFI binding
+# encodes 200k collection_insert records and must clear a floor rate with
+# ~10x headroom. Rust is exempt (its guest surface never serializes).
+# Expects the guests already built.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

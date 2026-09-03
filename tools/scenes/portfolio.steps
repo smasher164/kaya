@@ -1,36 +1,9 @@
-# The portfolio app's scene (docs/portfolio-plan.md): Python on the
-# three desktop lanes; mobile remains unwired until packaging. The
-# dashboard's dynamic tables first — each account copy stamps its own
-# table, addressed by the shared authored id plus that copy's string
-# key — then the TRANSACTIONS VIEW one push away, where 15,000 rows
-# live in one For (docs/virtualization-plan.md §5).
-#
-# EVERY LEDGER STRING BELOW IS ARITHMETIC, not an observation:
-# tools/gen-market.py writes guests/assets/market/transactions.csv
-# byte-stably, the guest formats integer cents dollars-dot-cents, the
-# tick posts POSTED on top, and tools/check-assets.py re-derives the
-# frozen halves from the CSV and that same posting rule on every run —
-# so regenerating the artifact without moving this file fails at a
-# gate, naming this file, instead of on three lanes.
-#
-# AND THE TWO SCREENS TIE OUT (ruled 2026-08-26): the ledger is
-# generated to net to the dashboard's book, so `label@net` — buys minus
-# sells over the rows showing, priced at the live book — repeats the
-# dashboard's own money to the byte. Unfiltered it is label#0's
-# "Portfolio: $10023.00"; filtered to Retirement it is label#5's
-# "Account total: $2370.00", and it names the per-ticker quantities the
-# positions tables freeze. check-assets derives both lines from the CSV.
-#
-# expect_window says the FIRST VISIBLE row and the DECLARED TOTAL —
-# both data (ruled 2026-08-25). The realized band's WIDTH is the
-# viewport in rows, a text metric no shared scene may sample; the
-# compiled table-tier gate holds that arithmetic instead, the
-# pane-ladder pattern. After scroll_to_row the first visible row IS
-# the scrolled-to row, which is what makes it data on both the exact
-# and the corrected paths.
-#
-# No opening settle: the first expect's bounded retry IS the
-# scene-ready wait.
+# docs/portfolio-plan.md; the 15,000-row view is virtualization-plan §5.
+# EVERY LEDGER STRING IS ARITHMETIC: tools/gen-market.py writes the CSV
+# byte-stably and tools/check-assets.py re-derives these frozen halves
+# from it, so regenerating without moving this file reddens a gate. The
+# two screens TIE OUT to the byte, and expect_window says the first
+# visible row and the declared total — both DATA, never the band's WIDTH.
 expect label#0 "Portfolio: $10026.50"
 expect label#1 "Transactions: 15000"
 expect label#2 "Brokerage"
@@ -39,89 +12,43 @@ expect label#4 "Retirement"
 expect label#5 "Account total: $2363.00"
 expect label#6 "Savings"
 expect label#7 "Account total: $500.00"
-# THE CHART (docs/canvas-plan.md §10), the artifact the canvas milestone
-# exists to feed: the book valued at each of the last 90 days' prices,
-# drawn by the CORE from an op stream this app computed, and blitted by
-# whichever backend is under it.
-#
-# THE THREE VERBS ARE NOT REDUNDANT (§7). expect_drawing is the legible
-# one — ops replayed and where the ink landed — so a failure reads as a
-# diagnosis rather than as a hash mismatch. expect_drawing_hash proves
-# this platform's libkaya produced the SAME PIXELS as the other two, down
-# to antialiasing, and proves nothing about the screen. expect_ink is the
-# only one that fails when the BLIT dropped.
-#
-# ONE STRING ON THREE LANES: the op stream is app arithmetic over
-# guests/assets/market/prices.csv, which every lane stages and verifies
-# by hash, and the coordinates are VIEWBOX units, so no platform's track
-# can move one (§3.2, invariant 6).
-#
-# THE FIGURE IS INSET INSIDE ITS VIEWBOX — a left gutter for the money
-# labels and a bottom one for the dates — so these four numbers can
-# discriminate at all: a drawing that filled its box would read
-# 0,0,100,100 whatever the transform did.
+# THE CHART (docs/canvas-plan.md §10); canvas.steps' header says why the
+# three verbs are not redundant. ONE STRING ON THREE LANES: the op
+# stream is app arithmetic over prices.csv, which every lane stages and
+# verifies BY HASH, in VIEWBOX units. THE FIGURE IS INSET (a gutter for
+# the money labels, one for the dates), so these four numbers can
+# discriminate at all.
 expect_drawing canvas@chart "220/1,4,98,91"
 expect_drawing_hash canvas@chart "98ad246fcf87c572"
-# THE BLIT, sampled at flat-region CENTRES and never at a boundary
-# (expect_app_icon's measured discipline). 18,36 is plot ground high
-# above the series and clear of both gridlines around it; 18,73 is deep
-# inside the filled area beneath it.
-#
-# THESE ARE THE CORE'S OWN BYTES, and both modes are named because the
-# DISPLAY raster uses the platform's appearance and kaya's palette has
-# two of them. They are the SAME PAIR tools/scenes/canvas.steps freezes,
-# and necessarily so: the same two paints over the same ground —
-# `ground` alone, then `series_fill` composited over it — which
-# crates/kaya/src/canvas.rs's the_scene_probe_points_are_opaque_and_pinned
-# rasterizes and prints for both modes. Never retyped from a platform's
-# read; this verb alone compares within ±1 per channel, because a macOS
-# window's backing store carries the display's profile (§7.2).
+# THE BLIT, at flat-region CENTRES: 18,36 is plot ground clear of both
+# gridlines, 18,73 deep inside the filled area. Both appearance modes
+# are named, and the pair is necessarily canvas.steps' (the same two
+# paints over the same ground). Derived by canvas.rs's
+# the_scene_probe_points_are_opaque_and_pinned, never from a platform.
 expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/212A35"
-# A DRAWING IS AN IMAGE to every platform's accessibility tree, and the
-# numbers a screen reader is told are the app's own (§9). This line is
-# also the chart's TIE-OUT said out loud: `now` is label#0's money to the
-# byte, because the series' last point is the live book — the same
-# discipline the ledger's `label@net` carries on the other screen.
+# Also the chart's TIE-OUT said out loud: `now` is label#0's money to
+# the byte, because the series' last point is the live book.
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10026.50"
-# THE DRAWN MARK beside the title, `fixed`'s forcing artifact
-# (docs/canvas-plan.md §3.2.1, ruling 3). NO `expect_raster` HERE, and
-# now for the structural reason: this chip is ungrown, so its track IS
-# its viewbox, both of the verb's answers are true at once, and the
-# core's own precedence (scene.rs's canvas_raster_shape) says "track" —
-# measured, not argued, when the line was tried 2026-08-28. A policy is
-# observable only where track and viewbox differ, which is why every
-# canvas in tools/scenes/sizepolicy.steps GROWS; that scene carries
-# `fixed`'s assertion, this one carries the drawing.
-# Derived by crates/kaya/src/canvas.rs's
-# the_portfolio_mark_expectations_are_derived, never typed from a
-# platform's read: the op count and the ink bounds, then the byte-exact
-# hash that says this lane's libkaya drew the same pixels as the other
-# two.
+# THE DRAWN MARK beside the title (docs/canvas-plan.md §3.2.1). NO
+# `expect_raster` HERE, structurally: this chip is UNGROWN, so its track
+# IS its viewbox and both answers are true at once (measured 2026-08-28,
+# when the core's precedence answered "track"). Derived by canvas.rs's
+# the_portfolio_mark_expectations_are_derived, never from a platform.
 expect_drawing canvas@mark "21/4,7,96,93"
 expect_drawing_hash canvas@mark "29abce8483ccc343"
 # THE CENTRE, and only the centre: this verb samples hundredths of the
-# canvas's own BOX, and the day the mark grows, a `fixed` drawing sits
-# centred in a track it does not fill — an edge probe would land in the
-# margin then and say nothing about the mark. The colours are the pair
-# the chart's filled region freezes, and necessarily: the same two
-# paints, `series_fill` composited over `ground` (§7.2, ±1 per channel).
+# canvas's own BOX, so the day the mark grows an edge probe would land
+# in a `fixed` drawing's margin and say nothing about it.
 expect_ink canvas@mark "50,50 = light D2E3F7 dark 212A35"
-# THE DEFAULT WINDOW INSET, MEASURED (styling-plan D3): the styling
-# scene freezes inset 0, and nothing froze the default-16 path until a
-# scroll-rooted dashboard shipped flush left on WinUI — its one-Padding
-# design stamps the window inset onto the mounted root, and a SCROLL
-# root matched no stamp arm (2026-08-30). Relative, so byte-frozen on
-# all five lanes.
+# THE DEFAULT WINDOW INSET (styling-plan D3): styling.steps freezes
+# inset 0, and nothing froze the default-16 path until a scroll-rooted
+# dashboard shipped flush left on WinUI, whose one-Padding design
+# matched no stamp arm for a SCROLL root (2026-08-30).
 expect_inset 16
-# NO expect_window_size, ruled 2026-08-28 when the phone legs arrived:
-# the declared 900x600 is a desktop request and a phone's window IS the
-# device, so the outer geometry is the panes-band shape — a value the
-# platforms legitimately answer differently, which no shared scene may
-# sample. The scene's contract is the ADAPTIVE behavior (every
-# assertion below is data-shaped and passed unchanged at 375x812 —
-# the flex-presentation asserts moved to the cut tail 2026-08-30 when
-# the grouped tier stopped laying those containers out);
-# declared-size honoring is window.steps' mechanism proof, once.
+# NO expect_window_size, ruled 2026-08-28: the declared 900x600 is a
+# desktop request and a phone's window IS the device, so outer geometry
+# is the panes-band shape no shared scene may sample. Declared-size
+# honoring is window.steps' proof, once.
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
 expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
@@ -131,7 +58,6 @@ expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,
 expect_column_edges column@positions[savings] 4
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
 expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
-# One copy's sort indicator and order move; both siblings stay put.
 header_click column@positions[retirement] 3
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value ^3"
 expect_column_edges column@positions[retirement] 4
@@ -143,19 +69,15 @@ header_click column@positions[retirement] 3
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
 expect_column_edges column@positions[retirement] 4
 expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
-# A second copy owns an independent sort state.
 header_click column@positions[brokerage] 1
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
 expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50|AAPL,10,$180.00,$1800.00"
 # The tick updates every nested collection, preserves each copy's sort,
-# AND POSTS ONE DIVIDEND PER ACCOUNT — the two screens are one model,
-# and label#1 counts the book from the same list the ledger is built
-# from. A dividend carries no quantity, which is why the net line below
-# is asserted on a book these three rows are part of. The view is
-# CLOSED here, so this also pins that a tick with no view pushed writes
-# to nothing that is gone.
+# AND POSTS ONE DIVIDEND PER ACCOUNT (a dividend carries no quantity).
+# The view is CLOSED here, so this also pins that a tick with no view
+# pushed writes to nothing that is gone.
 click button#0
 expect label#0 "Portfolio: $10023.00"
 expect label#1 "Transactions: 15003"
@@ -168,18 +90,16 @@ expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
 expect_column_edges column@positions[savings] 4
 expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
-# AND THE CHART FOLLOWED THE PRICES. The tick moves the series' last
-# point and nothing else — the window, the axis band and every label are
-# where they were — so the op count and the ink bounds are UNCHANGED
-# while the hash moves. That pairing is what proves the hash sees what
-# the bounds cannot (docs/canvas-plan.md §7.4), and it proves the
-# redeclaration replaced the whole drawing rather than patching it
-# (§2.1). `now` is again label#0's money to the byte.
+# AND THE CHART FOLLOWED THE PRICES: the tick moves the series' last
+# point and nothing else, so the op count and ink bounds are UNCHANGED
+# while the hash moves — the pairing that proves the hash sees what the
+# bounds cannot (docs/canvas-plan.md §7.4) and that the redeclaration
+# replaced the whole drawing rather than patching it (§2.1).
 expect_drawing canvas@chart "220/1,4,98,91"
 expect_drawing_hash canvas@chart "6fc708cad68264c3"
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10023.00"
-# THE TRANSACTIONS VIEW, one push from the dashboard. The four status
-# labels are addressed by AUTHORED ID: their creation index sits behind
+# THE TRANSACTIONS VIEW, one push away. The four status labels are
+# addressed by AUTHORED ID because their creation index sits behind
 # every stamped cell the dashboard made, and a band decides how many of
 # those there are.
 expect_title "portfolio"
@@ -190,52 +110,45 @@ expect_title "Transactions"
 expect label@count "15003 of 15003 transactions"
 expect label@first "first 2023-10-21 BND buy $841.44"
 expect label@last "last 2026-08-25 CASH div $2.05"
-# THE TIE-OUT, unfiltered: the whole book's transactions net to the whole
-# book's holdings — the same six quantities the positions tables show,
-# and the same money as label#0 above.
+# THE TIE-OUT, unfiltered: the same six quantities the positions tables
+# show, and the same money as label#0 above.
 expect label@net "net AAPL 10, BND 20, CASH 1, NVDA 4, VTI 6, VXUS 15 = $10023.00"
 expect_columns column@ledger "Date|Ticker|Side|Total"
 expect_column_edges column@ledger 4
-# The whole collection arrived: 15,003 rows of DATA behind a band that
-# realizes a few dozen widgets. label@count counts what the guest holds,
-# and the last three rows are the dividends the tick posted.
+# 15,003 rows of DATA behind a band that realizes a few dozen widgets;
+# the last three rows are the dividends the tick posted.
 expect_window column@recent 0 8
 expect_rows column@recent "2026-08-24,VTI,sell,$7547.25|2026-08-24,AAPL,sell,$7200.00|2026-08-24,VTI,buy,$7547.25|2026-08-24,VTI,div,$0.50|2026-08-24,VTI,sell,$10410.00|2026-08-25,AAPL,div,$2.40|2026-08-25,BND,div,$6.20|2026-08-25,CASH,div,$2.05"
-# The band at rest sits at the top of a 15,003-row collection.
 expect_window column@ledger 0 15003
-# The middle, addressed by the ROW and not by a pixel: t07500 is the
-# 7,501st line of the CSV, realized or not.
+# Addressed by the ROW and not by a pixel: t07500 is the 7,501st line of
+# the CSV, realized or not.
 scroll_to_row column@ledger t07500
 expect_window column@ledger 7500 15003
-# The end. At a clamped scroll the first VISIBLE row is the viewport
-# in rows below the last — a metric — so this scroll runs unasserted
-# and the filter steps below carry the proof it happened.
+# At a CLAMPED scroll the first visible row is the viewport in rows
+# below the last — a metric — so this scroll runs unasserted and the
+# filter steps below carry the proof it happened.
 scroll_to_row column@ledger t15002
 # ONE ACCOUNT'S HISTORY: the filter narrows the DECLARED TOTAL under a
-# live window: 10,305 rows leave the collection and the band re-fills
-# from what is left. The account's last row is the dividend the tick
-# posted for it.
+# live window — 10,305 rows leave and the band re-fills from what stays.
 choose select#0 2
 expect label@count "4698 of 15003 transactions"
 expect label@first "first 2023-10-21 BND buy $841.44"
 expect label@last "last 2026-08-25 BND div $6.20"
-# THE TIE-OUT, one account: Retirement's own transactions net to exactly
-# what its card holds — BND 20 and VXUS 15 — and to label#5's money
-# above, which is what makes "an account's holdings are the sum of its
-# transactions" an assertion rather than a hope.
+# THE TIE-OUT, one account: Retirement's transactions net to what its
+# card holds and to label#5's money above.
 expect label@net "net BND 20, VXUS 15 = $2370.00"
 # Scrolled to the FIRST row, so `first` is 0 whichever end of the band
-# the tier reports — the one scroll in this file with no ambiguity.
+# the tier reports.
 scroll_to_row column@ledger t00000
 expect_window column@ledger 0 4698
 # A sort moves 4,698 rows THROUGH a fixed band: the order is data, the
-# band is a position, and the header's indicator is the guest's.
+# band is a position.
 header_click column@ledger 3
 expect_columns column@ledger "Date|Ticker|Side|Total ^3"
 expect label@first "first 2023-11-20 NVDA div $0.25"
 expect label@last "last 2026-01-01 NVDA sell $44136.00"
-# t01602 is the 2,001st row of the SORTED order — a row the band has
-# never realized, reached by identity.
+# t01602 is the 2,001st row of the SORTED order: a row the band never
+# realized, reached by identity.
 scroll_to_row column@ledger t01602
 expect_window column@ledger 2000 4698
 header_click column@ledger 3
@@ -245,18 +158,14 @@ expect label@last "last 2023-11-20 NVDA div $0.25"
 # The net line is a SUM, so no order can move it: the same two positions
 # after two sorts as before them.
 expect label@net "net BND 20, VXUS 15 = $2370.00"
-# t11545 heads the descending order, so the band that follows it is at
-# the top of a collection whose order moved under it.
+# t11545 heads the descending order, so the band lands at the top of a
+# collection whose order moved under it.
 scroll_to_row column@ledger t11545
 expect_window column@ledger 0 4698
-# A CLICK INSIDE A POP'S TRANSITION IS DROPPED (the mac and android
-# title WATCHes' 4th/5th sightings, matrix 19 of 2026-09-02, both with
-# the instrument reading `click button#1 145ms after the last pop;
-# entries=0` and no push in 5s; docs/traps.md's Compose entrance-drop
-# entry measured the same window at ~half a second). Every `back` below
-# settles past it before the scene clicks again.
-# BACK TO THE DASHBOARD: the covered root is retained — its numbers and
-# each copy's independent sort survive the round trip.
+# A CLICK INSIDE A POP'S TRANSITION IS DROPPED (docs/traps.md's Compose
+# entrance-drop entry measured that window at ~half a second), so every
+# `back` below settles past it before the scene clicks again.
+# BACK TO THE DASHBOARD: the covered root is retained.
 back
 expect_entries 0
 settle 600
@@ -266,12 +175,9 @@ expect label#1 "Transactions: 15003"
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
-# A STAMPED BUTTON DRIVEN BY KEY (2026-09-01): each account card carries
-# its own Transactions button, a stamped copy the keyed target reaches
-# — the affordance docs/portfolio-plan.md §5 recorded as unreachable
-# while `kind@id[key.path]` answered for columns alone. The view opens
-# filtered to the card's account, so the count, the net line and the
-# filter's own selection say which card was clicked.
+# A STAMPED BUTTON DRIVEN BY KEY: the view opens filtered to the card's
+# account, so the count, the net line and the filter's own selection say
+# which card was clicked.
 click button@transactions[retirement]
 expect_entries 1
 expect_title "Transactions"
@@ -284,9 +190,7 @@ settle 600
 expect_title "portfolio"
 
 # THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END
-# so the phone cut costs nothing above it: stacked, the summary renders
-# inside the ledger's viewport — one scroll, the summary scrolling away
-# above row 0 — and side by side it does not. Every assert sits after a
+# so the phone cut costs nothing above it. Every assert sits after a
 # resize because the initial state is width-dependent (the adaptive
 # scene's rule); the phone legs cut at resize_window and assert their
 # always-stacked truth as a per-leg extra.
@@ -294,25 +198,18 @@ click button#1
 expect_title "Transactions"
 resize_window 900x600
 expect_folded column@summary none
-# THE FLEX-PRESENTATION ASSERTS LIVE IN THE CUT TAIL (moved 2026-08-30,
-# with the grouped-screen rule): on iOS a table-bearing screen lowers as
-# grouped SECTIONS — the detail and accounts columns dissolve into the
-# stream and never lay out as containers, so "aligns" has nothing to
-# read there. That is the tier's design, not a miss; these sample the
-# FLEX presentation and run where it exists, exactly as the
-# window-size note above scopes the outer geometry. The records read
-# here were written at the scene's own 900 opening.
+# THE FLEX-PRESENTATION ASSERTS LIVE IN THE CUT TAIL: on iOS a
+# table-bearing screen lowers as grouped SECTIONS, so these columns
+# dissolve into the stream and never lay out as containers — the tier's
+# design, not a miss.
 expect_aligned column@detail "stretch"
 expect_aligned column@accounts "stretch"
-# No expect_fills on column@detail: the breadth rule maximizes this
+# NO expect_fills ON column@detail: the breadth rule maximizes this
 # column's height while the hugging dashboard legitimately leaves slack
 # under its content (the empty-row ruling, docs/tables-plan.md).
-# The hug half of that ruling: an ungrown summary table's viewport sits
-# within a row-pitch of its last row — watched failing both ways
-# (content-height frame removed, then inflated 100pt). BACK FIRST: the
-# observation is generation-keyed and a covered dashboard cannot
-# re-stamp it, so the read runs on the live screen, then the push is
-# restored for the fold round trip below.
+# BACK FIRST: the hug observation below is generation-keyed and a
+# covered dashboard cannot re-stamp it, so the read runs on the live
+# screen and the push is restored for the fold round trip after it.
 back
 expect_entries 0
 settle 600

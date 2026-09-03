@@ -1,8 +1,4 @@
-(* The sections conformance scene, OCaml port: two peer roots in the
-   primary window's section set — presentation context, not lifecycle.
-   The archive pane folds [~on_selected] into a visit count, pinning the
-   echo doctrine from both sides: a user's switch emits, a programmatic
-   [select_section] does not. See guests/rust/sections.rs and
+(* The sections scene, OCaml port — guests/rust/sections.rs,
    tools/scenes/sections.steps. *)
 
 open Kaya_wire
@@ -11,10 +7,8 @@ open Kaya_app
 let feed = 7L
 let archive = 8L
 
-(* The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
-   shared scene covers BOTH arms. REACHABILITY IS THE GATE, not a
-   capability read: this window opens from a handler only the desktop
-   tail's click reaches, and the phone runners cut that tail. *)
+(* The SIDEBAR half rides an AUX WINDOW opened only from the desktop tail's
+   click, so [create_window] never runs where the capability is absent. *)
 let library = 1L
 let shelves = 2L
 let loans = 3L
@@ -37,17 +31,12 @@ let () =
          (Str (Printf.sprintf "archive: %d visits" !visit_count))
         
      in
-     (* A tab bar without icons is not the platform's real thing, and no
-        shared asset would be legal — SF Symbols are licensed to Apple
-        platforms only, so the symbol names a CONCEPT
-        (docs/styling-plan.md D6). *)
+     (* A symbol names a CONCEPT (docs/styling-plan.md D6). *)
      add_section ~title:"Feed" ~symbol:Home feed;
      add_section ~title:"Archive" ~symbol:Star ~on_selected:on_archive_shown
        archive;
      let go_archive () =
-       (* Programmatic selection is configuration and does NOT echo:
-          [~on_selected] must not fire, and the scene asserts the count
-          holds. *)
+       (* Programmatic selection does NOT echo: [~on_selected] must not fire. *)
        select_section archive
      in
      let open_library () =

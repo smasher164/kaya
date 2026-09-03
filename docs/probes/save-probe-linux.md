@@ -8,7 +8,7 @@ Platform under test: the repo's own linux lane — the `kaya-linux` image
 (tools/linux/Dockerfile), GTK **4.18.6**, X11 under Xvfb, per-leg AT-SPI bus via
 tools/linux/a11y-leg.sh. MEASURED in the image: `pkg-config --modversion gtk4` =
 4.18.6, and **no xdg-desktop-portal installed** (`dpkg -l | grep -i portal`
-empty) — which is the condition crates/kaya/src/gtk.rs:4573-4578 already states
+empty) — which is the condition crates/kaya/src/gtk.rs:4356-4361 already states
 and the reason GTK presents its own chooser in-process.
 
 ---
@@ -80,7 +80,7 @@ for writing FAILS, in the guest's ordinary error idiom").
 
 The errno crosses intact (13 EACCES, 2 ENOENT): capi.rs:1433 returns
 `e.raw_os_error()`, and the bindings re-raise it (python
-bindings/python/kaya/runtime.py:190-191; go bindings/go/runtime.go:320-322).
+bindings/python/kaya/runtime.py:166-167; go bindings/go/runtime.go:253-255).
 
 ## A.3 What the existing unit test misses
 
@@ -126,7 +126,7 @@ for python and go only.
 **The API kaya would call: `gtk4::FileDialog::save()`** — the same object the
 open path already builds at gtk.rs:4581, with `set_initial_name()` and
 optionally `set_accept_label()` added. MEASURED present in the pinned crate:
-`gtk4` 0.11.4 with feature `v4_10` (crates/kaya/Cargo.toml:134), `pub fn save`
+`gtk4` 0.11.4 with feature `v4_10` (crates/kaya/Cargo.toml:74), `pub fn save`
 at `~/.cargo/registry/src/.../gtk4-0.11.4/src/auto/file_dialog.rs:410`,
 `set_initial_name` at :769. DOCUMENTED: `Gtk.FileDialog` since GTK 4.10,
 `save_finish()` "returns the file that was selected" and sets
@@ -227,7 +227,7 @@ the one-live-dialog slot (capi.rs:1531), the retire path
 the directory read, the row read, and the filter list. What makes it a
 milestone is everything the invariants make mandatory:
 
-1. **Spec change** (crates/kaya/src/spec.rs:827-850). Either a new record or a
+1. **Spec change** (crates/kaya/src/spec.rs:764-787). Either a new record or a
    kind field on `show_file_dialog` — which conveniently already carries a
    `reserved: U32` at spec.rs:834 (MEASURED). The spec hash moves; every
    generated surface regenerates in lockstep (invariant 7).

@@ -7,31 +7,11 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# A KayaSceneModel FIELD THAT A COMPOSABLE DRAWS FROM MUST BE COMPOSITION
-# STATE. Compose recomposes a function when a `mutableStateOf` it read
-# changes; a plain field is read once, at the first composition, and the
-# surface never moves again. `windowTitle` shipped as a plain field for a
-# milestone and only a film caught it (docs/deferred.md, "The CLASS behind
-# the stale title bar has no gate"): nothing about a plain field is a
-# compile error, and the scenes read the OTHER surface (the task label).
-#
-# THE RULE, read off the file rather than off a list somebody keeps: every
-# `KayaSceneModel.<field>` READ inside a `@Composable fun` body names a
-# field declared `by mutableStateOf` / `mutableStateListOf` /
-# `mutableStateMapOf`, or is in the EXEMPT table below with its reason —
-# and every exemption is still LIVE (some composable still reads it),
-# because an exemption nobody needs is the next stale audit. Writes are
-# not reads: a composable STAMPING a plain field for the harness to read
-# (formFactor, menuPresentation, …) is fine; only a draw read recomposes.
-# Comments and strings are blanked positionally first, since the file's
-# prose names every field and a bare-word census reported `rows`,
-# `columns` and `labels` off comments and KayaNode locals alike.
-#
-# AND THE ONE ORDERING THE EXEMPTIONS LEAN ON IS ASSERTED, NOT ASSUMED:
-# the four alert fields are plain and read to draw, safe only because
-# APPLY_PRESENT_ALERT writes them BEFORE `alertId`, which IS state and is
-# the recomposition key. Swap two lines and the dialog draws last time's
-# title — so that arm is read and the order is held.
+# A KayaSceneModel field a composable DRAWS FROM must be composition
+# state: a plain field is read once, at the first composition, and the
+# surface never moves again — no compile error, and no scene sees it
+# (CLAUDE.md's gate list; docs/deferred.md, "The CLASS behind the stale
+# title bar has no gate").
 
 import re
 
@@ -60,9 +40,8 @@ STATE_INITIALIZERS = re.compile(
     r"(?:\bby\s+(?:[\w.]+\.)?mutable(?:Int|Long|Float|Double)?StateOf\b"
     r"|=\s*(?:[\w.]+\.)?mutableState(?:List|Map)Of\b)")
 # `[ \t]*`, never `\s*`: a blanked comment line is all spaces, and `\s*`
-# from its start would swallow the newline and the next line's indent,
-# leaving every field after a comment uncounted (the first draft read
-# 29 of 56).
+# from its start swallows the newline and the next line's indent, leaving
+# every field after a comment uncounted.
 FIELD = re.compile(
     r"^([ \t]*)(?:@\w+(?:\([^)]*\))?[ \t]*)?(?:(?:internal|private|public)[ \t]+)?"
     r"(?:lateinit[ \t]+)?(var|val)[ \t]+(\w+)\b(.*)$", re.M)
@@ -291,8 +270,8 @@ def census(text):
 
 real = g.read(COMPOSE)
 
-# THE WATCHED NEGATIVES, each a doctored copy with its substitution count
-# printed, each demanding the sentence the real census would print.
+# Watched negatives: a doctored copy each, demanding the sentence the
+# real census would print.
 NEGATIVES = [
     ("windowTitle made a plain field (the shipped defect)",
      r"var windowTitle by mutableStateOf\(\"\"\)", 'var windowTitle = ""',

@@ -1,5 +1,4 @@
-// The panels conformance scene, C# port — the auxiliary-window
-// grammar via named arguments. See guests/rust/panels.rs and
+// The panels scene, C# port — guests/rust/panels.rs,
 // tools/scenes/panels.steps.
 
 static class PanelsScene

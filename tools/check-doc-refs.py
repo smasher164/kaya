@@ -8,63 +8,30 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 
-# A PATH THE DOCS NAME MUST BE A PATH THE TREE HAS.
+# A PATH THE DOCS NAME MUST BE A PATH THE TREE HAS (CLAUDE.md's gate
+# list).
 #
-#   tools/check-doc-refs.py                 every tracked .md in the tree
-#   tools/check-doc-refs.py --also PATH     scan one more file BESIDE the
-#                                           real set — THE TEST SEAM, so
-#                                           the watched negatives plant
-#                                           their dead reference in a
-#                                           COPY and the real docs are
-#                                           never edited to prove a gate
-#                                           red.
+# With no argument, every tracked .md in the tree; `--also PATH` scans
+# one more file BESIDE that set — THE TEST SEAM, so the watched
+# negatives plant their dead reference in a COPY and the real docs are
+# never edited to prove a gate red.
 #
-# WHAT COUNTS AS A REFERENCE: a word starting with one of the repo's
-# source roots — tools/ crates/ guests/ docs/ swift/ android/ bindings/ —
-# backticked or bare. Trailing punctuation and a possessive `'s` end the
-# token; a `<placeholder>` right after it makes it a FAMILY name, and
-# families are not checked.
-#
-# A `:123` OR `:123-456` SUFFIX ENDS THE TOKEN AND IS THEN READ: the file
-# must exist AND be long enough for the line the sentence points at.
-# WHAT IT CATCHES IS THE FILE THAT SHRANK, and only that — an in-range
-# line number whose content moved is not catchable this way, and the gate
-# does not pretend otherwise.
-#
-# THREE SHAPES BEYOND THE PLAIN PATH:
-#
-#   GLOBS — required to match AT LEAST ONE path: a glob that has stopped
-#     matching is exactly as dead as a missing file.
-#   BRACE GROUPS — `guests/{go/undo/undo.go:309, rust/undo.rs:207, …}`.
-#     Expanded and checked member by member. Left alone, the tokenizer
-#     would read `swift/undo.swift` out of the middle of one and report a
-#     file that was never claimed to exist.
-#   ELISIONS — `android/kaya/.../KayaCompose.kt`. NOT exempt: write the
-#     path out.
-#
-# THE HISTORICAL-MENTION CONVENTION, and nothing else — every exemption
-# is a place a dead reference can hide:
-#
-#   1. Inside ~~strikethrough~~ (a struck sentence claims nothing).
-#   2. Inside a ``` fenced block (a quote may not be edited to suit a
-#      gate).
-#   3. Followed by the literal marker `(gone)`, for a live sentence that
-#      must name a file the tree no longer has.
-#
-# In particular a reference is not exempted for being in a "historical"
-# document: every doc in docs/ records something that already happened.
-#
-# THE EXEMPTIONS ARE COUNTED AND PRINTED on every run, and the gate
-# REFUSES A VERDICT if the exempt references outnumber the checked ones.
+# A REFERENCE is a word starting with one of the repo's source roots,
+# backticked or bare; trailing punctuation and a possessive `'s` end the
+# token, and a `<placeholder>` after it makes it a FAMILY name, unread.
+# A `:123` or `:123-456` SUFFIX ends the token and is then read: WHAT IT
+# CATCHES IS THE FILE THAT SHRANK and only that, an in-range line whose
+# content moved being uncatchable this way. ELISIONS are NOT exempt —
+# write the path out — and an unexpanded BRACE GROUP would have the
+# tokenizer read a path out of the middle of one. A reference is not
+# exempted for being in a "historical" document: every doc in docs/
+# records something that already happened.
 #
 # AND ONE CLAUSE OVER EVERY TRACKED FILE, not just the .md set: nothing
-# tracked may cite scratchpad/ — a session scratch directory dies on
-# reboot, so a comment pointing there points at nothing, sooner or
-# later. Measured 2026-08-19: 47 tracked files carried such citations
-# and 19 of the cited documents were already dead, replayed out of
-# session transcripts to land them (docs/chrome/, docs/styling/,
-# docs/probes/). The one legal spelling of a dead scratch path is the
-# same `(gone)` marker as above.
+# tracked may cite scratchpad/, which dies on reboot. Measured
+# 2026-08-19: 47 tracked files carried such citations and 19 of the
+# cited documents were already dead, replayed out of session transcripts
+# to land them. A dead scratch path is spelled `(gone)` like any other.
 
 import re
 import subprocess
@@ -339,7 +306,11 @@ if not plan.is_file():
 else:
     plan_text = plan.read_text(encoding="utf-8")
     _, g0, m0 = scan(plan, plan_text)
-    broken, n3 = re.subn(r"rust/undo\.rs:135", "rust/undo-NO-SUCH.rs:135",
+    # The member's line number follows the guest (a comments pass moved it
+    # twice in one day), so the perturbation reads it rather than pins it.
+    undo_at = re.search(r"rust/undo\.rs:(\d+)", plan_text)
+    undo_at = undo_at.group(1) if undo_at else "0"
+    broken, n3 = re.subn(rf"rust/undo\.rs:{undo_at}", f"rust/undo-NO-SUCH.rs:{undo_at}",
                          plan_text)
     print(f"check-doc-refs: self-test N3 broke 1 member of a real brace group "
           f"({g0} group(s), {m0} member(s) expanded), {n3} substitution(s)")
@@ -394,7 +365,7 @@ if len(findings_in(under)) != len(findings_in(sample_text)):
 # member, so a brace expansion that quietly dropped the anchor would
 # show here rather than in six months.
 if plan.is_file():
-    deep, n6 = re.subn(r"rust/undo\.rs:135", "rust/undo.rs:999999", plan_text)
+    deep, n6 = re.subn(rf"rust/undo\.rs:{undo_at}", "rust/undo.rs:999999", plan_text)
     print(f"check-doc-refs: self-test N6b pushed a real brace member's line "
           f"anchor past the end of guests/rust/undo.rs, {n6} substitution(s)")
     if n6 < 1:
@@ -405,16 +376,12 @@ if plan.is_file():
              "not reported — the members are reaching the line clause without "
              "their anchors")
 
-# N5 — THE CENSUS REFUSAL. A run that read almost nothing must refuse a
-# verdict rather than print one. 30 files and 841 checkable references
-# today (measured 2026-08-19); the floors below are low enough that
-# pruning a plan doc is not a false refusal, high enough that a
-# tokenizer which stopped matching cannot report a clean scan.
-#
-# THE ANCHOR FLOOR IS 1, not a fraction: the corpus carries 92 line
-# anchors across five documents, and a doc prune could honestly take
-# most of them, but it cannot take all of them by accident. Zero anchors
-# beside a full reference count means the SUFFIX stopped being read.
+# N5 — THE CENSUS REFUSAL: a run that read almost nothing must refuse a
+# verdict. 30 files and 841 checkable references today (2026-08-19), so
+# the floors are low enough that pruning a plan doc is not a false
+# refusal. THE ANCHOR FLOOR IS 1, not a fraction: the corpus carries 92
+# line anchors across five documents and a prune could honestly take
+# most, but zero means the SUFFIX stopped being read.
 FLOOR_FILES, FLOOR_REFS = 12, 250
 
 
@@ -551,9 +518,113 @@ else:
              f"repoint, or — for a sentence that must name what is already "
              f"lost — mark it `{token} {GONE}`.")
 
+# ------------------------------------- 3. the traps-pointer clause
+#
+# The 2026-09-02 comments pass left `docs/traps.md: <headline>` behind
+# wherever a measured finding moved out of the code, so a pointer whose
+# words open no headline is a finding the reader cannot chase.
+POINTER = re.compile(r"docs/traps\.md: +\"?(.*)$")
+POINTER_CONT = re.compile(r"^\s*(?://[/!]?|#|\*|--)\s?")
+POINTER_FLOOR = 30
+
+
+def pointer_norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def pointer_text(lines, i):
+    """The pointer's words on line i, joined with up to three wrapped
+    comment lines below it until 40 letters are in hand."""
+    txt = POINTER.search(lines[i]).group(1)
+    j = i + 1
+    while len(pointer_norm(txt)) < 40 and j < len(lines) and j <= i + 3 \
+            and POINTER_CONT.match(lines[j]):
+        txt += " " + POINTER_CONT.sub("", lines[j])
+        j += 1
+    return re.split(r"\)\.|\"\)|\)\s*$|\"\s*$", txt)[0].strip().strip("\"")
+
+
+def pointer_findings(text, heads):
+    """(line, pointer text) for every pointer no headline opens with."""
+    out = []
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if not POINTER.search(line):
+            continue
+        txt = pointer_text(lines, i)
+        if txt.startswith("<"):
+            continue  # `<headline>`: the convention's own placeholder, as in CLAUDE.md
+        n = pointer_norm(txt)[:25]
+        if len(n) < 12 or not any(h.startswith(n) for h in heads):
+            out.append((i + 1, txt))
+    return out
+
+
+def pointer_heads():
+    """Every headline docs/traps.md carries: `## ` entries, and the older
+    bold-bullet entries by their first line."""
+    heads = []
+    for line in (root / "docs" / "traps.md").read_text(encoding="utf-8").split("\n"):
+        if line.startswith("## "):
+            heads.append(pointer_norm(line[3:]))
+        elif line.startswith("- **"):
+            heads.append(pointer_norm(line[4:].split("**")[0]))
+    return heads
+
+
+def pointer_run():
+    heads = pointer_heads()
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=root,
+                         stdout=subprocess.PIPE, text=True, check=False)
+    findings, seen = [], 0
+    for p in (x for x in out.stdout.split("\0") if x and not x.startswith("docs/")):
+        if p == "tools/check-doc-refs.py":
+            continue  # this clause's own patterns and sentences
+        f = root / p
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "docs/traps.md:" not in text:
+            continue
+        seen += text.count("docs/traps.md:")
+        findings.extend((p, n, txt) for n, txt in pointer_findings(text, heads))
+    return findings, seen, heads
+
+
+# N8 — a pointer whose words open no headline is reported; the same
+# pointer naming a real headline is not.
+_heads = pointer_heads()
+_real = [h for h in _heads if len(h) > 30][0]
+n8_good = pointer_findings(f"// docs/traps.md: {_real[:40]}\n", _heads)
+n8_bad = pointer_findings("// docs/traps.md: a headline nobody ever wrote down here\n",
+                          _heads)
+print(f"check-doc-refs: self-test N8 a pointer at a real headline -> "
+      f"{len(n8_good)} finding(s), at an invented one -> {len(n8_bad)}")
+if n8_good:
+    fail("self-test N8: a pointer at a real headline was reported — the clause "
+         "cannot read its own file")
+if len(n8_bad) != 1:
+    fail("self-test N8: a pointer at an invented headline was not reported — "
+         "the traps-pointer clause is vacuous")
+
+pointer_bad, pointer_seen, _ = pointer_run()
+if pointer_seen < POINTER_FLOOR:
+    fail(f"traps-pointer clause read {pointer_seen} pointer(s) — below its floor "
+         f"of {POINTER_FLOOR} (the tree carried 101 when it landed). REFUSAL.")
+else:
+    for where, n, txt in pointer_bad:
+        fail(f"{where}:{n} points at docs/traps.md: {txt!r}, and no headline "
+             f"there opens with those words. Name the headline's first words "
+             f"(25 characters or more, on the pointer's line or the comment "
+             f"lines under it), or add the entry.")
+
 detail = ", ".join(f"{k} {v}" for k, v in sorted(exempt.items())) or "none"
 if status == 0:
-    print(f"check-doc-refs: OK ({len(files)} files, {checked} references "
+    print(f"check-doc-refs: OK ({len(files)} files, {checked} references, "
+          f"{pointer_seen} traps pointers, "
           f"checked, {anchored} of them line-anchored and held to the target's "
           f"length, {groups} brace group(s) expanded to {members} member(s); "
           f"exempt: {detail}; mortal-path clause over {mortal_scanned} tracked "

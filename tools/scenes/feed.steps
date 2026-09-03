@@ -1,8 +1,5 @@
-# The feed scene: sum-typed elements. expect_order reads the For
-# container's bare label children — only the Note case stamps one, so
-# the order reads the notes; todo rows nest theirs. Promote converts
-# the first note into a finished todo: same key, restamped in place,
-# so a note leaves the order and the done count rises.
+# expect_order reads the For's BARE label children, so the order is the
+# notes alone — todo rows nest theirs, and a promoted note leaves it.
 expect_order column#0 "jot one|jot two"
 expect label#0 "0 done"
 toggle checkbox#0 on

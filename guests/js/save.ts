@@ -1,22 +1,5 @@
-// The save conformance scene, JS port — the ROUND TRIP an editor
-// actually walks (docs/save-plan.md D5): open a file, edit it, save it
-// back, save it AS somewhere new, then reopen both and prove the bytes
-// are where they belong. The four claims it drives are docs/save-plan.md
-// D1's numbered list.
-//
-// EVERY STATUS IS A READ-BACK OFF THE DISK, never what the guest hoped it
-// wrote: a write that returned success and landed nowhere is exactly the
-// failure "save" has, and only reopening sees it.
-//
-// THE FILE IS READ THROUGH THE HANDLE, NEVER THROUGH `localPath` — that
-// name is empty on both phones, so a port that reached for it would pass
-// on the desktops and be unportable by construction.
-//
-// NO EXTENSIONS ON THE NAMES: a hidden-extension Finder preference would
-// make `expect_save_dialog` read the stem on one machine and the whole
-// name on another (docs/deferred.md).
-//
-// See guests/rust/save.rs and tools/scenes/save.steps.
+// The save round trip (tools/scenes/save.steps). EVERY STATUS IS A READ-BACK
+// OFF THE DISK, through the HANDLE, and no name carries an extension.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,17 +9,14 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-// Both halves compute this identically, each in its own language's way.
-// `os.tmpdir()` and NEVER `TMPDIR` — see docs/traps.md.
+// `os.tmpdir()` and NEVER `TMPDIR` — docs/traps.md.
 const saveDir = join(tmpdir(), `kaya-save-${process.pid}`);
 mkdirSync(saveDir, { recursive: true });
-// The file the scene opens, plus the decoy the picker needs (see
-// guests/js/filedialog.ts). "decoy" MUST sort before "draft".
+// The decoy MUST sort before "draft" (guests/js/filedialog.ts says why).
 writeFileSync(join(saveDir, "draft"), "first draft", { encoding: "utf-8" });
 writeFileSync(join(saveDir, "decoy"), "decoy", { encoding: "utf-8" });
 
-// Held as handles, never as paths: the phones have no re-openable path,
-// and the desktops must not be allowed to pass with one.
+// HANDLES and never paths: the phones have no re-openable path.
 let source: kaya.PickedFile | null = null;
 let destination: kaya.PickedFile | null = null;
 
@@ -47,8 +27,7 @@ function reason(e: unknown): string {
 
 /** Read a handle back through kaya, with the guest's own file API. */
 function readBack(picked: kaya.PickedFile): string {
-  // The addon reads over the platform handle — the same spelling on
-  // every desktop, Windows included (docs/js-plan.md §6).
+  // The addon reads over the platform handle (docs/js-plan.md §6).
   try {
     return new TextDecoder().decode(picked.read());
   } catch (e) {
@@ -57,8 +36,7 @@ function readBack(picked: kaya.PickedFile): string {
 }
 
 function writeBack(picked: kaya.PickedFile, text: string): string {
-  // What the save dialog handed back opens EMPTY (docs/save-plan.md D1):
-  // the addon writes the bytes, then the read-back is the proof.
+  // What the dialog handed back opens EMPTY (docs/save-plan.md D1).
   try {
     picked.write(text);
   } catch (e) {
@@ -67,10 +45,8 @@ function writeBack(picked: kaya.PickedFile, text: string): string {
   return readBack(picked);
 }
 
-/** Run one file operation and post the answer back. The python version
- * hands `job` to a thread of its own; the app-thread worker has no
- * thread, so the job runs here and the ANSWER is still posted, which is
- * the half the scene can see. */
+/** One file operation, with the ANSWER posted: this worker has no second
+ * thread to hand the job to. */
 function work(job: () => string): void {
   const text = job();
   app.post(() => status.set(text));
@@ -100,12 +76,8 @@ async function openFile(): Promise<void> {
 }
 
 function saveBack(): void {
-  // Save-back needs no dialog — the user already chose this file, and
-  // the handle they chose it with is writable. A missing handle is an
-  // open that never landed (cancelled, or the dialog swallowed under
-  // load) — its OWN sentence, never a crash: a crashed guest takes the
-  // process and masks the real failure (docs/deferred.md, save-jvm
-  // WATCH).
+  // No dialog: the chosen handle is writable. A missing one gets its OWN
+  // sentence, never a crash (docs/deferred.md, save-jvm WATCH).
   const file = source;
   if (file === null) {
     status.set("nothing open to save");
@@ -115,17 +87,13 @@ function saveBack(): void {
 }
 
 async function saveAs(): Promise<void> {
-  // The suggested name the dialog OPENS with; the harness types over it.
-  // NO FILTER here either, and that one matters: with allowed content
-  // types set, NSSavePanel appends the first allowed extension to an
-  // extension-less name (docs/deferred.md).
+  // The name the dialog OPENS with. NO FILTER either: with types set,
+  // NSSavePanel appends an extension (docs/deferred.md).
   saved(await kaya.saveFile("copy"));
 }
 
 function reopen(): void {
-  // BOTH, in order: a save that went to the wrong handle passes every
-  // earlier step and fails here. The missing-handle guard, same reason
-  // as saveBack's.
+  // A save through the wrong handle fails only here.
   const first = source;
   const second = destination;
   if (first === null || second === null) {

@@ -1,11 +1,5 @@
-// The feed scene: sum-typed elements, end to end. The list of record
-// types IS the sum — `kaya.collection([Note, Todo])` declares one variant
-// per member, in that order — and forEach yields the eliminator, one
-// `cases.case(Ctor, (el) => ...)` per constructor, held to totality at
-// declaration. A patch witnesses the entry's current constructor, and a
-// field the constructor lacks throws at the call site.
-//
-// Build the library first (cargo build), then:
+// The list of record types IS the sum, in that order, and the eliminator
+// is held to totality at declaration. See guests/rust/feed.rs.
 //     KAYA_SELFTEST=feed node guests/js/feed.ts
 
 import * as kaya from "kaya-gui";
@@ -23,8 +17,7 @@ function doneCountText(items: Map<kaya.Key, Post>): string {
 }
 
 function onPromote(): void {
-  // The MODEL is asked which entry is a Note — never the widgets — and
-  // the update's new constructor restamps that key's copy in place.
+  // The MODEL says which entry is a Note; the update restamps in place.
   for (const [key, post] of feed.items()) {
     if (post instanceof Note) {
       feed.update(key, Todo({ title: post.text, done: true }));
@@ -34,8 +27,7 @@ function onPromote(): void {
 }
 
 function onToggle(post: kaya.RowHandle<Post>, checked: boolean): void {
-  // The instanceof as a guard: a row that has left the collection
-  // matches no variant, so a stale occurrence folds into nothing.
+  // A row that has left matches no variant: a stale occurrence folds away.
   if (post instanceof Todo) post.done = checked;
 }
 

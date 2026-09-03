@@ -101,10 +101,9 @@ with contextlib.suppress(FileNotFoundError):
     (STORE / FIXTURE).unlink()
 
 # 5. Without KAYA_FAST the cache is never CONSULTED. The variable is
-# REMOVED from the child's environment, not merely unset here: this gate
-# runs inside lanes that may have exported KAYA_FAST=1, and a clause
-# that inherits the variable it claims to have unset tests the opposite
-# of what it says.
+# REMOVED from the child's environment, not merely unset here: a lane
+# may have exported KAYA_FAST=1, and a clause that inherits the variable
+# it claims to have unset tests the opposite of what it says.
 keyed("true")
 _, out = keyed("echo", "ran", fast=False)
 if out.strip() != "ran":
@@ -127,13 +126,11 @@ if out.strip() != "ran":
     fail(f"a full run's FAILURE left a stamp behind — the next fast run "
          f"would skip a red gate: {out}")
 
-# 5c. THE ARTIFACT HALF OF A KEY FOLLOWS THE EMBEDDED BUILD-ID. Two
-# staged roots whose artifact carries a DIFFERENT marker must yield
-# different keys; the SAME marker with different surrounding bytes must
-# yield the same key (that is the point — every relink mints a new
-# LC_UUID, and the marker is what says which sources the artifact came
-# from); and no marker at all must differ from both. Proven through the
-# KAYA_GATE_ARTIFACT_ROOT seam, which exists for exactly this clause.
+# 5c. THE ARTIFACT HALF OF A KEY FOLLOWS THE EMBEDDED BUILD-ID: a
+# different marker keys differently, the SAME marker with different
+# surrounding bytes keys the same (every relink mints a new LC_UUID and
+# the key must not hash that), no marker differs from both.
+# KAYA_GATE_ARTIFACT_ROOT exists for exactly this clause.
 def gate_key(root):
     return subprocess.run(
         ["tools/build-id.py", "--gate", "check-abort"], cwd=ROOT,
@@ -162,15 +159,10 @@ with scratch_dir("check-keyed-art-") as art:
         fail("an artifact with NO build-id marker keyed like a marked one")
 
 
-# 6 and 7 read tools/gates.py's list, with a vacuity floor inside — a
-# census that finds almost nothing is a broken census, not a clean tree.
-#
-#   6. The gates that read a BUILT ARTIFACT must be keyed WITH that
-#      artifact's bytes in their key (build-id.py's ARTIFACT_GATES;
-#      ratified 2026-08-20) — sources can sit unchanged while target/
-#      holds something else, and the bytes are what close that gap.
-#      check-build-id alone stays unkeyed forever: caching the
-#      staleness gate's answer is the defect it exists to find.
+# 6 and 7 read tools/gates.py's list, with a vacuity floor inside.
+#   6. A gate that reads a BUILT ARTIFACT is keyed WITH that artifact's
+#      bytes (build-id.py's ARTIFACT_GATES; ratified 2026-08-20);
+#      check-build-id alone stays unkeyed forever.
 #   7. Everything that IS wrapped must have an input set, or keyed.py
 #      dies at run time inside a lane instead of here.
 def keyed_census():

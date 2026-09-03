@@ -7,28 +7,13 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE FAILURE THIS EXISTS FOR, MEASURED 2026-08-16. The semantic icon
-# vocabulary (docs/styling-plan.md D6) maps each concept to an SF Symbols
-# name in swift/KayaSwiftUI.swift. Apple renamed several families in SF
-# Symbols 6 (2024): `doc.on.doc` -> `document.on.document` and kin. The
-# OLD names still resolve everywhere. The NEW ones need macOS 15 / iOS 18
-# and, below that, fail as a BLANK IMAGE — no build error, no runtime
-# complaint.
-#
-# NO SCENE CAN CATCH THIS, measured rather than assumed: swapping
-# `doc.on.doc` for `document.on.document` and running the menus scene on
-# this machine PASSED, because the new name resolves perfectly well on a
-# current OS. A resolution check only fails on a machine old enough to be
-# the floor, and nobody has one. The only thing that CAN answer is
-# Apple's own availability data, which ships on every mac:
-#   /System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/
-#     name_availability.plist   — name -> introduction year, plus a
-#                                 year -> {macOS, iOS, ...} release table
-#
-# The rule: every SF name in kaya's table must exist in that plist with a
-# year whose macOS release is <= kaya's floor (macOS 13.0 = SF Symbols 4)
-# AND whose iOS release is <= 16.0, because one Swift file serves both
-# platforms.
+# An SF Symbols 6 rename (`doc.on.doc` -> `document.on.document`) needs
+# macOS 15 / iOS 18 and renders BLANK below that, with no build error and
+# nothing a scene can see (measured 2026-08-16; CLAUDE.md's gate list).
+# The only thing that can answer is Apple's own availability data, which
+# ships on every mac: every SF name in kaya's table must carry a year
+# whose macOS release is <= 13.0 and whose iOS release is <= 16.0, since
+# one Swift file serves both platforms.
 
 import plistlib
 import re
@@ -70,10 +55,9 @@ def check(src, text):
             "gate itself broke")
 
     bad = []
-    # The table rows: (constant, semantic name, sf name, rendered-or-nil).
-    # The fourth column is the AX read-back name a MODERN OS reports for
-    # the old spelling — a measurement, not a request, so the floor does
-    # not bind it; only the sf column is what kaya asks the OS for.
+    # (constant, semantic name, sf name, rendered-or-nil). The fourth
+    # column is the AX read-back a MODERN OS reports for the old spelling
+    # — a measurement, not a request, so the floor does not bind it.
     rows = re.findall(
         r'\(\s*(symbol\w+),\s*"([^"]+)",\s*"([^"]+)",\s*(?:nil|"[^"]*")\s*\)',
         text)
@@ -120,11 +104,8 @@ elif verdict == "bad":
     print("\n".join(payload), file=sys.stderr)
     status = 1
 
-# THE GUARD GUARDS ITSELF, perturbed out of the REAL file so what is
-# proven is that the rule matches the spelling this file actually
-# carries — and the substitution count is printed and checked (the
-# prelude's doctor), because a perturbation that did not apply proves
-# nothing.
+# Perturbed out of the REAL file, so what is proven is that the rule
+# matches the spelling this file actually carries.
 drifted = gate.doctor("the doc.on.doc perturbation", text,
                       r'"doc\.on\.doc"', '"document.on.document"')
 dverdict, dpayload = check("drifted.swift", drifted)
@@ -134,10 +115,9 @@ if not ("document.on.document" in drift and "ABOVE kaya" in drift):
           f"refused): {drift}", file=sys.stderr)
     sys.exit(1)
 
-# And the accept direction: a rule that refused everything would pass
-# the refusal above. The real check ran first; its verdict is `status`,
-# and the count it printed came from the same python that enforced the
-# rule — never a second pattern that could drift to zero on its own.
+# And the accept direction: a rule that refused everything would pass the
+# refusal above. The count comes from the same code that enforced the
+# rule, never a second pattern that could drift to zero on its own.
 if status == 0:
     print(f"check-symbols: OK ({payload} names at or below macOS 13.0 / "
           f"iOS 16.0)")

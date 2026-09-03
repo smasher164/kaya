@@ -8,59 +8,30 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 
-# THE LEDGER MAY NOT DISAGREE WITH ITSELF. A ledger entry is read the
-# way a diagnostic is read: whoever reads it next acts on the sentence.
+# THE LEDGER MAY NOT DISAGREE WITH ITSELF (CLAUDE.md invariant 9 and
+# its gate list). `tools/check-ledger.py <path>` reads some other copy —
+# THE TEST SEAM the watched negatives run against.
 #
-#   tools/check-ledger.py              check docs/deferred.md
-#   tools/check-ledger.py <path>       check some other copy — THE TEST
-#                                      SEAM, how the watched negatives
-#                                      run against a COPY
+# THE CONTRACT.
+#   A. an UNSTRUCK headline over an entry-level TERMINAL RESOLUTION;
+#   B. a STRUCK headline with no resolution note;
+#   C. a closed entry whose body still claims live work.
+#   A BULLET entry is `- ` at column 0; a SECTION entry is a `## `/`### `
+#   heading, closed either struck or prefixed `SOLVED:`. The four
+#   ORGANIZING headings are not entries and are ASSERTED present, since
+#   a named exemption that can rot is worse than none; everything else
+#   at `##` or deeper is an entry BY DEFAULT, which points the safe way.
+#   ENTRY LEVEL for a section is its heading plus the column-0 lines
+#   that are neither bullets nor continuations — what keeps the
+#   depth-stub sections open (self-test N4b, watched NOT firing).
 #
-# TWO CLAUSES.
-#
-#   A. An UNSTRUCK headline whose entry carries an ENTRY-LEVEL TERMINAL
-#      RESOLUTION (the measured shape: a present-tense "GAP —" over a
-#      body recording COMPLETE three weeks earlier).
-#   B. A STRUCK headline with no resolution note — a closed entry and no
-#      record of where the work went.
-#
-# TWO SYNTAXES, ONE RULE. A BULLET ENTRY is a `- ` at column 0; a
-# SECTION ENTRY is a `## `/`### ` heading over a prose body. A section is
-# closed in its heading two ways, both in the file: struck, and prefixed
-# `SOLVED:`. Both must read as closed to clause A and both owe clause B
-# a dated note.
-#
-# FOUR HEADINGS ARE NOT ENTRIES — the file's taxonomy, whose bodies are
-# lists of bullet entries read one at a time. They are named in
-# ORGANIZING below and their presence is ASSERTED, because a named
-# exemption that can rot silently is worse than none. Everything else at
-# `##` or deeper is an entry BY DEFAULT, and that default points the
-# safe way.
-#
-# THE DISCRIMINATOR IS THE WHOLE PROBLEM. Entries legitimately mix a
-# finished slice with an open remainder, so LANDED, FIXED and CLOSED
-# cannot carry the rule — all three appear slice-scoped in unstruck
-# entries ("DEPTH SLICE LANDED", "FIXED FOR GO AND RUST", "CLOSED …
-# for the remaining five"). COMPLETE can: this ledger reserves it for a
-# whole-entry verdict. The second recognized shape is a scoped-sounding
-# word corroborated by a full five-lane result on the same line
-# (`CLOSED … matrix ALL PASS`).
-#
-# THE DECLARED LIMITS. An entry that records itself with a bare
-# `CLOSED <date>` and is never struck goes unflagged; the exits are to
-# strike it or to write a whole-entry verdict, NOT to widen the
-# vocabulary while those slice-scoped spellings live in the file. And
-# SUB-BULLETS are a different grammar: ENTRY LEVEL for a section is its
-# heading plus the column-0 lines that are neither bullets nor a
-# bullet's continuation, which is what keeps the depth-stub sections
-# open (self-test N4b is that shape, watched NOT firing).
-#
-# THE CENSUS DISCIPLINE (check-gates, tpl-surfaces): both syntaxes have
-# a floor, and a SECOND, deliberately different reader counts the same
-# two things off the lines. The two must agree — they do so by
-# construction today, and the refusal exists so they cannot silently
-# STOP agreeing. Every clause is watched failing on every run, against
-# the real bytes doctored in memory, with the count printed.
+# THE DISCRIMINATOR IS THE WHOLE PROBLEM: LANDED, FIXED and CLOSED all
+# appear slice-scoped in unstruck entries ("DEPTH SLICE LANDED", "FIXED
+# FOR GO AND RUST"), so the whole-entry shapes are COMPLETE and a
+# scoped word corroborated by a five-lane result on the same line
+# (`CLOSED … matrix ALL PASS`). A bare `CLOSED <date>` never struck goes
+# unflagged: strike it or write a whole-entry verdict, do not widen the
+# vocabulary while those spellings live in the file.
 
 import re
 

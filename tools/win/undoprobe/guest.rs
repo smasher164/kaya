@@ -1,13 +1,9 @@
-//! THROWAWAY guest for the WinUI undo probe (docs/undo-plan.md §0,
-//! probe plan P3-win / P4 / P5). Not a scene and not a conformance
-//! surface: it stands up one Entry and one Edit>Undo item carrying
-//! `primary+z`, built through the ordinary menu API so the catalog, the
-//! KeyboardAccelerator and `core.menu_shortcuts` exist as they would in
-//! a shipped app.
-//!
-//! Everything the app observes prints with a PROBEGUEST prefix, so the
-//! measurement can tell an occurrence the app saw from a native state
-//! the backend read.
+//! THROWAWAY guest for the WinUI undo probe (docs/undo-plan.md §0). One
+//! Entry and one Edit>Undo item carrying `primary+z`, built through the
+//! ORDINARY menu API so the catalog, the KeyboardAccelerator and
+//! `core.menu_shortcuts` exist as they would in a shipped app.
+//! Its observations print PROBEGUEST, so the measurement can tell an
+//! occurrence the app saw from a native state the backend read.
 
 #[derive(Clone)]
 enum Msg {

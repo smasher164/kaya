@@ -2,13 +2,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    // Hybrid CRT on msvc targets: static vcruntime (not an OS contract),
-    // dynamic UCRT (OS-shipped and OS-serviced). No-op elsewhere.
+    // Hybrid CRT on msvc: static vcruntime, dynamic UCRT. No-op elsewhere.
     static_vcruntime::metabuild();
 
-    // Bake the id of the sources this core is compiled from. The hash
-    // comes from tools/build-id.py, shelled out to rather than
-    // reimplemented, so the two cannot disagree.
+    // The id is shelled out to tools/build-id.py rather than
+    // reimplemented, so the two cannot disagree (docs/HACKING.md).
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("../..")
         .canonicalize()
@@ -16,9 +14,8 @@ fn main() {
     let script = root.join("tools/build-id.py");
     let id = if script.is_file() {
         // build.rs re-runs only when something it DECLARES changes, and
-        // the id is a function of the whole source set — so the whole
-        // source set is declared. Miss this and the baked id silently
-        // keeps a value the sources have moved away from.
+        // the id is a function of the whole source set. Miss one and the
+        // baked id silently keeps a value the sources moved away from.
         for input in ["crates", "Cargo.toml", "Cargo.lock"] {
             println!("cargo::rerun-if-changed={}", root.join(input).display());
         }
@@ -38,13 +35,12 @@ fn main() {
             .trim()
             .to_string()
     } else {
-        // No tools/ directory: kaya built as a dependency from a
-        // published package. Zeros, so the verifier reports NO build id
-        // rather than pretending to know one.
+        // No tools/: kaya built from a published package. Zeros, so the
+        // verifier reports NO build id rather than pretending to know one.
         "0000000000000000".to_string()
     };
-    // The marker in capi.rs is a fixed-size array, so a width change
-    // here is a compile error there rather than a truncated id.
+    // capi.rs's marker is a fixed-size array, so a width change here is a
+    // compile error there rather than a truncated id.
     assert_eq!(
         id.len(),
         16,
@@ -55,13 +51,12 @@ fn main() {
     refuse_a_stale_generator(&root);
 }
 
-/// Fail the BUILD when the binding generator has moved since the
-/// bindings it produced were written (docs/traps.md).
-///
-/// Two exemptions: no tools/ directory (kaya built as a published
-/// dependency), and KAYA_REGENERATING, which gen-bindings.py sets
-/// because the generator depends on this crate — without it a
-/// generator edit would fail the build of the tool that fixes it.
+/// Fail the BUILD when the binding generator has moved since the bindings it
+/// produced were written (docs/traps.md: a generator edited and never rerun
+/// compiles perfectly). Two exemptions: no tools/ directory, and
+/// KAYA_REGENERATING, which gen-bindings.py sets because the generator
+/// depends on this crate — without it a generator edit would fail the build
+/// of the tool that fixes it.
 fn refuse_a_stale_generator(root: &std::path::Path) {
     if std::env::var_os("KAYA_REGENERATING").is_some() {
         return;
@@ -79,9 +74,9 @@ fn refuse_a_stale_generator(root: &std::path::Path) {
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "rs"))
         .collect();
-    // Sorted, and by CONTENT: the shell glob that writes the stamp is
-    // sorted too, and a touched file with the same bytes is not a
-    // different generator (docs/traps.md, mtime versus hash).
+    // Sorted and by CONTENT, matching the stamp writer: a touched file
+    // with the same bytes is not a different generator (docs/traps.md,
+    // mtime versus hash).
     sources.sort();
     let mut joined = Vec::new();
     for path in &sources {
@@ -97,8 +92,8 @@ fn refuse_a_stale_generator(root: &std::path::Path) {
     );
 }
 
-/// The same 16 hex chars `shasum -a 256 | cut -c1-16` gives, so the
-/// stamp writer and this reader cannot disagree.
+/// The same 16 hex chars `shasum -a 256 | cut -c1-16` gives, so the stamp
+/// writer and this reader cannot disagree.
 fn short_sha256(bytes: &[u8]) -> String {
     use std::process::Stdio;
     let mut child = Command::new("shasum")

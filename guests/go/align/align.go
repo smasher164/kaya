@@ -1,5 +1,4 @@
-// The align conformance scene, Go port. See guests/rust/align.rs and
-// tools/scenes/align.steps.
+// The align conformance scene (tools/scenes/align.steps).
 package align
 
 import (
@@ -38,8 +37,6 @@ func App() *kaya.App {
 			tx.Row(func() { // row#1: the stretch pair's host
 				tx.Label(anchor) // label#2
 				tx.Column(func() {
-					// grown into the row's leftover, stretched
-					// across its own breadth
 					tx.Label(fit) // label#3
 					tx.Button("wide", nil)
 				}).Grow(1).Align(kaya.AlignStretch).A11yID("fitcol")

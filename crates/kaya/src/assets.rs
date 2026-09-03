@@ -12,35 +12,26 @@ const REPO_DEFAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../guests/as
 
 /// THE RESERVED NAMESPACE. An app asset whose name starts with this is
 /// refused by the same wall that refuses `..` and absolute paths
-/// (docs/canvas-plan.md §4.2): without it an app could ship a
-/// `kaya/default-font` of its own under the asset root and silently
-/// shadow the built-in, and the failure would be a font that changed on
-/// one platform.
-///
-/// NOT THE SAME THING as the `kaya/` prefix Android packages assets
-/// under INSIDE the apk, which the Kotlin reader strips before a name is
-/// resolved (docs/assets-plan.md A4). The two spellings look identical
-/// in a grep; the refusal below means the confusing case cannot arise.
+/// (docs/canvas-plan.md §4.2). NOT THE SAME THING as the `kaya/` prefix
+/// Android packages assets under INSIDE the apk, which the Kotlin reader
+/// strips before a name is resolved (docs/assets-plan.md A4).
 pub(crate) const RESERVED_PREFIX: &str = "kaya/";
 
 /// The face a canvas text op draws with when it names none. Answered
-/// from bytes EMBEDDED in libkaya, so a canvas can always draw text: on
-/// a lane whose asset root is missing, on a platform whose staging
-/// failed, in an app that ships no assets at all.
+/// from bytes EMBEDDED in libkaya, so a canvas can always draw text with
+/// no asset root at all.
 pub(crate) const DEFAULT_FONT: &str = "kaya/default-font";
 
-/// The vendored Sora, compiled in. It rides tools/build-id.py's
-/// artifact id, so a font swap that did not rebuild is a build-id
-/// refusal rather than a drawing that changed on one lane. The OFL
-/// permits embedding, and embedding is not modification.
+/// The vendored Sora, compiled in; it rides tools/build-id.py's
+/// artifact id. The OFL permits embedding, and embedding is not
+/// modification.
 const DEFAULT_FONT_BYTES: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../guests/assets/fonts/sora-wght.ttf"
 ));
 
-/// Where this process's asset root is, and which route said so — the
-/// failure sentence names the route, so it is carried rather than
-/// recomputed.
+/// Where this process's asset root is, and which route said so; the
+/// failure sentence names the route.
 pub(crate) struct Root {
     pub(crate) place: Place,
     pub(crate) route: &'static str,
@@ -61,7 +52,6 @@ impl Place {
     fn shown(&self) -> String {
         match self {
             Place::Dir(p) => p.display().to_string(),
-            // Asked of the platform on the failure path only.
             #[cfg(target_os = "android")]
             Place::Apk => crate::android::apk_assets_shown(),
         }
@@ -69,14 +59,11 @@ impl Place {
 }
 
 /// Resolve the asset root for this process, in order: `KAYA_ASSET_DIR`,
-/// the Apple main bundle's Resources, the APK's own `assets/`, beside
-/// the executable, then the repo-relative compile-time default
-/// (docs/assets-plan.md A4).
-///
-/// Do not reorder. "Beside the executable" must stay below the bundle
-/// route, and it is the weakest step: for a DLL-hosted guest — python,
-/// go, csharp, java — `current_exe()` names the HOST interpreter's
-/// binary, not the app's (docs/deferred.md, "DLL-hosted guest").
+/// the Apple main bundle's Resources, the APK's own `assets/`, beside the
+/// executable, then the repo-relative compile-time default
+/// (docs/assets-plan.md A4). Do not reorder: for a DLL-hosted guest —
+/// python, go, csharp, java — `current_exe()` names the HOST interpreter's
+/// binary (docs/deferred.md, "DLL-hosted guest").
 pub(crate) fn root() -> Root {
     if let Ok(dir) = std::env::var(ENV_VAR) {
         if !dir.trim().is_empty() {
@@ -176,9 +163,7 @@ fn name_fault(name: &str) -> Option<(&'static str, String)> {
         return Some(("absolute", name.to_owned()));
     }
     // The reserved namespace, checked BEFORE the component walk so the
-    // sentence names the real problem. `read` answers the reserved names
-    // it knows before it gets here; anything else under the prefix is an
-    // app trying to shadow the built-ins.
+    // sentence names the real problem.
     if name.starts_with(RESERVED_PREFIX) {
         return Some(("reserved", name.to_owned()));
     }
@@ -193,14 +178,12 @@ fn name_fault(name: &str) -> Option<(&'static str, String)> {
     None
 }
 
-/// Why `asset(name)` would fail. The empty string means it would
-/// SUCCEED; every other answer is the sentence the guest's own
-/// `asset(name)` raises, byte for byte.
-///
-/// The two-line split is a constraint: line 1 is what
-/// tools/scenes/assets.steps freezes and must stay equal on five
-/// platforms, line 2 names the resolved place and route, which no
-/// cross-platform expectation could hold equal.
+/// Why `asset(name)` would fail. The empty string means it would SUCCEED;
+/// every other answer is the sentence the guest's own `asset(name)` raises,
+/// byte for byte. The two-line split is a constraint: line 1 is what
+/// tools/scenes/assets.steps freezes and must stay equal on five platforms,
+/// line 2 names the resolved place and route, which no cross-platform
+/// expectation could hold equal.
 pub(crate) fn asset_why_not(name: &str) -> String {
     if reserved(name).is_some() {
         return String::new();
@@ -321,14 +304,12 @@ pub(crate) fn read(name: &str) -> Result<Vec<u8>, String> {
     let root = root();
     match read_raw(&root.place, name) {
         Ok(bytes) if !bytes.is_empty() => Ok(bytes),
-        // Empty and missing both route through the diagnostic.
         _ => Err(asset_why_not(name)),
     }
 }
 
 /// The bytes kaya answers a reserved name with, or None if the name is
-/// not one kaya knows. The whole reserved table, so the wall above and
-/// this answer cannot disagree.
+/// not one kaya knows. The whole reserved table.
 fn reserved(name: &str) -> Option<&'static [u8]> {
     match name {
         DEFAULT_FONT => Some(DEFAULT_FONT_BYTES),
@@ -348,14 +329,10 @@ pub(crate) fn font_bytes(name: &str) -> Result<std::sync::Arc<[u8]>, String> {
 /// EVERY TEST THAT RESOLVES AN ASSET TAKES THIS LOCK — in this module
 /// and in any other. The tests below set and clear the process-wide
 /// `KAYA_ASSET_DIR` and cargo runs tests on threads, so a resolution
-/// that lands inside one of those windows reads a root nobody chose.
-///
-/// MEASURED 2026-08-26: canvas's pin test resolves
-/// `fonts/sora-wght.ttf`, took no lock, and failed once in a full suite
-/// with `the scene's stream validates: "kaya: no asset named
-/// \"fonts/sora-wght.ttf\" ... chosen by KAYA_ASSET_DIR"` — then passed
-/// 33 consecutive runs. Pointing the variable at an empty directory
-/// reproduces that panic exactly (docs/traps.md).
+/// that lands inside one of those windows reads a root nobody chose
+/// (measured 2026-08-26: canvas's pin test took no lock, failed once in
+/// a full suite with the resolver's sentence and then passed 33
+/// consecutive runs; docs/traps.md).
 #[cfg(test)]
 static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -371,7 +348,6 @@ mod tests {
     use super::*;
 
     /// Every branch of the diagnostic made to print (invariant 3).
-    /// `cargo test -- --nocapture` shows the sentences a reader gets.
     #[test]
     fn why_not_answers_in_facts() {
         let _serial = serially();
@@ -418,7 +394,6 @@ mod tests {
 
         let s = seen("family/hollow.bin");
         assert!(s.contains("EMPTY (0 bytes)"), "{s}");
-        // A directory named as an asset is "there and not readable".
         let s = seen("family");
         assert!(
             s.contains("could not be read") || s.contains("no asset named"),
@@ -456,8 +431,7 @@ mod tests {
         // and the typeface scene's blob-channel copy.
         assert_eq!(font, read("fonts/sora-wght.ttf").unwrap());
 
-        // And with no asset root at all, which is half of what the
-        // embedding buys: a canvas can always draw text.
+        // And with no asset root at all: a canvas can always draw text.
         let nowhere = std::env::temp_dir().join(format!("kaya-no-assets-{}", std::process::id()));
         // SAFETY: single-threaded test section under `serially()`.
         unsafe { std::env::set_var(ENV_VAR, &nowhere) };
@@ -478,7 +452,6 @@ mod tests {
     fn read_answers_the_vendored_font() {
         let _serial = serially();
         let bytes = read("fonts/sora-wght.ttf").expect("the repo default root");
-        // The byte count is asserted so a truncated read cannot pass.
         assert_eq!(bytes.len(), 111400, "the vendored font's byte count");
     }
 

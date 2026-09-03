@@ -1,10 +1,5 @@
-// The reorder scene from C#: order as collection data. Handlers
-// reposition an entry BY KEY and never touch a widget.
-//
-// The root is a Row so the For's container is the scene's only
-// column-kind widget: languages disagree on whether containers are
-// created before or after their children, and column#0 must name the
-// same widget everywhere.
+// The reorder scene, C# port — guests/rust/reorder.rs,
+// tools/scenes/reorder.steps.
 
 [KayaGen]
 record Item(string Title);
@@ -22,8 +17,6 @@ static class ReorderScene
             {
                 tx.Button("rotate", t =>
                 {
-                    // The model owns the order, so the handler asks it
-                    // which key is first; it never counts widgets.
                     var entries = items.Items(t);
                     items.MoveToEnd(t, entries[0].Key);
                 });

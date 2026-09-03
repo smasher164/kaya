@@ -449,7 +449,7 @@ Confirmed:
 
 | | gomobile / Fyne (`gomobile build`, `fyne package -os android`) | kaya today |
 |---|---|---|
-| Android entry symbol | `ANativeActivity_onCreate` in `app/android.c:72`, in the app's own .so | `Java_dev_kaya_KayaGo_attach`, `bindings/go/android.go:170 (gone)` |
+| Android entry symbol | `ANativeActivity_onCreate` in `app/android.c:72`, in the app's own .so | `Java_dev_kaya_KayaGo_attach`, `bindings/go/android.go:138 (gone)` |
 | who calls Go's app code | `dlsym(RTLD_DEFAULT, "main.main")` → `callMain` → `go callfn.CallFn(mainPC)` (`android.c:93-97`, `android.go:101`) | `KayaGo.attach(this)` from `onCreate` → `go func(){…app()}()` |
 | Go guest code thread | a goroutine; **not** the UI thread | a `LockOSThread`'d goroutine; **not** the UI thread |
 | who owns the Looper | ActivityThread; `onCreate` returns to it immediately | ActivityThread; `attach` returns to it immediately |
@@ -491,7 +491,7 @@ know — `kaya.Env` instead of `os.Getenv` (a whole milestone, and the
 reason `tools/check-go-env.py` exists), the one-APK-many-scenes library
 split that forced 30 scenes out of `main` packages
 (`guests/go/milestone2/main_android.go (gone)`), and the re-attach panic on
-configuration change (`bindings/go/android.go:150-160 (gone)`). gomobile pays
+configuration change (`bindings/go/android.go:118-128 (gone)`). gomobile pays
 those same costs — its `callMain` patches three env vars by hand for
 exactly the reason kaya's `kaya.Env` exists — it just pays them inside the
 toolchain instead of in the guest.
@@ -501,7 +501,7 @@ cheap and worth considering on its own merits: gomobile's guard against a
 second entry is `static int main_running` in C (`app/android.c:62,73,98`),
 which makes re-`onCreate` **idempotent** — the Activity may be recreated
 and Go's `main` is simply not started again. kaya's equivalent
-(`bindings/go/android.go:150-160 (gone)`) **panics**, on the stated reasoning
+(`bindings/go/android.go:118-128 (gone)`) **panics**, on the stated reasoning
 that the shell must survive rotation itself. Both are defensible; they are
 not the same choice, and gomobile's is evidence that the idempotent one is
 survivable in practice. (kaya's comment already anticipates this and

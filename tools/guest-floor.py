@@ -41,12 +41,10 @@ import re
 import sys
 
 # --- rule tables ------------------------------------------------------
-#
 # Per extension: (label, kind, pattern, fire, quiet)
 #   kind 'line'  — regex against one comment-stripped line
-#   kind 'for2'  — pattern locates a call; it counts as a hit only if
-#                  the call has >= 2 top-level arguments (kaya's For
-#                  shape; stdlib iteration takes the body alone)
+#   kind 'for2'  — the call counts only with >= 2 top-level arguments
+#                  (kaya's For shape; stdlib iteration takes the body)
 # `fire` and `quiet` feed the built-in self-test.
 
 RULES = {
@@ -117,11 +115,10 @@ RULES = {
         ("bindTextElement by index", "line", r"\.bindTextElement\(",
          "t.bindTextElement(label, 0);",
          "t.label(TodoKaya.title());"),
-        # Java's callback For died 2026-08-24 — the one form is the eager
-        # `rows` Iterable — so `.forEach(` names nothing the binding
-        # exports and the compiler holds that. The tier below the for
-        # statement is KayaRecords.rowTrace, public because the generated
-        # surfaces call it from the guests' own package.
+        # Java has no callback For — the one form is the eager `rows`
+        # Iterable — so the compiler holds `.forEach(`. The tier below the
+        # for statement is KayaRecords.rowTrace, public because the
+        # generated surfaces call it from the guests' own package.
         ("the rowTrace machinery", "line", r"KayaRecords\.rowTrace\(",
          "return KayaRecords.rowTrace(tx, c, t -> new Row(t, c));",
          "for (var row : TodoKaya.rows(tx, todos)) {"),

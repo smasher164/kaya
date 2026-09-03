@@ -9,20 +9,10 @@ dev_shell_or_die()
 
 # Lint every tools/ shell script with shellcheck at warning level, plus
 # the repo's own shell rules (--locked, $?, no sed/awk, ffmpeg -nostdin,
-# no exec out of a build directory).
-#
-# ITS SCOPE DID NOT SHRINK, ITS POPULATION DID (docs/deferred.md's
-# 2026-08-27 ruling). A converted gate is a two-line `exec python3` shim
-# over a tools/check-*.py, so it is still walked here and passes every
-# clause vacuously — there is no shell in it to get wrong. The rules
-# that DO apply to its body are check-python.py's, and the shim's exact
-# bytes are pinned there too, so it can never grow logic this file would
-# then have to hold. What stays here is what shell is still for: the
-# runners, keyed.py, the generators and tools/lib/*.sh. The four
-# per-command rules (--locked, javac -encoding, sed/awk, ffmpeg
-# -nostdin) follow the commands into the converted bodies as
-# check-python's rule 11 — for four days after the conversion they
-# policed nothing there (audit 2026-08-31).
+# no exec out of a build directory). The population is what shell is still
+# for — the launcher shapes and tools/lib/*.sh; the same four per-command
+# rules follow the commands into python as check-python's rule 11, and the
+# two copies move together.
 
 import re
 import shutil
@@ -52,10 +42,9 @@ with scratch_dir("check-shell-") as tmp:
 
 status = 0
 
-# EVERY .sh under tools/, found rather than enumerated: a script in a
-# new subdirectory must not be linted by nothing. The floor is the
-# census rule: shims hold the .sh count roughly constant through the
-# python conversion, so a walk that finds almost none read nothing.
+# EVERY .sh under tools/, found rather than enumerated: a script in a new
+# subdirectory must not be linted by nothing. A walk that finds almost
+# none read nothing.
 scripts = sorted(p for p in (ROOT / "tools").rglob("*.sh") if p.is_file())
 if len(scripts) < 30:
     print(f"check-shell: walked only {len(scripts)} .sh files under "
@@ -104,13 +93,10 @@ if unpinned:
     status = 1
 
 # Every cargo invocation carries --locked (CLAUDE.md). The flag is
-# per-invocation, so a new callsite starts out unguarded.
-# cargo, an optional wrapper (ndk/xwin) with its own flags, then the
-# subcommand that can resolve dependencies. `run` joined 2026-08-31:
-# it resolves exactly as `build` does, and gen-bindings' bare
-# `cargo run` sat outside this alternation for the gate's whole life.
-# check-python's SH_CARGO is this pattern's copy for embedded shell —
-# the two move together.
+# per-invocation, so a new callsite starts out unguarded. cargo, an
+# optional wrapper (ndk/xwin) with its own flags, then the subcommand that
+# can resolve dependencies — `run` resolves exactly as `build` does.
+# check-python's SH_CARGO is this pattern's copy for embedded shell.
 CARGO = re.compile(r"(?:^|[^-\w])cargo\s+"
                    r"(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?"
                    r"(?:build|check|test|run)(?!\S)")
@@ -162,11 +148,8 @@ HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
 
 def without_heredocs(text):
     """Heredoc bodies blanked out, line numbering preserved. The rule
-    below is about SHELL semantics, and a heredoc body is data — the
-    python the shell gates embedded was full of `$?` in regexes and
-    messages, and scanning it flagged this very clause thirteen times.
-    Any scanner that reads tools/*.sh has to know where the shell
-    stops."""
+    below is about SHELL semantics and a heredoc body is data: any scanner
+    over tools/*.sh has to know where the shell stops."""
     out, delim = [], None
     for line in text.splitlines():
         if delim is not None:
@@ -254,9 +237,8 @@ TOOLCMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
 
 
 def shell_lines(text):
-    """Lines that are actually SHELL: heredoc bodies dropped. The shell
-    gates' own scanners lived in heredocs, so without this the gate
-    reported itself — which it did, three times, on the first run."""
+    """Lines that are actually SHELL: heredoc bodies dropped, or a
+    scanner embedded in one is reported as an invocation."""
     delim = None
     for n, line in enumerate(text.splitlines(), 1):
         if delim is not None:
@@ -277,9 +259,8 @@ for f in scripts:
             badtool.append(f"{rel}:{n}: {m.group(1)} is banned — use "
                            f"python3 instead")
 # Self-test: a real invocation seen, the word inside another word not.
-# Fixtures are BUILT, not written literally: this file is beside the
-# scanned tree, and the shell version was inside it, where a literal
-# invocation would be reported as a real one.
+# Fixtures are BUILT, not written literally: a literal invocation in a
+# file beside the scanned tree would be reported as a real one.
 S, A = "s" + "ed", "a" + "wk"
 tool_bad = [f"{S} -n p file", "cat x | " + A + " '{print $1}'",
             f"x=$({S} s/a/b/ f)"]
@@ -361,10 +342,9 @@ if badffmpeg:
     status = 1
 
 # A LEG MAY NOT EXEC OUT OF A BUILD DIRECTORY: macOS walks the
-# executable's containing directory on every launch, and a build
-# directory is huge (docs/deferred.md). Lanes stage guests into a small
-# directory and run them from there. The old grep read tools/*.sh and
-# tools/*/*.sh — two levels, kept.
+# executable's containing directory on every launch, and a build directory
+# is huge (docs/deferred.md). Lanes stage guests somewhere small and run
+# them from there. Two levels of tools/, deliberately.
 EXEC = re.compile(r"^[ \t]*run[ \t].*target/(debug|release)/"
                   r"(examples|deps)/")
 badexec = []

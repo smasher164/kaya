@@ -1,13 +1,5 @@
-// The filedialog conformance scene, C# port — the picker's
-// request/result grammar and the capability it hands back (DESIGN.md,
-// File dialogs). The assertion goes all the way to the bytes.
-//
-// Open BLOCKS, so the read runs on a thread of the guest's own, and it
-// PARKS between reading and posting: a guest that read inline is caught
-// by `expect label#0 "reading"`, and one that read on the app thread
-// wedges everything after.
-//
-// See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
+// The filedialog scene, C# port — guests/rust/filedialog.rs,
+// tools/scenes/filedialog.steps.
 
 using System;
 using System.Collections.Generic;
@@ -24,12 +16,11 @@ static class FileDialogScene
             Path.GetTempPath(),
             $"kaya-picked-{System.Environment.ProcessId}");
         Directory.CreateDirectory(dir);
-        // The decoy must sort BEFORE picked.txt (docs/traps.md,
-        // "Pressing Open with nothing selected still returns a file").
+        // The decoy must sort BEFORE picked.txt (docs/traps.md, "Pressing
+        // Open with nothing selected still returns a file").
         File.WriteAllText(Path.Combine(dir, "picked.txt"), "picked bytes");
         File.WriteAllText(Path.Combine(dir, "decoy.txt"), "decoy");
 
-        // The release gate: the app thread sets, the worker waits.
         var released = new ManualResetEventSlim(false);
 
         Signal status = default;
@@ -74,8 +65,7 @@ static class FileDialogScene
                 var label = tx.Label(bind: status); // label#0
                 tx.SetA11yId(label, "status");
                 tx.Button("open", onClick: inner =>
-                    // Filters are ADVISORY on every platform, never a
-                    // guarantee: a guest still validates what it got.
+                    // Filters are ADVISORY: a guest still validates what it got.
                     inner.PickFiles(
                         filters: new[] { ("Text", "txt") },
                         onResult: Picked));

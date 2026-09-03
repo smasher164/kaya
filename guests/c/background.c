@@ -1,12 +1,5 @@
-/* The background scene from C, on the function floor: work off the app
- * thread, posted back (docs/background-work-plan.md). The three pieces
- * a binding's `post` hides are the guest's here — a mutex-guarded work
- * list, kaya_wake, and a drain before every wait — and every other C
- * guest that posts refers back to this file.
- *
- * THE WORKER PARKS SO A WRONG IMPLEMENTATION DEADLOCKS rather than
- * disagreeing: only a live app thread can deliver the click that
- * releases it. */
+/* The background scene (tools/scenes/background.steps): work off the app
+ * thread, posted back. Every other C guest that posts points here. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -15,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids; tools/check-c-ids.py holds the one id space. */
 #define SIG_STATUS 1
 #define SIG_ALIVE 2
 #define SIG_NESTED 3
@@ -28,14 +21,12 @@
 #define W_RELEASE 7
 #define W_NEST 8
 
-/* The release latch: the app thread sets it, the worker waits on it.
- * The release must NEVER BLOCK the app thread. */
+/* The release must NEVER BLOCK the app thread. */
 static pthread_mutex_t release_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t release_cond = PTHREAD_COND_INITIALIZER;
 static int released = 0;
 
-/* THE POST QUEUE, and the only state two threads touch. Closures do not
- * cross the C ABI, so each entry spells its own destination. */
+/* Closures do not cross the C ABI, so each entry spells its destination. */
 #define MAX_POSTED 16
 typedef struct {
     uint64_t signal;
@@ -47,12 +38,11 @@ static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
 static PostedWrite posted_steps[MAX_POSTED];
 static unsigned posted_count = 0;
 
-/* Accumulators: app thread only, inside a drained post, so no lock. */
+/* App thread only, inside a drained post, so no lock. */
 static char landed[32] = "";
 static char nested[8] = "";
 
-/* Queue one step for the app thread and ring the doorbell. Called from
- * the WORKER thread. */
+/* Called from the WORKER thread. */
 static void post_step(uint64_t signal, char *acc, size_t acc_cap, const char *step) {
     pthread_mutex_lock(&post_lock);
     if (posted_count < MAX_POSTED) {
@@ -63,14 +53,12 @@ static void post_step(uint64_t signal, char *acc, size_t acc_cap, const char *st
         snprintf(w->step, sizeof w->step, "%s", step);
     }
     pthread_mutex_unlock(&post_lock);
-    /* Posted work is not an occurrence and never enters the ring, so a
-     * wake is the only way the parked app thread hears about it. */
+    /* Posted work never enters the ring: a wake is the only notification. */
     kaya_wake();
 }
 
-/* Run everything queued, in order. The batch is copied and the lock
- * dropped BEFORE any of it is applied, so a post made while draining
- * lands in the next batch instead of extending this one. */
+/* The lock is dropped BEFORE the batch is applied: a post made while
+ * draining lands in the next one. */
 static void drain_posted(void) {
     PostedWrite batch[MAX_POSTED];
     unsigned n;
@@ -96,8 +84,6 @@ static void *worker(void *arg) {
     while (!released)
         pthread_cond_wait(&release_cond, &release_lock);
     pthread_mutex_unlock(&release_lock);
-    /* Three posts, in order: the accumulator in drain_posted makes this
-     * a test of ORDER, not of which one ran last. */
     post_step(SIG_STATUS, landed, sizeof landed, "1");
     post_step(SIG_STATUS, landed, sizeof landed, "2");
     post_step(SIG_STATUS, landed, sizeof landed, "3");
@@ -121,7 +107,6 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_ALIVE, "alive");
     kaya_tx_create_widget(&tx, W_NESTED, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_NESTED, SIG_NESTED);
-    /* Authored so the closing AX read can address it by identifier. */
     kaya_tx_set_a11y_id(&tx, W_NESTED, "nested");
 
     kaya_tx_create_widget(&tx, W_START, KAYA_KIND_BUTTON);
@@ -152,8 +137,7 @@ static void *app(void *arg) {
     int started = 0;
     const uint8_t *rec;
     for (;;) {
-            /* Posted work first, then the ring, then park. Draining at
-             * the TOP is what makes a wake sufficient. */
+            /* Draining at the TOP is what makes a wake sufficient. */
         drain_posted();
         size_t size = kaya_next_occurrence(&rec);
         if (size == KAYA_OCCURRENCE_SHUTDOWN)
@@ -185,9 +169,7 @@ static void *app(void *arg) {
             pthread_cond_broadcast(&release_cond);
             pthread_mutex_unlock(&release_lock);
         } else if (id == W_NEST) {
-            /* A post from INSIDE a handler QUEUES for after; it never
-             * nests. This handler appends a, queues b, appends c — so
-             * it commits "ac" and the next drain commits "acb". */
+            /* A post from INSIDE a handler QUEUES for after; it never nests. */
             strncat(nested, "a", sizeof nested - strlen(nested) - 1);
             post_step(SIG_NESTED, nested, sizeof nested, "b");
             strncat(nested, "c", sizeof nested - strlen(nested) - 1);

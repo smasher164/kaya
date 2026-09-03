@@ -1,20 +1,11 @@
-// The SwiftUI layout negative, compiled INTO the interpreter's own
-// module by tools/check-empty-child.py and run as an executable: the
-// reproduction of docs/deferred.md's half-decoded-image crash.
-//
-// WHAT IT DRIVES IS THE REAL THING: the real `kayaDecodeImage`, the real
-// `KayaRender` switch, and the real `KayaFlex`/`KayaCell` layouts, hosted
-// in an `NSHostingView` and measured. Only the node graph is written
-// here, and that is what a wire batch would have built.
-//
-// THE POSITION IS THE WHOLE POINT. `KayaCell` wraps each child of a FLEX
-// container, and the gallery scene puts its undecodable image in a
-// growerless nested row that takes the stock HStack branch instead — so
-// this mounts the image as a DIRECT CHILD OF THE ROOT, the arrangement
-// no scene has.
-//
-// The kind numbers come from crates/kaya/include/kaya.h through the same
-// bridging header the interpreter compiles against.
+// The SwiftUI layout negative, compiled INTO the interpreter's own module
+// by tools/check-empty-child.py and run: the reproduction of
+// docs/deferred.md's half-decoded-image crash, driving the REAL decode,
+// render switch and KayaFlex/KayaCell layouts in an NSHostingView.
+// THE POSITION IS THE WHOLE POINT: the gallery scene puts its undecodable
+// image in a growerless nested row that takes the stock HStack branch, so
+// this mounts it as a DIRECT CHILD OF THE ROOT — the arrangement no scene
+// has.
 
 import AppKit
 import SwiftUI
@@ -57,8 +48,7 @@ enum KayaEmptyChildProbe {
     static func main() {
         // LINE BUFFERING, and not cosmetic: the failure this exists for
         // is a TRAP and a trapped process flushes nothing, so under a
-        // pipe the output dies with it and the crash reads as having
-        // happened on the FIRST case when it happened on the last.
+        // pipe the crash reads as having happened on the FIRST case.
         setvbuf(stdout, nil, _IOLBF, 0)
         // Reaching the end of `probe()` at all is most of the test: the
         // crash it guards happened during layout, so a process that gets
@@ -80,10 +70,8 @@ enum KayaEmptyChildProbe {
 nonisolated(unsafe) private var contributed: [String: Int] = [:]
 
 /// A one-child Layout that RECORDS what it was given and then behaves.
-/// Deliberately NOT KayaCell: KayaCell tolerates an empty child, so it
-/// can no longer tell "the image rendered nothing" from "the image
-/// rendered a 0x0 box" — and everything that counts children
-/// positionally reads the wrong child in the first case.
+/// Deliberately NOT KayaCell, which tolerates an empty child and so
+/// cannot tell "rendered nothing" from "rendered a 0x0 box".
 private struct CountingCell: Layout {
     let name: String
 
@@ -156,11 +144,10 @@ private func probe() -> Int32 {
         }
     }
 
-    // AND THE CELL'S OWN CLAUSE, which the image cases can no longer
-    // reach now that no image renders nothing. A kind number this
-    // interpreter does not know falls to KayaRender's `default:` arm and
+    // AND THE CELL'S OWN CLAUSE, which no image case can reach now: an
+    // unknown kind number falls to KayaRender's `default:` arm and
     // produces no view at all — the state a guest reaches by running an
-    // app built against a newer core than the interpreter it loaded.
+    // app built against a newer core than its interpreter.
     let stranger = KayaNode(id: 4, kind: 250, tag: Array("stranger".utf8))
     stranger.grow = 1.0
     let stray = KayaNode(id: 3, kind: UInt32(KAYA_KIND_COLUMN), tag: [])

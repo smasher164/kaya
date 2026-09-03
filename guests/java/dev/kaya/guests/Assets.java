@@ -3,38 +3,16 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The assets conformance scene from the JVM (docs/assets-plan.md,
- * ratified 2026-08-18). The byte-frozen contract is
+ * The assets scene from the JVM — guests/rust/assets.rs,
  * tools/scenes/assets.steps.
- *
- * <p>THIS ONE PROVES THE BYTES. {@code asset(name)} has two redemptions
- * and the typeface scene already covers the other — a font whose bytes go
- * from the core's read straight to the platform and never enter this
- * JVM's heap. Here the guest IS the consumer: it copies the mark out with
- * {@code bytes()} and hands the array to an image, and the platform's own
- * decoder answers 64x64 off the real view.
- *
- * <p>THE MISS IS A QUESTION, NOT A {@code catch}.
- * {@code assetMissSentence} answers the same sentence {@code asset} would
- * throw with, without throwing, and that is the only shape all nine
- * share — the C floor catches nothing at all (docs/deferred.md, the
- * assets entry).
- *
- * <p>LINE 1 ONLY. Line 2 of that sentence names the place the core
- * resolved and the route that chose it, which a bundle, a device
- * directory and a repo checkout spell three different ways; line 1 is the
- * same everywhere, so it is the line a scene can freeze.
  */
 public final class Assets {
-    /** The one that is deliberately not there — a LEGAL name, so what
-     * comes back is the census sentence and not a name-fault one. */
+    /** Deliberately absent, and a LEGAL name: the answer is the census sentence. */
     private static final String MISSING = "icons/nope.png";
 
-    /** The one the mark is under, and the one the census must list. */
     private static final String MARK = "icons/kaya-mark.png";
 
-    /** The large one: 111400 bytes, so a reader that truncated into a
-     * fixed buffer shows up here rather than passing quietly. */
+    /** 111400 bytes, so a reader that truncated into a fixed buffer shows here. */
     private static final String FONT = "fonts/sora-wght.ttf";
 
     public static void app() {
@@ -51,18 +29,13 @@ public final class Assets {
 
                 KayaApp.Signal<String> title = tx.signal("assets");
                 KayaApp.Signal<String> found = tx.signal(census);
-                // Concatenation rather than String.format: the scene
-                // compares this string byte-for-byte against seven other
-                // languages, and a default locale is not part of that
-                // contract. Integer.toString has no locale to consult.
+                // Concatenation, not String.format: compared byte-for-byte
+                // against eight other languages, with no locale in the contract.
                 KayaApp.Signal<String> sizes = tx.signal(
                         FONT + ": " + font.bytes().length + " bytes, " + verdict);
 
                 tx.mount(tx.column(() -> {
                     tx.label(title); // label#0
-                    // THE BYTES, not the blob redemption: this scene is
-                    // the consumer, so what reaches the decoder is what
-                    // bytes() handed back.
                     tx.image(mark.bytes()); // image#0
                     tx.label(found); // label#1
                     tx.label(sizes); // label#2
@@ -73,7 +46,6 @@ public final class Assets {
         app.dispatchLoop();
     }
 
-    /** The census half of the sentence. Empty in, empty out. */
     private static String firstLine(String sentence) {
         int at = sentence.indexOf('\n');
         return at < 0 ? sentence : sentence.substring(0, at);

@@ -1,28 +1,12 @@
-// The text-ranges conformance scene, JS port: the three primitives an
-// editor cannot write for itself — HIGHLIGHT a set of ranges, SELECT one,
-// REVEAL one — driven by a search this file writes in six lines.
-//
-// kaya ships no find engine, no find bar and no regex dialect
-// (docs/ranges-plan.md §3): what to decorate is the app's question.
-//
-// THE OFFSETS ARE UTF-8 BYTE OFFSETS, WHICH IS WHY THE SEARCH RUNS OVER A
-// `Buffer` AND NOT OVER THE STRING — `String.indexOf` counts UTF-16 code
-// units, so the two disagree on this document. The rule and the numbers
-// are in `highlightRanges`' doc comment (bindings/js/kaya/index.ts); the
-// document opens with a CJK word so a guest that mixed the units
-// decorates six characters early and the frozen offsets say so.
-//
-// Canonical semantics in guests/rust/ranges.rs; the byte-frozen contract
-// in tools/scenes/ranges.steps.
+// The text-ranges scene (tools/scenes/ranges.steps). THE OFFSETS ARE UTF-8
+// BYTE OFFSETS, which is why the search runs over a `Buffer`.
 
 import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-// BYTE-IDENTICAL to guests/rust/ranges.rs's DOC: the scene's frozen
-// offsets are positions in THESE bytes. Three occurrences of `alpha` and
-// nothing else containing it; forty short lines, so the last match is
-// below a 240x96 viewport and REVEAL has something to do.
+// BYTE-IDENTICAL to guests/rust/ranges.rs's DOC: the frozen offsets are of
+// THESE bytes, and the last match must sit below the viewport.
 const DOC = `line 00: 日本語 preface
 line 01: gamma kappa
 line 02: alpha beta gamma
@@ -66,12 +50,10 @@ line 39: the last line`;
 
 const NEEDLE = "alpha";
 
-// The app's own copy, which is the ONLY authority on what the offsets
-// mean. It advances on every edit.
+// The ONLY authority on what the offsets mean; it advances on every edit.
 let doc = DOC;
 
-/** The whole search: literal, forward, non-overlapping, over the UTF-8
- * BYTES, so what it yields is already kaya's unit. */
+/** Over the UTF-8 BYTES, so what it yields is already kaya's unit. */
 function findAll(text: string, needle: string): [number, number][] {
   const data = Buffer.from(text, "utf8");
   const hit = Buffer.from(needle, "utf8");
@@ -85,9 +67,7 @@ function findAll(text: string, needle: string): [number, number][] {
 }
 
 function onEdit(text: string): void {
-  // kaya has ALREADY dropped the decorations (D2: a declared set is
-  // bound to the text it was declared against); this is the app
-  // agreeing, not being told.
+  // kaya has ALREADY dropped the decorations on this edit.
   doc = text;
   status.set("0 matches");
 }
@@ -95,8 +75,7 @@ function onEdit(text: string): void {
 function onFind(): void {
   const hits = findAll(doc, NEEDLE);
   editor.highlightRanges(hits);
-  // The second match, so a leg can tell the selection apart from "the
-  // first thing found".
+  // The SECOND match, so a leg can tell it from the first.
   if (hits.length > 1) editor.selectRange(hits[1]!);
   status.set(`${hits.length} matches`);
 }
@@ -121,9 +100,7 @@ let editor!: kaya.Widget;
 app.window({ title: "ranges" }, () => {
   status = kaya.signal("0 matches");
   kaya.column(() => {
-    // The a11y id is REQUIRED, not decoration: every range assertion
-    // reads the platform's accessibility tree and finds this control
-    // by that id.
+    // Every range assertion finds this control by its authored id.
     editor = kaya.textarea({ onChange: onEdit }); // textarea#0
     editor.a11yId("doc").a11yLabel("Document").setText(DOC);
     kaya.label({ bind: status }); // label#0

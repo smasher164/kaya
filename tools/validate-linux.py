@@ -24,12 +24,11 @@ def run(argv, **kw):
 
 os.chdir(ROOT)
 
-# ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed
-# (guests/assets/market/README.md), so a fresh clone bind-mounts an
-# incomplete root at /work. HERE AND NOT IN run-suites.sh, which is
-# the lane's asset site: this is the only half that runs as the host
-# user, and a stamp written by the container's root would then be one
-# the gate sweep cannot rewrite.
+# ONE FILE UNDER THE ASSET ROOT IS DERIVED and never committed, so a
+# fresh clone bind-mounts an incomplete root at /work. HERE AND NOT IN
+# run-suites.sh: this is the only half that runs as the HOST user, and a
+# stamp written by the container's root is one the gate sweep cannot
+# rewrite.
 if run([sys.executable, str(ROOT / "tools/gen-market.py"),
         "--ensure"]).returncode != 0:
     print("validate-linux: python3 tools/gen-market.py --ensure failed "
@@ -48,13 +47,10 @@ if run(["docker", "build", "-q", "-t", "kaya-linux",
 print(f"TIMING image-build {int(time.monotonic() - t0)}s", flush=True)
 t0 = time.monotonic()
 
-# THE FLIGHT RECORDER'S HOME IS THE HOST'S, MOUNTED IN. The container
-# is `--rm`, so a journal written to its own filesystem dies with it —
-# and the recorder's whole point is that a leg which fails once and
-# passes on the rerun leaves something behind. One home per MACHINE is
-# also the design (tools/lib/flightrec.py): two lanes from two
-# checkouts belong in one journal, and a per-container home would
-# fragment it.
+# THE FLIGHT RECORDER'S HOME IS THE HOST'S, MOUNTED IN: the container is
+# `--rm`, so a journal on its own filesystem dies with it. One home per
+# MACHINE is the design (tools/lib/flightrec.py) — two lanes from two
+# checkouts belong in one journal.
 flightrec_home = pathlib.Path(
     os.environ.get("XDG_STATE_HOME",
                    str(pathlib.Path.home() / ".local/state"))) / "kaya"

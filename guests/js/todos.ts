@@ -1,15 +1,5 @@
-// The todos scene: records and field projection, end to end. The
-// collection's elements are records; the record type IS the schema
-// (wire-typed fields in declaration order), the template binds each field
-// to its own widget, and toggling a row sends one field's delta —
-// `patch(key, {done})` never resends the title. The items-left label is a
-// derived signal recomputed from the collection after every mutation.
-//
-// THE DERIVED LABEL COMES BACK FROM AN UNDO WITH NOBODY RESTORING IT,
-// which is why this file registers no `onUndone`: the derive's write
-// lands in the add's own batch, so the core banks it in both directions.
-//
-// Build the library first (cargo build), then:
+// The todos scene: IT REGISTERS NO `onUndone`, because the derive's write
+// rides the add's batch.
 //     KAYA_SELFTEST=todos node guests/js/todos.ts
 
 import * as kaya from "kaya-gui";
@@ -32,27 +22,19 @@ function onChange(text: string): void {
 
 async function onAdd(): Promise<void> {
   if (!draft) return;
-  // The ambient tier names the step from INSIDE the handler — the
-  // binding opened this transaction, not the app — and the marker still
-  // leads the batch wherever the call sits in the body.
+  // The marker leads the batch wherever the call sits in the body.
   kaya.undoable(`add ${draft}`);
-  // The binding mints the key (docs/fresh-key-plan.md); the toggle
-  // handler below receives that row as a handle.
+  // The binding mints the key (docs/fresh-key-plan.md).
   todos.insertFresh(Todo({ title: draft, done: false }));
-  // Finishing the form is a SECOND transaction: `clear` inside an
-  // undoable group is refused at apply (docs/undo-plan.md D4), and
-  // undoing the add must not put "buy milk" back beside a todo that is
-  // gone. The handler's transaction commits at this await, and the
-  // continuation is the next one (docs/js-plan.md §4, the implicit
-  // transaction). CLEAR BEFORE FOCUS, so focus is the last word.
+  // A SECOND transaction: `clear` in an undoable group is refused, and the
+  // handler's transaction commits at this await. CLEAR BEFORE FOCUS.
   await app.commit();
   field.clear();
   field.focus();
 }
 
 function onToggle(todo: kaya.RowHandle<kaya.Fields<typeof Todo.schema>>, checked: boolean): void {
-  // One field's delta: the assignment IS the patch, the title never
-  // travels, and the derived signal updates itself.
+  // One field's delta: the assignment IS the patch.
   todo.done = checked;
 }
 
@@ -72,8 +54,7 @@ app.window({ title: "todos" }, () => {
     field = kaya.entry({ onChange });
     kaya.button("Add", { onClick: onAdd });
     kaya.label({ bind: itemsLeft });
-    // The for statement IS the For: the body runs ONCE, authoring the
-    // blueprint; stamping is the core's replay.
+    // The body runs ONCE, authoring the blueprint.
     for (const todo of todos) {
       kaya.row(() => {
         kaya.checkbox({ checked: todo.done, onToggle });

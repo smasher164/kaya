@@ -1,13 +1,5 @@
-// The split conformance scene, Go port — adaptive panes via the chain
-// spelling. The guest asks for the presentation ONCE and does nothing
-// adaptive again: everything after that is the platform re-deciding as
-// the size class changes, and there is no prop for WHICH entries
-// present.
-//
-// TWO scripts drive this ONE app: split resizes and names the
-// presentation on each side, listdetail asserts the bare invariant at
-// whatever width its host gives. See guests/rust/split.rs,
-// tools/scenes/split.steps and tools/scenes/listdetail.steps.
+// The split scene, driven by TWO scripts (tools/scenes/split.steps and
+// listdetail.steps): the presentation is asked for ONCE and never again.
 package split
 
 import (
@@ -25,9 +17,7 @@ func App() *kaya.App {
 		status = tx.Signal("list pane")
 
 		tx.Mount(tx.Column(func() {
-			// Authored ids so the REAL-TREE read can address these: an
-			// index read passes whether or not anything reached the
-			// screen.
+			// Authored ids: an index read passes for an empty arm.
 			tx.Label(status).A11yID("list") // label#0
 			tx.Button("open detail", func(tx *kaya.Tx) { // button#0
 				entry := tx.PushEntry(detail).

@@ -7,18 +7,10 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# A FILE MODE IS A NUMBER THAT CROSSES THREE ABIs, AND THE SPEC OWNS IT.
-#
-# `kaya_open_picked(handle, mode, …)` takes an integer whose meaning
-# crates/kaya/src/spec.rs declares. Every GENERATED surface moves when
-# that numbering moves; five HAND-WRITTEN sites do not — protocol.rs's
-# picked_mode_code, the SwiftUI interpreter's POSIX flags, the C# and
-# python bindings' FileAccess and fdopen spellings. Renumber and the
-# guest asks to READ while the backend opens O_WRONLY|O_TRUNC, with no
-# error anywhere (docs/save-plan.md D3).
-#
-# So this gate reads the numbers OUT OF THE SPEC and carries only the
-# SEMANTICS; the numbers are never written down here:
+# A FILE MODE IS A NUMBER THAT CROSSES THREE ABIs, AND THE SPEC OWNS IT
+# (CLAUDE.md's gate list; docs/save-plan.md D3). The gate reads the
+# numbers OUT OF THE SPEC and carries only the SEMANTICS; the numbers
+# are never written down here:
 #
 #   read        opens for reading and MUST NOT truncate
 #   write       opens for writing and MUST truncate
@@ -26,13 +18,6 @@ dev_shell_or_die()
 #
 # Creation is deliberately NOT pinned (D1 puts it in the core), but no
 # mode may swap its ACCESS or its TRUNCATION.
-#
-# THE CENSUS is the half that survives someone adding a site: every
-# file naming a redemption entry point is in SITES (its arms are
-# checked) or in PASSTHROUGH (it hands the number on, WITH A REASON —
-# and that claim is checked, by refusing any branch on `mode` in it).
-# Generated surfaces are excluded: gen-bindings/gen-header diff them
-# already.
 #
 # NOT IN SCOPE: guests/, which all name the constant rather than a
 # digit. A guest that writes a bare integer is a rule this can grow.
@@ -487,12 +472,11 @@ def check(root):
     return bad
 
 
-# THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES. Each
-# perturbation prints its substitution count and is REFUSED if it did
-# not apply, and every refusal is checked for its REASON.
+# The watched negatives, on DOCTORED COPIES OF THE REAL FILES; every
+# refusal is checked for its REASON.
 #
-# A shadow root: every file this gate reads, as a symlink. Doctoring
-# one means REPLACING a symlink with a real file, so the tree is never
+# A shadow root: every file this gate reads, as a symlink. Doctoring one
+# means REPLACING a symlink with a real file, so the tree is never
 # written through.
 def fresh(name):
     dst = g.scratch() / name
@@ -530,7 +514,7 @@ if out:
     raise SystemExit(1)
 
 # N1 — THE DEFECT ITSELF: renumber the spec's modes and watch every
-# consumer disagree. This is the edit that used to be silent.
+# consumer disagree.
 s = fresh("renumbered")
 doctor_shadow("the spec renumbering", s, "crates/kaya/src/spec.rs",
               r'\("read", 0\), \("write", 1\)',
@@ -550,9 +534,8 @@ for want, label in (
 ):
     g.negative(label, lambda: renumbered, want=want)
 
-# N2 — THE PAIRING, which the old three-line clause could not see: swap
-# the two write-ish arms in the interpreter and keep every token
-# present.
+# N2 — THE PAIRING: swap the two write-ish arms in the interpreter and
+# keep every token present.
 s = fresh("swapped")
 doctor_shadow("the swapped-arms perturbation", s,
               "swift/KayaSwiftUI.swift",

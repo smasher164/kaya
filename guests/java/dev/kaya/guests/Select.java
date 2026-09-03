@@ -3,8 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The select conformance scene from the JVM. See
- * guests/rust/select.rs and tools/scenes/select.steps.
+ * The select scene from the JVM — guests/rust/select.rs,
+ * tools/scenes/select.steps.
  */
 public final class Select {
     private static final String[] OPTIONS = {"Red", "Green", "Blue"};

@@ -1,19 +1,12 @@
-// DialogProbe — what the Shell's file dialog is MADE OF, measured on
-// the VM the windows lane actually runs on: whether the file list and
-// the address bar are classic controls or DirectUI, whether the classic
-// control ids answer, and which of those reads survive a PROCESS
-// BOUNDARY (the guest must stop loading uiautomationcore — see
-// docs/deferred.md and docs/traps.md).
+// DialogProbe — what the Shell's file dialog is MADE OF, measured on the
+// VM the windows lane runs on: classic controls or DirectUI, whether the
+// classic control ids answer, and which reads survive a PROCESS BOUNDARY
+// (docs/deferred.md, docs/traps.md).
 //
-// It opens the dialog the way crates/kaya/src/winui/mod.rs does, on its
-// own STA thread with CLSCTX_INPROC_SERVER, rather than attaching to a
-// running app: it must measure the arrangement the harness would
-// actually have, not a similar one. The window calls are hand-declared
-// with plain types for the same reason.
-//
-// Not a lane; nothing builds it but build.sh beside it. Output goes to
-// stdout under "PROBE", and the last line is PROBEDONE so the runner
-// knows it finished rather than hung.
+// It opens the dialog the way crates/kaya/src/winui/mod.rs does — its
+// own STA thread, CLSCTX_INPROC_SERVER — rather than attaching to a
+// running app, so it measures the arrangement the harness would have.
+// THROWAWAY; the last line is PROBEDONE so a hang is legible.
 
 use windows::core::PCWSTR;
 use windows::Win32::System::Com::{

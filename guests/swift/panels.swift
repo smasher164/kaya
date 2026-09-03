@@ -1,8 +1,5 @@
-// The panels conformance scene, Swift port — see guests/rust/panels.rs.
-// The inspector arms vetoClose, so the chrome close EMITS
-// close_requested and closes nothing; the guest records the request and
-// destroys the window. DESKTOP-ONLY: phone hosts reject createWindow at
-// the root by capability.
+// The panels scene, Swift port — guests/rust/panels.rs,
+// tools/scenes/panels.steps.
 
 import Foundation
 

@@ -1,19 +1,13 @@
 // The table tier rule, driven for real — compiled INTO the interpreter's
-// own module by tools/check-table-tier.py and run as an executable.
-// Three halves:
-//
-//   1  THE TRUTH TABLE: kayaTableTier over every width the rule knows
-//      crossed with both availabilities, and kayaTableWidth's mapping
-//      from the environment's own type. This is the part no device can
-//      assert: both tiers present identical bytes, so a leg cannot name
-//      the one that drew it (docs/traps.md).
-//   2  THIS HOST'S BRANCH: KayaTableSurface.widthClass on a mac, which is
-//      the `#if os(macOS)` arm the truth table cannot reach by itself.
-//   3  THE RENDERED TIER: a real KayaTableSurface in a real NSWindow, and
-//      the NSTableView the native tier is made of, found in the view
-//      tree — the discriminator the shared scene gave up. A plain label
-//      tree is walked beside it, so a finder that says yes to everything
-//      fails here.
+// own module by tools/check-table-tier.py and run. Three halves:
+//   1  THE TRUTH TABLE: kayaTableTier over every width crossed with both
+//      availabilities, which no device can assert — both tiers present
+//      identical bytes (docs/traps.md).
+//   2  THIS HOST'S BRANCH: KayaTableSurface.widthClass on a mac, the
+//      `#if os(macOS)` arm the truth table cannot reach by itself.
+//   3  THE RENDERED TIER: a real KayaTableSurface in a real NSWindow with
+//      the NSTableView found in the view tree. A plain label tree is
+//      walked beside it, so a finder that says yes to everything fails.
 
 import AppKit
 import SwiftUI
@@ -81,19 +75,13 @@ enum KayaTableTierProbe {
         expectBool(
             "table track overflow is rejected",
             kayaTableViewportMatchesTrack(viewport, track: 297), false)
-        // THE PADDED CARD CONVICTS NOTHING — gtk.rs's
-        // `gtk_table_padded_card_convicts_nothing` in this file's spelling,
-        // for the iOS synthesized tier's inset-grouped card (ruled
-        // 2026-08-25). The numbers are PASSED, never read: this host's own
-        // constants are zero, so a probe that read them would drive the
-        // unpadded case and call it a measurement.
-        //
-        // THE CARD IS TWO LAYERS AND THE CHAIN HAS TO CLOSE. The ground band
-        // is OUTSIDE the scroll clip (it frames the table and never
-        // scrolls); the interior is INSIDE it, on the content that scrolls
-        // with the rows — so an 800pt assigned track gives a 768pt clip and
-        // a 736pt cells' box, and 736 is exactly what the instrument's
-        // content track must be.
+        // THE PADDED CARD CONVICTS NOTHING, for the iOS synthesized
+        // tier's inset-grouped card (ruled 2026-08-25). The numbers are
+        // PASSED, never read: this host's own constants are zero, so a
+        // probe that read them would drive the unpadded case.
+        // THE CARD IS TWO LAYERS AND THE CHAIN HAS TO CLOSE: the ground
+        // band is OUTSIDE the scroll clip and the interior INSIDE it, so
+        // an 800pt track gives a 768pt clip and a 736pt cells' box.
         let assignedTrack = 800.0
         let clip = CGRect(x: 116, y: 200, width: 768, height: 400)
         let carded = kayaTableCellsBox(inScrollClip: clip, interior: 16)
@@ -554,15 +542,12 @@ enum KayaTableTierProbe {
             "a widget tree with no table draws no NSTableView (the finder discriminates)")
 
         // --- Half 4: the tier's window contract at the view layer. -----
-        // Ruled 2026-08-25: expect_window carries first-visible and
-        // total only; the band-width arithmetic (visible plus one
-        // viewport of overscan each side) is held by the CORE's own
-        // watched tests (crates/kaya/src/rowwindow.rs), because a
-        // hand-built probe node has no core window to have arithmetic
-        // about. What the VIEW layer owes, and this clause holds: with
-        // no core window reported, the driver answers the UNREPORTED
-        // fallback — every row realized, band (0, N, N) — which is the
-        // compatibility bridge's tier half; and firstVisible reads the
+        // Ruled 2026-08-25: expect_window carries first-visible and total
+        // only, and the band arithmetic is the CORE's own watched tests'
+        // (crates/kaya/src/rowwindow.rs), since a hand-built probe node
+        // has no core window. What the VIEW layer owes: with no core
+        // window reported the driver answers the UNREPORTED fallback —
+        // every row realized, band (0, N, N) — and firstVisible reads the
         // real visible range, not the band.
         let bandTable = KayaNode(
             id: 40, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("band".utf8))
@@ -629,17 +614,12 @@ enum KayaTableTierProbe {
         // --- Half 5: content is the floor (ruled 2026-08-26). ----------
         // A HUGGING container narrower than the table's content is the
         // shape the transactions view shipped: the panel measured 210pt,
-        // the columns' content wanted 267, and every Date and Total cell
-        // ellipsized. Two things are read here, one per half of the
-        // ruling — the MINIMUM each column declares to AppKit, and the
-        // content width the tier hands UP — and the second is read off
-        // the real NSScrollView, so "it published a number" and "the
-        // container actually widened" are separate readings.
-        //
-        // The floors are recomputed here from the SAME cell measurement
-        // the tier uses, deliberately: what this holds is the ASSIGNMENT,
-        // which is where the defect was. The measurement itself is the
-        // capture's to prove.
+        // the columns wanted 267, and every Date and Total cell
+        // ellipsized. Both halves of the ruling are read — the MINIMUM
+        // each column declares to AppKit, and the content width the tier
+        // hands UP, that one off the real NSScrollView. The floors are
+        // recomputed from the SAME cell measurement the tier uses: what
+        // this holds is the ASSIGNMENT, where the defect was.
         func findTableView(_ view: NSView) -> NSTableView? {
             if let table = view as? NSTableView { return table }
             for sub in view.subviews {
@@ -669,35 +649,25 @@ enum KayaTableTierProbe {
         let floorRoot = KayaNode(
             id: 53, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor-root".utf8))
         floorRoot.children.append(floorTable)
-        // THE HUG IS ASKED WHERE IT IS A HUG (rewritten 2026-08-29). This
-        // clause holds ruling A's substance — a container grows to the
-        // table's content rather than ellipsizing inside it — and it used
-        // to ask that inside a 200pt window against 335pt of columns,
-        // where the only way to pass was for the table's own VIEWPORT to
-        // be wider than the window containing it. That is not a hug; it is
-        // 135pt of table hanging off the side of the window with no way to
-        // reach it, and it is exactly what the overflow ruling replaced
-        // with scrolling (docs/tables-plan.md, 2026-08-29). A test may not
-        // demand the behaviour its own project has ruled against.
-        //
-        // So: room for the hug, and a SPACER beside it so the container
-        // hugs rather than fills — which is the shape a real hugging panel
-        // has, and asks the question without `fixedSize`, whose ideal-width
-        // resolution feeds this tier SwiftUI's 10x10 substitution default
-        // and pins it there (measured 2026-08-29). The narrow case is the
-        // ruling's now, and the scene drives it. TEETH INTACT: a tier that
-        // publishes no content width answers ~10pt here, which is what this
-        // gate's own self-test perturbs it into doing.
+        // THE HUG IS ASKED WHERE IT IS A HUG: ruling A's substance is a
+        // container growing to the table's content rather than
+        // ellipsizing inside it, and asking that in a window NARROWER
+        // than the columns can only pass if the viewport hangs off the
+        // side — which the overflow ruling replaced with scrolling
+        // (docs/tables-plan.md, 2026-08-29). So: room for the hug, and a
+        // SPACER beside it so the container hugs rather than fills, which
+        // asks the question without `fixedSize`, whose ideal-width
+        // resolution pins this tier at SwiftUI's 10x10 substitution
+        // default (measured 2026-08-29). TEETH INTACT: a tier that
+        // publishes no content width answers ~10pt here.
         let floorWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 400),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         // THE HUG IN KAYA'S OWN VOCABULARY: an ungrown column beside a
-        // GROWN sibling, which is the shape a real hugging panel has (the
-        // portfolio's dashboard is exactly this). The ungrown one takes its
-        // natural width — the table's content — and the grown one takes the
-        // rest. SwiftUI-side tricks do not serve here: the root fills its
-        // host, and `fixedSize` feeds this tier the 10x10 substitution
-        // default and pins it there (both measured 2026-08-29).
+        // GROWN sibling, the shape a real hugging panel has. SwiftUI-side
+        // tricks do not serve: the root fills its host, and `fixedSize`
+        // pins this tier at the 10x10 substitution default (measured
+        // 2026-08-29).
         let floorFiller = KayaNode(
             id: 55, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("floor-filler".utf8))
         floorFiller.grow = 1

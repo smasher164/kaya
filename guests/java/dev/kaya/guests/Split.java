@@ -3,15 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The split conformance scene from the JVM — adaptive panes via the
- * chain spelling. The guest asks for the presentation ONCE and does
- * nothing adaptive after that; the platform re-decides as the size
- * class changes.
- *
- * <p>TWO scripts drive this ONE app: split resizes and names the
- * presentation on each side, listdetail asserts the bare invariant at
- * whatever width its host gives. See guests/rust/split.rs,
- * tools/scenes/split.steps and tools/scenes/listdetail.steps.
+ * The split scene from the JVM — guests/rust/split.rs, tools/scenes/split.steps.
  */
 public final class Split {
     private static final long DETAIL = 7;
@@ -23,10 +15,8 @@ public final class Split {
             tx.window(0).title("split").panes(2);
             KayaApp.Signal<String> s = tx.signal("list pane");
             tx.mount(tx.column(() -> {
-                // Authored ids so the read goes through the REAL tree:
-                // an index read passes whether or not anything reached
-                // the screen, which once let a non-rendering split arm
-                // look green.
+                // Authored ids: an index read passes whether or not anything
+                // reached the screen.
                 tx.label(s).a11yId("list"); // label#0
                 tx.button("open detail", inner -> { // button#0
                     long entry = inner.pushEntry(DETAIL)

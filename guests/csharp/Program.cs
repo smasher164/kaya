@@ -1,11 +1,9 @@
-// One guest binary hosts every scene: the KAYA_SELFTEST value doubles
-// as the scene selector, and "1" falls to the default arm, milestone-2.
+// The one guest binary's scene selector: KAYA_SELFTEST names the scene,
+// KAYA_CHECK the headless invariant check.
 static class Program
 {
     static void Main()
     {
-        // Headless invariant checks ride the same binary: KAYA_CHECK
-        // selects one, no window, no Run().
         if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "abort")
         {
             AbortCheck.Run();

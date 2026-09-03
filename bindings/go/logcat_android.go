@@ -1,7 +1,6 @@
 //go:build android
 
-// A Go panic on Android reaches nobody: the runtime writes to fd 2 and
-// exits, and an app process has no stderr (measured 2026-08-09;
+// A Go panic on Android reaches nobody (measured 2026-08-09;
 // docs/go-mobile-plan.md §D3).
 //
 // It must stay a recover and not x/mobile's fd-2-into-a-pipe pump: the

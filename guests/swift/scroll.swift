@@ -1,6 +1,4 @@
-// The scroll conformance scene, Swift port — the viewport GROWS so the
-// enclosing track constrains it (an unconstrained viewport hugs its
-// content and nothing overflows). See guests/rust/scroll.rs and
+// The scroll scene, Swift port — guests/rust/scroll.rs,
 // tools/scenes/scroll.steps.
 
 import Foundation

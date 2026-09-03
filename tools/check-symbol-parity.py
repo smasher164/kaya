@@ -7,27 +7,13 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# ONE SYMBOL VOCABULARY, SIX FILES. `wire::SYMBOLS`
-# (crates/kaya/src/wire.rs) owns the (value, semantic name) set; it is
-# not in the spec hash, and adding a concept regenerates nothing, so the
-# other five sites are a matched set nobody is reminded of:
-#
-#   crates/kaya/src/capi.rs       KAYA_SYMBOL_* — the C floor's copies
-#   crates/kaya/src/gtk.rs        SYMBOL_ICONS, keyed on wire::SYMBOL_*
-#   crates/kaya/src/winui/mod.rs  the two S::* match arms
-#   swift/KayaSwiftUI.swift       private let symbol* + kayaSymbolTable
-#   android/…/KayaCompose.kt      const val SYMBOL_* + the Triple table
-#
-# GTK and WinUI NAME the wire constants, so the compiler holds their
-# values and this gate holds their COVERAGE; Swift, Compose and the C
-# floor copy the NUMBERS by hand (check-file-modes' trap, one surface
-# over), so this gate holds value, name and coverage all three. A
-# concept added to five of six files fails nowhere at build time and
-# renders as a missing glyph on the sixth platform only.
-#
-# check-symbols.py (the OS-floor gate) is this gate's sibling: that one
-# asks whether the Swift table's names EXIST at the floor, this one asks
-# whether the six tables are THE SAME table.
+# ONE SYMBOL VOCABULARY, SIX FILES (CLAUDE.md's gate list). `wire::SYMBOLS`
+# is not in the spec hash and adding a concept regenerates nothing, so a
+# concept added to five of the six fails nowhere at build time and renders
+# as a missing glyph on the sixth platform only. GTK and WinUI NAME the
+# wire constants, so the compiler holds their values and this holds
+# COVERAGE; Swift, Compose and the C floor copy the NUMBERS by hand, so
+# there it holds value, name and coverage all three.
 
 import re
 
@@ -188,11 +174,8 @@ if verdict == "bad":
     status = 1
 
 
-# THE GUARD GUARDS ITSELF: each perturbation is applied in memory to the
-# real bytes (the prelude's doctor — count printed, an unapplied
-# perturbation refused), and the red demanded — a census that reads
-# nothing agrees with everything, and each clause here was watched
-# failing through this block on the day it landed.
+# Each perturbation is applied in memory to the REAL bytes and the red
+# demanded.
 def selftest(label, site, pattern, repl, expect):
     doctored = gate.doctor(label, REAL[site], pattern, repl)
     v, p = check({**REAL, site: doctored})
@@ -218,10 +201,7 @@ selftest("N3", SWIFTUI, r'\(symbolHome, "home"', '(symbolHome, "hovel"',
 # N4: a WinUI wire arm gone while its glyph arm stays.
 selftest("N4", WINUI, r"S::Home => crate::wire::SYMBOL_HOME,", "",
          "no wire arm")
-# N5: a drifted NUMBER in the C floor's copy — found unwatched during
-# the 2026-08-31 python conversion (the clause existed in the shell body
-# with no negative pointing at it; invariant 3 says a clause nobody has
-# seen fire is a guess).
+# N5: a drifted NUMBER in the C floor's copy.
 selftest("N5", CAPI, r"pub const KAYA_SYMBOL_HOME: u32 = 20;",
          "pub const KAYA_SYMBOL_HOME: u32 = 21;",
          "the C floor's copy drifted")

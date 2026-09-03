@@ -57,12 +57,10 @@ with scratch_dir("check-wheel-") as tmp:
 
     smoke_env = dict(bare, KAYA_LIB=str(ROOT / "target/debug/libkaya.dylib"))
 
-    # The smoke's cwd is PINNED to the scratch dir: `python -c` puts
-    # the cwd at sys.path[0], so an unpinned run from bindings/python
-    # imports the WORKING TREE ahead of the venv and prints OK for a
-    # wheel that ships nothing (audit 2026-08-31). The decoy watches
-    # the mechanism: the same interpreter run from a cwd carrying a
-    # kaya package must import THAT — which is what the pin prevents.
+    # The smoke's cwd is PINNED to the scratch dir: `python -c` puts the
+    # cwd at sys.path[0], so an unpinned run from bindings/python imports
+    # the WORKING TREE ahead of the venv and prints OK for a wheel that
+    # ships nothing (audit 2026-08-31). The decoy watches that mechanism.
     decoy = tmp / "decoy"
     (decoy / "kaya").mkdir(parents=True)
     (decoy / "kaya" / "__init__.py").write_text(

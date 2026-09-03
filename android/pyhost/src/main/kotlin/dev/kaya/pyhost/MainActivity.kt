@@ -10,13 +10,11 @@ import dev.kaya.KayaRing
 import java.io.File
 
 /**
- * The PYTHON guests' shell — gohost's five lines with the guest
- * tier swapped: python consumes the occurrence ring directly through
- * ctypes over the C ABI, so [KayaRing.attach] and never `Kaya.attach`
- * (the Go shell's reasoning, verbatim). One bundle carries every
- * python scene behind app/main.py's KAYA_SELFTEST dispatch
- * (tools/pyhost-main.py) — the iOS bundle's pattern, which was this
- * platform's pattern first.
+ * The PYTHON guests' shell — gohost's five lines with the guest tier
+ * swapped: python consumes the occurrence ring directly through ctypes
+ * over the C ABI, so [KayaRing.attach] and never `Kaya.attach` (the Go
+ * shell's reasoning). One bundle carries every python scene behind
+ * app/main.py's KAYA_SELFTEST dispatch (tools/pyhost-main.py).
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,10 +42,8 @@ class MainActivity : ComponentActivity() {
         KayaRing.attach(this)
         KayaCompose.mount(this)
         // The guest runs to completion off the UI thread: extraction
-        // behind a version stamp (the testbed re-extracts EVERY launch,
-        // which pays the full copy each time — invariant 8 says the
-        // stamp), then CPython, whose app.run() parks as the occurrence
-        // consumer until the core shuts down.
+        // behind a version stamp, then CPython, whose app.run() parks as
+        // the occurrence consumer until the core shuts down.
         Thread {
             val home = extractPython()
             KayaPy.run(home.toString(), File(home, "app").toString())
@@ -83,11 +79,9 @@ class MainActivity : ComponentActivity() {
                 } else if (path != "python/kaya-stamp") {
                     // THE STAMP IS WRITTEN ONCE, AT THE END, AND THE WALK
                     // MAY NOT COPY IT: it sorts between `app` and `lib`, so
-                    // a process killed while the stdlib was still copying
-                    // used to leave a STAMPED half-tree that every later
-                    // launch matched and skipped — the app then died at
-                    // `ModuleNotFoundError: No module named 'importlib'`
-                    // before any scene existed (docs/traps.md).
+                    // a process killed mid-copy would otherwise leave a
+                    // STAMPED half-tree that every later launch matches and
+                    // skips (docs/traps.md).
                     val outName = path.removePrefix("python/").let {
                         if (it.endsWith(".gz-")) it.dropLast(1) else it
                     }

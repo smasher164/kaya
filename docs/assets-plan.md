@@ -127,7 +127,7 @@ not know the answer.
 
 Today a guest reads an asset with its own language's file call, and the
 resolution rule plus the error sentence are hand-written eight times
-(guests/rust/typeface.rs:17 and its seven siblings). This brief
+(guests/rust/typeface.rs:1 and its seven siblings). This brief
 recommends replacing those eight copies with **one call, `asset(name)`,
 that returns a blob handle rather than bytes**: the guest says "load this
 and use it," the core resolves the path, reads the file and registers the
@@ -141,7 +141,7 @@ being asked to decide.
 The 39 image literals are byte-identical right now [MEASURED], and a
 typo that broke a decode would redden that language's leg on five lanes.
 But every scene asserts a **decoded size** and never a pixel
-(tools/scenes/gallery.steps:12, tools/scenes/clipboard.steps:36,
+(tools/scenes/gallery.steps:8, tools/scenes/clipboard.steps:19,
 docs/clipboard-plan.md:688 titles the reason), so a copy whose colors
 drifted would stay green everywhere forever. One census gate closes that
 for less than the cost of staging four scenes' inputs to five lanes. The
@@ -161,7 +161,7 @@ reconstructed bytes.
 | 2x2 RGB PNG | 75 | `e6d668891312` | **18** (a11y and gallery, 9 languages each) | keep inline |
 | 2x64 PNG | 75 | `546bc373c85c` | **8** (align, 8 languages; no C guest) | keep inline |
 | 4x4 RGB PNG | 77 | `97720159d21d` | **13** (clipboard, 8 languages, plus 5 in tools/) | keep inline |
-| corrupt PNG, bad IDAT CRC | 88 | `759ad58259a5` | 1 (tools/win/clipprobe/clipprobe.ps1:95) | keep, deliberately |
+| corrupt PNG, bad IDAT CRC | 88 | `759ad58259a5` | 1 (tools/win/clipprobe/clipprobe.ps1:93) | keep, deliberately |
 | `ranges` document | 813 | text | 9 languages | keep inline |
 | `editor` seed document | ~131 | text | 1 (guests/go/editor/editor.go) | keep inline |
 | `"not an image"`, `note=1` | 12, 6 | text | 17 | keep |
@@ -179,10 +179,10 @@ synthesis exists only in two probes, tools/ios/clipprobe/run2.sh (python
 own input is proving the platform's encoder, not kaya's.
 
 The 5 non-guest copies of the 4x4 image are separately compiled programs
-on four toolchains: tools/win/clipprobe/src/main.rs:55,
-tools/linux/gdkclipprobe/probe.rs:66, tools/ios/clipprobe/main2.swift:57,
+on four toolchains: tools/win/clipprobe/src/main.rs:50,
+tools/linux/gdkclipprobe/probe.rs:63, tools/ios/clipprobe/main2.swift:46,
 tools/android/clipprobe/app/src/main/kotlin/dev/kaya/clipprobe/SeedReceiver.kt:82,
-and tools/android/cliphelper/run3.sh:63 (base64 over an intent extra, the
+and tools/android/cliphelper/run3.sh:61 (base64 over an intent extra, the
 only base64 of it in the tree).
 
 ### Why the images stay inline, stated properly
@@ -241,7 +241,7 @@ an error that names neither the asset nor the reason [REPO].
 ### What is not an asset, and must not become one
 
 The four per-platform icon tables (swift/KayaSwiftUI.swift for SF
-Symbols, crates/kaya/src/gtk.rs:78 for Adwaita names,
+Symbols, crates/kaya/src/gtk.rs:65 for Adwaita names,
 crates/kaya/src/winui/mod.rs for Fluent, and KayaCompose.kt for Material,
 20 entries each) are per-platform spellings of a semantic vocabulary, and
 DESIGN.md:2418 already ruled the question: "Icons want names, not bytes
@@ -297,7 +297,7 @@ wire has. The guest registers bytes, gets a handle valid for exactly one
 submit, and the record carries the handle
 (crates/kaya/src/capi.rs, the blob tables). Where the bytes came from is
 not the protocol's business, and the C floor's guests already call
-`kaya_blob_register` directly (guests/c/a11y.c:99).
+`kaya_blob_register` directly (guests/c/a11y.c:95).
 
 Putting an asset **name** on a record, so that a backend or the core
 resolved it, would be a different mechanism with three costs and no
@@ -333,7 +333,7 @@ default, and let every guest read the file with its own language's API.
   earned its own gate: a Go guest must read the host's environment
   through `kaya.Env` and never `os.Getenv`, because in a c-shared library
   Go's copy is empty forever (tools/check-go-env.py, and
-  guests/go/typeface/typeface.go:24 carries the comment). Invariant 3
+  guests/go/typeface/typeface.go:11 carries the comment). Invariant 3
   prefers one implementation to a gate over eight copies.
 
 **(B) A binding-level reader.** `kaya.asset("fonts/sora-wght.ttf")`
@@ -413,21 +413,21 @@ the bytes get to the machine at all. All rows [REPO].
 | platform | repo run today | staged to the lane today | in a packaged app | reader exists? |
 |---|---|---|---|---|
 | **macOS** | repo-relative default, no copy | nothing needed, runs from the repo root | `Contents/Resources/` in a `.app` | later; no bundle in the tree |
-| **Linux** | repo-relative default | nothing needed, the repo is bind-mounted at `/work` (tools/linux/run-suites.sh:736 states the reasoning) | `$datadir/kaya/<app>/` beside the `.desktop` file | later |
-| **Windows** | n/a | `scp` every run into a repo-mirror path, deliberately outside the deploy stamp so an asset edit cannot be swallowed by a stamp skip (tools/deploy-win.py:484) | beside the exe, or inside an MSIX | staging today, packaging later |
-| **Android** | n/a | `adb push` to `/data/local/tmp` with a size check, then named into the app through an intent extra (tools/android/run-emulator.py:712) | APK resources or `assets/`, read through `AssetManager` | staging today, packaging later |
+| **Linux** | repo-relative default | nothing needed, the repo is bind-mounted at `/work` (tools/linux/run-suites.sh:606 states the reasoning) | `$datadir/kaya/<app>/` beside the `.desktop` file | later |
+| **Windows** | n/a | `scp` every run into a repo-mirror path, deliberately outside the deploy stamp so an asset edit cannot be swallowed by a stamp skip (tools/deploy-win.py:450) | beside the exe, or inside an MSIX | staging today, packaging later |
+| **Android** | n/a | `adb push` to `/data/local/tmp` with a size check, then named into the app through an intent extra (tools/android/run-emulator.py:662) | APK resources or `assets/`, read through `AssetManager` | staging today, packaging later |
 | **iOS** | n/a | **nothing. No file-push route for assets exists.** | inside the `.app`, copied at bundle assembly | **neither** |
 
 **The iOS row is the finding.** [MEASURED] `grep -c typeface` over the
 five lane scripts: validate-mac 5, the linux suite runner 19, deploy-win
 15, the android emulator runner 21, **ios/run-sim 0**. The scene lists at
-tools/lib/lanes/ios.py:26 do not contain `typeface`. The one asset kaya
+tools/lib/lanes/ios.py:24 do not contain `typeface`. The one asset kaya
 ships has never reached iOS, and the lane's only host-to-guest binary
 channel is a base64-over-container-file bridge that is the clipboard and
 dialog protocol, not an asset installer.
 
 The recommended fix is the one that is also the packaging reader:
-**tools/ios/run-sim.py:219 (`make_bundle`) copies the asset root into the
+**tools/ios/run-sim.py:198 (`make_bundle`) copies the asset root into the
 bundle's Resources.** That is what a shipped iOS app does anyway, so iOS
 becomes the first lane whose asset delivery is the real mechanism rather
 than a test convenience, and the typeface scene becomes runnable there.
@@ -444,7 +444,7 @@ lanes that have a filesystem. Both already exist; neither needs inventing.
 ## A5. What the harness and the lanes need
 
 1. **Stage the root, not the file.** `font_prepare()` (now
-   `assets_prepare`, tools/android/run-emulator.py:712) becomes an
+   `assets_prepare`, tools/android/run-emulator.py:662) becomes an
    asset-root push. Its
    size verification (`adb shell stat -c %s` compared against `wc -c`)
    is the model, and it should become a **hash** comparison rather than a

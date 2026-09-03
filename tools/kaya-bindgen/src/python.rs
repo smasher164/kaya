@@ -107,8 +107,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return struct.pack(\"<IHH\", 8 + len(body), kind, 0) + body");
     c.line("");
 
-    // One packer per fixed-layout tx record; set_property gets one
-    // helper per source arm.
     for r in spec.tx {
         if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
@@ -137,13 +135,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_{}, {})", r.name.to_uppercase(), body));
     }
 
-    // The set_property trios, one per property: spec-driven so new
-    // props reach every binding without emitter edits. Python's value
-    // encoder is type-generic, so PropKind only shapes the docstring.
+    // Python's value encoder is type-generic, so PropKind only shapes
+    // the docstring.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        // Blob setters speak the wire tier: the parameter is the u64
-        // handle from kaya_blob_register (see BlobHandle), not bytes.
+        // Blob setters take the u64 kaya_blob_register handle, not bytes.
         let (param, ty, expr) = match kind {
             PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
             PropKind::Bool => (*prop, "bool", format!("_enc.value({prop})")),
@@ -172,9 +168,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_{up}, SOURCE_ELEMENT, level, field))"));
     }
 
-    // The window-prop duos (const + signal — element sources are
-    // rejected by the wire; windows are not collection elements).
-    // Window 0, the primary surface, until aux windows land.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (ty, expr) = match kind {
@@ -196,8 +190,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QIIQ\", window, WPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (ty, expr) = match kind {
@@ -217,8 +211,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_ENTRY_PROP, struct.pack(\"<QIIQ\", entry, EPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = match kind {
@@ -244,9 +238,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
 
     // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
-    // only, policy being the core's and validated on the canonical form.
-    // tx_set_menu_shortcut routes through it, so no call site can
-    // bypass canonicalization.
+    // only, policy being the core's. tx_set_menu_shortcut routes through
+    // it, so no call site can bypass canonicalization.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
         .iter()
         .map(|k| format!("\"{k}\""))
@@ -260,12 +253,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("def canonicalize_shortcut(spelling):");
     c.line("    \"\"\"Canonicalize a shortcut spelling to the wire form: lowercase");
     c.line("    '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
-    c.line("    key (a-z, 0-9, or the closed named set). Accepts ASCII case");
-    c.line("    variants and any modifier order; rejects whitespace, empty tokens,");
-    c.line("    repeated modifiers, aliases (ctrl/cmd/option), and unknown or");
-    c.line("    multiple or missing keys. POLICY stays at the core: escape,");
-    c.line("    shift-only and bare alphanumerics, and the reserved floor are");
-    c.line("    validated there, on the canonical spelling, never rewritten.\"\"\"");
+    c.line("    key (a-z, 0-9, or the closed named set). Rejects whitespace, empty");
+    c.line("    tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
+    c.line("    or multiple or missing keys. POLICY stays at the core, validated");
+    c.line("    on the canonical spelling and never rewritten.\"\"\"");
     c.line("    if not spelling:");
     c.line("        raise ValueError(\"kaya: shortcut is empty\")");
     c.line("    if any(ch in spelling for ch in \" \\t\\n\\v\\f\\r\"):");
@@ -291,9 +282,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            \"(one of a-z, 0-9, or the closed named set)\")");
     c.line("    return \"+\".join([m for m in (\"primary\", \"shift\", \"alt\") if m in seen] + [key])");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root).
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = match kind {
@@ -345,14 +335,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    raise ValueError(f\"unknown value type {vtype}\")");
     c.line("");
     c.line("");
-    // The occurrence blob table, the third direction. A blob in an
-    // OCCURRENCE is a table handle, not the apply channel's batch-local
-    // index: the occurrence channel has no boundary that retires one
-    // (the guest takes records one at a time, and the direct-ring
-    // consumers move the head themselves), so it is released
-    // explicitly. Redeeming HERE, in the generated decoder, is what
-    // keeps a handle from ever reaching an app — a released handle is
-    // not something a guest should be able to hold.
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index: the occurrence channel has no
+    // boundary that retires one, so it is released explicitly.
+    // Redeeming HERE, in the generated decoder, keeps a handle from ever
+    // reaching an app.
     c.line("occurrence_blob = None");
     c.line("\"\"\"Redeem-and-release for occurrence blobs, installed by the runtime");
     c.line("at import (this module loads no library of its own).\"\"\"");
@@ -384,7 +371,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    copy's key path. text is the entry's new content for");
     c.line("    OCC_TEXT_CHANGED, the new state for OCC_TOGGLED, the new");
     c.line("    value for OCC_VALUE_CHANGED, None otherwise.");
-    // (kind lists below derive from the spec's Record::payload.)
     c.line("    \"\"\"");
     c.line("    _size, kind, _flags = struct.unpack_from(\"<IHH\", buf, 0)");
     let accepted = crate::occurrence_names(spec)
@@ -398,15 +384,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("        alert, choice = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("        return kind, alert, [], choice");
-    // The picker's answer is the one occurrence whose payload is a
-    // LIST OF RECORDS rather than a scalar: dialog id, a count, then
-    // three Values per file (handle, name, local_path). The generic
-    // tail below reads a KEY PATH, which would take the count as a
-    // path length and start reading eight bytes early — decoding a
-    // handle as a key and losing the rest. Hence its own arm.
-    //
-    // EMPTY IS CANCEL, and it arrives here as count 0, so the arm has
-    // nothing special to say about it.
+    // The picker's answer is the one occurrence whose payload is a LIST
+    // OF RECORDS rather than a scalar, so it needs its own arm: the
+    // generic tail below would take the count for a key-path length and
+    // start reading eight bytes early. EMPTY IS CANCEL, arriving as
+    // count 0.
     c.line("    if kind == OCC_FILE_DIALOG_RESULT:");
     c.line("        dialog, count = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("        at = 32  # past dialog, count, pad, values count, reserved");
@@ -417,9 +399,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            local_path, at = parse_value(buf, at)");
     c.line("            files.append((handle, name, local_path))");
     c.line("        return kind, dialog, [], files");
-    // The privileged read's one answer, in its own arm: the generic
-    // tail would take the CLIP KIND for a path length, so a text answer
-    // would read the values header as a key.
+    // Its own arm: the generic tail would take the CLIP KIND for a path
+    // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
         c.line("        (request,) = struct.unpack_from(\"<Q\", buf, 8)");
@@ -449,13 +430,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        window, section = struct.unpack_from(\"<QQ\", buf, 8)");
         c.line("        return kind, section, [], window");
     }
-    // ONE STEP CAME BACK. The payload is a STATEMENT OF THE RESTORED
-    // STATE rather than a replay of ops: four counted runs cut out of
-    // one flat Values tail, in the fixed order signals, texts, entries,
-    // orders (docs/undo-plan.md D5; wire::undo_body). Its own arm for
-    // the file_dialog_result reason — the generic tail below would take
-    // `window` for a widget id and the SIGNAL COUNT for a key-path
-    // length, and read the label's bytes as keys.
+    // Four counted runs cut out of one flat Values tail, in the fixed
+    // order signals, texts, entries, orders (docs/undo-plan.md D5;
+    // wire::undo_body). Its own arm for the file_dialog_result reason —
+    // the generic tail would take `window` for a widget id and the
+    // SIGNAL COUNT for a key-path length.
     let undo = crate::undo_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))
@@ -483,19 +462,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        for _ in range(n_signals):");
         c.line("            signals.append((flat[i], flat[i + 1]))");
         c.line("            i += 2");
-        // ARITY-FIRST LIKE ITS TWO NEIGHBOURS, and for their reason:
-        // a stamped copy's field is named by (template node, key path),
-        // and a fixed pair had nowhere to put the path. path_len 0 means
-        // the id is a live widget id.
+        // A stamped copy's field is named by (template node, key path);
+        // path_len 0 means the id is a live widget id.
         c.line("        texts = []");
         c.line("        for _ in range(n_texts):");
         c.line("            size, ident, path_len = flat[i:i + 3]");
         c.line("            body = flat[i + 3:i + size]");
         c.line("            i += size");
         c.line("            texts.append((ident, tuple(body[:path_len]), body[path_len]))");
-        // Arity-first, so each group carries its own size and a reader
-        // needs nothing else: 5 fixed values, then the instance path,
-        // the key, and the record — `size` counts itself.
         c.line("        entries = []");
         c.line("        # Arity-first groups: `size` counts itself, so a");
         c.line("        # reader takes it and needs nothing else.");
@@ -511,9 +485,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            body = flat[i + 3:i + size]");
         c.line("            i += size");
         c.line("            orders.append((coll, tuple(body[:path_len]), body[path_len:]))");
-        // A truncated or over-long body is a broken ENCODER, not bad
-        // input, and it fails here rather than handing the app half a
-        // step (the read-in-threes rule the picker already follows).
+        // A truncated or over-long body is a broken ENCODER, and it
+        // fails here rather than handing the app half a step.
         c.line("        if i != len(flat):");
         c.line("            raise ValueError(\"kaya: undo delta has trailing values\")");
         c.line("        return kind, window, [], (label, signals, texts, entries, orders)");
@@ -526,7 +499,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        keys.append(key)");
     c.line("    payload = None");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read before the generic tail.
+    // these — read before the generic tail.
     let u32_slot = crate::u32_slot_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))
@@ -544,8 +517,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("    if kind in ({with_payload},):"));
     c.line("        payload, at = parse_value(buf, at)");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))
@@ -556,8 +528,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        clip, values, at = parse_clip(buf, at)");
         c.line("        payload = (clip, values)");
     }
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1).
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

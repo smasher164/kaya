@@ -1,11 +1,4 @@
-(* The feed scene from OCaml: sum-typed elements, end to end. The
-   variant declaration is the sum ([@@deriving kaya_gen]); the generated
-   [post_each] takes one REQUIRED labelled arm per constructor, so
-   template totality is a compile error here. The generated
-   per-constructor patches witness the handler's match, and a drifted
-   entry is refused rather than folded.
-
-   Build like milestone2.ml, then run with KAYA_SELFTEST=feed. *)
+(* The feed scene, OCaml port — guests/rust/feed.rs, tools/scenes/feed.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -31,8 +24,6 @@ let () =
            Str (Printf.sprintf "%d done" n))
      in
      let on_promote () =
-       (* The update's new constructor restamps that key's copy in
-          place. *)
        let entries = sum_items feed in
        match
          List.find_opt (fun (_, p) -> match p with Note _ -> true | _ -> false) entries
@@ -42,8 +33,7 @@ let () =
        | _ -> ()
      in
      let on_toggle keys checked =
-       (* The match is the refinement and the generated patch witnesses
-          it; a stale occurrence lands in the other arm. *)
+       (* The match is the refinement and the generated patch witnesses it. *)
        let post = sum_get feed (List.hd keys) in
        match post with
        | Some (Todo _) -> post_todo_patch ~done_:checked feed (List.hd keys)

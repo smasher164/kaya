@@ -1,7 +1,5 @@
-//! The toolbar conformance scene: the `primary` bit as real window
-//! chrome (docs/chrome-plan.md C2). There is no toolbar vocabulary to
-//! spell — this is the menus guest with a promotion bit and no new
-//! call. The byte-frozen contract is tools/scenes/toolbar.steps.
+//! The toolbar scene (tools/scenes/toolbar.steps): the `primary` bit as
+//! window chrome, with no toolbar vocabulary to spell.
 
 #[derive(Clone)]
 enum Msg {
@@ -15,22 +13,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (status, can_save) = ctx.apply(|tx| {
         let status = tx.signal("ready");
-        // Written against the MENU ITEM and never a button: the promoted
-        // button IS that item, so it follows or the lowering kept a copy.
+        // Written against the MENU ITEM: the promoted button IS that item.
         let can_save = tx.signal(true);
 
-        // CATALOG PREORDER DECIDES PROMOTION — groupings in menubar
-        // order, then children in append order, depth-first. Save is the
-        // first primary and Find the second, so every host's promoted
-        // set is [Save, Find] however large its own k is.
+        // CATALOG PREORDER DECIDES PROMOTION.
         let save = tx
             .window(kaya::DEFAULT_WINDOW)
             .title("toolbar")
             .menu("File", |m| {
                 let save = m
                     .item("Save")
-                    // `done` is the checkmark idiom: the vocabulary has
-                    // no save glyph (docs/styling-plan.md D6).
+                    // The vocabulary has no save glyph, so `done` is it.
                     .symbol(kaya::Symbol::Done)
                     .primary(true)
                     .enabled(can_save)

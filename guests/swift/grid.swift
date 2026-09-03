@@ -1,5 +1,4 @@
-// The grid conformance scene, Swift port. See
-// guests/rust/grid.rs and tools/scenes/grid.steps.
+// The grid scene, Swift port — guests/rust/grid.rs, tools/scenes/grid.steps.
 
 import Foundation
 

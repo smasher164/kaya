@@ -1,7 +1,5 @@
-// The scroll conformance scene, Go port — the viewport GROWS so the
-// enclosing track constrains it (an unconstrained viewport hugs its
-// content and nothing overflows). See guests/rust/scroll.rs and
-// tools/scenes/scroll.steps.
+// The scroll conformance scene (tools/scenes/scroll.steps). The viewport
+// GROWS: unconstrained it hugs its content and nothing overflows.
 package scroll
 
 import (

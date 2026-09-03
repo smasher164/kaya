@@ -1,8 +1,5 @@
-{- The clipboard conformance scene from Haskell — one clip in several
-   representations, and the privileged read that takes one back.
-
-   Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
-   contract in tools/scenes/clipboard.steps. -}
+-- The clipboard scene, Haskell port — guests/rust/clipboard.rs,
+-- tools/scenes/clipboard.steps.
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
@@ -15,9 +12,7 @@ import System.FilePath ((</>))
 import System.IO (hClose, hGetContents')
 import System.Posix.Process (getProcessID)
 
--- A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
--- through a foreign decoder, so it has to be a real encoded image whose
--- size is knowable from the script.
+-- A real 4x4 PNG: a foreign decoder asserts its size.
 pixelPng :: BS.ByteString
 pixelPng =
   BS.pack
@@ -33,21 +28,17 @@ pixelPng =
       0x44, 0xAE, 0x42, 0x60, 0x82 -- IEND + crc
     ]
 
--- Reverse-DNS and space-free: the id reaches every platform's own
--- registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 atom, a
--- MIME type).
+-- Reverse-DNS and space-free: reaches every registry VERBATIM.
 noteId :: String
 noteId = "dev.kaya/note"
 
--- NO QUOTES IN THE PAYLOAD: the step grammar escapes \n, \r and \\ and
--- nothing else, so a quoted byte cannot be spelled in the expectation.
+-- NO QUOTES: the step grammar escapes \n, \r and \\ only.
 noteBytes :: BS.ByteString
 noteBytes = BC.pack "note=1"
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- Guest and interpreter are the same process and compute this path
-  -- identically; the pid keeps parallel legs from colliding.
+  -- The pid keeps parallel legs from colliding.
   tmp <- getTemporaryDirectory
   pid <- getProcessID
   let dir = tmp </> ("kaya-clip-" ++ show pid)
@@ -72,19 +63,13 @@ main = kayaMain $ \app -> do
     status <- signal (VStr "ready")
     rowStatus <- signal (VStr "")
 
-    -- Built before the focus buttons that close over them: Build is a
-    -- PURE state monad, so nothing can reach back for them later, and
-    -- `pure` places them in the column where every language puts them.
-    --
-    -- An accept list is what turns the paste hook on; a field that
-    -- declares none gets the platform's own insertion instead.
+    -- Built before the focus buttons that close over them: Build is a PURE
+    -- state monad, so nothing can reach back for them later.
     rich <- entryOn (const (return ())) [A11yId "rich", Accepts [acceptText]]
     plain <- entryOn (const (return ())) [A11yId "plain"]
 
-    -- The same door one tier down: the accept list is declared on the
-    -- TEMPLATE, and that declaration is what turns the node hook on
-    -- (docs/tpl-props-plan.md §1). 'forEach' rather than 'each' because
-    -- the central registration below needs the node it hands back.
+    -- The accept list is declared on the TEMPLATE, which turns the node hook
+    -- on (docs/tpl-props-plan.md §1); 'forEach' hands the node back.
     notes <- collection
     (noteList, note) <-
       forEach notes $
@@ -96,8 +81,6 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound status [A11yId "status"], -- label#0
-          -- One clip, four representations; kaya derives none of them
-          -- from any other, so the app spells out each.
           buttonOn
             "copy"
             ( buildTx app $ do
@@ -130,8 +113,7 @@ main = kayaMain $ \app -> do
     RText text -> buildTx app (writeSignal status (VStr ("pasted " ++ text)))
     _ -> buildTx app (writeSignal status (VStr "pasted other"))
 
-  -- The stamped copy's paste, against the node the template handed out;
-  -- the copy's own key arrives with the payload.
+  -- The copy's own key arrives with the payload.
   onPaste app note $ \keys clip ->
     let key = case keys of
           VStr k : _ -> k
@@ -141,8 +123,7 @@ main = kayaMain $ \app -> do
             buildTx app (writeSignal rowStatus (VStr ("row " ++ key ++ " pasted " ++ text)))
           _ -> buildTx app (writeSignal rowStatus (VStr ("row " ++ key ++ " pasted other")))
 
--- The privileged read's one answer. A pasted FILE is read OFF THE APP
--- THREAD, because openPicked blocks.
+-- A pasted FILE is read OFF THE APP THREAD, because openPicked blocks.
 reader :: App -> Signal -> Maybe Representation -> IO ()
 reader app status clip = case clip of
   Just (RFiles (first : _)) -> do
@@ -167,8 +148,7 @@ reader app status clip = case clip of
   Just (RCustom i body) ->
     buildTx app (writeSignal status (VStr ("custom " ++ i ++ " " ++ BC.unpack body)))
   Just (RImage bytes) ->
-    -- Straight back out: the image is asserted as a foreign decoder's
-    -- SIZE, never as bytes, since every host re-encodes freely.
+    -- Straight back out: the image is asserted as a foreign decoder's SIZE.
     buildTx app $ do
       copy emptyClip {clipImage = Just bytes}
       writeSignal status (VStr "image")

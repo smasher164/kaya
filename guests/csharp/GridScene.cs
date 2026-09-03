@@ -1,5 +1,4 @@
-// The grid conformance scene, C# port. See
-// guests/rust/grid.rs and tools/scenes/grid.steps.
+// The grid scene, C# port — guests/rust/grid.rs, tools/scenes/grid.steps.
 
 static class GridScene
 {

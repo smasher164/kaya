@@ -1,19 +1,11 @@
-//! libkaya IS the Node addon (docs/js-plan.md §2). `process.dlopen` on
-//! this library finds `napi_register_module_v1` below and gets the
-//! function floor bindings/js/kaya/runtime.ts binds — the same calls
-//! bindings/python/kaya/runtime.py makes through ctypes. Node's own API
-//! is resolved at registration out of the HOST PROCESS's symbol table,
-//! so there is no node header, no node-gyp, no link-time dependency and
-//! no second artifact: the lane verifies libkaya and that is the addon.
+//! libkaya IS the Node addon (docs/js-plan.md §2): Node's own API is
+//! resolved at registration out of the HOST PROCESS's symbol table, so
+//! there is no node header, no node-gyp and no second artifact.
 //!
-//! THE PUMP (docs/js-plan.md §3): the worker's JS thread is the kaya-app
-//! thread, and it cannot block in `kaya_next_occurrence` without
-//! freezing its own event loop, so a native thread blocks there for it
-//! and hands each record over through a threadsafe function — ONE AT A
-//! TIME, waiting for the handler to return before it takes the next.
-//! That wait is what keeps the stall watchdog honest: a wedged handler
-//! leaves the next click unclaimed in the ring, exactly as a wedged
-//! Python app thread does (tools/scenes/stall.steps).
+//! THE PUMP (§3): the worker's JS thread is the kaya-app thread and cannot
+//! block in `kaya_next_occurrence`, so a native thread blocks there and
+//! hands each record over ONE AT A TIME, waiting for the handler to return.
+//! That wait is what keeps the stall watchdog honest.
 
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::ptr;
@@ -168,8 +160,6 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
     exports
 }
 
-// ------------------------------------------------------------ helpers
-
 unsafe fn args<const N: usize>(env: Env, info: CbInfo) -> [Value; N] {
     let mut argc = N;
     let mut argv = [ptr::null_mut(); N];
@@ -281,8 +271,6 @@ macro_rules! try_or_throw {
         }
     };
 }
-
-// ----------------------------------------------------------- the floor
 
 unsafe extern "C" fn spec_hash(env: Env, _info: CbInfo) -> Value {
     let mut out: Value = ptr::null_mut();
@@ -484,8 +472,6 @@ unsafe extern "C" fn exit(env: Env, info: CbInfo) -> Value {
     // exit entry).
     crate::exit_hard(code as i32)
 }
-
-// ------------------------------------------------------------ the pump
 
 struct Pump {
     tsfn: Tsfn,

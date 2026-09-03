@@ -1,16 +1,11 @@
-//! The legible way to lose.
+//! The legible way to lose (docs/deferred.md, "A GUARD THAT ABORTS THE
+//! PROCESS IS THE WRONG SHAPE").
 //!
-//! Every caller here sits in a frame that CANNOT UNWIND — an
-//! `extern "C"` entry, a DispatcherQueue callback, a glib idle source —
-//! so a panic in one is `fatal runtime error: failed to initiate panic`
-//! and the leg dies with a bare exit code, taking the harness's failure
-//! list with it (docs/deferred.md, "A GUARD THAT ABORTS THE PROCESS IS
-//! THE WRONG SHAPE"). The rule this module holds: an app-misuse guard
-//! or a failed apply REDDENS THE LEG with its sentence intact, and only
-//! genuinely unrecoverable state aborts.
-//!
-//! `fault::tests` is the wall — a source census over the four files
-//! whose nounwind bodies this covers, run by `cargo test -p kaya`.
+//! Every caller here sits in a frame that CANNOT UNWIND, so a panic there
+//! kills the leg with a bare exit code and no failure list. The rule: an
+//! app-misuse guard or a failed apply REDDENS THE LEG with its sentence
+//! intact, and only unrecoverable state aborts. `fault::tests` is the wall,
+//! a source census over the four files whose nounwind bodies this covers.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,14 +17,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static FAULT: Mutex<Option<(String, u32)>> = Mutex::new(None);
 
 /// Whether a HARNESS is driving this process — set once, at the top of
-/// each of the three script runners, never cleared. The flag decides
-/// `report`'s second half: watched, the latch is the harness's to turn
-/// into a red leg; UNWATCHED — a real app misusing the API, or the
-/// bindings' corpse-reading child processes (bindings/go/internal/
-/// rootprobe) — the process must die legibly, sentence first, because
-/// "report and keep going" means a pump that blocks forever (ratified
-/// 2026-08-21; the fault census below holds all three runners to the
-/// call).
+/// each of the three script runners, never cleared. It decides `report`'s
+/// second half: watched, the latch is the harness's to turn into a red
+/// leg; UNWATCHED — a real app, or the bindings' corpse-reading child
+/// processes — the process must die legibly, sentence first, because
+/// "report and keep going" means a pump that blocks forever. The census
+/// below holds all three runners to the call.
 static WATCHED: AtomicBool = AtomicBool::new(false);
 
 /// The harness's declaration that it is watching the latch.
@@ -43,13 +36,11 @@ pub(crate) fn watch() {
 static PANIC_LOG_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 /// THE PANIC LOG: a Rust panic's one sentence, appended to the file
-/// `KAYA_PANIC_LOG` names BEFORE the default hook prints it — for hosts
-/// whose stderr is not durable (an iOS app launched with no console
-/// loses it; docs/deferred.md, "AN iOS GUEST'S PANIC MESSAGE DIES WITH
-/// ITS PTY"). Unset or empty means no hook at all. A RELATIVE name
-/// resolves under `$HOME/Documents` when that directory exists — the
-/// iOS data container, the one place a runner can read back — and
-/// under the working directory otherwise.
+/// `KAYA_PANIC_LOG` names BEFORE the default hook prints it, for hosts
+/// whose stderr is not durable (docs/deferred.md, "AN iOS GUEST'S PANIC
+/// MESSAGE DIES WITH ITS PTY"). Unset or empty means no hook. A RELATIVE
+/// name resolves under `$HOME/Documents` when that directory exists — the
+/// iOS data container — and under the working directory otherwise.
 pub(crate) fn log_panics() {
     let Some(named) = std::env::var_os("KAYA_PANIC_LOG").filter(|p| !p.is_empty()) else {
         return;
@@ -159,9 +150,8 @@ pub(crate) fn guard<R>(what: &str, f: impl FnOnce() -> R) -> Option<R> {
 mod tests {
     /// The panic log writes the sentence and the location BEFORE the
     /// default hook runs, so a host whose stderr is gone still has the
-    /// guest's last words (the iOS pyhost sighting). Process-global by
-    /// nature: the hook chains to whatever was installed before it, so
-    /// the suite's other panics print exactly as they did.
+    /// guest's last words. The hook chains to whatever was installed
+    /// before it, so the suite's other panics print as they did.
     #[test]
     fn the_panic_log_keeps_the_sentence_and_the_location() {
         let dir = std::env::temp_dir().join(format!("kaya-panic-log-{}", std::process::id()));
@@ -265,15 +255,10 @@ mod tests {
         }
     }
 
-    /// AND EVERY NOUNWIND BOUNDARY STOPS THE UNWIND. `Scene::apply` is
-    /// one long wall of app-misuse assertions (scene.rs), and every one
-    /// of them fires inside one of these frames.
-    ///
-    /// THE LIST IS DERIVED, NOT REMEMBERED: the clause under this one
-    /// finds the boundaries by looking for `Scene::apply` callers, which
-    /// is what found gtk.rs's SECOND drain — a copy of the first inside
-    /// `type_text`'s quiescence wait, missed by the naming clause
-    /// because nobody thought to name it.
+    /// AND EVERY NOUNWIND BOUNDARY STOPS THE UNWIND. `Scene::apply` is one
+    /// long wall of app-misuse assertions (scene.rs), and every one of them
+    /// fires inside one of these frames. The clause under this one is the
+    /// authority; this list is the readable half.
     #[test]
     fn every_nounwind_boundary_names_the_guard() {
         for (src, file, name) in [
@@ -303,13 +288,11 @@ mod tests {
     }
 
     /// AND THE LIST ABOVE IS NOT THE AUTHORITY — this is. Every place a
-    /// BACKEND drives `Scene::apply` is a nounwind frame by
-    /// construction (that is what a backend's pump is), so the sites are
-    /// FOUND rather than named, and a new one arrives red instead of
-    /// arriving unguarded. Measured 2026-08-21: gtk.rs's `type_text`
-    /// carries a SECOND copy of the drain inside its quiescence wait,
-    /// under `on_main_mut` (`glib::idle_add`), and the named list had
-    /// missed it — this clause is what a list cannot do.
+    /// BACKEND drives `Scene::apply` is a nounwind frame by construction,
+    /// so the sites are FOUND rather than named. Measured 2026-08-21:
+    /// gtk.rs's `type_text` carries a SECOND copy of the drain inside its
+    /// quiescence wait, under `on_main_mut` (`glib::idle_add`), which the
+    /// named list had missed.
     #[test]
     fn every_scene_apply_caller_sits_under_a_guard() {
         // Generous, because a guard is always a few lines up; a guard 40
@@ -344,18 +327,12 @@ mod tests {
         );
     }
 
-    /// AND SO DOES EVERY ROW-WINDOW ENTRY. The window verbs panic
-    /// through `Scene::window_site` for a target that is not a For
-    /// container — four discriminating arms — and `scroll_to_row` panics
-    /// for a key the collection does not hold. A BACKEND reaches them
-    /// from a scroll signal, a layout callback or a harness step, which
-    /// are the pump's own frames one feature over: nothing there can
-    /// unwind (docs/virtualization-plan.md §3).
-    ///
-    /// THE RUST BACKENDS ONLY. capi.rs's five entries all funnel through
-    /// `with_window_scene`, which carries the guard for every one of
-    /// them, so THAT is what is checked for capi rather than a line
-    /// proximity that would pass or fail by accident of layout.
+    /// AND SO DOES EVERY ROW-WINDOW ENTRY: the window verbs and
+    /// `scroll_to_row` panic on a bad target, and a backend reaches them
+    /// from a scroll signal or a layout callback, frames that cannot unwind
+    /// (docs/virtualization-plan.md §3). THE RUST BACKENDS ONLY — capi.rs's
+    /// five entries funnel through `with_window_scene`, so that is what is
+    /// checked there rather than a line proximity.
     #[test]
     fn every_window_report_caller_sits_under_a_guard() {
         // Generous, exactly as the Scene::apply clause above.
@@ -428,13 +405,12 @@ mod tests {
         );
     }
 
-    /// AND THE PUMP'S OWN FRAME MAY NOT DECIDE TO DIE. `fault::guard`
-    /// wraps `Scene::apply` inside `kaya_next_commands`; everything else
-    /// in that function is outside it, so a panic there is the abort with
-    /// no verdict list AND no transaction to blame. It shipped one: an
-    /// `assert!` that the resolved batch fit the caller's 64 KiB buffer
-    /// killed macOS, iOS and Android at 161 table rows in one transaction
-    /// (docs/deferred.md, the 64 KiB pump wall).
+    /// AND THE PUMP'S OWN FRAME MAY NOT DECIDE TO DIE. `fault::guard` wraps
+    /// only `Scene::apply` inside `kaya_next_commands`, so a panic elsewhere
+    /// in that function aborts with no verdict list. It shipped one: an
+    /// `assert!` on the caller's 64 KiB buffer killed macOS, iOS and Android
+    /// at 161 table rows in one transaction (docs/deferred.md, the 64 KiB
+    /// pump wall).
     #[test]
     fn the_pump_frame_never_decides_to_die() {
         let body = body(CAPI, "kaya_next_commands", "capi.rs");
@@ -451,12 +427,10 @@ mod tests {
     }
 
     /// AND NO PUMP SIZES ITS OWN BUFFER. The core owns the batch's bytes
-    /// and states their length; a reader that allocates a fixed buffer
-    /// instead puts a cap back on how many rows one transaction may
-    /// build, which is invisible until a real app crosses it — 161 rows
-    /// on macOS/iOS, 157 on Android, and not at all on GTK or WinUI,
-    /// whose backends never cross this ABI (docs/measurements/
-    /// choke-macos-2026-08-24.txt).
+    /// and states their length; a reader that allocates a fixed buffer puts
+    /// a cap back on how many rows one transaction may build — 161 rows on
+    /// macOS/iOS, 157 on Android (docs/deferred.md, the 64 KiB pump wall;
+    /// docs/measurements/choke-macos-2026-08-24.txt).
     #[test]
     fn no_pump_sizes_its_own_buffer() {
         let swift = include_str!("../../../swift/KayaSwiftUI.swift");

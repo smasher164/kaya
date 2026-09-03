@@ -11,11 +11,11 @@ debian trixie @ `sha256:fac46bff…`), started as a throwaway container
     libadwaita  1.7.6    (pkg-config --modversion libadwaita-1)
     icon theme  Adwaita 48.1 (adwaita-icon-theme), 758 icon names
     Rust crates gtk4 0.11.4 (features = ["v4_10"]), libadwaita 0.9.2 (v1_4)
-                — crates/kaya/Cargo.toml:123,134
+                — crates/kaya/Cargo.toml:66,134
 
 Both session backends the lane actually runs were measured: X11 under
 `xvfb-run` and Wayland under headless `sway`, started exactly as
-`tools/linux/run-suites.sh:168-206` starts it. The a11y reads ran inside
+`tools/linux/run-suites.sh:125-142` starts it. The a11y reads ran inside
 `tools/linux/a11y-leg.sh`, the lane's own per-leg a11y session.
 
 Probe sources (throwaway):
@@ -51,7 +51,7 @@ Probe sources (throwaway):
 
 ### 1a. The exhaustive property sweep
 
-Read from the container's own GIR (`/usr/share/gir-1.0/{Gtk-4.0,Adw-1,Gdk-4.0}.gir`),
+Read from the container's own GIR (`/usr/share/gir-1.0/{Gtk-4.0, Adw-1, Gdk-4.0}.gir`),
 which is the same description the `gtk4`/`libadwaita` Rust crates are generated
 from, so the Rust surface cannot have more.
 
@@ -100,7 +100,7 @@ grep over `/usr/include/libadwaita-1/` for the same words: **zero hits.**
   `set_title` ("may be used to identify the surface in a task bar, window
   list, or other user interface elements provided by the compositor") and
   `set_app_id`. There is no state, flag, or hint for document modification, in
-  xdg-shell or anywhere in `/usr/share/wayland-protocols/{stable,staging,unstable}`.
+  xdg-shell or anywhere in `/usr/share/wayland-protocols/{stable, staging, unstable}`.
 - **X11.** GTK4 exposes one attention-adjacent call and it is backend-private:
   `gdk_x11_surface_set_urgency_hint` (`gdk/x11/gdkx11surface.h:114`). It is
   X11-only, it means "demands attention" (the WM flashes the task entry), and
@@ -112,7 +112,7 @@ kaya puts in the header bar are the whole vocabulary.
 
 ### 1c. kaya already owns the titlebar, which is what makes any of this cheap
 
-`install_nav_chrome` (`crates/kaya/src/gtk.rs:747-761`) calls
+`install_nav_chrome` (`crates/kaya/src/gtk.rs:729-743`) calls
 `window.set_titlebar(Some(&header))` with a `GtkHeaderBar` for **every** kaya
 window — the primary (`gtk.rs:4589`) and every aux window (`gtk.rs:3393`).
 Probe confirms it at runtime: `gtk_window_get_titlebar()` reports
@@ -188,11 +188,11 @@ marker is a label with a character in it.
   on every push/pop: the covering entry's title (948, 989) or the window's own
   title restored at pop (994).
 - Read: `gtk.rs:5949-5957`, `Stage::window_title` — `gtk_window_get_title()`.
-- Prop vocabulary: `WindowProp` (`crates/kaya/src/protocol.rs:1076-1105`) =
+- Prop vocabulary: `WindowProp` (`crates/kaya/src/protocol.rs:1043-1072`) =
   Title, Width, Height, VetoClose, SectionsPresentation, ListDetail; wire enum
-  `wprop` (`crates/kaya/src/spec.rs:1684-1694`) = title 1 … list_detail 6, so
+  `wprop` (`crates/kaya/src/spec.rs:1621-1631`) = title 1 … list_detail 6, so
   a `dirty` prop is `wprop 7`, Bool-valued.
-- Verb: `Step::ExpectTitle` (`crates/kaya/src/harness.rs:2077-2095`) polls
+- Verb: `Step::ExpectTitle` (`crates/kaya/src/harness.rs:1688-1705`) polls
   `stage.window_title(id)` and compares byte-for-byte.
 
 ### 3b. What a composed marker actually renders like

@@ -1,8 +1,5 @@
-{- The toolbar conformance scene, Haskell port: the `primary` bit as real
-   window chrome (docs/chrome-plan.md C2). The app declares ONE catalog
-   and marks two actions primary; every host promotes the same first two
-   in catalog preorder. Canonical semantics in guests/rust/toolbar.rs;
-   the byte-frozen contract in tools/scenes/toolbar.steps. -}
+-- The toolbar scene, Haskell port — guests/rust/toolbar.rs,
+-- tools/scenes/toolbar.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
@@ -15,14 +12,11 @@ main = kayaMain $ \app -> do
 
   buildTx app $ do
     status <- signal (VStr "ready")
-    -- Written against the MENU ITEM, never against any button: the
-    -- promoted button IS that item, so it follows or the lowering kept
-    -- a copy.
+    -- Written against the MENU ITEM: the promoted button IS that item.
     canSave <- signal (VBool True)
 
-    -- CATALOG PREORDER DECIDES PROMOTION — top-level groupings in
-    -- menubar-append order, then each node's children in append order,
-    -- depth-first. Save is the first primary and Find the second.
+    -- CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
+    -- children depth-first, so every host promotes [Save, Find].
     window
       0
       [ WTitle "toolbar",
@@ -32,8 +26,8 @@ main = kayaMain $ \app -> do
               []
               [ item
                   "Save"
-                  -- `done` is the checkmark idiom: the vocabulary has no
-                  -- save-specific glyph (docs/styling-plan.md D6).
+                  -- No save-specific glyph; `done` is the checkmark idiom
+                  -- (docs/styling-plan.md D6).
                   [ ISymbol SymbolDone,
                     IPrimary True,
                     IEnabledBy canSave,

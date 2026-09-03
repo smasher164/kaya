@@ -4,19 +4,14 @@ import dev.kaya.KayaApp;
 import dev.kaya.KayaWire;
 
 /**
- * The sections conformance scene from the JVM: two peer roots in the
- * primary window's section set. The visit count pins the echo doctrine
- * from both sides — the user's switch emits, a programmatic
- * selectSection does not. See guests/rust/sections.rs and
+ * The sections scene from the JVM — guests/rust/sections.rs,
  * tools/scenes/sections.steps.
  */
 public final class Sections {
     private static final long FEED = 7;
     private static final long ARCHIVE = 8;
-    // The SIDEBAR arm lives in an AUX WINDOW, opened only from the
-    // desktop tail's click: the phone runners cut that tail, so
-    // createWindow never runs where the capability is absent.
-    // Reachability is the gate — no capability read needed.
+    // The SIDEBAR arm rides an AUX WINDOW opened only from the desktop tail's
+    // click, so createWindow never runs where the capability is absent.
     private static final long LIBRARY = 1;
     private static final long SHELVES = 2;
     private static final long LOANS = 3;
@@ -32,9 +27,7 @@ public final class Sections {
                     .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
             KayaApp.Signal<String> visits = tx.signal("archive: 0 visits");
 
-            // Symbols are CONCEPTS, drawn per platform: SF Symbols
-            // spells HOME `house`, and no shared asset would be legal
-            // anyway (docs/styling-plan.md D6).
+            // A symbol names a CONCEPT (docs/styling-plan.md D6).
             long feed = tx.addSection(FEED).title("Feed")
                     .symbol(KayaApp.Symbol.HOME)
                     .id();

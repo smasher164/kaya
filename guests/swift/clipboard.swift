@@ -1,23 +1,13 @@
-// The clipboard conformance scene, Swift port — one clip in several
-// representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md). See
-// guests/rust/clipboard.rs and tools/scenes/clipboard.steps.
-//
-// EVERY ASSERTION CROSSES A PROCESS BOUNDARY: a check where kaya reads
-// what kaya wrote parses its own malformed header happily, so it cannot
-// fail for the reason the design exists. The custom format is the one
-// exception — no stock tool writes an app-defined type, so a foreign
-// reader confirms the bytes from outside. The image is asserted as a
-// DECODED SIZE, never as bytes, because every host re-encodes freely.
+// The clipboard scene, Swift port — guests/rust/clipboard.rs,
+// tools/scenes/clipboard.steps.
 
 import Foundation
 
 let app = KayaApp()
 
 // NOT THE TEMP DIRECTORY ON iOS: $TMP there is the app's own Documents
-// (kayaTempDir in swift/KayaSwiftUI.swift), because the outside process
-// that seeds and reads these files cannot see an app's private storage.
-// TMPDIR FIRST EVERYWHERE ELSE — NSTemporaryDirectory() ignores TMPDIR
+// (kayaTempDir in swift/KayaSwiftUI.swift) — the outside reader cannot see
+// private storage. TMPDIR elsewhere; NSTemporaryDirectory() ignores it
 // (docs/traps.md).
 #if os(iOS)
     let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
@@ -29,8 +19,7 @@ let sceneDir = (kayaTmp as NSString)
 try? FileManager.default.createDirectory(
     atPath: sceneDir, withIntermediateDirectories: true)
 
-// A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
-// through a foreign decoder, so it has to be a real encoded image.
+// A real 4x4 PNG: a foreign decoder asserts its size.
 let pixelPNG: [UInt8] = [
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  // signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  // IHDR length + type
@@ -44,11 +33,9 @@ let pixelPNG: [UInt8] = [
     0x44, 0xAE, 0x42, 0x60, 0x82,  // IEND + crc
 ]
 
-// The app-defined format's id: reverse-DNS and space-free, because it
-// reaches every platform's own registry VERBATIM.
+// Reverse-DNS and space-free: reaches every registry VERBATIM.
 let noteID = "dev.kaya/note"
-// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and
-// \\ in all three interpreters, so a quoted byte has no spelling.
+// NO QUOTES: the step grammar escapes \n, \r and \\ only.
 let noteBytes: [UInt8] = Array("note=1".utf8)
 
 FileManager.default.createFile(
@@ -78,8 +65,6 @@ app.build { tx in
 
     func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
         switch clip {
-        // EMPTY IS THE UNIVERSAL NO; the guest does not try to tell its
-        // four causes apart, because the platforms decline to say.
         case nil:
             tx.write(status, .str("empty"))
         case .text(let text):
@@ -99,8 +84,7 @@ app.build { tx in
                 return
             }
             Thread.detachNewThread {
-                // OFF THE APP THREAD: open blocks, and a pasted file is a
-                // picked one arriving through a second door.
+                // OFF THE APP THREAD: open blocks.
                 var text = ""
                 do {
                     let (handle, _) = try file.open()
@@ -124,9 +108,6 @@ app.build { tx in
         tx.button(
             "copy",
             onClick: { inner in  // button#0
-                // ONE CLIP, FOUR REPRESENTATIONS, and kaya derives none
-                // from any other. Wire order is kaya's — descending
-                // richness — not this chain's.
                 inner.copy()
                     .text("kaya clip")
                     .html("<b>kaya</b> clip")
@@ -176,17 +157,15 @@ app.build { tx in
         plain = tx.entry()  // entry#1
         tx.setA11yId(plain, "plain")
 
-        // The accept list is declared on the TEMPLATE, and that
-        // declaration is what turns the node hook on at all
-        // (docs/tpl-props-plan.md §1).
+        // The accept list is declared on the TEMPLATE, which is what turns the
+        // node hook on at all (docs/tpl-props-plan.md §1).
         tx.setA11yId(tx.label(bind: rowStatus), "row-status")  // label#1
         let notes = tx.collection()
         tx.each(notes) { t in
             let note = t.entry()  // entry#2, one stamped copy
             t.setAccepts(note, [KayaAppTx.acceptText])
             tx.onPaste(note) { inner, keys, clip in
-                // The dispatch only routes a NON-EMPTY path to a node
-                // handler, so the first key is there by construction.
+                // Dispatch routes only a NON-EMPTY path to a node handler.
                 if case .text(let text) = clip, case .str(let key) = keys[0] {
                     inner.write(rowStatus, .str("row \(key) pasted \(text)"))
                     return

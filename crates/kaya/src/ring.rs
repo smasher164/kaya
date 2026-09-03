@@ -65,11 +65,10 @@ pub struct KayaRecordHeader {
     pub flags: u16,
 }
 
-/// The button-clicked record as it appears on the wire. `id` is a widget
-/// id when `path_len` is 0 and a template node id otherwise, with
-/// `path_len` key values — the copy's key path, outermost first, each
-/// encoded as { u32 type; u32 len; payload padded to 8 } — following the
-/// fixed part.
+/// The button-clicked record on the wire. `id` is a widget id when
+/// `path_len` is 0 and a template node id otherwise, followed by `path_len`
+/// key values — the copy's key path, outermost first, each encoded as
+/// { u32 type; u32 len; payload padded to 8 }.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -334,33 +333,27 @@ impl OccRing {
     }
 
     /// Consumers inside `cond.wait` right now: a wake test that does not
-    /// first know the consumer is parked proves nothing, because the
-    /// flag is also honored on the way in.
-    ///
-    /// Test-only, and `cfg`'d rather than `allow`'d so it says which.
+    /// first know the consumer is parked proves nothing, because the flag
+    /// is also honored on the way in. `cfg`'d rather than `allow`'d.
     #[cfg(test)]
     pub fn parked(&self) -> usize {
         self.parked.load(Ordering::Acquire)
     }
 
-    /// The two cursors, for the stall watchdog: `(head, tail)`. Equal is
-    /// an empty ring; unequal with `head` standing still is the stall.
-    /// Works for the direct tier as well as the function floor, because
-    /// both advance `head`.
+    /// The two cursors, for the stall watchdog: `(head, tail)`. Equal is an
+    /// empty ring; unequal with `head` standing still is the stall — true
+    /// for the direct tier too, since both advance `head`.
     pub(crate) fn cursors(&self) -> (u32, u32) {
         let head = self.head.0.load(Ordering::Acquire);
         let tail = self.tail.0.load(Ordering::Acquire);
         (head, tail)
     }
 
-    /// How many records are waiting, for the watchdog's message.
-    ///
-    /// Walks the published region, which is safe to READ from another
-    /// thread: those bytes were written before `tail` was released and
-    /// nothing reuses them until the consumer advances `head` past them.
-    /// A DIAGNOSTIC count: a consumer draining concurrently can leave
-    /// this walk on a header the producer has overwritten, so the walk
-    /// is bounded and stops at anything that cannot be a record.
+    /// How many records are waiting, for the watchdog's message. Walking the
+    /// published region is safe from another thread — those bytes were
+    /// written before `tail` was released. A DIAGNOSTIC count: a concurrent
+    /// drain can leave the walk on an overwritten header, so it is bounded
+    /// and stops at anything that cannot be a record.
     pub(crate) fn pending_records(&self) -> u64 {
         let (mut at, tail) = self.cursors();
         let mut records = 0;
@@ -470,14 +463,10 @@ mod tests {
         assert_eq!(consumer.join().unwrap(), Waited::Shutdown);
     }
 
-    // Spinning on `parked` first is what makes the wake tests a test of
-    // the NOTIFY rather than of the flag: the wake is also honored on
-    // the way in, so a version that slept and lost the race would pass
-    // while proving nothing (docs/background-work-plan.md §5).
-    //
-    // And the wait is timed rather than joined: a missing notify leaves
-    // the consumer parked forever, and `join` would turn that into a
-    // hung matrix lane instead of a failure.
+    // Spinning on `parked` first is what makes the wake tests a test of the
+    // NOTIFY rather than of the flag: the wake is also honored on the way
+    // in (docs/background-work-plan.md §5). The wait is timed rather than
+    // joined — a missing notify would otherwise hang the lane.
     fn woke_within<T: Send + 'static>(
         ring: &Arc<OccRing>,
         wait: impl FnOnce(Arc<OccRing>) -> T + Send + 'static,

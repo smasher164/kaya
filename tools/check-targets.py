@@ -7,11 +7,8 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# Cross-target compile check: per-platform Rust breakage in seconds,
-# before any emulator, simulator or VM is involved.
-#
+# Cross-target compile check: per-platform Rust breakage in seconds.
 # Usage: check-targets.py [native|ios|android|windows|all]   (default all)
-#
 # The Linux/GTK backend is the one absentee — gtk-sys needs the distro's
 # pkg-config world — so tools/check-gtk.py is what to run after touching
 # gtk.rs. Do not read a green here as "every backend compiles".
@@ -61,20 +58,13 @@ check("android", "--target", "aarch64-linux-android")
 check("windows", "--target", "aarch64-pc-windows-msvc")
 
 
-# THE GO BINDING'S ANDROID ARM: the `//go:linkname mainMain main.main`
-# pull in bindings/go/mainmain_android.go (docs/go-mobile-plan.md). The
-# MATRIX cannot cover it — the validation APK uses the registration
-# shape — so this clause cross-builds a single-main fixture for
-# android/arm64 as `-buildmode=c-shared` and asks two things: does the
-# tagged file compile, and does the linkname RESOLVE. A bodyless func
-# compiles whether or not the directive above it is there or spelled
-# right; only the link says otherwise.
-#
-# NO cargo-ndk BUILD IS NEEDED, which is what makes this a fast gate.
-# The binding's `#cgo android LDFLAGS` names -lkaya, and a one-symbol
-# stub answers for it. CGO_LDFLAGS is searched BEFORE the #cgo
-# directive's own -L (measured with `ld -t`), so the stub wins whether
-# or not the android lane left a real libkaya.so behind.
+# THE GO BINDING'S ANDROID ARM (docs/go-mobile-plan.md): the MATRIX
+# cannot cover the `//go:linkname mainMain main.main` pull, since the
+# validation APK uses the registration shape. A bodyless func compiles
+# whether or not the directive above it is spelled right, so only the
+# link says otherwise. NO cargo-ndk BUILD IS NEEDED: CGO_LDFLAGS is
+# searched BEFORE the #cgo directive's own -L (measured with `ld -t`),
+# so a one-symbol stub wins whether or not a real libkaya.so is there.
 def go_android():
     global status
     if want not in ("all", "android"):
@@ -87,10 +77,9 @@ def go_android():
         return
     bins = sorted(glob.glob(f"{ndk}/toolchains/llvm/prebuilt/*/bin"))
     ndkbin = bins[0] if bins else f"{ndk}/toolchains/llvm/prebuilt/*/bin"
-    # THE LOWEST PLATFORM THE NDK CARRIES, not the module's minSdk, and
-    # deliberately not coupled to it: this checks Go symbol resolution,
-    # which no platform level changes, and reading build.gradle.kts would
-    # put the Compose interpreter into this gate's cache key.
+    # THE LOWEST PLATFORM THE NDK CARRIES, deliberately not the module's
+    # minSdk: reading build.gradle.kts would put the Compose interpreter
+    # into this gate's cache key.
     candidates = sorted(glob.glob(f"{ndkbin}/aarch64-linux-android[0-9]*-clang"))
     if not candidates or not os.access(candidates[0], os.X_OK):
         print(f"check-targets: go-android FAIL (no aarch64-linux-android*-"
@@ -100,11 +89,9 @@ def go_android():
     cc = candidates[0]
     with scratch_dir("check-targets-go-") as t:
         # A SINGLE main.go WITH NO BUILD TAGS AND NO ANDROID-SPECIFIC
-        # LINE — that is the claim, so the fixture must not contain one
-        # word more than an app author writes. Its own module with a
-        # filesystem replace, because a main package inside dev.kaya
-        # would be a guest with no leg and check-steps would rightly say
-        # so.
+        # LINE is the claim, so the fixture holds not one word more than
+        # an app author writes. Its own module, because a main package
+        # inside dev.kaya would be a guest with no leg.
         (t / "go.mod").write_text(
             f"module kayalinknamefixture\n\ngo 1.27\n\n"
             f"require dev.kaya v0.0.0\n\nreplace dev.kaya => {ROOT}\n",
@@ -133,10 +120,8 @@ def go_android():
             return
         # -dumpdep MAKES THE LINKER SHOW ITS WORK, for the one mutation a
         # successful link cannot see: if guestMain stopped answering with
-        # the app's main, nothing would reference mainMain, dead-code
-        # elimination would drop it, and the build would still succeed.
-        # The dump is the reachability graph on stderr; the edge asserted
-        # below is the attach entry naming the app's own main.
+        # the app's main, dead-code elimination would drop mainMain and
+        # the build would still succeed.
         env = dict(os.environ, CGO_ENABLED="1", GOOS="android",
                    GOARCH="arm64", CC=cc, GOFLAGS="-mod=mod", GOPROXY="off",
                    CGO_LDFLAGS=f"-L{t}/stub")
@@ -225,13 +210,12 @@ if subprocess.run([sys.executable, "tools/lib/paired-cfg.py"],
                   cwd=ROOT, check=False).returncode != 0:
     status = 1
 
-# EVERY SPAWN IN THE CORE SETS ITS THREE DESCRIPTORS EXPLICITLY. A host
-# runtime may mark its own fds 0-2 close-on-exec — node does — and a
-# child left to inherit one starts with it closed: wl-copy refuses by
-# design, xclip hangs to the step ceiling (measured on the js legs
-# 2026-09-01, docs/traps.md). `Command::output()` sets all three itself;
-# a `.spawn()` chain has to say so. Read as text, since the spawn in
-# question is cfg'd to a platform no compiler here reaches.
+# EVERY SPAWN IN THE CORE SETS ITS THREE DESCRIPTORS EXPLICITLY: a host
+# runtime may mark its own fds 0-2 close-on-exec (node does), and a child
+# inheriting one starts with it closed — wl-copy refuses by design, xclip
+# hangs to the step ceiling (measured on the js legs 2026-09-01,
+# docs/traps.md). Read as text, since that spawn is cfg'd to a platform
+# no compiler here reaches.
 _spawn_gate = Gate("check-targets")
 
 

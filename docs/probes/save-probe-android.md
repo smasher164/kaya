@@ -25,11 +25,11 @@ never had is a caller.
 ### The path, end to end (DOCUMENTED, file:line)
 
 1. Guest calls `kaya_open_picked(handle, FILE_MODE_WRITE, …)` —
-   `crates/kaya/src/capi.rs:1406`; the mode decode accepts all three
+   `crates/kaya/src/capi.rs:1338`; the mode decode accepts all three
    values at `capi.rs:1420-1423`, so nothing rejects Write earlier.
-2. `UriSource::open` — `crates/kaya/src/android.rs:277`. Android has no
+2. `UriSource::open` — `crates/kaya/src/android.rs:269`. Android has no
    path: the source holds the `content://` URI and opens per redemption.
-3. Mode string — `crates/kaya/src/protocol.rs:217-222`:
+3. Mode string — `crates/kaya/src/protocol.rs:214-214`:
    Read→`"r"`, Write→`"wt"`, ReadWrite→`"rw"`. `wt` and not `w`
    deliberately: `PathSource` truncates (`protocol.rs:235`), so a bare
    `w` would make one `FileMode` mean two things (docs/traps.md:2344).
@@ -37,7 +37,7 @@ never had is a caller.
    `KayaPresent.openPickedUri`, exception read and cleared, negative fd
    turned into an io error.
 5. `KayaPresent.openPickedUri` —
-   `android/kaya/src/main/kotlin/dev/kaya/KayaPresent.kt:152-163`:
+   `android/kaya/src/main/kotlin/dev/kaya/KayaPresent.kt:122-126`:
    `contentResolver.openFileDescriptor(Uri.parse(uri), mode)` then
    `detachFd()`; ownership crosses to the guest.
 6. The grant that makes step 5 legal is asked for at pick time —
@@ -46,8 +46,8 @@ never had is a caller.
    to the `ACTION_OPEN_DOCUMENT` intent.
 7. Every binding can name the mode: Rust `FileMode`
    (`protocol.rs:83`), Go `PickedFile.Open(mode uint32)`
-   (`bindings/go/runtime.go:316`, constants `kaya_wire.go:89-91`),
-   Python (`bindings/python/kaya/__init__.py:1359`), Swift
+   (`bindings/go/runtime.go:249`, constants `kaya_wire.go:89-91`),
+   Python (`bindings/python/kaya/__init__.py:1195`), Swift
    (`KayaApp.swift:721`), Java (`KayaApp.java:583`), C#
    (`Kaya.cs:34,257`), OCaml (`kaya_runtime.ml:118`), Haskell
    (`KayaApp.hs:349`). MEASURED by grep: 8/8 expose the mode.
@@ -218,7 +218,7 @@ mandatory rather than optional:
   guest surfaces regenerate in lockstep.
 - The request surface must be swept across all 8 bindings (invariant
   2) — Go's `TxShowFileDialog` (`bindings/go/kaya_wire.go:560`) is
-  generated, but the sugar (`bindings/go/app.go:1708`) is not.
+  generated, but the sugar (`bindings/go/app.go:1624`) is not.
 - Four other backends: SwiftUI (`NSSavePanel` / `.fileExporter`),
   GTK (`FileChooserAction.SAVE`), WinUI (`FileSavePicker`), iOS
   (`UIDocumentPickerViewController(forExporting:)`) — one arm each,

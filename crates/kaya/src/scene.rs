@@ -1,17 +1,12 @@
 //! The scene core: signal and collection storage, the binding indexes,
-//! the template registry, and the stamping machinery. Transactions come
-//! in; resolved apply-ops come out. Backends apply what this module emits
-//! and never see a signal, a collection, or a template.
-//!
-//! A For binds a collection and stamps one copy of its template per
-//! entry; a When is For over a zero-or-one collection wired to a Bool
-//! signal. Stamped widgets get core-allocated internal ids (top bit set,
-//! opaque to backends and never guest-visible); the guest-visible name of
-//! a copy is (template node, key path), which interactive widgets carry
-//! pre-encoded as a click tag.
-//!
-//! Lives on the UI thread, one instance per core. Every panic here is a
-//! broken guest or binding, not a runtime condition.
+//! the template registry, and the stamping machinery. Transactions come in;
+//! resolved apply-ops come out, and backends never see a signal, a
+//! collection, or a template. A For binds a collection and stamps one copy
+//! of its template per entry; a When is For over a zero-or-one collection
+//! wired to a Bool signal. Stamped widgets get core-allocated internal ids
+//! (top bit set, never guest-visible); the guest-visible name of a copy is
+//! (template node, key path). Lives on the UI thread, one instance per core,
+//! and every panic here is a broken guest or binding.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,14 +25,12 @@ const INTERNAL_BIT: u64 = 1 << 63;
 /// primary one. Clear on the phones, whose systems own surface geometry.
 pub(crate) const CAP_AUX_WINDOWS: u64 = 1;
 
-/// THE HOST'S CAPABILITY WORD, AND THE ONLY PLACE THE PREDICATE IS
-/// WRITTEN. `kaya_capabilities()` returns this const and the walls below
-/// test it, so the answer a guest is told and the refusal a guest walks
-/// into cannot disagree.
-///
-/// `cfg!` rather than a `#[cfg]` pair on purpose: it is a const-folded
-/// bool, so both arms of every wall below COMPILE on every target and a
-/// typo in the phone arm fails the mac build.
+/// THE HOST'S CAPABILITY WORD, AND THE ONLY PLACE THE PREDICATE IS WRITTEN:
+/// `kaya_capabilities()` returns this const and the walls below test it, so
+/// what a guest is told and what it walks into cannot disagree. `cfg!` rather
+/// than a `#[cfg]` pair on purpose: it is a const-folded bool, so both arms of
+/// every wall COMPILE on every target and a typo in the phone arm fails the
+/// mac build.
 pub(crate) const CAPABILITIES: u64 = if cfg!(any(target_os = "ios", target_os = "android")) {
     0
 } else {
@@ -67,16 +60,14 @@ enum TplOp {
     When { node: u64, signal: SignalId, body: Arc<TplBody> },
     /// A context catalog attached to a template node: every stamped copy
     /// shows the shared `item` tree, and each stamp emits a
-    /// CONTEXT_ATTACH_NODE apply carrying that copy's key path. Menu
-    /// items are not stamped in v1.
+    /// CONTEXT_ATTACH_NODE apply carrying that copy's key path.
     ContextAttachNode { node: u64, item: MenuItemId },
 }
 
 /// The collections ONE COPY of each variant's blueprint owns as data:
 /// every `Collection` declared directly in that body, When bodies
-/// included (they stamp at the same copy path). A nested For's own body
-/// is NOT walked — its Collections belong to ITS rows, one key deeper,
-/// and are born when those rows are inserted.
+/// included. A nested For's own body is NOT walked — its Collections
+/// belong to ITS rows, one key deeper.
 fn owned_collections(bodies: &[Arc<TplBody>]) -> Vec<Vec<CollectionId>> {
     fn walk(body: &TplBody, out: &mut Vec<CollectionId>) {
         for op in &body.ops {
@@ -188,19 +179,14 @@ struct CollInstance {
     entries: HashMap<Key, (u32, Record)>,
 }
 
-/// THE SEED: how many rows a windowed-capable For realizes before its
-/// backend has laid anything out, on a backend that declared it windows
-/// (docs/deferred.md, the declares-windowing entry).
-///
-/// A GENEROUS SCREENFUL, and generous is the whole argument. Two tiers
-/// read their first VISIBLE COUNT off the rows they have realized (the
-/// iOS synthesized table's placement walk, Compose's laid-out cells), so
-/// a seed smaller than one viewport is handed straight back as the first
-/// report and the band then converges by DOUBLING (docs/traps.md, "A
-/// window seed smaller than one viewport"). 128 rows clears a 2,560pt
-/// viewport at kaya's shortest row, a bare label's ~20pt pitch. The cost
-/// is bounded and paid once: ~6.7 MB of Compose state against ART's
-/// 192 MB limit, against the whole collection under the bridge.
+/// THE SEED: how many rows a windowed-capable For realizes before its backend
+/// has laid anything out (docs/deferred.md, the declares-windowing entry). A
+/// GENEROUS SCREENFUL is the whole argument — two tiers read their first
+/// VISIBLE COUNT off the rows they have realized, so a smaller seed is handed
+/// back as the first report and the band converges by DOUBLING (docs/traps.md,
+/// "A window seed smaller than one viewport"). 128 rows clears a 2,560pt
+/// viewport at a bare label's ~20pt pitch, for ~6.7 MB of Compose state
+/// against ART's 192 MB limit.
 const WINDOW_SEED_ROWS: usize = 128;
 
 /// A live rendering site of a For: the (collection, instance path) it
@@ -231,14 +217,10 @@ struct WhenSite {
 struct Stamp {
     /// Internal widget ids in creation order; destroyed in reverse.
     widgets: Vec<WidgetId>,
-    /// Which TEMPLATE NODE each of this copy's widgets came from — the map
-    /// `run_body` builds while stamping, kept instead of thrown away.
-    ///
-    /// It is the translation between the copy's two names: a stamped
-    /// widget has an internal id, which a programmatic write names and the
-    /// ledger keys on, while the app knows it as (template node, key
-    /// path). Banking a row's typing and naming the restored text in an
-    /// `undone` payload both read this map.
+    /// Which TEMPLATE NODE each of this copy's widgets came from — the
+    /// translation between the copy's two names: a stamped widget has an
+    /// internal id, which a programmatic write names and the ledger keys
+    /// on, while the app knows it as (template node, key path).
     nodes: HashMap<u64, WidgetId>,
     /// The copy's root widgets (children of the For's container), in
     /// body order — what a move repositions.
@@ -280,14 +262,12 @@ struct MenuItem {
 
 // --- The undo ledger (docs/undo-plan.md D2, D3, §3) ---------------------
 
-/// One window's history, newest LAST. `done` is what an undo walks;
-/// `redo` is what a redo walks, and any new step clears it.
-///
-/// ONE ORDERED LIST, NOT TWO STACKS: "ask the focused text first" and
-/// "ask the most recent first" are the same question, because a group
-/// commit clears the focused field's native stack (A1) and every episode
-/// therefore begins with an empty one. Nothing in a native stack can
-/// reach past the frontier episode's start.
+/// One window's history, newest LAST. `done` is what an undo walks; `redo` is
+/// what a redo walks, and any new step clears it. ONE ORDERED LIST, NOT TWO
+/// STACKS: "ask the focused text first" and "ask the most recent first" are
+/// the same question, because a group commit clears the focused field's native
+/// stack (A1), so nothing in a native stack can reach past the frontier
+/// episode's start.
 #[derive(Default)]
 struct Ledger {
     done: Vec<LedgerEntry>,
@@ -341,9 +321,9 @@ pub(crate) enum UndoRoute {
 }
 
 /// A group under construction: the pre-state of everything the batch has
-/// touched so far. Kept for two jobs — computing the inverse at the end,
-/// and PUTTING THE SCENE BACK if a later op turns out to be one the core
-/// cannot invert.
+/// touched so far, for computing the inverse at the end and for PUTTING
+/// THE SCENE BACK if a later op turns out to be one the core cannot
+/// invert.
 struct GroupCapture {
     window: WindowId,
     label: String,
@@ -374,19 +354,17 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         | TxOp::CollectionUpdateField { .. }
         | TxOp::CollectionRemove { .. }
         | TxOp::CollectionMove { .. } => UndoVerdict::Invertible,
-        // Focus was the first pure effect; the three text-range ops are
-        // the rest of the set A2 anticipated ("scroll when it lands").
-        // Clear is NOT one — it destroys widget-owned text the core
-        // never held, so it cannot be put back.
+        // Focus was the first pure effect; the three text-range ops
+        // are the rest of the set A2 anticipated. Clear is NOT one — it
+        // destroys widget-owned text the core never held.
         TxOp::WidgetCommand {
             command: CommandKind::Focus,
             ..
         } => UndoVerdict::PureEffect,
-        // ALL THREE, together, so no app author has to remember which of
-        // them a group admits. HIGHLIGHT looks like state and is not: the
-        // core keeps no declared set to invert (docs/ranges-plan.md D2),
-        // and a set is bound to the text it was declared against — an undo
-        // that restores the text drops it anyway.
+        // ALL THREE, together, so no app author has to remember which
+        // of them a group admits. HIGHLIGHT looks like state and is not:
+        // the core keeps no declared set to invert
+        // (docs/ranges-plan.md D2).
         TxOp::HighlightRanges { .. } | TxOp::SelectRange { .. } | TxOp::RevealRange { .. } => {
             UndoVerdict::PureEffect
         }
@@ -457,14 +435,13 @@ pub(crate) struct Scene {
     /// this Option is the whole record of it.
     brand_accent: Option<crate::brand::BrandAccent>,
     /// The brand typeface, once set — the accent's twin, same set-once
-    /// and pre-mount walls, same reason. The REQUEST is kept rather
-    /// than anything derived: the core resolves nothing here, so there
-    /// is nothing else to keep (docs/styling-plan.md Slice 2b).
+    /// and pre-mount walls. The REQUEST is kept rather than anything
+    /// derived: the core resolves nothing here (docs/styling-plan.md
+    /// Slice 2b).
     brand_typeface: Option<crate::protocol::TypefaceRequest>,
     /// The app's identity, once declared — the brand's walls verbatim
-    /// (docs/app-identity-plan.md). The DECLARATION is kept rather than
-    /// anything derived, for the typeface's reason: the core inspects
-    /// neither the name nor the bytes, so there is nothing else to keep.
+    /// (docs/app-identity-plan.md). The DECLARATION is kept: the core
+    /// inspects neither the name nor the bytes.
     app_identity: Option<crate::protocol::AppIdentity>,
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
@@ -483,8 +460,8 @@ pub(crate) struct Scene {
     /// user pops reconcile through `user_popped`.
     nav_stacks: HashMap<WindowId, Vec<WindowId>>,
     entry_bindings: HashMap<SignalId, Vec<(WindowId, EntryProp)>>,
-    /// Live sections: section surface id -> the window whose section set
-    /// holds it. Sections share the surface namespace with windows and
+    /// Live sections: section surface id -> the window whose section
+    /// set holds it, sharing the surface namespace with windows and
     /// entries. APPEND-ONLY by design: this grammar has no destruction
     /// verbs, and a section only dies with its window.
     section_of: HashMap<WindowId, WindowId>,
@@ -506,8 +483,8 @@ pub(crate) struct Scene {
     window_shortcuts: HashMap<WindowId, std::collections::HashSet<String>>,
     /// role -> the item that claimed it. App-wide, unlike shortcuts: a
     /// role names ONE standard command for the whole program, and the
-    /// host that relocates it (macOS's application menu) has exactly
-    /// one slot to put it in.
+    /// host that relocates it (macOS's application menu) has exactly one
+    /// slot to put it in.
     menu_roles: HashMap<String, MenuItemId>,
     /// signal -> the (item, property) pairs it feeds. Only the
     /// signal-bindable menu props (label, enabled, checked, value) land
@@ -521,24 +498,23 @@ pub(crate) struct Scene {
     /// order. `applied` is the hysteresis bit.
     breakpoints: Vec<BreakpointState>,
     /// The last (content width, platform size class) each window
-    /// reported (kaya_window_metrics; the class is SIZE_CLASS_NONE where
-    /// the platform has none and the width derives it). Latched like the
-    /// presentation: a breakpoint declared before the first report
-    /// evaluates when it arrives.
+    /// reported (kaya_window_metrics; SIZE_CLASS_NONE where the platform
+    /// has none and the width derives it). Latched, so a breakpoint
+    /// declared before the first report evaluates when it arrives.
     window_metrics: HashMap<WindowId, (f64, i64)>,
     /// The last GUEST-AUTHORED axis per widget — what a reverting
     /// breakpoint restores (falling back to the creation kind's own).
     /// Breakpoint applies deliberately do not write here.
     authored_axis: HashMap<WidgetId, i64>,
-    /// Live containers that DECLARED COLUMNS — a table is a column whose
-    /// header bar makes it one, and that same declaration is what gives
+    /// Live containers that DECLARED COLUMNS — a table is a column
+    /// whose header bar makes it one, and that declaration is what gives
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
     /// axis refusal below can be stated in both orderings.
     tables: std::collections::HashSet<WidgetId>,
     /// `parent_of`'s ORDERED twin: parent -> children in declaration
-    /// order. Kept for the stacked fold (docs/adaptive-layout-plan.md
-    /// D7), whose rule reads a breakpoint row's own shape at evaluation
-    /// time. Never pruned, like `widgets`.
+    /// order, for the stacked fold (docs/adaptive-layout-plan.md D7),
+    /// whose rule reads a breakpoint row's own shape at evaluation time.
+    /// Never pruned, like `widgets`.
     children_of: HashMap<WidgetId, Vec<WidgetId>>,
     /// Guest-authored grow weights — the fold rule's other input.
     grow_weights: HashMap<WidgetId, f64>,
@@ -547,29 +523,24 @@ pub(crate) struct Scene {
     coll_instances: HashMap<(CollectionId, PathKey), CollInstance>,
     /// What ONE ROW of each collection owns as data: the nested
     /// collections its blueprint declares, per variant, recorded when its
-    /// For's scope closes (live or nested). It is what lets a row's own
-    /// nested collections be born with its RECORD instead of with its
-    /// stamp (`birth_nested`) — data-outliving-widgets one level down.
-    /// `bind_collection` asserts one For per collection, so the key is
-    /// unambiguous, and the overwhelmingly common empty entry costs the
-    /// insert path a lookup and no allocation.
+    /// For's scope closes. It is what lets a row's nested collections be
+    /// born with its RECORD instead of with its stamp (`birth_nested`) —
+    /// data-outliving-widgets one level down. `bind_collection` asserts
+    /// one For per collection, so the key is unambiguous.
     row_owned: HashMap<CollectionId, Vec<Vec<CollectionId>>>,
     for_sites: HashMap<(CollectionId, PathKey), ForSite>,
     stamps: HashMap<EntryRef, Stamp>,
-    /// A nested For's TEMPLATE-SCOPED header bar (docs/tables-plan.md,
-    /// dynamic tables), keyed by the For's template node: every stamped
-    /// copy receives it, and stamping records the copy in
-    /// [`Self::bar_instances`].
+    /// A nested For's TEMPLATE-SCOPED header bar (docs/tables-plan.md),
+    /// keyed by the For's template node: every stamped copy receives it,
+    /// and stamping records the copy in [`Self::bar_instances`].
     tpl_headers: HashMap<u64, HeaderBar>,
     /// Per-copy header re-declarations (the per-copy sort indicator),
-    /// keyed (template node, copy keys outermost-first). Cleared with
-    /// the copy, and by a template re-declaration — "replacing whatever
-    /// was declared before" covers the copies.
+    /// keyed (template node, copy keys outermost-first). Cleared with the
+    /// copy, and by a template re-declaration.
     bar_overrides: HashMap<(u64, PathKey), HeaderBar>,
     /// Every stamped copy of every nested For: (template node, copy
-    /// keys) -> that copy's container. Recorded unconditionally so a
-    /// LATE template declaration can re-stamp bars onto copies that
-    /// already exist.
+    /// keys) -> that copy's container. Recorded unconditionally so a LATE
+    /// template declaration can re-stamp bars onto existing copies.
     bar_instances: HashMap<(u64, PathKey), WidgetId>,
     /// EVERY LIVE CANVAS'S VALIDATED DRAWING, live ids and stamped
     /// instance ids alike (docs/canvas-plan.md). This is the raster's
@@ -582,8 +553,7 @@ pub(crate) struct Scene {
     tpl_drawings: HashMap<u64, crate::canvas::Drawing>,
     /// Per-copy re-declarations, keyed (template node, copy keys
     /// outermost-first). Cleared with the copy, and by a template
-    /// re-declaration — "replacing whatever was declared before" covers
-    /// the copies.
+    /// re-declaration.
     drawing_overrides: HashMap<(u64, PathKey), crate::canvas::Drawing>,
     /// Every stamped copy of every canvas template node. Recorded
     /// unconditionally so a LATE template declaration reaches copies
@@ -603,8 +573,7 @@ pub(crate) struct Scene {
     canvas_tracks: HashMap<WidgetId, (f64, f64)>,
     /// THE LATEST-WINS MAILBOX (§3.2.1). One entry per redraw canvas:
     /// the size a request is outstanding for. A newer size REPLACES the
-    /// pending entry rather than queueing behind it, and the guest's
-    /// answering set_drawing is what re-arms the ask — so a drag-resize
+    /// pending entry rather than queueing behind it, so a drag-resize
     /// storm collapses to the newest size and a guest slower than the
     /// resize can never stuff a queue.
     canvas_pending: HashMap<WidgetId, (f64, f64)>,
@@ -613,21 +582,20 @@ pub(crate) struct Scene {
     canvas_asked: HashMap<WidgetId, (f64, f64)>,
     /// Draw requests a TRANSACTION produced — a canvas that became a
     /// redraw one after its track was already known. Drained by the
-    /// caller of [`Scene::apply`] onto its own occurrence sink, because a
-    /// scene owns no sink of its own.
+    /// caller of [`Scene::apply`], because a scene owns no sink.
     asks: Vec<Occurrence>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
-    /// Every live surface that has a mounted root, and WHICH widget that
-    /// root is. `Mount` is the only site that inserts; six sites remove.
-    /// Held as one map rather than a set plus a side table because the two
-    /// facts have one lifetime: a seventh removal site that updated only
-    /// one of them would make an unreachable widget look reachable.
+    /// Every live surface that has a mounted root, and WHICH widget
+    /// that root is. `Mount` is the only site that inserts; six sites
+    /// remove. One map rather than a set plus a side table because the
+    /// two facts have one lifetime: a seventh removal site that updated
+    /// only one would make an unreachable widget look reachable.
     mounted_windows: HashMap<WindowId, WidgetId>,
     /// child -> parent, LIVE ZONE ONLY. The template zone keeps its own
     /// and promotes an unparented node to a root of the stamped copy; the
-    /// live zone has nowhere to promote to, so an unclaimed widget renders
-    /// nowhere while still answering every read. This map plus
+    /// live zone has nowhere to promote to, so an unclaimed widget
+    /// renders nowhere while still answering every read. This map plus
     /// `mounted_windows` is what proves it does not happen.
     parent_of: HashMap<WidgetId, WidgetId>,
     /// Scroll viewports that already hold their one child: a scroll
@@ -651,22 +619,19 @@ pub(crate) struct Scene {
     ledgers: HashMap<WindowId, Ledger>,
     /// The text the core has SEEN each field hold: seeded by every
     /// programmatic write it resolves, advanced by every text_changed it
-    /// is told about. NOT A MIRROR READ — this is the core's record of
-    /// what it watched go past, and it exists because an episode's
-    /// before-image is the text as of the event BEFORE the run's first.
+    /// is told about. NOT A MIRROR READ — an episode's before-image is
+    /// the text as of the event BEFORE the run's first.
     field_text: HashMap<WidgetId, String>,
     /// THE BACKEND DECLARED THAT IT WINDOWS ROWS (docs/deferred.md, the
     /// declares-windowing entry). Core-internal, set once at the
-    /// backend's own init: it rides no wire record, no binding spells it
-    /// and no guest hears it. It seeds a windowed-capable For's band —
-    /// see `seed_window`.
+    /// backend's own init: it rides no wire record and no guest hears it.
+    /// It seeds a windowed-capable For's band — see `seed_window`.
     windowing: bool,
 }
 
-/// The choice kinds: one selection among label-children options.
-/// Select is the dropdown presentation, Radio the inline group —
-/// SAME semantics (options as label children, Value as the 0-based
-/// index, value_changed on user picks only), different chrome.
+/// The choice kinds: one selection among label-children options. Select
+/// is the dropdown presentation, Radio the inline group — SAME semantics,
+/// different chrome.
 fn is_choice(kind: WidgetKind) -> bool {
     matches!(kind, WidgetKind::Select | WidgetKind::Radio)
 }
@@ -735,10 +700,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The arrangement axis: the two constructor kinds are one node
         // this parameterizes (docs/adaptive-layout-plan.md D1).
         Prop::Axis => matches!(kind, WidgetKind::Column | WidgetKind::Row),
-        // A container's own padding (docs/styling-plan.md D3, one level
-        // down from the window inset): spacing's kinds exactly, and for
-        // spacing's reason — the prop is about a container's relation
-        // to ITS children, and a leaf has none to hold off its edge.
+        // A container's own padding (docs/styling-plan.md D3): spacing's
+        // kinds exactly, and for spacing's reason — the prop is about a
+        // container's relation to ITS children.
         Prop::Inset => {
             matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid)
         }
@@ -749,19 +713,15 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // identity and a spoken name. Containers included, deliberately —
         // a column is a labelled group to an assistive client.
         Prop::A11yId | Prop::A11yLabel => true,
-        // Acceptance is scoped to what can RECEIVE a paste. Kept to the
-        // text kinds for now because those are the ones with native paste
-        // behaviour to override; widening it is a decision about which
-        // kinds get a paste hook, not about this prop.
+        // Acceptance is scoped to what can RECEIVE a paste: the text
+        // kinds, which are the ones with native paste behaviour to
+        // override.
         Prop::Accepts => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
-        // The hint is the ONE accessibility prop that is not universal,
-        // and the reason is the platforms' own definition: a hint says
-        // what ACTIVATING the control does, so it needs an activation.
-        // Android carries it as the click ACTION's label and has nowhere
-        // to put one without an action. So a hint on a label, an image or
-        // a container dies here rather than reaching four backends and not
-        // the fifth. Adjustable and editable kinds are a deliberate cut:
-        // their Android route is a different action's label.
+        // The hint is the ONE accessibility prop that is not universal, and
+        // the reason is the platforms' own: a hint says what ACTIVATING the
+        // control does, and Android carries it as the click ACTION's label
+        // with nowhere to put one without an action. So a hint on a label
+        // dies here rather than reaching four backends and not the fifth.
         Prop::A11yHint => matches!(
             kind,
             WidgetKind::Button
@@ -777,10 +737,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
 
-/// A command is momentary and kind-scoped. The same check class as
-/// check_prop — misuse fails loudly at the call site, never on a backend.
-/// (The silent no-op is reserved for instance-addressed commands, where a
-/// stamped target can legitimately vanish under rebuild.)
+/// A command is momentary and kind-scoped. The check_prop class —
+/// misuse fails loudly at the call site, never on a backend. (The silent
+/// no-op is reserved for instance-addressed commands, where a stamped
+/// target can legitimately vanish under rebuild.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
         CommandKind::Clear => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
@@ -821,32 +781,20 @@ fn native_offset_chars(text: &str, byte: u64) -> u64 {
     text[..byte as usize].chars().count() as u64
 }
 
-/// THE ONE CHOKEPOINT every declared range crosses (docs/ranges-plan.md
-/// D2, docs/ranges-units.md §7): validate against the text, then
-/// convert to the backend's unit. Both halves here, in this order,
-/// because the conversion is only meaningful on an offset that is
-/// already known to be a code-point boundary inside the text —
-/// `&text[..byte]` panics with Rust's own message otherwise, which is a
-/// worse version of the same complaint.
+/// THE ONE CHOKEPOINT every declared range crosses (docs/ranges-plan.md D2,
+/// docs/ranges-units.md §7): validate against the text, then convert to the
+/// backend's unit, in that order because the conversion is only meaningful on
+/// an offset already known to be a code-point boundary.
 ///
-/// WHY IT PANICS rather than dropping the op: it is the same class as
-/// `wire.rs`'s `expect("kaya: string value is not UTF-8")` — an
-/// app-programming error, deterministic, and fixable by the app. A
-/// dropped op is the failure that SHIPS, because the app sees a
-/// highlight that did not appear and blames the backend. Snapping is
-/// what the platforms do and the measurements show snapping is not one
-/// behaviour: AppKit snaps a bad start and keeps a bad end (whose copy
-/// then yields U+FFFD), GTK accepts a split verbatim, Compose snaps
-/// outward and throws out of bounds, Windows clamps silently. Adopting
-/// any of them would mean adopting whichever platform ran first.
+/// WHY IT PANICS rather than dropping the op: a dropped op is the failure that
+/// SHIPS, and snapping is not one behaviour — AppKit snaps a bad start and
+/// keeps a bad end (whose copy yields U+FFFD), GTK accepts a split verbatim,
+/// Compose snaps outward and throws, Windows clamps silently.
 ///
-/// WHAT IT DOES NOT REFUSE, deliberately: a GRAPHEME split. The
-/// platforms disagree about what a grapheme is — java.text.BreakIterator
-/// counts the ZWJ family as 11 clusters where .NET StringInfo and Swift
-/// count 5, same string, measured — so a core refusing by its own table
-/// would refuse ranges three platforms honour. It also does not refuse
-/// an empty range (that is a caret, and select_range needs it) or an
-/// empty set.
+/// WHAT IT DOES NOT REFUSE, deliberately: a GRAPHEME split, since the
+/// platforms disagree about what a grapheme is (java.text.BreakIterator counts
+/// the ZWJ family as 11 clusters where .NET StringInfo and Swift count 5, same
+/// string, measured). Nor an empty range (a caret) or an empty set.
 fn check_range(text: &str, widget: WidgetId, op: &str, range: TextRange) -> NativeRange {
     let where_ = format!("kaya: {op} on {widget:?}");
     assert!(
@@ -876,9 +824,8 @@ fn check_range(text: &str, widget: WidgetId, op: &str, range: TextRange) -> Nati
 }
 
 /// Which character a mid-sequence offset splits, spelled the way Rust's
-/// own slice panic spells it — the core can say this because it holds
-/// the text, and it is the difference between a message that names the
-/// bug and one that names a number.
+/// own slice panic spells it: the core holds the text, so it can name the
+/// bug rather than a number.
 fn split_char(text: &str, offset: usize) -> String {
     let start = (0..=offset).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
     let ch = text[start..].chars().next().unwrap_or('\u{fffd}');
@@ -974,9 +921,8 @@ fn check_section_prop_value(prop: SectionProp, value: &Value) {
 
 /// THE VALUE WALL for the semantic icon vocabulary (docs/styling-plan.md
 /// D6), the `role` precedent: an out-of-enum number dies AT THE ROOT,
-/// naming the vocabulary. Without it the failure is silent in the worst
-/// direction — a backend's glyph table simply misses and nothing says
-/// why. The sentence lists the whole vocabulary rather than the count.
+/// naming the vocabulary. Without it a backend's glyph table simply
+/// misses and nothing says why.
 fn check_symbol(value: i64) {
     assert!(
         crate::wire::symbol_name(value).is_some(),
@@ -989,10 +935,10 @@ fn check_symbol(value: i64) {
     );
 }
 
-/// The closed parent/child grammar (DESIGN.md, Menus): a `menu`
-/// contains the five non-option kinds; a `radio_group` contains only
-/// `radio_option`; leaves contain nothing. The depth cap is separate
-/// (validated at the anchor); this is the per-edge grammar.
+/// The closed parent/child grammar (DESIGN.md, Menus): a `menu` contains
+/// the five non-option kinds; a `radio_group` contains only
+/// `radio_option`; leaves contain nothing. The depth cap is separate,
+/// validated at the anchor.
 fn menu_accepts(parent: MenuItemKind, child: MenuItemKind) -> bool {
     match parent {
         MenuItemKind::Menu => matches!(
@@ -1018,7 +964,7 @@ fn is_menu_group(kind: MenuItemKind) -> bool {
 /// Which kinds carry which property (DESIGN.md, Menus): label/enabled on
 /// everything but a separator; checked toggle-only; value
 /// radio-group-only; primary and role action-only; shortcut on any LEAF
-/// command; icon on everything but a separator. Misuse dies at the root.
+/// command; icon on everything but a separator.
 fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     let ok = match prop {
         MenuProp::Label | MenuProp::Enabled | MenuProp::Icon | MenuProp::Symbol => {
@@ -1032,17 +978,11 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
 }
 
-/// The closed role vocabulary (DESIGN.md, Menus). Closed on purpose — a
-/// role is the only thing that can move an authored item into
-/// dress-owned chrome, or hand its behaviour to the platform.
-///
-/// `cut`, `copy` and `paste` are THE GESTURE LAYER, and they exist
-/// because kaya has no selection API: only the widget knows what is
-/// selected. A role item lowers to the platform's own command, acts on
-/// the FOCUSED widget, and configures its own enablement, which kaya
-/// computes. `undo` and `redo` are the same layer one tier deeper
-/// (docs/undo-plan.md D6). tools/check-roles.py holds every backend to
-/// this line.
+/// The closed role vocabulary (DESIGN.md, Menus). Closed on purpose — a role
+/// is the only thing that can move an authored item into dress-owned chrome.
+/// `cut`, `copy` and `paste` are THE GESTURE LAYER, and they exist because
+/// kaya has no selection API: only the widget knows what is selected.
+/// tools/check-roles.py holds every backend to this line.
 pub(crate) const MENU_ROLES: &[&str] =
     &["settings", "cut", "copy", "paste", "undo", "redo"];
 
@@ -1081,10 +1021,9 @@ fn is_bindable_menu_prop(prop: MenuProp) -> bool {
     )
 }
 
-/// A menu property value against its type, plus the value domain: a
-/// radio group's `value` is a 0-based option index (integral,
-/// non-negative). The upper bound (index < option count) needs scene
-/// state, so it lives at the call site (the select-index precedent).
+/// A menu property value against its type, plus the value domain: a radio
+/// group's `value` is a 0-based option index. The upper bound (index <
+/// option count) needs scene state, so it lives at the call site.
 fn check_menu_prop_value(prop: MenuProp, value: &Value) {
     assert!(
         value.type_of() == menu_prop_value_type(prop),
@@ -1116,8 +1055,7 @@ fn is_named_key(key: &str) -> bool {
 /// The closed punctuation set, named rather than spelled with the
 /// character itself — a name keeps the wire spelling free of characters
 /// the step grammar and the path syntax already use. Each names the
-/// UNSHIFTED US position; the host binds its own key code and displays
-/// the chord its own way. Typing protection is the alphanumeric rule:
+/// UNSHIFTED US position. Typing protection is the alphanumeric rule:
 /// these keys need primary or alt too.
 fn is_punctuation_key(key: &str) -> bool {
     matches!(
@@ -1157,9 +1095,7 @@ fn is_ascii_alnum_key(key: &str) -> bool {
 /// policy — the one shortcut checker, validating and never rewriting
 /// (DESIGN.md, Menus). Canonical form: `+`-joined lowercase tokens,
 /// optional `primary`, `shift`, `alt` in that order, then exactly one
-/// key. `escape` is recognized but always rejected; `shift` and an
-/// alphanumeric key both require `primary` or `alt`; `primary+q` and
-/// `alt+f4` are the reserved cross-platform union.
+/// key.
 fn validate_shortcut(spelling: &str) -> Result<(), String> {
     if spelling.is_empty() {
         return Err("kaya: shortcut is empty".to_string());
@@ -1239,10 +1175,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         value.type_of() == prop_value_type(prop),
         "kaya: {prop:?} cannot hold {value:?}"
     );
-    // Grow's domain is narrower than its type. A negative weight has no
-    // reading under "divide the leftover in proportion to the weights",
-    // and every backend would invent its own answer. Nonsense dies at the
-    // root, where the answer is the same in all eight languages.
+    // Grow's domain is narrower than its type: a negative weight has
+    // no reading under "divide the leftover in proportion to the
+    // weights", and every backend would invent its own answer.
     if let (Prop::Grow, Value::F64(weight)) = (prop, value) {
         assert!(
             *weight >= 0.0 && weight.is_finite(),
@@ -1257,10 +1192,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: a grid's columns is an integral count >= 1, got {cols}"
         );
     }
-    // The ROLE'S VARIANT is what decides the kind, not the prop
+    // The ROLE'S VARIANT decides the kind, not the prop
     // (docs/styling-plan.md D4): check_prop admits Role on the union of
-    // the variants' homes, and this is where a destructive LABEL dies —
-    // at declare time, in one sentence naming both sides.
+    // the variants' homes, and this is where a destructive LABEL dies.
     if let (Prop::Role, Value::I64(role)) = (prop, value) {
         let ok = match *role {
             // destructive, prominent: an ACTION's emphasis — what
@@ -1293,18 +1227,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::Accepts, Value::Str(list)) = (prop, value) {
         crate::wire::check_accept_list(list, "accepts");
     }
-    // AN EMPTY ACCESSIBLE NAME IS NOT A DECLARATION. The four backends
-    // each documented "empty means unset" and three implemented it as a
-    // silent no-op while WinUI's pattern guard fell through to its
-    // catch-all panic — so the same guest declaration was a working app
-    // on three platforms and an aborted drain on the fourth
-    // (docs/deferred.md a11y-empty-label). The divergence dies here, at
-    // the one chokepoint all eight bindings reach, rather than being
-    // settled four times: a label the guest never filled in is refused
-    // where the guest can still see which widget it was.
-    // CLEARING a label that was set is a different act and has no
-    // spelling today; if it is ever wanted it gets its own one
-    // (DESIGN.md, Binding conventions).
+    // AN EMPTY ACCESSIBLE NAME IS NOT A DECLARATION. Three backends made it
+    // a silent no-op while WinUI's pattern guard fell through to its catch-all
+    // panic, so the same guest declaration was a working app on three
+    // platforms and an aborted drain on the fourth (docs/deferred.md
+    // a11y-empty-label). CLEARING a set label is a different act with no
+    // spelling today.
     if let (Prop::A11yLabel, Value::Str(label)) = (prop, value) {
         assert!(
             !label.is_empty(),
@@ -1358,10 +1286,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
                 "kaya: a progress fraction lives in 0..=1, got {fraction}"
             );
         }
-        // A choice widget's value is a 0-based option index:
-        // integral and non-negative, or it has no reading. The upper
-        // bound (index < option count) needs scene state, so it
-        // lives at the live SetProp site, not here.
+        // A choice widget's value is a 0-based option index. The upper
+        // bound (index < option count) needs scene state, so it lives at
+        // the live SetProp site.
         if is_choice(kind) {
             assert!(
                 fraction.is_finite() && *fraction >= 0.0 && fraction.fract() == 0.0,
@@ -1403,10 +1330,9 @@ fn check_type(current: &Value, incoming: &Value, what: &str) {
 
 impl Scene {
     /// The window's content width and platform size class, reported by
-    /// the backend (kaya_window_metrics; class SIZE_CLASS_NONE where the
-    /// platform has none). THE CORE EVALUATES the declared breakpoints
-    /// here — one rule, every platform (docs/adaptive-layout-plan.md
-    /// D3). A report that changes nothing emits nothing.
+    /// the backend (kaya_window_metrics). THE CORE EVALUATES the declared
+    /// breakpoints here — one rule, every platform
+    /// (docs/adaptive-layout-plan.md D3).
     pub(crate) fn window_metrics_of(&self, window: WindowId) -> Option<(f64, i64)> {
         self.window_metrics.get(&window).copied()
     }
@@ -1432,8 +1358,7 @@ impl Scene {
 
     /// One breakpoint against one metrics report: apply entering the
     /// declared class, revert leaving it — the revert restoring the
-    /// guest-authored value or the creation kind's own default
-    /// (diff-against-base).
+    /// guest-authored value or the creation kind's own default.
     fn evaluate_breakpoint(
         &mut self,
         index: usize,
@@ -1470,12 +1395,11 @@ impl Scene {
             out.push(ApplyOp::SetProp { id: *widget, prop: *prop, value });
         }
         // THE STACKED FOLD (docs/adaptive-layout-plan.md D7). Entering
-        // the class, each stacked row whose own shape says so folds its
+        // the class, each stacked row whose shape says so folds its
         // leading hugging children into its one grown table's viewport;
         // leaving it unfolds exactly what was folded — recorded pairs,
         // not a recomputation, so a shape that changed while stacked
-        // still reverts cleanly. Assignments are computed at the
-        // crossing and hold until the crossing back.
+        // still reverts cleanly.
         if hold {
             let mut folded = Vec::new();
             for (row, _, _) in &setters {
@@ -1496,13 +1420,11 @@ impl Scene {
     }
 
     /// D7's shape rule, total by construction: a stacked row folds IF AND
-    /// ONLY IF exactly one of its children grows, that child is a
-    /// declared table, and at least one hugging child precedes it. The
-    /// fold is those leading children, in declaration order. Trailing
-    /// children keep stacking — trailing content on a stacked screen is
-    /// bottom-bar-shaped, and a bar that scrolls away with the rows would
-    /// be wrong. Everything that fails the shape keeps today's stacking
-    /// unchanged.
+    /// ONLY IF exactly one of its children grows, that child is a declared
+    /// table, and at least one hugging child precedes it. The fold is those
+    /// leading children, in declaration order; trailing children keep
+    /// stacking, because trailing content on a stacked screen is
+    /// bottom-bar-shaped.
     fn fold_assignment(&self, row: WidgetId) -> Option<(WidgetId, Vec<WidgetId>)> {
         let children = self.children_of.get(&row)?;
         let mut growers = children
@@ -1523,9 +1445,9 @@ impl Scene {
     /// This backend windows rows: seed every windowed-capable For it
     /// renders from here on (docs/deferred.md, the declares-windowing
     /// entry). Called at the backend's own init — gtk.rs's and
-    /// winui/mod.rs's CoreState, swiftui_host::run for mac and iOS,
-    /// android.rs's register_present_natives for Compose — so a backend
-    /// that runs cannot skip it.
+    /// winui/mod.rs's CoreState, swiftui_host::run, android.rs's
+    /// register_present_natives — so a backend that runs cannot skip
+    /// it.
     pub(crate) fn declare_windowing(&mut self) {
         self.windowing = true;
     }
@@ -1539,20 +1461,19 @@ impl Scene {
         Some(crate::wire::click_tag(id, &path_values(path)))
     }
 
-    /// Apply one transaction atomically, returning the ops a backend must
-    /// perform. Construction ops come out in submission order; signal
-    /// writes coalesce (last write wins per signal within the batch) and
-    /// flush at the end. A property bound mid-transaction is also set
-    /// immediately at bind time, so a scene arrives fully valued.
-    /// Collection delta ops are edits, not writes: they apply in place, in
-    /// order, never coalesced.
+    /// Apply one transaction atomically, returning the ops a backend
+    /// must perform. Construction ops come out in submission order;
+    /// signal writes coalesce (last write wins per signal) and flush at
+    /// the end. A property bound mid-transaction is also set at bind
+    /// time, so a scene arrives fully valued. Collection deltas are
+    /// edits: in place, in order, never coalesced.
     pub(crate) fn apply(&mut self, tx: Transaction) -> Vec<ApplyOp> {
         let mut out = Vec::new();
         // First-dirtied order, deduped.
         let mut dirty: Vec<SignalId> = Vec::new();
         // Pre-transaction values of the signals this batch writes,
-        // captured on first write. If a coalesced value fails its domain
-        // check at the barrier these restore every signal this batch
+        // captured on first write: if a coalesced value fails its domain
+        // check at the barrier these restore every signal the batch
         // touched before the panic propagates.
         let mut rollback: HashMap<SignalId, Value> = HashMap::new();
         // Template scopes currently open; while non-empty, creation
@@ -1564,8 +1485,7 @@ impl Scene {
         // Every LIVE widget this batch minted, in creation order — the
         // domain of the reachability barrier below. Batch-scoped, not a
         // global sweep over `self.widgets`, because the core never prunes
-        // that map: DestroyWindow and PopEntry drop the surfaces and leave
-        // their widget ids behind forever.
+        // that map: DestroyWindow and PopEntry leave widget ids behind.
         let mut created: Vec<WidgetId> = Vec::new();
         // Breakpoints this batch declared, evaluated at the batch tail
         // when the row's children exist (the fold rule's requirement).
@@ -1605,10 +1525,9 @@ impl Scene {
             }
             match op {
                 TxOp::UndoGroup { window, label } => {
-                    // HEAD OF BATCH, ONCE. A transaction is a bare list
+                    // HEAD OF BATCH, ONCE: a transaction is a bare list
                     // with no header, so this position is the whole
-                    // grammar: anywhere else and "which ops does it
-                    // cover" would have two answers.
+                    // grammar for which ops the group covers.
                     assert!(
                         at == 0,
                         "kaya: undo_group is record {} of this transaction — it must be \
@@ -1811,11 +1730,11 @@ impl Scene {
                     }
                 }
                 TxOp::CreateWindow { window } => {
-                    // Capability gate: a host without aux windows rejects
-                    // at the root (DESIGN.md, Presentation contexts).
-                    // CAPABILITIES INFORM; THIS WALL REFUSES — both read
-                    // the one const above, so "what you were told" and
-                    // "what you hit" are the same bit by construction.
+                    // Capability gate: a host without aux windows
+                    // rejects at the root (DESIGN.md, Presentation
+                    // contexts). CAPABILITIES INFORM; THIS WALL REFUSES —
+                    // both read the one const above, so "what you were
+                    // told" and "what you hit" are the same bit.
                     assert!(
                         CAPABILITIES & CAP_AUX_WINDOWS != 0,
                         "kaya: this host has no auxiliary windows \
@@ -1864,8 +1783,9 @@ impl Scene {
                     self.selected_section.remove(&window);
                     // ... and its command catalog: the chords free with
                     // the window (window ids are recreatable, so a fresh
-                    // window must not inherit a dead catalog's shortcuts),
-                    // and the anchored trees revert to free roots.
+                    // window must not inherit a dead catalog's
+                    // shortcuts), and the anchored trees revert to free
+                    // roots.
                     self.window_shortcuts.remove(&window);
                     for root in self.window_menus.remove(&window).unwrap_or_default() {
                         self.menu_items.get_mut(&root).unwrap().anchor = None;
@@ -1901,8 +1821,7 @@ impl Scene {
                     // ContentDialog throws on a second per root), and the
                     // result that frees the slot arrives on the
                     // presentation side, so the slot lives in capi.
-                    // Refused means not presented — the picker twin's
-                    // note two arms down says why.
+                    // Refused means not presented.
                     if crate::capi::alert_shown(spec.alert) {
                         out.push(ApplyOp::PresentAlert(spec));
                     }
@@ -1922,13 +1841,11 @@ impl Scene {
                              empty label — the label is what the picker shows"
                         );
                     }
-                    // Same liveness rule and the same reason as alerts:
-                    // process-global, freed by a result that arrives on
-                    // the presentation side, so the slot lives in capi's
-                    // singleton.
-                    // REFUSED MEANS NOT PRESENTED: the slot answers, and
-                    // a second picker over a live one never reaches a
-                    // backend that could not stack two modals anyway.
+                    // The alerts rule, verbatim: the live slot is
+                    // process-global and lives in capi's singleton, and
+                    // REFUSED MEANS NOT PRESENTED — a second picker over
+                    // a live one never reaches a backend that could not
+                    // stack two modals anyway.
                     if crate::capi::file_dialog_shown(spec.dialog) {
                         out.push(ApplyOp::PresentFileDialog(spec));
                     }
@@ -1956,8 +1873,7 @@ impl Scene {
                     // Without this wall an ARGB constant pasted where
                     // 0xRRGGBB belongs applied cleanly and reached every
                     // backend as seed AND fill (measured through the Swift
-                    // and Java fan-out — Java can even spell it as a
-                    // negative int), while Compose feeds the raw word to
+                    // and Java fan-out), while Compose fed the raw word to
                     // Material's own derivation.
                     for (word, which) in [(Some(seed), "seed"), (light, "light"), (dark, "dark")] {
                         if let Some(w) = word {
@@ -1989,25 +1905,23 @@ impl Scene {
                          BEFORE the first mount, so no backend ever shows an \
                          unbranded frame it must repaint"
                     );
-                    // A FAMILY NAME IS THE WHOLE REQUEST, so an empty one
-                    // is an author who filled no field rather than a
-                    // request for the platform default: every font API
-                    // renders SOMETHING for a name it cannot match, so an
-                    // empty string would sail through four lowerings and
-                    // land as the system font — indistinguishable from a
-                    // typeface that applied. Declaring no typeface at all
-                    // is what asks for the platform's own.
+                    // A FAMILY NAME IS THE WHOLE REQUEST, so an empty one is
+                    // an author who filled no field: every font API renders
+                    // SOMETHING for a name it cannot match, so an empty
+                    // string would sail through four lowerings and land as
+                    // the system font. Declaring no typeface at all is what
+                    // asks for the platform's own.
                     assert!(
                         !req.family.is_empty(),
                         "kaya: set_brand_typeface has an empty family — an app that \
                          wants the platform's own typeface declares none at all \
                          (docs/styling-plan.md Slice 2b)"
                     );
-                    // THE PLATFORM TAGS ARE A CLOSED VOCABULARY, and the
-                    // wall is here for the seed's reason: a tag nobody
-                    // serves is silently ignored by all four lowerings, so
-                    // a mistyped constant reads exactly like a platform
-                    // that chose the default.
+                    // THE PLATFORM TAGS ARE A CLOSED VOCABULARY, for the
+                    // seed's reason: a tag nobody serves is silently
+                    // ignored by all four lowerings, so a mistyped
+                    // constant reads exactly like a platform that chose
+                    // the default.
                     let mut seen: Vec<u32> = Vec::new();
                     for (tag, family) in &req.platforms {
                         assert!(
@@ -2032,13 +1946,12 @@ impl Scene {
                         );
                         seen.push(*tag);
                     }
-                    // THE BYTES ARE NOT INSPECTED HERE. Whether a blob is
+                    // THE BYTES ARE NOT INSPECTED HERE: whether a blob is
                     // a font, and what family it declares, is a question
-                    // only the platform's own font manager can answer, and
-                    // a guess that disagreed with the registration would
-                    // be worse than no answer. The observation reads the
-                    // RESOLVED family, so a blob that registers as nothing
-                    // fails exactly like a family that is not installed.
+                    // only the platform's own font manager can answer. The
+                    // observation reads the RESOLVED family, so a blob
+                    // that registers as nothing fails exactly like a
+                    // family that is not installed.
                     self.brand_typeface = Some(req.clone());
                     out.push(ApplyOp::SetTypeface(req));
                 }
@@ -2060,10 +1973,10 @@ impl Scene {
                          unidentified frame it must repaint"
                     );
                     // A NAME IS HALF THE DECLARATION, so an empty one is
-                    // an author who filled no field: an empty string would
-                    // sail through five lowerings and land as the launcher
-                    // binary's name, indistinguishable from an identity
-                    // that applied.
+                    // an author who filled no field: it would sail through
+                    // five lowerings and land as the launcher binary's
+                    // name, indistinguishable from an identity that
+                    // applied.
                     assert!(
                         !identity.name.is_empty(),
                         "kaya: set_app_identity has an empty name — an app that wants \
@@ -2083,11 +1996,9 @@ impl Scene {
                          picture's bytes or declare no icon"
                     );
                     // THE BYTES ARE NOT INSPECTED HERE, the typeface's
-                    // rule verbatim: whether a blob is an image is a
-                    // question only the platform's own decoder can answer.
-                    // The observation reads the DECODED result, so bytes
-                    // that are not an image fail exactly like an icon that
-                    // never applied.
+                    // rule verbatim. The observation reads the DECODED
+                    // result, so bytes that are not an image fail exactly
+                    // like an icon that never applied.
                     self.app_identity = Some(identity.clone());
                     out.push(ApplyOp::SetAppIdentity(identity));
                 }
@@ -2116,10 +2027,10 @@ impl Scene {
                         "kaya: show_save_dialog has an empty suggested_name — \
                          name the file the dialog opens with (tx.save_file(\"notes.txt\"))"
                     );
-                    // THE PICKER'S LIVE SLOT, not a second one: one dialog
-                    // of either kind per process, so a guest that shows a
-                    // save panel over a live picker is refused here rather
-                    // than presenting two modals a platform cannot stack.
+                    // THE PICKER'S LIVE SLOT, not a second one: one
+                    // dialog of either kind per process, so a save panel
+                    // over a live picker is refused here rather than
+                    // presenting two modals a platform cannot stack.
                     if crate::capi::file_dialog_shown(spec.dialog) {
                         out.push(ApplyOp::PresentSaveDialog(spec));
                     }
@@ -2164,9 +2075,9 @@ impl Scene {
                     }));
                 }
                 TxOp::ReadClipboard { request, accepting } => {
-                    // ACCEPTING NOTHING CANNOT SUCCEED, so it is an author
-                    // error rather than a read that always answers empty —
-                    // the empty answer means denied or absent, and
+                    // ACCEPTING NOTHING CANNOT SUCCEED, so it is an
+                    // author error rather than a read that always answers
+                    // empty — the empty answer means denied or absent, and
                     // conflating the two would hide a typo.
                     crate::wire::check_accept_list(&accepting, "read_clipboard");
                     out.push(ApplyOp::ReadClipboard { request, accepting });
@@ -2175,8 +2086,8 @@ impl Scene {
                     // No capability gate — every host materializes a
                     // serial stack natively (the deliberate contrast with
                     // create_window; DESIGN.md, Navigation). Stacks are
-                    // PER-SURFACE: a section hosts its own, and back routes
-                    // to the ACTIVE section's stack on the backends.
+                    // PER-SURFACE: a section hosts its own, and back
+                    // routes to the ACTIVE section's stack.
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&window)
@@ -2475,8 +2386,7 @@ impl Scene {
                 TxOp::Mount { window, root } => {
                     // The target's domain is SURFACES: the primary, a
                     // created window, a pushed navigation entry, or an
-                    // added section (generalize the TARGET of mount,
-                    // not the tree).
+                    // added section.
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&window)
@@ -2592,21 +2502,19 @@ impl Scene {
                 }
                 TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                     // The header bar's three addressings, spec doc order
-                    // (docs/tables-plan.md, dynamic tables): a live For's
-                    // container, a nested For's template node for every
-                    // copy, or that node plus keys for ONE stamped copy.
-                    // Bar walls first, arity walls per target, all at
-                    // declaration — a mismatched template dies here
-                    // instead of rendering N-1 cells under N headers on
-                    // some platforms and not others.
+                    // (docs/tables-plan.md): a live For's container, a nested
+                    // For's template node for every copy, or that node plus
+                    // keys for ONE stamped copy. All the walls run at
+                    // declaration — a mismatched template dies here instead
+                    // of rendering N-1 cells under N headers.
                     Self::validate_bar(&titles, sorted, direction);
                     let count = titles.len() as u32;
-                    // Keys resolve in the TEMPLATE space alone: widget and
-                    // node numbers are separate per-binding counters over
-                    // one target field, so a keyed record must never be
-                    // answered by a live container that shares the number
-                    // (the Haskell breadth probe's finding; the collision
-                    // walls at declaration are this rule's other half).
+                    // Keys resolve in the TEMPLATE space alone: widget
+                    // and node numbers are separate per-binding counters
+                    // over one target field, so a keyed record must never
+                    // be answered by a live container that shares the
+                    // number (the collision walls at declaration are this
+                    // rule's other half).
                     let live = if path.is_empty() {
                         self.for_sites.values().find(|s| s.container == widget)
                     } else {
@@ -2616,8 +2524,7 @@ impl Scene {
                         Self::validate_row_arity(&site.bodies, count);
                         // THE OTHER ORDERING of the refusal below: a
                         // container that was flipped and then declared
-                        // columns is the same illegal widget, reached the
-                        // other way round.
+                        // columns is the same illegal widget.
                         assert!(
                             !self.authored_axis.contains_key(&widget),
                             "kaya: {widget:?} declared an axis and now declares columns — a \
@@ -2719,9 +2626,8 @@ impl Scene {
                     // (docs/canvas-plan.md §3.1): a live canvas, a canvas
                     // TEMPLATE NODE for every stamped copy, or that node
                     // plus keys for ONE copy. THE VALIDATION IS FIRST AND
-                    // IS THE SAME CALL for all three — there is one place
-                    // that draws, so there is one place that refuses
-                    // (§3.5).
+                    // IS THE SAME CALL for all three — one place draws, so
+                    // one place refuses (§3.5).
                     let drawing = match crate::canvas::validate(viewbox, &ops) {
                         Ok(d) => d,
                         Err(why) => panic!("{why}"),
@@ -2731,11 +2637,10 @@ impl Scene {
                     if live {
                         self.drawings.insert(widget, drawing.clone());
                         self.emit_drawing(widget, &drawing, &mut out);
-                        // THE MAILBOX'S RECEIVE HALF (§3.2.1): this is
-                        // the answer to an outstanding draw request, so
-                        // the ask re-arms — and if the track moved while
-                        // the guest was drawing, the LATEST size goes out
-                        // now and the sizes in between are dropped.
+                        // THE MAILBOX'S RECEIVE HALF (§3.2.1): the ask
+                        // re-arms, and if the track moved while the guest
+                        // was drawing the LATEST size goes out now and the
+                        // sizes in between are dropped.
                         let again = self.canvas_answered(widget);
                         self.asks.extend(again);
                     } else {
@@ -2811,10 +2716,9 @@ impl Scene {
                         self.emit_drawing(widget, &drawing, &mut out);
                     }
                     // ...and re-arms the ask, so a canvas that becomes a
-                    // redraw one AFTER its track was reported is asked
-                    // now rather than at the next resize, which may never
-                    // come. Drained by whoever ran this transaction
-                    // (`take_asks`).
+                    // redraw one AFTER its track was reported is asked now
+                    // rather than at the next resize, which may never
+                    // come. Drained by whoever ran this transaction.
                     let asks = self.ask_canvas(widget);
                     self.asks.extend(asks);
                 }
@@ -2916,19 +2820,17 @@ impl Scene {
         );
 
         // Barrier: validate every signal-bound menu prop on its COMPLETE
-        // coalesced value BEFORE any fan-out mutates derived state. A
-        // radio group's `value` has a live domain a late write can break.
-        // A rejection must not leave partially-applied signal state, so
-        // restore every signal this batch wrote, then propagate.
+        // coalesced value BEFORE any fan-out mutates derived state (a
+        // radio group's `value` has a live domain a late write can break).
+        // A rejection must not leave partially-applied signal state.
         for id in &dirty {
             if let Some(bound) = self.menu_bindings.get(id).cloned() {
                 let value = self.signals[id].clone();
                 for (item, prop) in bound {
                     if let Err(msg) = self.check_menu_binding_domain(item, prop, &value) {
-                        // A marked batch can put its COLLECTION edits back
-                        // too: the group captured their pre-state on first
-                        // touch. A rejected batch leaves the scene as it
-                        // was, either way.
+                        // A marked batch can put its COLLECTION edits
+                        // back too: the group captured their pre-state on
+                        // first touch.
                         match group.take() {
                             Some(cap) => self.rollback_group(&cap, &rollback),
                             None => {
@@ -2943,18 +2845,16 @@ impl Scene {
             }
         }
 
-        // Barrier: every widget this batch created must be reachable from
-        // a mounted root. It must be a BARRIER and not a per-op check,
-        // because ordering inside a transaction is free and a widget is an
-        // orphan for most of the batch's length by design (guests/c/a11y.c
-        // mints every widget, then makes 24 add_child calls, then mounts,
-        // in one transaction). And it must run BEFORE the fan-out, so a
-        // refusal has nothing derived to unwind.
+        // Barrier: every widget this batch created must be reachable from a
+        // mounted root. A BARRIER and not a per-op check, because ordering
+        // inside a transaction is free and a widget is an orphan for most of
+        // the batch by design (guests/c/a11y.c mints every widget, then makes
+        // 24 add_child calls, then mounts). BEFORE the fan-out, so a refusal
+        // has nothing derived to unwind.
         if let Some(orphan) = self.first_unreachable(&created) {
-            // Signals only, and that is not an omission: a MARKED batch
-            // cannot get here with anything to check, because
-            // `undo_verdict` refuses create_widget/create_for/create_when
-            // outright, so `created` is empty whenever `group` is live.
+            // Signals only, and that is not an omission: `undo_verdict`
+            // refuses create_widget/create_for/create_when outright, so
+            // `created` is empty whenever `group` is live.
             debug_assert!(group.is_none(), "a marked batch cannot create widgets");
             for (sid, old) in &rollback {
                 self.signals.insert(*sid, old.clone());
@@ -2978,10 +2878,9 @@ impl Scene {
 
         // Barrier: no grow along a scroll's own axis (ruled REFUSE
         // 2026-09-02; docs/deferred.md, "`grow` INSIDE A SCROLL IS
-        // SILENTLY ZERO"). A barrier for the orphan wall's reason —
-        // ordering inside a batch is free, so the scroll may be attached
-        // last — and AFTER the fan-out because a signal-bound weight is
-        // only current once it has fanned out.
+        // SILENTLY ZERO"). A barrier for the orphan wall's reason — the
+        // scroll may be attached last — and AFTER the fan-out, because a
+        // signal-bound weight is only current once it has fanned out.
         if self.layout_dirty {
             self.layout_dirty = false;
             if let Some(msg) = self.grow_in_scroll_message() {
@@ -2992,12 +2891,12 @@ impl Scene {
             }
         }
 
-        // EVERY programmatic text write this batch produced, read off the
-        // ops themselves rather than from the four sites that emit them.
-        // One place, and it cannot be bypassed by a fifth site: this is
-        // what advances the core's record of each field's text and what
-        // closes an episode when an app write changes it (D7, narrowed by
-        // A3 to writes that actually differ).
+        // EVERY programmatic text write this batch produced, read off
+        // the ops themselves rather than from the four sites that emit
+        // them: one place a fifth site cannot bypass. It advances the
+        // core's record of each field's text and closes an episode when an
+        // app write changes it (D7, narrowed by A3 to writes that
+        // differ).
         self.absorb_text_writes(&out);
 
         if let Some(cap) = group {
@@ -3148,11 +3047,11 @@ impl Scene {
         }
     }
 
-    /// Put the scene back to where a group found it, emitting nothing.
-    /// The silence is the point: this runs on the refusal path, where the
-    /// batch's ApplyOps die with the panic. Signals, then entries, then
-    /// orders — the same sequence an inverse uses, because an entry cannot
-    /// be positioned before it exists.
+    /// Put the scene back to where a group found it, emitting nothing:
+    /// this runs on the refusal path, where the batch's ApplyOps die with
+    /// the panic. Signals, then entries, then orders — the sequence an
+    /// inverse uses, because an entry cannot be positioned before it
+    /// exists.
     fn rollback_group(&mut self, cap: &GroupCapture, rollback: &HashMap<SignalId, Value>) {
         for (id, old) in rollback {
             self.signals.insert(*id, old.clone());
@@ -3183,13 +3082,10 @@ impl Scene {
 
     /// Close the group: compute both directions, push it onto the window's
     /// ledger, and tell the backend to clear the focused field's native
-    /// history.
-    ///
-    /// THE CLEAR IS THE KEYSTONE (A1, §3). It runs on every group commit,
-    /// unconditionally, because the core does not know what is focused.
-    /// What it buys: every episode begins with an empty native stack, so
-    /// one ledger read newest-first IS the user's history. The episode was
-    /// banked before the clear, so only granularity is lost.
+    /// history. THE CLEAR IS THE KEYSTONE (A1, §3), run on every group commit
+    /// because the core does not know what is focused: every episode then
+    /// begins with an empty native stack, so one ledger read newest-first IS
+    /// the user's history.
     fn bank_group(
         &mut self,
         cap: GroupCapture,
@@ -3259,43 +3155,16 @@ impl Scene {
         out.push(ApplyOp::ClearUndo { window: cap.window });
     }
 
-    /// Read every programmatic text write out of a finished batch's ops.
+    /// The text a range op is addressed against: the widget's content AS IT
+    /// WILL BE when this batch lands.
     ///
-    /// ON THE OPS, NOT AT THE FOUR EMISSION SITES: a const set, a bind-time
-    /// set, the end-of-batch flush, an element binding re-resolving and
-    /// `clear` all reach a field as one of these two ops, so reading them
-    /// here is the only place a sixth site cannot bypass.
-    ///
-    ///
-    /// A3: only a write that CHANGES the text closes an episode. An app
-    /// that mirrors a field into a signal and writes it back would
-    /// otherwise lose its typing history on every keystroke.
-    /// The text a range op is addressed against: the widget's content AS
-    /// IT WILL BE when this batch lands.
-    ///
-    /// NOT SIMPLY `field_text`, and that is the whole method.
-    /// `absorb_text_writes` runs at the END of a batch (one place, so a
-    /// fifth emit site cannot bypass it), so while the batch is being
-    /// applied `field_text` still holds the PREVIOUS text. The obvious
-    /// app spelling —
-    ///
-    /// ```text
-    /// tx.set_text(editor, new_document);
-    /// tx.highlight(editor, matches_in(new_document));
-    /// ```
-    ///
-    /// — would then be validated and converted against the old document.
-    /// That is not a wrong colour: on macOS an out-of-range attribute is
-    /// an NSRangeException and the process dies with exit 134
-    /// (docs/ranges-units.md §3, measured). So the ops this batch
-    /// has already produced are consulted first, newest write wins.
-    ///
-    /// TEXTAREA ONLY (docs/ranges-plan.md D1): the entry's deferral is
-    /// enforced here rather than described in a document, because the
-    /// three platforms that cannot honour it honestly would each fail in
-    /// their own way and one of them silently (GTK's entry highlight
-    /// rides byte offsets that do not follow edits and is unreadable
-    /// over AT-SPI).
+    /// NOT SIMPLY `field_text`, and that is the whole method:
+    /// `absorb_text_writes` runs at the END of a batch, so the obvious app
+    /// spelling (set_text then highlight, one transaction) would be validated
+    /// against the old document — and on macOS an out-of-range attribute is an
+    /// NSRangeException that kills the process with exit 134
+    /// (docs/ranges-units.md §3, measured). TEXTAREA ONLY
+    /// (docs/ranges-plan.md D1).
     fn range_text(&self, widget: WidgetId, op: &str, out: &[ApplyOp]) -> String {
         let kind = self
             .widgets
@@ -3340,10 +3209,9 @@ impl Scene {
             }
         }
         for (id, text) in writes {
-            // Only the text-bearing INTERACTIVE kinds carry a native
-            // undo stack; a label's text is not an edit history. A
-            // stamped copy's kind is not in the widget table (its
-            // blueprint holds it), so an internal id is admitted.
+            // Only the text-bearing INTERACTIVE kinds carry a native undo
+            // stack. A stamped copy's kind is not in the widget table, so an
+            // internal id is admitted.
             let editable = match self.widgets.get(&id) {
                 Some(kind) => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
                 None => id.0 & INTERNAL_BIT != 0,
@@ -3359,10 +3227,9 @@ impl Scene {
         }
     }
 
-    /// A programmatic write landed on this field: any open episode on it
-    /// is over. Across every ledger, because the core knows the widget
-    /// and not its window — the scene keeps no widget-to-window map, and
-    /// a field lives in exactly one window anyway.
+    /// A programmatic write landed on this field: any open episode on it is
+    /// over. Across every ledger, because the core knows the widget and not
+    /// its window — and a field lives in exactly one window anyway.
     fn close_episodes_on(&mut self, field: WidgetId) {
         for ledger in self.ledgers.values_mut() {
             if let Some(LedgerEntry::Episode(ep)) = ledger.done.last_mut() {
@@ -3375,19 +3242,12 @@ impl Scene {
 
     // --- Undo: episode banking (docs/undo-plan.md §3) -------------------
 
-    /// A text_changed the backend is about to deliver to the guest, shown
-    /// to the ledger on the way past.
-    ///
-    /// This is banking: the run of edits on one field between clears is
-    /// ONE ledger entry, opened by the first event and extended by each one
-    /// after. Nothing is copied — the two images plus the current position
-    /// are all a coarse restore needs.
-    ///
-    /// `focused` is the backend's answer for the field this event names.
-    /// An event on an UNFOCUSED field closes the episode as it stands.
-    ///
-    /// NOT for a text_changed the core itself provoked by routing a native
-    /// undo — that one goes to `note_native_undo`.
+    /// A text_changed the backend is about to deliver to the guest, shown to
+    /// the ledger on the way past: the run of edits on one field between
+    /// clears is ONE ledger entry. `focused` is the backend's answer for the
+    /// field this event names, and an event on an UNFOCUSED field closes the
+    /// episode as it stands. NOT for a text_changed the core provoked by
+    /// routing a native undo — that goes to `note_native_undo`.
     pub(crate) fn note_text_changed(
         &mut self,
         window: WindowId,
@@ -3400,16 +3260,12 @@ impl Scene {
             .get(&field)
             .cloned()
             .unwrap_or_default();
-        // AN EVENT THAT TELLS THE LEDGER NOTHING IT ALREADY KNOWS IS NOT
-        // A STEP. A COMMAND ACTS LIKE THE USER — `clear` deliberately
-        // echoes — but `absorb_text_writes` already recorded the field as
-        // empty when the write went out, so the echo describes a run from
-        // "" to "", and pushing it would put a step that does nothing on
-        // top of the ledger: the user clicks add and the first Cmd+Z spends
-        // itself on the clear's shadow instead of taking back the add.
-        //
-        // It is also why the redo stack survives: a report of no change is
-        // not new typing, so the forward history has no business dying.
+        // AN EVENT THAT TELLS THE LEDGER NOTHING IT ALREADY KNOWS IS NOT A
+        // STEP. `clear` deliberately echoes, but `absorb_text_writes` already
+        // recorded the field as empty, so the echo describes a run from "" to
+        // "" and the first Cmd+Z would spend itself on the clear's shadow
+        // instead of taking back the add. It is also why the redo stack
+        // survives.
         if before == text {
             return;
         }
@@ -3420,19 +3276,12 @@ impl Scene {
         ledger.redo.clear();
         match ledger.done.last_mut() {
             Some(LedgerEntry::Episode(ep)) if ep.open && ep.field == field => {
-                // A REPORT OF WHERE THE RUN ALREADY IS CANNOT BECOME THE
-                // NEW HIGH-WATER. `after` is where a redo goes; `current`
-                // is where the field is now, and they differ only while a
-                // native undo has walked the run backwards.
-                //
-                // A routed native undo is reported ONCE, by
-                // `note_native_undo`. This is the second line: a backend
-                // that forgets the ledger-quiet mark delivers a
-                // text_changed restating the walk's position, and lowering
-                // `after` to it would erase the walk the redo side needs.
-                //
-                // Ordinary typing is unaffected, mid-walk included: a new
-                // position is a new high-water.
+                // A REPORT OF WHERE THE RUN ALREADY IS CANNOT BECOME THE NEW
+                // HIGH-WATER. `after` is where a redo goes, `current` is where
+                // the field is now, and they differ only mid-walk: a backend
+                // that forgets the ledger-quiet mark restates the walk's
+                // position, and lowering `after` to it would erase the walk
+                // the redo side needs.
                 if text != ep.current {
                     ep.after = text.to_owned();
                 }
@@ -3461,13 +3310,11 @@ impl Scene {
         }
     }
 
-    /// The field a text_changed's identity tag names — the ledger's half
-    /// of the emit, which carries the widget's stored tag rather than an id.
-    ///
-    /// A STAMPED COPY ANSWERS WITH ITS OWN INTERNAL ID, which is the
-    /// identity that CARRIES the text: it is what a programmatic write to
-    /// the same field names and what the backend reports as focused. The
-    /// copy's app-facing name is restored where the payload is built.
+    /// The field a text_changed's identity tag names. A STAMPED COPY ANSWERS
+    /// WITH ITS OWN INTERNAL ID, which is the identity that CARRIES the text:
+    /// what a programmatic write to the same field names and what the backend
+    /// reports as focused. The copy's app-facing name is restored where the
+    /// payload is built.
     pub(crate) fn text_field_of_tag(&self, tag: &[u8]) -> Option<WidgetId> {
         match crate::wire::decode_text_changed_tag(tag, "") {
             Occurrence::TextChanged { id, .. } => Some(id),
@@ -3479,17 +3326,10 @@ impl Scene {
     }
 
     /// The internal widget a stamped copy's template node became, for the
-    /// copy addressed by `path`.
-    ///
-    /// The stamps table is keyed by (collection, site path, key) and the
-    /// copy's own path is the site path plus the key, so the candidates
-    /// are the stamps at that path and the node map picks among them. The
-    /// collection is not in the tag and does not need to be: a template
-    /// node belongs to exactly one blueprint.
-    ///
-    /// Linear in live copies, deliberately: the map that makes it O(1)
-    /// would be a second index over the same facts, and a second index
-    /// drifts.
+    /// copy addressed by `path`. The collection is not in the tag and does not
+    /// need to be, since a template node belongs to exactly one blueprint.
+    /// Linear in live copies, deliberately: an O(1) map would be a second
+    /// index over the same facts, and a second index drifts.
     fn instance_widget(&self, node: u64, path: &[Value]) -> Option<WidgetId> {
         let (key, site) = path.split_last()?;
         let key = Key::from_value(key);
@@ -3501,12 +3341,11 @@ impl Scene {
         })
     }
 
-    /// What an `undone`/`redone` payload calls this field. A live widget
-    /// is its own name; a stamped copy's internal id is NOT a name — no
-    /// app has ever seen it and it changes when the row is stamped again —
-    /// so the copy is named the way its own occurrences name it: template
-    /// node plus key path (D5). None means the field cannot be named at
-    /// all, which after `teardown`'s drop is a field no ledger holds.
+    /// What an `undone`/`redone` payload calls this field. A live widget is
+    /// its own name; a stamped copy's internal id is NOT a name — no app has
+    /// seen it and it changes when the row is stamped again — so the copy is
+    /// named the way its own occurrences name it: template node plus key path
+    /// (D5).
     fn field_identity(&self, field: WidgetId) -> Option<(u64, crate::protocol::Path)> {
         if field.0 & INTERNAL_BIT == 0 {
             return Some((field.0, Vec::new()));
@@ -3519,10 +3358,9 @@ impl Scene {
         })
     }
 
-    /// An episode's restored text as the payload's one-entry texts run, or
-    /// an EMPTY run for a field that can no longer be named — not a state
-    /// a ledger reaches, and an empty statement rather than a wrong one if
-    /// it ever is.
+    /// An episode's restored text as the payload's one-entry texts run, or an
+    /// EMPTY run for a field that can no longer be named — an empty statement
+    /// rather than a wrong one.
     fn text_delta(&self, field: WidgetId, text: &str) -> Vec<crate::protocol::UndoText> {
         self.field_identity(field)
             .map(|(id, path)| crate::protocol::UndoText {
@@ -3534,10 +3372,9 @@ impl Scene {
             .collect()
     }
 
-    /// The live widget an `undone` text entry describes: itself when it
-    /// names one, or the copy that carries that template node now.
-    /// RESOLVED AT APPLY, not stored: between banking and restoring a row
-    /// can be stamped again and the copy's internal ids are new.
+    /// The live widget an `undone` text entry describes. RESOLVED AT APPLY,
+    /// not stored: between banking and restoring, a row can be stamped again
+    /// and the copy's internal ids are new.
     fn text_target(&self, text: &crate::protocol::UndoText) -> Option<WidgetId> {
         if text.path.is_empty() {
             Some(WidgetId(text.id))
@@ -3546,27 +3383,14 @@ impl Scene {
         }
     }
 
-    /// The text_changed a NATIVE undo produced, plus the field's own
-    /// answer to "can you still undo?".
-    ///
-    /// Walks the frontier episode backwards rather than extending it, and
-    /// ends three ways:
-    ///
-    /// - the text reached the before-image: the episode is spent as a step
-    ///   back and is BANKED FORWARD, so a redo brings the typing back;
-    /// - the field can still undo: the episode stays OPEN at its current
-    ///   position and further typing extends it;
-    /// - the field is EXHAUSTED without having reached the before-image,
-    ///   which means the platform coalesced across the episode's start.
-    ///   A1's clear is supposed to make that unreachable, so this arm falls
-    ///   back to the coarse restore and its test's job is to prove the arm
-    ///   cannot be entered.
-    ///
-    /// THE FORWARD BANK IS WHAT KEEPS THE LEDGER SYMMETRIC: a walk that
-    /// reaches the run's start has spent the platform's stack, so
-    /// `route_redo` can no longer offer the native tier, and a merely
-    /// dropped episode would leave the typing unreachable in both
-    /// directions — the one hole D5's promise cannot have.
+    /// The text_changed a NATIVE undo produced, plus the field's own answer to
+    /// "can you still undo?". Walks the frontier episode backwards and ends
+    /// three ways: the before-image is reached (the episode is spent as a step
+    /// back and BANKED FORWARD, so a redo brings the typing back); the field
+    /// can still undo (the episode stays OPEN); or the field is EXHAUSTED
+    /// short of it, which A1's clear is supposed to make unreachable and whose
+    /// test's job is to prove the arm cannot be entered. THE FORWARD BANK IS
+    /// WHAT KEEPS THE LEDGER SYMMETRIC.
     pub(crate) fn note_native_undo(
         &mut self,
         window: WindowId,
@@ -3582,10 +3406,9 @@ impl Scene {
         };
         ep.current = text.to_owned();
         if ep.current == ep.before {
-            // Spent as a step back, and closed on the way over: the
-            // native stack that was carrying it is empty now, so nothing
-            // further belongs to this run — the same state the coarse
-            // restore leaves an episode in, reached by the other tier.
+            // Spent as a step back, and closed on the way over: the native
+            // stack that was carrying it is empty now — the same state the
+            // coarse restore leaves an episode in.
             ep.open = false;
             let spent = ledger.done.pop().expect("just matched the frontier");
             ledger.redo.push(spent);
@@ -3603,10 +3426,9 @@ impl Scene {
     // --- Undo: routing and the two entry points (D6, §3) ----------------
 
     /// Where an undo should go: the focused field's own stack, the core's
-    /// ledger, or nowhere. `focused_can_undo` is A4's named query,
-    /// answered by the backend and consumed here — ONE expression of the
-    /// question. Enablement is this same call: `Nothing` is what a
-    /// disabled Edit>Undo means, computed live at activation.
+    /// ledger, or nowhere. `focused_can_undo` is A4's named query, answered by
+    /// the backend and consumed here. Enablement is this same call: `Nothing`
+    /// is what a disabled Edit>Undo means, computed live at activation.
     pub(crate) fn route_undo(
         &self,
         window: WindowId,
@@ -3654,10 +3476,10 @@ impl Scene {
     }
 
     /// Undo the newest ledger entry: apply its inverse, move it to the redo
-    /// side, and say what was put back. ONE OCCURRENCE AND NOTHING ELSE
-    /// (D5) — the inverse is a programmatic write, so the echo doctrine
-    /// silences everything it touches, which is why the occurrence carries
-    /// the whole restored state rather than a notification.
+    /// side, and say what was put back. ONE OCCURRENCE AND NOTHING ELSE (D5) —
+    /// the inverse is a programmatic write, so the echo doctrine silences
+    /// everything it touches, which is why the occurrence carries the whole
+    /// restored state.
     pub(crate) fn undo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
@@ -3690,9 +3512,9 @@ impl Scene {
             }
             LedgerEntry::Episode(mut ep) => {
                 // The coarse restore: the core writes the before-image
-                // itself, which by D7 clears that field's native stack
-                // — one correctly-ordered step, at the granularity a
-                // banked episode has left.
+                // itself, which by D7 clears that field's native stack — one
+                // correctly-ordered step, at the granularity a banked episode
+                // has left.
                 let delta = UndoDelta {
                     texts: self.text_delta(ep.field, &ep.before),
                     ..UndoDelta::default()
@@ -3758,13 +3580,11 @@ impl Scene {
         ))
     }
 
-    /// Put a delta's state back into the scene and emit what the backend
-    /// must do about it.
-    ///
-    /// THE ORDER IS THE CORRECTNESS. Signals first, so bound widgets follow
-    /// their props. Then entries, so everything the order names exists.
-    /// Then orders. Then texts, the only part that touches widget-owned
-    /// state.
+    /// Put a delta's state back into the scene and emit what the backend must
+    /// do about it. THE ORDER IS THE CORRECTNESS: signals first, so bound
+    /// widgets follow their props; then entries, so everything the order names
+    /// exists; then orders; then texts, the only part that touches
+    /// widget-owned state.
     fn apply_delta(&mut self, delta: &UndoDelta, out: &mut Vec<ApplyOp>) {
         let from = out.len();
         let mut dirty: Vec<SignalId> = Vec::new();
@@ -3816,10 +3636,9 @@ impl Scene {
             self.restore_order(order.collection, &path, &keys, out);
         }
         for text in &delta.texts {
-            // THE PAYLOAD NAMES THE FIELD THE APP'S WAY, so the write has
-            // to translate back. A copy whose row is gone resolves to
-            // nothing and writes nothing — the same statement applied to a
-            // world that no longer has the widget.
+            // THE PAYLOAD NAMES THE FIELD THE APP'S WAY, so the write has to
+            // translate back. A copy whose row is gone resolves to nothing and
+            // writes nothing.
             let Some(field) = self.text_target(text) else {
                 continue;
             };
@@ -3830,20 +3649,19 @@ impl Scene {
                 value: Value::Str(text.text.clone()),
             });
         }
-        // An inverse is a programmatic write like any other, so D7 holds
-        // for it too: restoring a signal bound to a field's text ends that
-        // field's run. Read off the ops this call added, the same one place
-        // a forward batch reads its own from.
+        // An inverse is a programmatic write like any other, so D7 holds for
+        // it too: restoring a signal bound to a field's text ends that field's
+        // run. Read off the ops this call added.
         let added = out.split_off(from);
         self.absorb_text_writes(&added);
         out.extend(added);
     }
 
-    /// Restore an instance's key order, and its stamped copies with it.
-    /// RIGHT TO LEFT, each copy moved before the one already placed after
-    /// it, so the container ends in exactly this order whatever it held
-    /// before. O(entries) rather than O(change), deliberately — a minimal
-    /// move sequence would be a second reconciler.
+    /// Restore an instance's key order, and its stamped copies with it. RIGHT
+    /// TO LEFT, each copy moved before the one already placed after it, so the
+    /// container ends in exactly this order whatever it held before.
+    /// O(entries) rather than O(change): a minimal move sequence would be a
+    /// second reconciler.
     fn restore_order(
         &mut self,
         id: CollectionId,
@@ -3879,9 +3697,8 @@ impl Scene {
     }
 
     /// The user's back affordance popped an entry natively — the backend
-    /// informs the core POST-FACT and the core-owned stack reconciles here.
-    /// The counterpart of pop_entry with no ApplyOp: the platform already
-    /// animated the pop. A user pop always takes the visible top.
+    /// informs the core POST-FACT and the core-owned stack reconciles here,
+    /// with no ApplyOp. A user pop always takes the visible top.
     #[cfg_attr(
         not(any(target_os = "macos", target_os = "ios", target_os = "android")),
         allow(dead_code)
@@ -3889,25 +3706,17 @@ impl Scene {
     // --- Mounted-root reachability ---------------------------------------
     //
     // A widget with no parent is not an error the way a bad id is: it is
-    // WELL-FORMED and INVISIBLE. It enters the backends' per-kind
-    // registries at create time, so `kind#index` resolves to it and every
-    // harness read answers about it — while the screen shows nothing.
-    // Swift's milestone2 window displayed two widgets for over two weeks
-    // with every leg green (docs/deferred.md, the orphan entry).
-    //
-    // `Scene::apply` is the funnel for all five backends, so this walk is
-    // one implementation covering nine guest languages, and it fires in a
-    // real app that never runs the harness.
-    //
-    // WHAT IT DOES NOT COVER, stated so nobody reads it as total: an
-    // orphan made by a BACKEND — one that receives ApplyOp::AddChild and
-    // fails to reparent — is invisible here, because the core sees the op
-    // and not the toolkit's tree.
+    // WELL-FORMED and INVISIBLE, entering the backends' per-kind registries at
+    // create time so every harness read answers about it while the screen
+    // shows nothing (docs/deferred.md, the orphan entry — Swift's milestone2
+    // window displayed two widgets for two weeks with every leg green). It
+    // does NOT cover an orphan made by a BACKEND that receives
+    // ApplyOp::AddChild and fails to reparent.
 
-    /// Is `target` inside `root`'s subtree (or `root` itself)? Walks
-    /// UP from `target`, which is the direction the map runs. Bounded by
-    /// the map's size so a pre-existing cycle cannot hang the caller
-    /// that is checking for cycles.
+    /// Is `target` inside `root`'s subtree (or `root` itself)? Walks UP from
+    /// `target`, which is the direction the map runs. Bounded by the map's
+    /// size so a pre-existing cycle cannot hang the caller that is checking
+    /// for cycles.
     fn widget_subtree_contains(&self, root: WidgetId, target: WidgetId) -> bool {
         let mut at = target;
         for _ in 0..=self.parent_of.len() {
@@ -3922,11 +3731,9 @@ impl Scene {
         false
     }
 
-    /// A live container's axis as the GUEST declared it: the creation
-    /// kind, or the guest's own `axis` write. A breakpoint flip is not
-    /// read on purpose — a stacked row's growers are the fold rule's
-    /// business (D7), and its horizontal weights are legal at every
-    /// width it was authored for.
+    /// A live container's axis as the GUEST declared it: the creation kind,
+    /// or the guest's own `axis` write. A breakpoint flip is not read on
+    /// purpose — a stacked row's growers are the fold rule's business (D7).
     fn authored_vertical(&self, id: WidgetId) -> bool {
         let mode = self.authored_axis.get(&id).copied();
         match self.widgets.get(&id) {
@@ -3937,16 +3744,11 @@ impl Scene {
         }
     }
 
-    /// The first `grow` that would silently be ZERO because it runs
-    /// along a scroll's own axis, as a refusal sentence, or None. A
-    /// scroll proposes unbounded extent to its content, so a weight on
-    /// a child of any vertical container under it has nothing to
-    /// divide; every other toolkit refuses (Flutter, Compose) or gives
-    /// the scroll a definite box (CSS), and kaya answered zero. Walks
-    /// each scroll's LIVE subtree — stamped copies are not in
-    /// `children_of` — and reads a For container's template bodies once,
-    /// at their declaration, rather than once per row. Every clause of
-    /// the sentence is read off the scene.
+    /// The first `grow` that would silently be ZERO because it runs along a
+    /// scroll's own axis, as a refusal sentence, or None (ruled REFUSE
+    /// 2026-09-02; docs/deferred.md). Walks each scroll's LIVE subtree —
+    /// stamped copies are not in `children_of` — and reads a For container's
+    /// template bodies once, at their declaration.
     fn grow_in_scroll_message(&self) -> Option<String> {
         let mut scrolls: Vec<WidgetId> = self
             .widgets
@@ -3993,9 +3795,9 @@ impl Scene {
     }
 
     /// The template half of `grow_in_scroll_message`: a body's roots are
-    /// children of the (vertical) For container; inside the body, a
-    /// node's parent is its own `AddChild`, and a nested For or When
-    /// container is vertical like the live one.
+    /// children of the (vertical) For container; inside the body, a node's
+    /// parent is its own `AddChild`, and a nested For or When container is
+    /// vertical like the live one.
     fn template_grow_in_scroll(body: &TplBody, scroll: WidgetId, container: WidgetId) -> Option<String> {
         let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
         let mut axis: HashMap<u64, i64> = HashMap::new();
@@ -4079,10 +3881,10 @@ impl Scene {
             .find(|id| !roots.contains(&self.top_ancestor(*id)))
     }
 
-    /// The topmost widget above `id` (itself when it has no parent).
-    /// Bounded by the map's size: `add_child` refuses to make a cycle, so
-    /// this cannot spin — and if that refusal is ever removed, this
-    /// returns a wrong answer instead of hanging the app thread.
+    /// The topmost widget above `id` (itself when it has no parent). Bounded
+    /// by the map's size: `add_child` refuses to make a cycle, so if that
+    /// refusal is ever removed this returns a wrong answer instead of hanging
+    /// the app thread.
     fn top_ancestor(&self, id: WidgetId) -> WidgetId {
         let mut at = id;
         for _ in 0..=self.parent_of.len() {
@@ -4095,19 +3897,16 @@ impl Scene {
     }
 
     /// The refusal text. It carries the diagnosis because the whole failure
-    /// class is "it looked fine". Every clause here is READ OFF THE SCENE,
-    /// not guessed (docs/traps.md, "a diagnostic may only print what it
-    /// measured"): the kind, the chain that was actually walked, and how
-    /// many surfaces have a root at all.
+    /// class is "it looked fine", and every clause is READ OFF THE SCENE
+    /// (docs/traps.md, "a diagnostic may only print what it measured").
     fn orphan_message(&self, orphan: WidgetId) -> String {
         let kind = self.widgets.get(&orphan);
         let top = self.top_ancestor(orphan);
         let mut chain = String::new();
         if top != orphan {
-            // Strictly what was walked. NOT "its window was destroyed" —
-            // the core cannot tell a root whose surface died from one
-            // that was never mounted, and a diagnostic may only print
-            // what it measured (docs/traps.md).
+            // Strictly what was walked. NOT "its window was destroyed" — the
+            // core cannot tell a root whose surface died from one that was
+            // never mounted (docs/traps.md).
             chain = format!(
                 " Walking up, its topmost ancestor is {top:?} ({:?}), and no live \
                  surface has that widget as its root.",
@@ -4140,10 +3939,9 @@ impl Scene {
         )
     }
 
-    /// The user switched sections through the platform's switcher —
-    /// post-fact reconciliation of the core's selected-section mirror
-    /// (the user_popped stance). Selecting a section that was never
-    /// added is a backend bug and fails loudly.
+    /// The user switched sections through the platform's switcher — post-fact
+    /// reconciliation of the core's mirror (the user_popped stance). Selecting
+    /// a section that was never added is a backend bug and fails loudly.
     pub(crate) fn user_selected_section(&mut self, window: WindowId, section: WindowId) {
         assert!(
             self.section_of.get(&section) == Some(&window),
@@ -4186,10 +3984,9 @@ impl Scene {
         self.menu_items[&self.menu_root(item)].anchor
     }
 
-    /// The grouping-node depth of an item: grouping nodes on the path
-    /// from its root down to and including it. A leaf does not deepen the
-    /// chain; the cap (DESIGN.md, Menus) is a chain of at most two
-    /// grouping nodes.
+    /// The grouping-node depth of an item: grouping nodes on the path from
+    /// its root down to and including it. A leaf does not deepen the chain;
+    /// the cap (DESIGN.md, Menus) is at most two grouping nodes.
     fn menu_group_depth(&self, item: MenuItemId) -> u32 {
         let mut depth = 0;
         let mut cur = Some(item);
@@ -4224,10 +4021,10 @@ impl Scene {
         );
     }
 
-    /// Walk a subtree from `item` (at grouping depth `depth`): enforce
-    /// the depth cap on every grouping node, and either collect its
-    /// shortcuts (a window catalog is a shortcut home) or reject any
-    /// shortcut (a context anchor is not).
+    /// Walk a subtree from `item` (at grouping depth `depth`): enforce the
+    /// depth cap on every grouping node, and either collect its shortcuts (a
+    /// window catalog is a shortcut home) or reject any shortcut (a context
+    /// anchor is not).
     fn validate_menu_subtree(
         &self,
         item: MenuItemId,
@@ -4267,10 +4064,9 @@ impl Scene {
         }
     }
 
-    /// The shared front of context_attach and context_attach_node: the
-    /// root must be a free root, must not be a radio_option, and its
-    /// subtree must hold no shortcut (validated from the group-or-leaf
-    /// starting depth).
+    /// The shared front of context_attach and context_attach_node: the root
+    /// must be a free root, must not be a radio_option, and its subtree must
+    /// hold no shortcut.
     fn validate_context_root(&self, item: MenuItemId) {
         let kind = self
             .menu_items
@@ -4310,10 +4106,9 @@ impl Scene {
             !self.menu_subtree_contains(child, parent),
             "kaya: menu_item_append of {child:?} under {parent:?} would create a cycle"
         );
-        // If the parent's tree is anchored, the child joins that catalog
-        // now — re-validate at the child's would-be absolute grouping depth
-        // BEFORE linking, so a reject leaves the tree and the catalog
-        // untouched (the MenubarAppend standard).
+        // If the parent's tree is anchored, the child joins that catalog now
+        // — re-validate BEFORE linking, so a reject leaves the tree and the
+        // catalog untouched (the MenubarAppend standard).
         if let Some(anchor) = self.anchored_root(parent) {
             let is_bar = matches!(anchor, MenuAnchor::Window(_));
             let start = self.menu_group_depth(parent) + u32::from(is_menu_group(child_kind));
@@ -4356,13 +4151,11 @@ impl Scene {
         }
     }
 
-    /// Store a validated canonical shortcut on an action, and — for an
-    /// action already in a window catalog — dup-check and register it. A
-    /// shortcut on a context-anchored item is a root error.
-    ///
-    /// Props mutate freely, so a re-set REPLACES the item's registration.
-    /// The dup-check runs before any mutation, so a reject leaves both the
-    /// registry and the item untouched.
+    /// Store a validated canonical shortcut on an action, and — for an action
+    /// already in a window catalog — dup-check and register it. A shortcut on
+    /// a context-anchored item is a root error. Props mutate freely, so a
+    /// re-set REPLACES the registration, and the dup-check runs before any
+    /// mutation so a reject leaves both registry and item untouched.
     fn set_item_shortcut(&mut self, item: MenuItemId, spelling: String) {
         match self.anchored_root(item) {
             Some(MenuAnchor::Context) => panic!(
@@ -4386,9 +4179,8 @@ impl Scene {
         self.menu_items.get_mut(&item).unwrap().shortcut = Some(spelling);
     }
 
-    /// One standard command per role, window-anchored: a role can move an
-    /// authored item into dress-owned chrome, so two claimants would be two
-    /// items racing for one native slot, and a context anchor has no such
+    /// One standard command per role, window-anchored: two claimants would be
+    /// two items racing for one native slot, and a context anchor has no such
     /// slot at all. Re-setting the same role on the same item is idle.
     fn claim_menu_role(&mut self, item: MenuItemId, value: &Value) {
         let Value::Str(role) = value else { return };
@@ -4468,7 +4260,7 @@ impl Scene {
     /// A menu binding's COALESCED value against its live domain, at the
     /// barrier. Only a radio group's `value` has a domain a later coalesced
     /// write can break. Returns the exact message the barrier must panic
-    /// with (after restoring signal state).
+    /// with.
     fn check_menu_binding_domain(
         &self,
         item: MenuItemId,
@@ -4541,7 +4333,7 @@ impl Scene {
                         // The For `level` Fors up names a collection whose
                         // schema is already declared, and the case being
                         // parsed names which variant's schema this binding
-                        // sees. Validated here, before anything stamps.
+                        // sees. Validated before anything stamps.
                         let (collection, variant) = scopes
                             .iter()
                             .rev()
@@ -4596,20 +4388,12 @@ impl Scene {
                     "kaya: template node {} already has a parent",
                     child.0
                 );
-                // THE STRUCTURAL RULES THE LIVE PATH ENFORCES, ENFORCED
-                // HERE TOO. A scroll takes exactly one child and a choice's
-                // children are its options, and both were checked only on
-                // the live `AddChild`. Recording a template ran neither, so
-                // a malformed prototype recorded clean, declared clean, and
-                // reached four backends as a shape none of them has a
-                // reading for. It was unreachable through sugar until the
-                // template zone gained those constructors, which is exactly
-                // when a rule enforced on one path and not the other stops
-                // being theoretical (docs/sugar-pass-plan.md).
-                //
-                // Checked at RECORD time, not at stamp: the prototype is
-                // wrong once, and a message about the guest's own
-                // declaration beats the same message repeated per row.
+                // THE STRUCTURAL RULES THE LIVE PATH ENFORCES, ENFORCED HERE
+                // TOO: a scroll takes exactly one child and a choice's
+                // children are its options, checked only on the live
+                // `AddChild` until a malformed prototype reached four backends
+                // as a shape none of them reads (docs/sugar-pass-plan.md). At
+                // RECORD time, not at stamp: the prototype is wrong once.
                 let parent_kind = self.template_nodes[&parent.0];
                 let child_kind = self.template_nodes[&child.0];
                 if parent_kind == WidgetKind::Scroll {
@@ -4793,10 +4577,9 @@ impl Scene {
                     "kaya: context_attach_node rejected on {node_kind:?} — the editable \
                      text controls keep their native edit menus (dress)"
                 );
-                // The menu item tree is live (items are not stamped in
-                // v1) — validate it as a context root and anchor it once.
-                // Every stamped copy shares this tree; only the noun key
-                // path differs per copy.
+                // The menu item tree is live (items are not stamped in v1) —
+                // validated as a context root and anchored once. Every stamped
+                // copy shares this tree; only the noun key path differs.
                 self.validate_context_root(item);
                 self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
                 top.current.ops.push(TplOp::ContextAttachNode { node: node.0, item });
@@ -4804,9 +4587,8 @@ impl Scene {
             TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                 // The nested For's TEMPLATE-SCOPED bar: the rows() chain
                 // closed that For one op ago, so its blueprint is in this
-                // scope's ops — arity dies here, at declaration, exactly
-                // like the live arm's (docs/tables-plan.md, dynamic
-                // tables).
+                // scope's ops — arity dies here, at declaration, exactly like
+                // the live arm's (docs/tables-plan.md).
                 assert!(
                     path.is_empty(),
                     "kaya: a template-zone set_column_headers takes no key path — the \
@@ -4858,11 +4640,10 @@ impl Scene {
         }
     }
 
-    /// Assemble a closed scope's blueprint(s). A For's cases must be total
-    /// — one body per variant of its collection's sum, in discriminant
-    /// order — with the caseless scope standing for the one-variant For. An
-    /// empty case is the explicit way to render a constructor as nothing;
-    /// a missing one dies here, at declaration.
+    /// Assemble a closed scope's blueprint(s). A For's cases must be total —
+    /// one body per variant, in discriminant order — with the caseless scope
+    /// standing for the one-variant For. An empty case is the explicit way to
+    /// render a constructor as nothing; a missing one dies here.
     fn close_scope_bodies(&self, scope: TplScope) -> ClosedScope {
         let TplScope { header, closed, current, explicit_cases, .. } = scope;
         match header {
@@ -4912,8 +4693,7 @@ impl Scene {
 
     /// The schema-shape checks shared by live and template collection
     /// declarations. A unit variant is legal inside a real sum, but the
-    /// one-variant zero-field collection stays an error: a record with no
-    /// fields holds nothing.
+    /// one-variant zero-field collection stays an error.
     fn check_variants(id: CollectionId, variants: &[Vec<ValueType>]) {
         assert!(
             !variants.is_empty(),
@@ -4941,13 +4721,11 @@ impl Scene {
         decl.bound = true;
     }
 
-    /// A For starts rendering a collection instance: register the site
-    /// and stamp any entries already in the table.
-    ///
-    /// `table` says the site is windowed-capable AT BIRTH — a nested For
-    /// whose template node already carries a header bar. A live For's
-    /// columns arrive after its CreateFor, so that one is seeded from the
-    /// `set_column_headers` arm instead.
+    /// A For starts rendering a collection instance: register the site and
+    /// stamp any entries already in the table. `table` says the site is
+    /// windowed-capable AT BIRTH — a nested For whose template node already
+    /// carries a header bar. A live For's columns arrive after its CreateFor,
+    /// so that one is seeded from the `set_column_headers` arm instead.
     fn register_for_site(
         &mut self,
         collection: CollectionId,
@@ -4982,11 +4760,10 @@ impl Scene {
                 window: crate::rowwindow::RowWindow::default(),
             },
         );
-        // RECONCILE IS A SEEDED SITE'S ONLY STAMPER: seed_window stamps
-        // the band out of the order, so the whole-table walk below — the
-        // bridge's — must not run beside it. On an UNDECLARED backend
-        // nothing is seeded and the walk is still the whole of it, which
-        // is the arm the bridge test takes.
+        // RECONCILE IS A SEEDED SITE'S ONLY STAMPER: seed_window stamps the
+        // band out of the order, so the whole-table walk below must not run
+        // beside it. On an UNDECLARED backend nothing is seeded and the walk
+        // is still the whole of it.
         if table {
             self.seed_window(collection, &path, out);
             if self.windowed(collection, &path) {
@@ -5041,12 +4818,10 @@ impl Scene {
             })
     }
 
-    /// A row's own nested collections are born WITH ITS RECORD, never
-    /// with its stamp: an unrealized row's inner list is model data the
-    /// guest writes and reads like any other, and the band rebuilds its
-    /// widgets from that data on entry (docs/virtualization-plan.md §1
-    /// one level down — the ruling that closed docs/deferred.md's
-    /// nested-collection-instance entry).
+    /// A row's own nested collections are born WITH ITS RECORD, never with
+    /// its stamp: an unrealized row's inner list is model data the guest
+    /// writes and reads like any other, and the band rebuilds its widgets from
+    /// that data on entry (docs/virtualization-plan.md §1 one level down).
     fn birth_nested(&mut self, id: CollectionId, path: &PathKey, key: &Key, variant: u32) {
         // No For over this collection yet (rows may precede it): its
         // registration births what is already there.
@@ -5092,10 +4867,10 @@ impl Scene {
         self.drawing_overrides.retain(|(_, p), _| *p != copy_path);
     }
 
-    /// The blueprint over `collection` is known: record what one of its
-    /// rows owns, and birth the nested instances of every row already
-    /// inserted. Rows may arrive before their For binds ("data without a
-    /// For yet"), and those rows owe their inner lists just the same.
+    /// The blueprint over `collection` is known: record what one of its rows
+    /// owns, and birth the nested instances of every row already inserted.
+    /// Rows may arrive before their For binds, and they owe their inner lists
+    /// just the same.
     fn register_row_owned(&mut self, collection: CollectionId, bodies: &[Arc<TplBody>]) {
         let owned = owned_collections(bodies);
         if owned.iter().all(Vec::is_empty) {
@@ -5192,9 +4967,9 @@ impl Scene {
         *current = (variant, record.clone());
         if was != variant {
             // The entry changed constructor: its copy is a different
-            // blueprint now. Tear down, restamp from the new case, and
-            // put the fresh copy back in the entry's slot — the key
-            // kept its position in the order; only the shape changed.
+            // blueprint now. Tear down, restamp from the new case, and put the
+            // fresh copy back in the entry's slot — the key kept its position
+            // in the order; only the shape changed.
             if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
                 self.teardown(stamp, out);
             }
@@ -5266,10 +5041,10 @@ impl Scene {
     }
 
     /// One field's delta: only bindings on that field re-resolve — the
-    /// O(change) doctrine applied within an entry. `variant` is the
-    /// discriminant the guest witnessed; a mismatch with the stored one
-    /// means the binding's model has drifted from the core, and dies here
-    /// rather than writing the wrong constructor's field.
+    /// O(change) doctrine within an entry. `variant` is the discriminant the
+    /// guest witnessed; a mismatch with the stored one means the binding's
+    /// model has drifted from the core, and dies here rather than writing the
+    /// wrong constructor's field.
     fn update_field_entry(
         &mut self,
         id: CollectionId,
@@ -5542,11 +5317,9 @@ impl Scene {
                 }),
                 TplOp::Collection { id } => {
                     // THE INSTANCE IS ALREADY THERE, born with the row's
-                    // record (`birth_nested`), and a re-stamp on band
-                    // entry must read the rows the guest wrote while this
-                    // copy did not exist — an insert here would erase
-                    // them. It is entered rather than merely read because
-                    // the blueprint may be registered after its rows.
+                    // record (`birth_nested`), and a re-stamp on band entry
+                    // must read the rows the guest wrote while this copy did
+                    // not exist — an insert here would erase them.
                     self.coll_instances.entry((*id, copy_path.clone())).or_default();
                     stamp.colls.push((*id, copy_path.clone()));
                 }
@@ -5566,13 +5339,9 @@ impl Scene {
                     stamp.for_sites.push((*collection, copy_path.clone()));
                     // The copy's header bar, template-or-override, and the
                     // instance record a late template declaration re-stamps
-                    // through (docs/tables-plan.md, dynamic tables). The
-                    // tag is sort_requested's identity: the template node
-                    // plus this copy's keys, outermost first.
-                    //
-                    // READ BEFORE THE SITE REGISTERS: a copy that IS a
-                    // table is windowed-capable from its first row, so
-                    // the seed has to be in place before anything stamps.
+                    // through (docs/tables-plan.md). READ BEFORE THE SITE
+                    // REGISTERS: a copy that IS a table is windowed-capable
+                    // from its first row.
                     let bar = self
                         .bar_overrides
                         .get(&(*node, copy_path.clone()))
@@ -5619,9 +5388,8 @@ impl Scene {
                 }
                 TplOp::ContextAttachNode { node, item } => {
                     // The menu tree is shared (live); each stamp attaches
-                    // it to this copy's widget carrying the copy's key
-                    // path — the noun every activation stamps into its
-                    // occurrence (the on_click_node encoding).
+                    // it to this copy's widget carrying the copy's key path —
+                    // the noun every activation stamps into its occurrence.
                     let widget = node_map[node];
                     out.push(ApplyOp::ContextAttachNode {
                         widget,
@@ -5669,10 +5437,6 @@ impl Scene {
         }
     }
 
-    /// Undo one stamp exactly: nested sites and instances first (their
-    /// bookkeeping and their own stamps), then this copy's bindings,
-    /// then Destroys in reverse creation order — children before
-    /// parents, so backends never walk anything.
     /// The bar's own walls, every zone (spec doc order).
     fn validate_bar(titles: &[String], sorted: u32, direction: u32) {
         assert!(!titles.is_empty(), "kaya: set_column_headers declares no columns");
@@ -5695,13 +5459,9 @@ impl Scene {
         );
     }
 
-    /// Every variant's row template fits the declared arity.
-    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29). A table is a column
+    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29): a table is a column
     /// whose declared columns make it one, so a flip renders the rows as a
-    /// plain row and drops the header — silently, on every backend. The
-    /// same declaration is what gives a table its overflow behaviour, which
-    /// is why no separate property exists to collide with this one.
-    ///
+    /// plain row and drops the header, silently, on every backend.
     /// `stack_when` lowers to a breakpoint whose only setter is `axis`, so
     /// this one refusal covers both spellings.
     fn refuse_axis_on_table(tables: &std::collections::HashSet<WidgetId>, widget: WidgetId) {
@@ -5781,12 +5541,11 @@ impl Scene {
     }
 
     fn teardown(&mut self, stamp: Stamp, out: &mut Vec<ApplyOp>) {
-        // The copy's WIDGET bookkeeping goes with its widgets. Its
-        // per-copy header override does NOT: that is guest-declared state
-        // addressed by the copy's keys, and a windowed row's copy dies on
-        // every scroll — so it is reaped where the ROW dies
-        // (`reap_nested`), which keeps the property the coupling existed
-        // for (no resurrection on a same-key re-insert).
+        // The copy's WIDGET bookkeeping goes with its widgets. Its per-copy
+        // header override does NOT: that is guest-declared state addressed by
+        // the copy's keys, and a windowed row's copy dies on every scroll, so
+        // it is reaped where the ROW dies (`reap_nested`) — no resurrection
+        // on a same-key re-insert.
         let dead: std::collections::HashSet<WidgetId> = stamp.widgets.iter().copied().collect();
         self.bar_instances.retain(|_, wid| !dead.contains(wid));
         self.drawing_instances.retain(|_, wid| !dead.contains(wid));
@@ -5811,8 +5570,7 @@ impl Scene {
         // THE INSTANCE STAYS: it is the copy's data, keyed by the copy's
         // path, and it outlives the copy's widgets exactly as the outer
         // collection outlives its unrealized rows
-        // (docs/virtualization-plan.md §1, extended one level down). Only
-        // the widgets leave — the site and every inner copy's stamp.
+        // (docs/virtualization-plan.md §1, one level down).
         for (cid, path) in &stamp.colls {
             self.for_sites.remove(&(*cid, path.clone()));
             let order = self
@@ -5836,13 +5594,11 @@ impl Scene {
                 bound.retain(|(w, _, _)| w != widget);
             }
         }
-        // THE COPY TAKES ITS TYPING HISTORY WITH IT. An episode on a field
-        // that no longer exists is a step that would visibly do nothing.
-        // The row's own removal is a step in its own right and still walks
-        // back; what it brings back is a fresh copy, because an
-        // uncontrolled field's text is widget-owned state and undo restores
-        // app state (D4). An app that wants a row's text to survive its
-        // removal binds it to a record field.
+        // THE COPY TAKES ITS TYPING HISTORY WITH IT: an episode on a field
+        // that no longer exists is a step that would visibly do nothing. The
+        // row's removal is a step in its own right, and what it brings back
+        // is a fresh copy — an uncontrolled field's text is widget-owned and
+        // undo restores app state (D4).
         for ledger in self.ledgers.values_mut() {
             let spent = |entry: &LedgerEntry| match entry {
                 LedgerEntry::Episode(ep) => stamp.widgets.contains(&ep.field),
@@ -5858,11 +5614,10 @@ impl Scene {
 
     // --- Row windowing (docs/virtualization-plan.md §1-§3) ---------------
     //
-    // A For with NO window report and NO seed has an UNBOUNDED band:
-    // every row realizes, and every path above stays the one it was —
-    // §1's bridge, which is exactly right for a backend that never
-    // windows. The report is what narrows it, and from then on the
-    // site's realized set is exactly the band's rows.
+    // A For with NO window report and NO seed has an UNBOUNDED band: every
+    // row realizes and every path above stays the one it was (§1's bridge).
+    // The report is what narrows it, and from then on the site's realized set
+    // is exactly the band's rows.
 
     fn windowed(&self, id: CollectionId, path: &PathKey) -> bool {
         self.for_sites
@@ -5870,21 +5625,11 @@ impl Scene {
             .is_some_and(|s| s.window.is_bounded())
     }
 
-    /// A windowed-capable For on a DECLARED backend starts at the seed
-    /// rather than unbounded (docs/deferred.md, the declares-windowing
-    /// entry): its first k rows realize and every row past them is DATA
-    /// until the backend's first report replaces the seed with a measured
-    /// band.
-    ///
-    /// WINDOWED-CAPABLE IS A DECLARED TABLE, which is what all four
-    /// windowing tiers window and what nothing else does. Seeding a plain
-    /// For would cap it at k rows on a tier that never reports on one,
-    /// and nothing the guest can read would say so.
-    ///
-    /// ROWS THAT OWN NESTED COLLECTIONS ARE SEEDED TOO (ruled 2026-08-25,
-    /// the entry this closed in docs/deferred.md): their instances are
-    /// born with the row's record and outlive its widgets, so an
-    /// unrealized row's inner list is written and read like any other.
+    /// A windowed-capable For on a DECLARED backend starts at the seed rather
+    /// than unbounded (docs/deferred.md, the declares-windowing entry).
+    /// WINDOWED-CAPABLE IS A DECLARED TABLE — seeding a plain For would cap it
+    /// at k rows on a tier that never reports on one. Rows that own nested
+    /// collections are seeded too (ruled 2026-08-25).
     fn seed_window(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
         if !self.windowing {
             return;
@@ -5894,10 +5639,10 @@ impl Scene {
             Some(s) if !s.window.is_bounded() => {}
             _ => return,
         }
-        // A site seeded after its rows were stamped (columns declared
-        // late) still owes the teardown of everything past the band, and
-        // reconcile_window can only diff against a realized set that says
-        // what is actually stamped.
+        // A site seeded after its rows were stamped (columns declared late)
+        // still owes the teardown of everything past the band, and
+        // reconcile_window can only diff against a realized set that says what
+        // is actually stamped.
         self.inherit_realized(&site);
         self.for_sites
             .get_mut(&site)
@@ -5924,20 +5669,12 @@ impl Scene {
         self.seed_window(id, &path, out);
     }
 
-    /// Rasterize one canvas at the reported presentation and put the
-    /// pixels on the apply channel. THE ONE PLACE A DRAWING BECOMES
-    /// BYTES — a scale report, an appearance flip and a re-declaration
-    /// all arrive here, so a backend can never see two spellings of the
-    /// same picture.
-    ///
-    /// WHICH SIZE it is rastered at is the size policy's whole content
-    /// (docs/canvas-plan.md §3.2.1): `fixed` never adapts and takes the
-    /// VIEWBOX, and every other policy takes the TRACK the backend
-    /// reported — `scale` fitting the held display list into it
-    /// uniformly, `redraw` and `tick` having just been handed that same
-    /// size to draw for, so their fit is the identity. Before any track
-    /// report there is only the viewbox, which is also every raster this
-    /// function took before the policy existed.
+    /// Rasterize one canvas at the reported presentation and put the pixels on
+    /// the apply channel. THE ONE PLACE A DRAWING BECOMES BYTES — a scale
+    /// report, an appearance flip and a re-declaration all arrive here, so a
+    /// backend can never see two spellings of the same picture. WHICH SIZE is
+    /// the size policy's whole content (docs/canvas-plan.md §3.2.1): `fixed`
+    /// takes the VIEWBOX, every other policy the TRACK the backend reported.
     fn emit_drawing(
         &mut self,
         id: WidgetId,
@@ -5963,13 +5700,11 @@ impl Scene {
     }
 
     /// ASK ONE CANVAS FOR A DRAWING AT ITS ASSIGNED SIZE — the mailbox's
-    /// send half (§3.2.1). Nothing goes out for a constant-mode canvas
-    /// (`scale`/`fixed` need no round trip, which is the whole point of
-    /// declaring the function constant), for a canvas whose track no
-    /// backend has reported yet, or while a request is already
-    /// outstanding: that last one is what makes the mailbox a MAILBOX
-    /// rather than a queue — the newest size sits in `canvas_pending`
-    /// and goes out when the guest answers.
+    /// send half (§3.2.1). Nothing goes out for a constant-mode canvas, for a
+    /// canvas whose track no backend has reported yet, or while a request is
+    /// already outstanding: that last one is what makes it a MAILBOX rather
+    /// than a queue — the newest size sits in `canvas_pending` and goes out
+    /// when the guest answers.
     fn ask_canvas(&mut self, id: WidgetId) -> Vec<Occurrence> {
         let policy = self.canvas_policies.get(&id).copied().unwrap_or(crate::wire::SIZE_POLICY_SCALE);
         if policy != crate::wire::SIZE_POLICY_REDRAW && policy != crate::wire::SIZE_POLICY_TICK {
@@ -6007,12 +5742,11 @@ impl Scene {
         std::mem::take(&mut self.asks)
     }
 
-    /// THE BACKEND REPORTS WHAT LAYOUT ASSIGNED A CANVAS, in points —
-    /// `kaya_window_moved`'s shape one widget over, and the report the
-    /// stretch defect was missing (docs/canvas-plan.md §3.2.1,
-    /// docs/deferred.md). A `scale` canvas re-rasters here; a `redraw`
-    /// or `tick` one is asked; a `fixed` one records the number and
-    /// changes nothing, which is what refusing coercion means.
+    /// THE BACKEND REPORTS WHAT LAYOUT ASSIGNED A CANVAS, in points — the
+    /// report the stretch defect was missing (docs/canvas-plan.md §3.2.1,
+    /// docs/deferred.md). A `scale` canvas re-rasters here; a `redraw` or
+    /// `tick` one is asked; a `fixed` one records the number and changes
+    /// nothing.
     pub(crate) fn set_canvas_track(
         &mut self,
         id: WidgetId,
@@ -6021,12 +5755,11 @@ impl Scene {
         if !size.0.is_finite() || !size.1.is_finite() || size.0 <= 0.0 || size.1 <= 0.0 {
             return (Vec::new(), Vec::new());
         }
-        // DEDUPED AT HALF A POINT, not at equality, and the reason is a
-        // loop rather than cost: the raster rounds to whole DEVICE
-        // pixels, so the blit's logical size can differ from the track
-        // that produced it by up to half a point at scale 1 — and the
-        // backend reports the blit's box back. Exact equality would let
-        // that fraction re-raster forever.
+        // DEDUPED AT HALF A POINT, not at equality, and the reason is a loop
+        // rather than cost: the raster rounds to whole DEVICE pixels, so the
+        // blit's logical size can differ from the track that produced it by up
+        // to half a point at scale 1 — and the backend reports the blit's box
+        // back. Exact equality would let that fraction re-raster forever.
         if let Some((w, h)) = self.canvas_tracks.get(&id) {
             if (w - size.0).abs() < 0.5 && (h - size.1).abs() < 0.5 {
                 return (Vec::new(), Vec::new());
@@ -6045,10 +5778,9 @@ impl Scene {
         (out, asks)
     }
 
-    /// A FRAME (docs/canvas-plan.md §15.4): every `tick` canvas whose
-    /// track is known is handed that size and the platform's own frame
-    /// time. Ticking canvases are asked in id order for the apply
-    /// channel's reason — a HashMap's order is not a fact about kaya.
+    /// A FRAME (docs/canvas-plan.md §15.4): every `tick` canvas whose track
+    /// is known is handed that size and the platform's own frame time. Asked
+    /// in id order, because a HashMap's order is not a fact about kaya.
     pub(crate) fn frame(&mut self, time: f64) -> Vec<Occurrence> {
         let mut ticking: Vec<WidgetId> = self
             .canvas_policies
@@ -6066,13 +5798,11 @@ impl Scene {
     }
 
     /// WHICH SIZE the raster this canvas last produced actually is —
-    /// `expect_raster`'s observation (docs/canvas-plan.md §3.2.1). The
-    /// two candidates come from different places on purpose: the TRACK is
-    /// a number the backend measured and reported, the VIEWBOX is one the
-    /// guest declared, and the raster is what the core made of them. It
-    /// is the only canvas observable the size policy can move — `probe`
-    /// rasterizes at the viewbox by definition, so §7.1's hash and
-    /// `expect_drawing`'s bounds are policy-blind.
+    /// `expect_raster`'s observation (docs/canvas-plan.md §3.2.1). The two
+    /// candidates come from different places on purpose: the backend measured
+    /// the TRACK, the guest declared the VIEWBOX. It is the only canvas
+    /// observable the size policy can move — `probe` rasterizes at the
+    /// viewbox by definition.
     pub(crate) fn canvas_raster_shape(&self, id: WidgetId) -> Option<String> {
         let drawing = self.drawings.get(&id)?;
         let (rw, rh) = self.raster_target(id, drawing);
@@ -6092,10 +5822,9 @@ impl Scene {
     }
 
     /// The backend reports the window's scale and appearance; the core
-    /// re-rasters (docs/canvas-plan.md §5, §6). Only the numbers cross —
-    /// no platform colour reaches a drawing — and an unchanged report
-    /// emits nothing, because a stale-size blit is the transition bug
-    /// every core-buffer framework has and a redundant one is just cost.
+    /// re-rasters (docs/canvas-plan.md §5, §6). Only the numbers cross — no
+    /// platform colour reaches a drawing — and an unchanged report emits
+    /// nothing.
     pub(crate) fn set_presentation(
         &mut self,
         p: crate::canvas::Presentation,
@@ -6116,20 +5845,19 @@ impl Scene {
         out
     }
 
-    /// What the harness reads back about one canvas: the canonical
-    /// raster's hash and the two legible facts, composed HERE so five
-    /// platforms compare a string the core wrote (docs/canvas-plan.md
-    /// §7.1). `None` when the id names no canvas that has been drawn.
+    /// What the harness reads back about one canvas: the canonical raster's
+    /// hash and the two legible facts, composed HERE so five platforms
+    /// compare a string the core wrote (docs/canvas-plan.md §7.1).
     pub(crate) fn canvas_probe(&self, id: WidgetId) -> Option<String> {
         let drawing = self.drawings.get(&id)?;
         let p = crate::canvas::probe(drawing);
         Some(format!("{:016x} {}", p.hash, crate::canvas::drawing_observation(&p)))
     }
 
-    /// The realized set of a site whose band was UNBOUNDED: every row
-    /// that actually has a stamp, in the collection's order. Once only,
-    /// so the walk over every row is paid once — after it the band's own
-    /// reconciliation is the only writer.
+    /// The realized set of a site whose band was UNBOUNDED: every row that
+    /// actually has a stamp, in the collection's order. Once only, so the walk
+    /// over every row is paid once — after it the band's own reconciliation is
+    /// the only writer.
     fn inherit_realized(&mut self, site: &(CollectionId, PathKey)) {
         let (id, path) = site.clone();
         let realized: Vec<Key> = self.coll_instances[site]
@@ -6141,28 +5869,25 @@ impl Scene {
         self.for_sites.get_mut(site).unwrap().window.set_realized(realized);
     }
 
-    /// A backend's report of what is on screen. The band moves, entering
-    /// rows STAMP through the ordinary stamping path and leaving rows
-    /// tear down through the ordinary teardown path — so the applies are
-    /// ordinary applies, and this is the pump's SECOND PRODUCER (§3.3).
+    /// A backend's report of what is on screen. The band moves, entering rows
+    /// STAMP and leaving rows tear down through the ordinary paths — so the
+    /// applies are ordinary applies, and this is the pump's SECOND PRODUCER
+    /// (§3.3).
     pub(crate) fn window_moved(&mut self, target: u64, first: usize, count: usize) -> Vec<ApplyOp> {
         let site = self.window_site(target, "kaya_window_moved");
-        // A BACKEND THAT REPORTS IS A BACKEND THAT WINDOWS, and it says
-        // so at its init or not at all. Without the declaration the seed
-        // never plants and the first fill realizes the whole collection
-        // again — the failure this wall exists to name, which cost two
-        // fan-out agents a bench run each to find from the symptom.
+        // A BACKEND THAT REPORTS IS A BACKEND THAT WINDOWS, and it says so
+        // at its init or not at all. Without the declaration the seed never
+        // plants and the first fill realizes the whole collection again.
         assert!(
             self.windowing,
             "kaya: a window report arrived from a backend that never declared it \
              windows rows — call Scene::declare_windowing() at the backend's own \
              init (docs/deferred.md, the declares-windowing entry)"
         );
-        // THE FIRST REPORT INHERITS WHAT THE UNBOUNDED BAND REALIZED.
-        // Until it arrives every row is stamped, and the realized set has
-        // to say so or the rows outside the new band never leave. A
-        // SEEDED site is already banded and already keeps that set, so it
-        // never pays this walk.
+        // THE FIRST REPORT INHERITS WHAT THE UNBOUNDED BAND REALIZED: until
+        // it arrives every row is stamped, and the realized set has to say so
+        // or the rows outside the new band never leave. A SEEDED site is
+        // already banded and never pays this walk.
         if !self.for_sites[&site].window.is_bounded() {
             self.inherit_realized(&site);
         }
@@ -6181,14 +5906,12 @@ impl Scene {
         out
     }
 
-    /// The verify half (§2.2): the extents a backend measured for the rows
-    /// at `first..`, one per row. The core owns the presumption, the
-    /// cache, the prefix sums and the path choice, so all five backends
-    /// share one correctness story.
-    ///
-    /// A run past the end is TRUNCATED rather than refused: layout and
-    /// this report are separated by a hop, and a row the model dropped in
-    /// between has no identity left to hang a height on.
+    /// The verify half (§2.2): the extents a backend measured for the rows at
+    /// `first..`, one per row. The core owns the presumption, the cache, the
+    /// prefix sums and the path choice, so all five backends share one
+    /// correctness story. A run past the end is TRUNCATED rather than refused:
+    /// layout and this report are separated by a hop, and a row the model
+    /// dropped in between has no identity left to hang a height on.
     pub(crate) fn rows_measured(&mut self, target: u64, first: usize, heights: &[f64]) {
         let site = self.window_site(target, "kaya_rows_measured");
         let order = &self.coll_instances[&site].order;
@@ -6198,11 +5921,11 @@ impl Scene {
         window.measured(from, &order[from..upto], &heights[..upto - from]);
     }
 
-    /// `scroll_to_row`'s core half: the row's position in the
-    /// collection's CURRENT order (§5). It addresses the ROW, so an
-    /// unrealized row answers exactly like a realized one — and a key the
-    /// collection does not hold fails loudly naming it, because "scroll
-    /// nowhere" is indistinguishable from "already there".
+    /// `scroll_to_row`'s core half: the row's position in the collection's
+    /// CURRENT order (§5). It addresses the ROW, so an unrealized row answers
+    /// like a realized one — and a key the collection does not hold fails
+    /// loudly naming it, because "scroll nowhere" is indistinguishable from
+    /// "already there".
     pub(crate) fn scroll_to_row(&self, target: u64, key: &Value) -> usize {
         let site = self.window_site(target, "scroll_to_row");
         let key = Key::from_value(key);
@@ -6289,9 +6012,8 @@ impl Scene {
     }
 
     /// The collection's ORDER changed under a windowed site (an insert, a
-    /// remove, a sort). The prefix sums are indexed by position, so they
-    /// are about a different collection now; the band's membership
-    /// follows too.
+    /// remove, a sort). The prefix sums are indexed by position, so they are
+    /// about a different collection now; the band's membership follows.
     fn window_order_moved(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
         if let Some(site) = self.for_sites.get_mut(&(id, path.clone())) {
             site.window.order_moved();
@@ -6338,12 +6060,10 @@ impl Scene {
         }
     }
 
-    /// Resolve a window report's target to the For site it names.
-    ///
-    /// For containers and template nodes are ONE id space (the
-    /// set_column_headers collision walls, docs/tables-plan.md), so an id
-    /// that is not a container is named for what it actually is rather
-    /// than merely refused.
+    /// Resolve a window report's target to the For site it names. For
+    /// containers and template nodes are ONE id space (the
+    /// set_column_headers collision walls, docs/tables-plan.md), so an id that
+    /// is not a container is named for what it actually is.
     fn window_site(&self, target: u64, verb: &str) -> (CollectionId, PathKey) {
         let widget = WidgetId(target);
         if let Some((site, _)) = self.for_sites.iter().find(|(_, s)| s.container == widget) {
@@ -6378,11 +6098,9 @@ impl Scene {
         );
     }
 
-    /// Every windowed site's realized set is the band's rows, in order,
-    /// and each of them has a stamp. DEBUG ONLY, at the end of
-    /// `Scene::apply` and of `window_moved` — the two ways a band's
-    /// membership can move — so the whole unit suite checks it and a
-    /// shipped app pays nothing.
+    /// Every windowed site's realized set is the band's rows, in order, and
+    /// each of them has a stamp. DEBUG ONLY, at the end of `Scene::apply` and
+    /// of `window_moved` — the two ways a band's membership can move.
     #[cfg(debug_assertions)]
     fn assert_bands_hold(&self) {
         for ((id, path), site) in &self.for_sites {
@@ -6407,10 +6125,9 @@ impl Scene {
     }
 }
 
-/// One windowed For's geometry, as a backend lays it out: the realized
-/// band, the collection's row count, the band's top offset, the whole
-/// collection's extent, and how far the anchor row has moved since the
-/// viewport parked on it.
+/// One windowed For's geometry, as a backend lays it out: the realized band,
+/// the collection's row count, the band's top offset, the whole collection's
+/// extent, and how far the anchor row has moved since the viewport parked.
 pub(crate) struct WindowGeometry {
     pub(crate) first: usize,
     pub(crate) count: usize,
@@ -6430,15 +6147,11 @@ mod tests {
         Value::from(s)
     }
 
-    /// The milestone-2 scene: a column holding a When (extras banner)
-    /// and a For over groups, each group holding a label bound to its
-    /// element and a nested For over items, each item a label and a
-    /// remove button.
-    ///
-    /// ids: signals 1; widgets 1 column, 2 when, 3 for-groups;
-    /// collections 1 groups, 2 items (in group template); template
-    /// nodes 10 banner label, 20 group column, 21 group label,
-    /// 22 items-for, 30 item label, 31 item button.
+    /// The milestone-2 scene: a column holding a When (extras banner) and a
+    /// For over groups, each group holding an element-bound label and a nested
+    /// For over items. ids: signals 1; widgets 1 column, 2 when, 3 for-groups;
+    /// collections 1 groups, 2 items; template nodes 10 banner label, 20 group
+    /// column, 21 group label, 22 items-for, 30 item label, 31 item button.
     fn milestone2_scene() -> Transaction {
         vec![
             TxOp::CreateSignal {
@@ -6529,16 +6242,10 @@ mod tests {
     // --- The mounted-root reachability wall ------------------------------
     //
     // The two negatives below RE-CREATE THE SHIPPED DEFECT rather than a
-    // synthetic one. `milestone2_scene()` above is byte-for-byte the shape
-    // guests/swift/milestone2.swift had before aadbe9e. Delete the first
-    // AddChild and you have the Swift result builder discarding `banner`;
-    // delete the second and you have menus.swift's `itemList`, built
-    // outside its column and only mentioned inside it. Both shipped in the
-    // same commit and both rendered nothing while every leg stayed green.
-    //
-    // Each negative asserts the PERTURBATION COUNT: a `should_panic` test
-    // whose edit silently matched nothing passes for the wrong reason, and
-    // this repo has been bitten by exactly that twice.
+    // synthetic one: `milestone2_scene()` is byte-for-byte the shape
+    // guests/swift/milestone2.swift had before aadbe9e. Each asserts the
+    // PERTURBATION COUNT, because a `should_panic` test whose edit silently
+    // matched nothing passes for the wrong reason.
 
     /// Remove every `AddChild` that claims `child`, returning how many
     /// went. Printed, and every caller asserts on it.
@@ -6550,22 +6257,11 @@ mod tests {
         n
     }
 
-    /// E2, the one that shipped: the `When` container is created at
-    /// ambient parent 0 (app.rs:1239 emits no AddChild there), the column
-    /// never claims it, and it renders nowhere while answering every read.
-    /// The declared breakpoint's whole contract in one walk
-    /// (docs/adaptive-layout-plan.md D3): apply entering the declared
-    /// size class, auto-revert leaving it — to the GUEST-AUTHORED
-    /// value where one exists and the creation kind's own otherwise —
-    /// with a same-metrics report emitting nothing, and a breakpoint
-    /// declared before any report applying at the first one.
-    /// A SECOND BREAKPOINT DECLARED AFTER THE METRICS ARE ALREADY
-    /// LATCHED — the portfolio's Transactions screen, whose row is built
-    /// when the entry is PUSHED, long after the window has reported its
-    /// size. The dashboard's row is declared before any report and
-    /// applies at the first one; this one has to apply at DECLARATION,
-    /// off the latched metrics, or a screen reached by navigation never
-    /// adapts at all.
+    /// A SECOND BREAKPOINT DECLARED AFTER THE METRICS ARE ALREADY LATCHED —
+    /// the portfolio's Transactions screen, whose row is built when the entry
+    /// is PUSHED, long after the window has reported its size. It has to apply
+    /// at DECLARATION, off the latched metrics, or a screen reached by
+    /// navigation never adapts at all.
     #[test]
     fn breakpoint_declared_after_the_width_is_latched_applies_at_once() {
         let mut scene = Scene::new();
@@ -6587,10 +6283,9 @@ mod tests {
             ),
             "the dashboard's breakpoint must apply at the first report, got {ops:?}"
         );
-        // NOW the navigated screen, as the guest actually builds it: a
-        // PUSHED ENTRY with its own surface, its row mounted as that
-        // surface's root, and the breakpoint still naming window 0 — the
-        // binding hardcodes it (bindings/python/kaya/__init__.py).
+        // NOW the navigated screen, as the guest actually builds it: a PUSHED
+        // ENTRY with its own surface, its row mounted as that surface's root,
+        // and the breakpoint still naming window 0 — the binding hardcodes it.
         let ops = scene.apply(vec![
             TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
             TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Row },
@@ -6664,10 +6359,8 @@ mod tests {
 
     /// THE PLATFORM'S CLASS BEATS THE WIDTH (ruled 2026-08-31): an iPad
     /// split-view pane can be compact at widths the kaya boundary calls
-    /// regular, so a report that carries a platform class is believed
-    /// over the arithmetic — and only a NONE report derives from the
-    /// width. This is the one behavior that separates the class design
-    /// from a renamed threshold.
+    /// regular, so a report carrying a platform class is believed over the
+    /// arithmetic and only a NONE report derives from the width.
     #[test]
     fn a_reported_platform_class_beats_the_width_boundary() {
         let mut scene = Scene::new();
@@ -6728,9 +6421,9 @@ mod tests {
     }
 
     /// The Transactions shape for the fold tests (D7): row 1 holding a
-    /// hugging column 2, then For 4 — a declared, grown table. `head`
-    /// takes the ops that come BEFORE the children so the deferral test
-    /// can put CreateBreakpoint in constructor position.
+    /// hugging column 2, then For 4 — a declared, grown table. `head` takes
+    /// the ops that come BEFORE the children so the deferral test can put
+    /// CreateBreakpoint in constructor position.
     fn fold_scene(head: Vec<TxOp>) -> Transaction {
         let mut tx = head;
         tx.extend([
@@ -6818,11 +6511,9 @@ mod tests {
         );
     }
 
-    /// D7's deferral: the sugar spells stack_when in the row's
-    /// CONSTRUCTOR, so CreateBreakpoint lands before any AddChild — and
-    /// with the width already latched (the phone's order), an evaluation
-    /// at that op would read an empty row and fold nothing. The batch
-    /// tail is where the shape is finished.
+    /// D7's deferral: the sugar spells stack_when in the row's CONSTRUCTOR,
+    /// so CreateBreakpoint lands before any AddChild and an evaluation at that
+    /// op would read an empty row and fold nothing.
     #[test]
     fn stacked_fold_computed_at_the_batch_tail_sees_the_rows_children() {
         let mut scene = Scene::new();
@@ -6941,12 +6632,11 @@ mod tests {
         ]);
     }
 
-    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29), reached all three
-    /// ways a guest can reach it: the dynamic setter, the breakpoint
-    /// `stack_when` lowers to, and the two declarations in the other
-    /// order. WidgetId(4) is the For's container, which the core registers
-    /// as a Column — so `axis` is legal on it by kind, and only the
-    /// declared columns make it refusable.
+    /// A TABLE'S AXIS IS ITS OWN (ruled 2026-08-29), reached all three ways a
+    /// guest can: the dynamic setter, the breakpoint `stack_when` lowers to,
+    /// and the two declarations in the other order. WidgetId(4) is the For's
+    /// container, a Column — so `axis` is legal by kind, and only the declared
+    /// columns make it refusable.
     fn declared_table() -> Transaction {
         let mut tx = table_scene(2);
         tx.push(set_columns(&["Name", "Size"], crate::wire::SORT_NONE, 0));
@@ -7059,10 +6749,9 @@ mod tests {
         Scene::new().apply(milestone2_scene());
     }
 
-    /// A whole detached subtree is caught, and it is named at the widget
-    /// the author wrote FIRST — the container — rather than at whichever
-    /// leaf a hash map happened to yield. `created` is in creation order
-    /// for exactly this reason.
+    /// A whole detached subtree is caught, and named at the widget the author
+    /// wrote FIRST rather than at whichever leaf a hash map yielded —
+    /// `created` is in creation order for exactly this reason.
     #[test]
     #[should_panic(expected = "widget WidgetId(2)")]
     fn a_detached_subtree_is_named_at_its_container() {
@@ -7078,9 +6767,9 @@ mod tests {
     }
 
     /// The scene that creates widgets and never mounts at all. The SwiftUI
-    /// interpreter carries a diagnosis for exactly this, but that one runs
-    /// only on the failure path, so a scene whose legs all pass never
-    /// reaches it. This fires first, in the core, for every backend.
+    /// interpreter's own diagnosis runs only on the failure path, so a scene
+    /// whose legs all pass never reaches it; this fires first, for every
+    /// backend.
     #[test]
     #[should_panic(expected = "missing its mount(root)")]
     fn a_scene_that_never_mounts_is_refused() {
@@ -7094,11 +6783,11 @@ mod tests {
 
     // --- The positives: the wall must not fire on legitimate code --------
 
-    /// guests/c/a11y.c's shape, which is the decisive one: ONE
-    /// transaction, every widget created first, then the add_child calls
-    /// in a block, then the mount. Every widget in that file is an orphan
-    /// for most of the transaction's length, so a per-op check would fail
-    /// the whole C floor. This is why the wall is a BARRIER.
+    /// guests/c/a11y.c's shape, the decisive one: ONE transaction, every
+    /// widget created first, then the add_child calls, then the mount. Every
+    /// widget there is an orphan for most of the transaction, so a per-op
+    /// check would fail the whole C floor — which is why the wall is a
+    /// BARRIER.
     #[test]
     fn create_then_parent_later_in_the_same_batch_is_fine() {
         let mut scene = Scene::new();
@@ -7117,10 +6806,8 @@ mod tests {
         scene.apply(tx);
     }
 
-    /// guests/rust/nav.rs:51-58's shape: a pane built INSIDE A CLICK
-    /// HANDLER — push the entry, create the widgets, parent them, mount
-    /// into the entry — all in one handler transaction, long after the
-    /// app's first batch.
+    /// guests/rust/nav.rs's shape: a pane built INSIDE A CLICK HANDLER, all
+    /// in one handler transaction, long after the app's first batch.
     #[test]
     fn a_pane_built_and_mounted_in_a_handler_is_fine() {
         let mut scene = Scene::new();
@@ -7153,9 +6840,8 @@ mod tests {
     }
 
     /// The batch scope, and why it is not a nicety: the core NEVER prunes
-    /// `self.widgets`, so a global sweep would re-accuse a destroyed
-    /// window's widgets on every later transaction and redden three scenes
-    /// in the matrix today.
+    /// `self.widgets`, so a global sweep would re-accuse a destroyed window's
+    /// widgets on every later transaction and redden three scenes today.
     #[test]
     fn a_destroyed_windows_widgets_are_not_re_accused() {
         let mut scene = Scene::new();
@@ -7175,14 +6861,10 @@ mod tests {
         ]);
     }
 
-    /// The other half of that, and the one that makes the six
-    /// `mounted_windows.remove` sites load-bearing: parenting a NEW widget
-    /// into a destroyed window's tree is refused. Without the removal the
-    /// dead root would still count as mounted and this would pass.
-    ///
-    /// It is also the case that exercises the WALK: widget 6's immediate
-    /// parent exists and is perfectly real, so only following the chain to
-    /// its top finds the problem.
+    /// The other half, and what makes the six `mounted_windows.remove` sites
+    /// load-bearing: parenting a NEW widget into a destroyed window's tree is
+    /// refused. It also exercises the WALK — widget 6's immediate parent is
+    /// perfectly real, so only following the chain to its top finds it.
     #[test]
     #[should_panic(expected = "no live surface has that widget as its root")]
     fn a_widget_added_to_a_destroyed_windows_tree_is_refused() {
@@ -7316,19 +6998,12 @@ mod tests {
         )));
     }
 
-    /// A STAMPED COPY IS TAGGED EXACTLY WHERE A LIVE WIDGET IS, and the
-    /// two `button_tag` callsites are twelve hundred lines apart. They were
-    /// the same fact written twice and had already drifted: Textarea,
-    /// Select and Radio were tagged live and untagged when stamped. GTK and
-    /// WinUI unwrap the tag for exactly those three, so a stamped select
-    /// aborted the process there; the SwiftUI interpreter reads a
-    /// zero-length tag without complaint, so on mac and iOS the control
-    /// appeared and never reported. Nothing could see it, because no
-    /// BINDING had a template constructor for those kinds
-    /// (docs/sugar-pass-plan.md D1).
-    ///
-    /// EXHAUSTIVE OVER THE KIND ENUM, deliberately: it compares the two
-    /// paths for every variant rather than checking a list.
+    /// A STAMPED COPY IS TAGGED EXACTLY WHERE A LIVE WIDGET IS. The two
+    /// `button_tag` callsites had already drifted: Textarea, Select and Radio
+    /// were tagged live and untagged when stamped, so a stamped select aborted
+    /// GTK and WinUI and reported to nobody on mac and iOS
+    /// (docs/sugar-pass-plan.md D1). EXHAUSTIVE OVER THE KIND ENUM rather than
+    /// checking a list.
     #[test]
     fn a_stamped_copy_is_tagged_exactly_where_a_live_one_is() {
         for kind in WidgetKind::ALL {
@@ -7376,13 +7051,10 @@ mod tests {
         }
     }
 
-    /// A template scroll takes exactly one child, like a live one.
-    ///
-    /// This rule and the choice rule below lived on the live `AddChild` arm
-    /// only, so a two-child scroll prototype recorded clean and reached the
-    /// backends as a shape none of them reads. Unreachable through sugar
-    /// until the template zone gained a `scroll` constructor
-    /// (docs/sugar-pass-plan.md).
+    /// A template scroll takes exactly one child, like a live one. This rule
+    /// and the choice rule below lived on the live `AddChild` arm only, so a
+    /// two-child prototype recorded clean and reached the backends as a shape
+    /// none of them reads (docs/sugar-pass-plan.md).
     #[test]
     #[should_panic(expected = "already holds its one child")]
     fn a_template_scroll_refuses_a_second_child() {
@@ -7510,11 +7182,9 @@ mod tests {
     }
 
     /// THE EMPTY ACCESSIBLE NAME, both carriers. Four backends had four
-    /// answers to `A11yLabel = ""` and the guest could not tell which
-    /// one it would get: three no-opped, WinUI's pattern guard fell
-    /// through to its catch-all and aborted the drain
-    /// (docs/deferred.md a11y-empty-label). One answer now, at declare
-    /// time, in the root's words.
+    /// answers to `A11yLabel = ""`: three no-opped, WinUI's pattern guard fell
+    /// through to its catch-all and aborted the drain (docs/deferred.md
+    /// a11y-empty-label).
     #[test]
     #[should_panic(expected = "declares an empty a11y label")]
     fn an_empty_a11y_label_dies_at_declare() {
@@ -7529,10 +7199,9 @@ mod tests {
         ]);
     }
 
-    /// THE SHAPE THAT ACTUALLY SHIPPED: not a literal but a signal
-    /// declared empty and filled a line later, which the binding
-    /// resolves to its CURRENT value at declare time. The portfolio
-    /// dashboard's chart summary was exactly this.
+    /// THE SHAPE THAT ACTUALLY SHIPPED: not a literal but a signal declared
+    /// empty and filled a line later, which the binding resolves to its
+    /// CURRENT value at declare time.
     #[test]
     #[should_panic(expected = "declares an empty a11y label")]
     fn an_a11y_label_bound_to_an_empty_signal_dies_at_declare() {
@@ -7586,12 +7255,10 @@ mod tests {
         assert_eq!(labels, 2, "both a11y labels should reach the backend");
     }
 
-    // ------------------------------------------------------------------
     // THE SIZE POLICY (docs/canvas-plan.md §3.2.1). Every clause here is
-    // something NO SCENE CAN ASSERT: the mailbox's drop, the refusal, and
-    // the exact size an occurrence carries all live between the backend's
-    // report and the guest's answer, where no observable reaches.
-    // ------------------------------------------------------------------
+    // something NO SCENE CAN ASSERT: the mailbox's drop, the refusal, and the
+    // exact size an occurrence carries all live between the backend's report
+    // and the guest's answer, where no observable reaches.
 
     /// A canvas plus one drawing, ready for a track report.
     fn canvas_scene(policy: Option<u32>) -> Scene {
@@ -7626,10 +7293,8 @@ mod tests {
         })
     }
 
-    /// `scale` RE-RASTERS AT THE TRACK — the stretch defect's own
-    /// assertion, one layer under the scene (docs/deferred.md). Before
-    /// the size policy the buffer was the viewbox's size at every track
-    /// and the BACKEND stretched it.
+    /// `scale` RE-RASTERS AT THE TRACK — the stretch defect's own assertion,
+    /// one layer under the scene (docs/deferred.md).
     #[test]
     fn a_scale_canvas_re_rasters_at_the_reported_track() {
         let mut scene = canvas_scene(None);
@@ -7707,13 +7372,11 @@ mod tests {
         assert_eq!(scene.canvas_raster_shape(WidgetId(1)).as_deref(), Some("track"));
     }
 
-    /// LATEST-WINS MAILBOX, AND FRAME DROPPING (§3.2.1). NO SCENE CAN
-    /// SEE THIS: a drag-resize storm collapses to the newest size, and
-    /// the sizes in between are dropped rather than drawn late — the
-    /// buffer-stuffing defect Android's frame pacing library exists to
-    /// name. The proof is that a SECOND and THIRD report while a request
-    /// is outstanding queue nothing, and that the re-ask carries the
-    /// LAST of them and not the first.
+    /// LATEST-WINS MAILBOX, AND FRAME DROPPING (§3.2.1). NO SCENE CAN SEE
+    /// THIS: a drag-resize storm collapses to the newest size and the sizes in
+    /// between are dropped rather than drawn late. The proof is that a SECOND
+    /// and THIRD report while a request is outstanding queue nothing, and the
+    /// re-ask carries the LAST of them.
     #[test]
     fn a_resize_storm_collapses_to_the_newest_size() {
         let mut scene = canvas_scene(Some(crate::wire::SIZE_POLICY_REDRAW));
@@ -7861,10 +7524,10 @@ mod tests {
         scene.apply(vec![TxOp::SetBrandAccent { seed: 0x3584E4, light: None, dark: None }]);
     }
 
-    /// AND THE DOMAIN WALL: the seed is 0xRRGGBB and nothing else. The
-    /// fan-out measured an ARGB constant sailing through seven bindings and
-    /// reaching every backend as seed AND fill (only Python's local
-    /// precondition caught it). All three words are walled.
+    /// AND THE DOMAIN WALL: the seed is 0xRRGGBB and nothing else. The fan-out
+    /// measured an ARGB constant sailing through seven bindings and reaching
+    /// every backend as seed AND fill (only Python's local precondition caught
+    /// it).
     #[test]
     #[should_panic(expected = "brand seed 0xff3584e4 is not a packed")]
     fn an_alpha_carrying_seed_dies() {
@@ -7934,10 +7597,9 @@ mod tests {
         scene.apply(vec![TxOp::SetBrandTypeface(typeface("Georgia"))]);
     }
 
-    /// AN EMPTY FAMILY IS THE SILENT-FALLBACK BUG SPELLED BY THE APP:
-    /// it would reach four lowerings, match nothing, and render as the
-    /// system font — which every observation in this slice reports the
-    /// same way a working default does.
+    /// AN EMPTY FAMILY IS THE SILENT-FALLBACK BUG SPELLED BY THE APP: it
+    /// would reach four lowerings, match nothing, and render as the system
+    /// font — which every observation reports the way a working default is.
     #[test]
     #[should_panic(expected = "empty family")]
     fn an_empty_family_dies() {
@@ -7984,10 +7646,9 @@ mod tests {
         })]);
     }
 
-    /// THE CLEAN PATH: one SetTypeface out, carrying the request
-    /// UNRESOLVED — every pair and the blob — because the lowering is
-    /// what resolves a family name. And `family_for` is the one answer
-    /// to "which row is mine", so every backend asks it the same way.
+    /// THE CLEAN PATH: one SetTypeface out, carrying the request UNRESOLVED,
+    /// because the lowering is what resolves a family name. `family_for` is
+    /// the one answer to "which row is mine".
     #[test]
     fn the_typeface_rides_out_unresolved() {
         let mut scene = Scene::new();
@@ -8043,10 +7704,8 @@ mod tests {
         scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Notes"))]);
     }
 
-    /// AN EMPTY NAME IS THE SILENT-FALLBACK BUG SPELLED BY THE APP: it
-    /// would reach five lowerings, name nothing, and land as the
-    /// launcher binary's own name — which every observation reports the
-    /// same way a working default does.
+    /// AN EMPTY NAME IS THE SILENT-FALLBACK BUG SPELLED BY THE APP: it would
+    /// reach five lowerings and land as the launcher binary's own name.
     #[test]
     #[should_panic(expected = "empty name")]
     fn an_empty_identity_name_dies() {
@@ -8054,10 +7713,10 @@ mod tests {
         scene.apply(vec![TxOp::SetAppIdentity(identity(""))]);
     }
 
-    /// AND THE MIRROR OF THE WIRE'S MASK RULE: a mask that promises a
-    /// picture over zero bytes. Every image decoder answers nothing for
-    /// an empty buffer, so every lowering would leave the platform's own
-    /// icon in place and every read would report that default.
+    /// AND THE MIRROR OF THE WIRE'S MASK RULE: a mask that promises a picture
+    /// over zero bytes. Every image decoder answers nothing for an empty
+    /// buffer, so every lowering would leave the platform's own icon in
+    /// place.
     #[test]
     #[should_panic(expected = "EMPTY icon blob")]
     fn an_empty_identity_icon_dies() {
@@ -8069,9 +7728,8 @@ mod tests {
     }
 
     /// THE CLEAN PATH: one SetAppIdentity out, carrying the declaration
-    /// UNINSPECTED. The bytes here are NOT a PNG on purpose — the core must
-    /// pass them on regardless, and the platform's decoder is the only
-    /// party entitled to an opinion about them.
+    /// UNINSPECTED. The bytes are NOT a PNG on purpose — the platform's
+    /// decoder is the only party entitled to an opinion about them.
     #[test]
     fn the_identity_rides_out_uninspected() {
         let mut scene = Scene::new();
@@ -8234,10 +7892,10 @@ mod tests {
         assert_eq!(ops.len(), 0); // no dangling binding
     }
 
-    /// The sections grammar end to end at the core: add (first added
-    /// becomes selected), select validates membership, mount and
-    /// push_entry both accept a section as their surface, and the
-    /// selection mirror reconciles user switches.
+    /// The sections grammar end to end at the core: add (first added becomes
+    /// selected), select validates membership, mount and push_entry both
+    /// accept a section as their surface, and the mirror reconciles user
+    /// switches.
     #[test]
     fn sections_are_surfaces() {
         let mut scene = Scene::new();
@@ -8293,11 +7951,9 @@ mod tests {
 
     /// The custom-id grammar (DESIGN.md, Clipboard): mime-shaped — a slash,
     /// lowercase, no whitespace. The slash is GDK's measured charge: its
-    /// serving path interns the requested type as a mime type, so a
-    /// slashless id is ADVERTISED AND NEVER SERVED on GTK with no error
-    /// anywhere; the same path lowercases (docs/clipboard-plan.md §5b
-    /// finding 4). Checked at apply, so a bad id fails HERE on every
-    /// platform alike.
+    /// serving path interns the requested type as a mime type, so a slashless
+    /// id is ADVERTISED AND NEVER SERVED on GTK with no error anywhere, and
+    /// the same path lowercases (docs/clipboard-plan.md §5b finding 4).
     fn copy_of_custom(id: &str) -> TxOp {
         TxOp::Copy(crate::protocol::Clip {
             custom: vec![(
@@ -8432,9 +8088,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "rejects value")]
     fn dirty_rejects_a_non_bool() {
-        // The prop is a BOOLEAN, and a string here is exactly the design
-        // it replaces: Qt spells unsaved work as a `[*]` placeholder inside
-        // the app's own title (docs/dirty-plan.md D1). kaya's window titles
+        // The prop is a BOOLEAN, and a string here is exactly the design it
+        // replaces: Qt spells unsaved work as a `[*]` placeholder inside the
+        // app's own title (docs/dirty-plan.md D1), and kaya's window titles
         // are compared byte-for-byte across platforms.
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetWindowProp {
@@ -8460,9 +8116,9 @@ mod tests {
 
     /// THE SYMBOL VALUE WALL, section side (docs/styling-plan.md D6). The
     /// slot is a bare integer on the wire, so without this an
-    /// out-of-vocabulary number reaches four backends' glyph tables, misses
-    /// in each, and the tab simply draws with no icon. 21 is the first free
-    /// id, i.e. exactly what a guest generated against a NEWER spec sends.
+    /// out-of-vocabulary number reaches four backends' glyph tables, misses in
+    /// each, and the tab draws with no icon. 21 is the first free id — what a
+    /// guest generated against a NEWER spec sends.
     #[test]
     #[should_panic(expected = "21 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
@@ -8477,10 +8133,9 @@ mod tests {
         ]);
     }
 
-    /// The sentence NAMES THE VOCABULARY, not just the count — the
-    /// reader's next question is always "then what may I say?". Pinned
-    /// because a message that merely said "bad symbol" would satisfy
-    /// the test above and help nobody.
+    /// The sentence NAMES THE VOCABULARY, not just the count: a message that
+    /// merely said "bad symbol" would satisfy the test above and help
+    /// nobody.
     #[test]
     #[should_panic(expected = "the vocabulary is add=1, remove=2")]
     fn the_symbol_refusal_names_the_vocabulary() {
@@ -9004,10 +8659,9 @@ mod tests {
         ]);
     }
 
-    /// The hint is the one accessibility prop with a domain, and the domain
-    /// is the platforms' own: Android has nowhere to put a hint without an
-    /// action to hang it on. So a hint on a label dies here rather than
-    /// reaching four backends and silently missing the fifth.
+    /// The hint's domain is the platforms' own: Android has nowhere to put
+    /// one without an action to hang it on, so a hint on a label dies here
+    /// rather than reaching four backends and silently missing the fifth.
     #[test]
     #[should_panic(expected = "has no property")]
     fn hint_on_a_non_activation_kind_fails_loudly() {
@@ -9065,10 +8719,9 @@ mod tests {
         ]);
     }
 
-    /// The sum happy path: a Note{Str} | Todo{Str,Bool} feed, one case
-    /// per constructor. Stamping picks the case by the entry's
-    /// discriminant, and an update with a different tag restamps the
-    /// entry in place — same key, same slot, new shape.
+    /// The sum happy path: one case per constructor. Stamping picks the case
+    /// by the entry's discriminant, and an update with a different tag
+    /// restamps in place — same key, same slot, new shape.
     #[test]
     fn sum_stamps_per_variant_and_restamps_on_change() {
         let mut scene = Scene::new();
@@ -9487,10 +9140,9 @@ mod tests {
         );
     }
 
-    /// The happy path of the select grammar: options (label children)
-    /// first, then an in-range selection — and the select carries an
-    /// identity tag like every interactive kind (it emits
-    /// value_changed).
+    /// The happy path of the select grammar: options (label children) first,
+    /// then an in-range selection — and the select carries an identity tag
+    /// like every interactive kind.
     #[test]
     fn select_options_then_selection() {
         let mut scene = Scene::new();
@@ -10151,10 +9803,8 @@ mod tests {
         ]);
     }
 
-    /// A shortcut rides any LEAF command: a checkable item takes a
-    /// chord as readily as a plain one ("Show Sidebar" wants both its
-    /// checkmark and its key), and so does one option of a group
-    /// (the view-mode 1/2/3 pattern).
+    /// A shortcut rides any LEAF command: a checkable item takes a chord as
+    /// readily as a plain one, and so does one option of a group.
     #[test]
     fn shortcut_rides_toggle_and_radio_option() {
         let mut scene = Scene::new();
@@ -10716,7 +10366,7 @@ mod tests {
 
     /// THE CONVERSION TABLE ITSELF, pinned against the units arm's
     /// measurements — both units, on every hazard string. `native_offset`
-    /// picks one at build time and a test of the picked one alone would say
+    /// picks one at build time, so a test of the picked one alone would say
     /// nothing about the arm the linux lane runs.
     #[test]
     fn the_two_offset_conversions_match_the_measured_table() {
@@ -10727,10 +10377,9 @@ mod tests {
         assert_eq!(super::native_offset_chars(EMOJI, 2), 2);
         assert_eq!(super::native_offset_chars(EMOJI, 6), 3);
         assert_eq!(super::native_offset_chars(EMOJI, 8), 5);
-        // The ZWJ family is the discriminator: 25 bytes, 11 UTF-16 units,
-        // 7 scalars for ONE visible glyph. An off-by-one CJK would hide.
-        // 29 bytes end to end: `ab` + the 25-byte family + `cd`, so
-        // `cd` starts at byte 27 and at UTF-16 unit 13.
+        // The ZWJ family is the discriminator: 25 bytes, 11 UTF-16 units, 7
+        // scalars for ONE visible glyph, so `cd` starts at byte 27 and at
+        // UTF-16 unit 13. An off-by-one CJK would hide.
         assert_eq!(FAMILY.len(), 29);
         assert_eq!(super::native_offset_utf16(FAMILY, 2), 2);
         assert_eq!(super::native_offset_utf16(FAMILY, 27), 13);
@@ -10779,9 +10428,8 @@ mod tests {
         let mut scene = Scene::new();
         scene.apply(editor(COMBINING));
         // Between `e` and its combining acute — one grapheme, two code
-        // points. java.text.BreakIterator, .NET StringInfo and Swift
-        // give three different answers about this cluster; the core
-        // gives none, on purpose.
+        // points. java.text.BreakIterator, .NET StringInfo and Swift give
+        // three different answers about this cluster; the core gives none.
         let ops = scene.apply(vec![highlight(&[(1, 2)])]);
         assert_eq!(lowered(&ops).len(), 1);
         // And the whole ZWJ family, which is the same carve-out at size.
@@ -10833,9 +10481,9 @@ mod tests {
     }
 
     /// The END clause has its own test because AppKit treats the two
-    /// endpoints DIFFERENTLY — it snaps a bad start and keeps a bad end,
-    /// whose selected text then copies as U+FFFD (measured). One test
-    /// over both endpoints would pass with the end clause deleted.
+    /// endpoints DIFFERENTLY — it snaps a bad start and keeps a bad end, whose
+    /// selected text then copies as U+FFFD (measured). One test over both
+    /// endpoints would pass with the end clause deleted.
     #[test]
     #[should_panic(expected = "byte offset 5 is not a character boundary; it is inside")]
     fn an_end_inside_a_character_is_refused() {
@@ -10882,12 +10530,10 @@ mod tests {
         scene.apply(vec![highlight(&[(0, 0)])]);
     }
 
-    /// THE SAME-BATCH ORDERING HAZARD. `absorb_text_writes` runs at the END
-    /// of a batch, so `field_text` still holds the old text while the batch
-    /// is applying. A range declared over text this same transaction wrote
-    /// must be read against the NEW text — otherwise the obvious app
-    /// spelling validates against the wrong document, and on macOS that is
-    /// not a wrong colour, it is exit 134.
+    /// THE SAME-BATCH ORDERING HAZARD: `absorb_text_writes` runs at the END
+    /// of a batch, so a range declared over text this same transaction wrote
+    /// must be read against the NEW text — and on macOS validating against the
+    /// wrong document is not a wrong colour, it is exit 134.
     #[test]
     fn a_range_reads_the_text_this_batch_wrote() {
         let mut scene = Scene::new();
@@ -10932,10 +10578,9 @@ mod tests {
         ]);
     }
 
-    /// D2's other half, in the core: what the user typed is what the
-    /// next declaration is measured against. The paint-time half — a
-    /// declared set is dropped the moment the widget's text moves — is
-    /// the backend's, and the ranges scene watches it there.
+    /// D2's other half, in the core: what the user typed is what the next
+    /// declaration is measured against. The paint-time half is the backend's,
+    /// and the ranges scene watches it there.
     #[test]
     fn a_user_edit_moves_the_text_a_range_is_measured_against() {
         let mut scene = Scene::new();
@@ -10959,10 +10604,9 @@ mod tests {
                 prop: Prop::Text,
                 value: PropValue::Const(Value::Str("hello".to_owned())),
             },
-            // Into undo_scene's mounted column. A later transaction may
-            // add to a tree the app already mounted; what it may not do
-            // is leave the widget hanging, which is what this fixture
-            // used to do because nothing was looking.
+            // Into undo_scene's mounted column: a later transaction may add
+            // to a tree the app already mounted, but may not leave the widget
+            // hanging.
             TxOp::AddChild { parent: WidgetId(1), child: WidgetId(9) },
         ]);
         let ops = scene.apply(vec![
@@ -11084,10 +10728,9 @@ mod tests {
         ]);
     }
 
-    /// A rejected append into an anchored catalog leaves NO trace: the
-    /// edge is not linked, the registry is untouched, and the subtree
-    /// stays a free root a legal append may still take (the probe that
-    /// exposed the pre-fix mutate-before-validate divergence).
+    /// A rejected append into an anchored catalog leaves NO trace: the edge
+    /// is not linked, the registry is untouched, and the subtree stays a free
+    /// root a legal append may still take.
     #[test]
     fn rejected_append_leaves_tree_and_registry_untouched() {
         let mut scene = Scene::new();
@@ -11213,10 +10856,10 @@ mod tests {
         }]);
     }
 
-    /// The dynamic shape (docs/tables-plan.md, dynamic tables): an outer
-    /// For (node 4, collection 1) whose template holds a NESTED For
-    /// (node 20, collection 2) with a two-cell row template (nodes
-    /// 21..23) and a TEMPLATE-SCOPED columns declaration.
+    /// The dynamic shape (docs/tables-plan.md): an outer For (node 4,
+    /// collection 1) whose template holds a NESTED For (node 20, collection 2)
+    /// with a two-cell row template and a TEMPLATE-SCOPED columns
+    /// declaration.
     fn dynamic_table_scene() -> Transaction {
         vec![
             TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
@@ -11393,9 +11036,9 @@ mod tests {
     #[should_panic(expected = "names no nested For's template node")]
     fn a_live_container_refuses_keys() {
         // Keys resolve in the template space ALONE: a keyed record whose
-        // number is only a live container must say so, not claim the
-        // container "takes no key path" while never checking the space
-        // the keys address (the Haskell breadth probe's finding).
+        // number is only a live container must say so, not claim the container
+        // "takes no key path" while never checking the space the keys
+        // address.
         let mut scene = Scene::new();
         scene.apply(table_scene(2));
         scene.apply(vec![TxOp::SetColumnHeaders {
@@ -11408,9 +11051,9 @@ mod tests {
     }
 
     /// Widget and template-node numbers come from separate per-binding
-    /// counters yet resolve ONE set_column_headers / sort_requested
-    /// target space, so a collision misroutes silently. The wall
-    /// refuses it at declaration, both directions.
+    /// counters yet resolve ONE set_column_headers / sort_requested target
+    /// space, so a collision misroutes silently. Refused at declaration, both
+    /// directions.
     #[test]
     #[should_panic(expected = "collides")]
     fn a_nested_table_node_may_not_reuse_a_live_containers_number() {
@@ -11783,10 +11426,9 @@ mod tests {
 
     #[test]
     fn focus_rides_in_a_group_and_is_not_restored() {
-        // A2: a handler that appends a row and focuses it is the
-        // ordinary shape, and refusing it would refuse ordinary code.
-        // Undo restores state; it does not restore where you were
-        // looking, so nothing about the focus comes back.
+        // A2: a handler that appends a row and focuses it is the ordinary
+        // shape. Undo restores state; it does not restore where you were
+        // looking.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         let ops = scene.apply(vec![
@@ -12016,16 +11658,12 @@ mod tests {
         }
     }
 
-    /// THE SCENARIO THAT MOTIVATED THE MILESTONE (docs/undo-plan.md §2),
-    /// in the shape guests/rust/undo.rs and tools/scenes/undo.steps drive
-    /// it: the user types "milk", clicks add, and the handler appends a
-    /// todo AND clears the field. One Cmd+Z must take back the ADD. Under
-    /// two bare stacks it takes back the CLEAR.
-    ///
-    /// THE CLEAR ACTS LIKE THE USER, which is what makes this delicate: it
-    /// echoes, so the field really does emit its own `text_changed("")`,
-    /// and that echo arrives at the ledger AFTER `absorb_text_writes` has
-    /// recorded the field as empty — so it describes a run from "" to "".
+    /// THE SCENARIO THAT MOTIVATED THE MILESTONE (docs/undo-plan.md §2), in
+    /// the shape guests/rust/undo.rs and tools/scenes/undo.steps drive it: the
+    /// user types "milk", clicks add, and the handler appends a todo AND
+    /// clears the field. One Cmd+Z must take back the ADD; under two bare
+    /// stacks it takes back the CLEAR, because the clear echoes and that echo
+    /// describes a run from "" to "".
     #[test]
     fn the_add_scenario_undoes_the_add_and_not_the_clear() {
         let mut scene = Scene::new();
@@ -12042,10 +11680,9 @@ mod tests {
             TxOp::WriteSignal { id: SignalId(1), value: v("added milk, 1 total") },
             TxOp::WidgetCommand { widget: WidgetId(2), command: CommandKind::Focus },
         ]);
-        // ...and the clear in its own transaction, because Clear is
-        // refused inside a group (D4) — which is the design saying the
-        // same thing the fix says: emptying the field is not part of
-        // the step, it is what the form does afterwards.
+        // ...and the clear in its own transaction, because Clear is refused
+        // inside a group (D4) — the design saying what the fix says: emptying
+        // the field is not part of the step.
         scene.apply(vec![TxOp::WidgetCommand {
             widget: WidgetId(2),
             command: CommandKind::Clear,
@@ -12084,10 +11721,9 @@ mod tests {
 
     #[test]
     fn the_interleave_walks_back_b_then_x_then_a() {
-        // §2's hole, closed. Under two bare stacks this undoes as b, a,
-        // X — both text edits first, because they live on the other
-        // stack — and the user passes through a state that never
-        // existed. One ledger gives the order things happened in.
+        // §2's hole, closed. Under two bare stacks this undoes as b, a, X —
+        // both text edits first, because they live on the other stack — and
+        // the user passes through a state that never existed.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "a", true);
@@ -12183,11 +11819,10 @@ mod tests {
 
     #[test]
     fn a_native_walk_to_the_start_banks_the_episode_forward() {
-        // THE OTHER HALF OF CONSUMING AN EPISODE: it is spent as a step
-        // BACK, not thrown away. The walk emptied the platform's stack and
-        // the frontier moved to the group underneath, so a redo that found
-        // nothing here would be the one hole the ledger promises not to
-        // have.
+        // THE OTHER HALF OF CONSUMING AN EPISODE: it is spent as a step BACK,
+        // not thrown away. The walk emptied the platform's stack and the
+        // frontier moved to the group underneath, so a redo that found nothing
+        // here would be the one hole the ledger promises not to have.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "tea", true);
@@ -12303,15 +11938,12 @@ mod tests {
 
     #[test]
     fn a_restated_walk_position_is_not_a_new_high_water() {
-        // EXACTLY ONE FUNCTION REPORTS A ROUTED NATIVE UNDO. This is what
+        // EXACTLY ONE FUNCTION REPORTS A ROUTED NATIVE UNDO: this is what
         // happens when a backend forgets the ledger-quiet mark and the same
-        // undo is reported twice.
-        //
-        // The no-change return at the top of note_text_changed catches it
-        // whenever the core's record of the field is current — which it is,
-        // right after a walk — so the record is made STALE here by hand.
-        // That is the only way to reach the high-water rule at all, and a
-        // guard nobody can reach is a guard nobody can watch fail.
+        // undo is reported twice. The no-change return at the top of
+        // note_text_changed catches it whenever the core's record is current,
+        // so the record is made STALE here by hand — the only way to reach the
+        // high-water rule at all.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
@@ -12384,12 +12016,9 @@ mod tests {
     }
 
     /// The undo scene one level down: the For's template holds the
-    /// element-bound label AND AN ENTRY OF ITS OWN — a collection row's
-    /// text field, which is the case the fixed-arity texts run could not
-    /// name and therefore did not bank (RULED 2026-08-06, option A).
-    ///
-    /// ids: signal 1; widgets 1 column, 2 the live entry, 3 label,
-    /// 4 the For; collection 1; template nodes 10 label, 11 row entry.
+    /// element-bound label AND AN ENTRY OF ITS OWN (RULED 2026-08-06, option
+    /// A). ids: signal 1; widgets 1 column, 2 the live entry, 3 label, 4 the
+    /// For; collection 1; template nodes 10 label, 11 row entry.
     fn stamped_field_scene() -> Transaction {
         vec![
             TxOp::CreateSignal { id: SignalId(1), initial: v("one") },
@@ -12428,10 +12057,9 @@ mod tests {
         }
     }
 
-    /// The map the stamping pass used to throw away is kept, and per copy:
-    /// every template node the body created answers with the widget THIS
-    /// copy got. Without it the two names for a row's field cannot be
-    /// translated in either direction.
+    /// The stamping pass's node map is kept, per copy: every template node
+    /// the body created answers with the widget THIS copy got. Without it the
+    /// two names for a row's field cannot be translated either way.
     #[test]
     fn a_stamp_remembers_which_node_each_widget_came_from() {
         let mut scene = Scene::new();
@@ -12454,11 +12082,9 @@ mod tests {
         );
     }
 
-    /// THE ITEM THIS SLICE EXISTS FOR. A row's field banks a typing episode
-    /// like any other field and is named in the payload the way the app
-    /// knows it: template node plus key path, never the copy's internal id
-    /// (D5 — this record is the only thing the app hears, so every name in
-    /// it must be one the app can resolve).
+    /// THE ITEM THIS SLICE EXISTS FOR: a row's field banks a typing episode
+    /// like any other and is named in the payload the way the app knows it —
+    /// template node plus key path, never the copy's internal id (D5).
     #[test]
     fn a_stamped_rows_field_banks_an_episode_and_names_itself_to_the_app() {
         let mut scene = Scene::new();
@@ -12631,9 +12257,7 @@ mod tests {
     #[test]
     fn the_core_never_reads_a_widget_for_an_episode() {
         // The before-image comes from the occurrence stream and the
-        // programmatic writes the core resolved — nothing else. A field
-        // the core has never heard of starts empty, and one it has
-        // written starts from what it wrote.
+        // programmatic writes the core resolved — nothing else.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.apply(vec![TxOp::SetProperty {
@@ -12734,11 +12358,10 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             .join("\n")
     }
 
-    /// THE §1 BRIDGE: a For with NO window report has an UNBOUNDED band,
-    /// so every existing backend, scene and lane sees the stream it
-    /// always saw. Frozen against the base commit's own output rather
-    /// than re-derived here, which would only prove this file agrees with
-    /// itself.
+    /// THE §1 BRIDGE: a For with NO window report has an UNBOUNDED band, so
+    /// every existing backend, scene and lane sees the stream it always saw.
+    /// Frozen against the base commit's own output rather than re-derived
+    /// here, which would only prove this file agrees with itself.
     #[test]
     fn an_unreported_for_emits_the_stream_it_did_before_windowing() {
         let mut scene = Scene::new();
@@ -13047,9 +12670,8 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     }
 
     /// A TABLE WHOSE ROWS OWN A COLLECTION WINDOWS LIKE EVERYTHING ELSE
-    /// (ruled 2026-08-25; this replaces the bridge exemption that stood
-    /// here). The write to an out-of-band row's inner list SUCCEEDS and
-    /// lands in data — the fault varied.py met, `no instance of
+    /// (ruled 2026-08-25). The write to an out-of-band row's inner list
+    /// SUCCEEDS and lands in data — the fault varied.py met, `no instance of
     /// CollectionId(2) at path [Str("a199")]`, is what this asserts away.
     #[test]
     fn an_unrealized_rows_inner_list_takes_writes_and_realizes_them() {
@@ -13076,10 +12698,10 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         );
     }
 
-    /// SCROLL AWAY AND BACK: the copy's widgets go, its data does not,
-    /// and the return rebuilds the inner rows from that data. This is the
-    /// half that was already broken under a report, before any seed
-    /// existed (docs/traps.md).
+    /// SCROLL AWAY AND BACK: the copy's widgets go, its data does not, and
+    /// the return rebuilds the inner rows from that data — the half that was
+    /// already broken under a report, before any seed existed
+    /// (docs/traps.md).
     #[test]
     fn an_inner_list_survives_its_rows_teardown() {
         let mut scene = nested_lines_table(200);
@@ -13319,8 +12941,7 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
 
     /// THE ANCHOR IS A ROW, NOT A PIXEL: realizing taller rows ABOVE the
     /// viewport moves the extent and the anchor row's position, and the
-    /// difference is the scroll adjustment that keeps the row still. The
-    /// anchor itself does not move.
+    /// difference is the scroll adjustment that keeps the row still.
     #[test]
     fn corrections_above_the_anchor_adjust_the_extent_not_the_anchor() {
         let mut scene = rows_scene(1_000);
@@ -13442,11 +13063,8 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     //
     // A scroll proposes unbounded extent, so a weight on a child of any
     // vertical container under it silently read ZERO for a month
-    // (docs/deferred.md, "`grow` INSIDE A SCROLL IS SILENTLY ZERO").
-    // Each negative below is a should_panic on the barrier's own
-    // sentence; the positives are the shapes the tree ships today — the
-    // scroll scene's grown viewport, and the portfolio's grown detail
-    // column inside a stackable ROW inside its scroll.
+    // (docs/deferred.md, "`grow` INSIDE A SCROLL IS SILENTLY ZERO"). Each
+    // negative is a should_panic on the barrier's own sentence.
 
     fn scrolled(ops: Vec<TxOp>) -> Vec<TxOp> {
         let mut tx = vec![
@@ -13582,10 +13200,9 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         ]);
     }
 
-    /// The shapes that ship: a grown scroll viewport (the scroll scene), a
-    /// grown child of a ROW under the scroll (the portfolio's detail column
-    /// — horizontal, bounded by the width), and a template node grown
-    /// inside a template ROW. None is refused.
+    /// The shapes that ship: a grown scroll viewport, a grown child of a ROW
+    /// under the scroll (horizontal, bounded by the width), and a template
+    /// node grown inside a template ROW. None is refused.
     #[test]
     fn horizontal_grow_inside_a_scroll_is_legal() {
         let mut scene = Scene::new();

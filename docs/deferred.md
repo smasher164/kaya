@@ -625,7 +625,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
     whose extension is already in the filter.
   - ~~**THE THREE SAVE `Stage` METHODS STILL CARRY DEFAULT BODIES**~~ —
     DONE 2026-08-17 in `cbf6476`. `save_dialog_state`, `set_save_name`
-    and `confirm_save` now end in `;` (crates/kaya/src/harness.rs:877,
+    and `confirm_save` now end in `;` (crates/kaya/src/harness.rs:676,
     :881, :884), so a backend that forgets one fails to COMPILE like
     every other observation, and tools/lib/stage-coverage.py — whose
     REQUIRED regex is exactly a signature ending in `;` — holds all
@@ -1444,7 +1444,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
       silently ignored, so this wants a gate, not a comment.
     - ~~**Semantic icon names.**~~ — LANDED 2026-08-16 in `c94da13`,
       exactly as filed: a closed name set (`symbol`, sprop 3 / mprop 9,
-      `PropKind::Enum("symbol")` at crates/kaya/src/spec.rs:229 and
+      `PropKind::Enum("symbol")` at crates/kaya/src/spec.rs:176 and
       :253) BESIDE the `icon` Blob, which stays for app-specific art.
       The vocabulary is `wire::SYMBOLS` and two gates hold it —
       tools/check-symbols.py (every SF name exists at kaya's floor) and
@@ -1470,7 +1470,7 @@ list, in rough priority order; chat / todo / media stay unpicked.
       scale (Dynamic Type / `sp` both break otherwise), which makes the
       role tier a precondition rather than an alternative.~~ — LANDED
       2026-08-16 in `31ace6b` with that rule in the wire contract:
-      `set_brand_typeface` (crates/kaya/src/spec.rs:1078) carries a
+      `set_brand_typeface` (crates/kaya/src/spec.rs:1015) carries a
       family and no scale, and `expect_typeface` reads back the family
       the text system actually resolved (tools/scenes/typeface.steps
       freezes `expect_typeface "Sora"`). The one remainder is the iOS
@@ -2220,7 +2220,7 @@ reach.
   perturb copies with counts printed on every run.)
 - Two smaller findings from the same research: CPython's
   `PyGILState_Ensure`-during-finalization hang would compound the known
-  exit hang at crates/kaya/src/harness.rs:1832-1854 if Python ever runs
+  exit hang at crates/kaya/src/harness.rs:1452-1471 if Python ever runs
   on mobile; and signal-handler ordering (Rust std's stack guard, a
   guest runtime's handlers, the host crash reporter) is a three-way
   negotiation nobody currently owns — it becomes real the moment a
@@ -2264,7 +2264,7 @@ reach.
   - ~~**A stamped copy's typing is not banked**~~ — SHIPPED 2026-08-05 in
     `1d2cf95` ("rows join the ledger: the texts run carries a path, the
     stamp keeps its map, and no field is beneath undo"). Option A is in
-    the tree: crates/kaya/src/spec.rs:275 reads `texts: groups(i64 size,
+    the tree: crates/kaya/src/spec.rs:218 reads `texts: groups(i64 size,
     i64 id, i64 path_len, path_len key values, str text)` and :2001-2007
     spells out the identity rule (path_len 0 = a live widget id, a
     non-empty path = the TEMPLATE NODE of a stamped copy addressed by
@@ -2407,7 +2407,7 @@ reach.
   - ~~**The sibling suspicion was right, and a THIRD instance was still
     live at HEAD.**~~ — FIXED 2026-08-07, see the note below this
     paragraph. `guests/swift/menus.swift` was fixed by eye in
-    aadbe9e. `guests/swift/feed.swift:27-55` was not: `promote`,
+    aadbe9e. `guests/swift/feed.swift:22-49` was not: `promote`,
     `status` and `list` were built at ambient parent 0 and only
     MENTIONED inside `tx.row { }`, whose result builder discards a bare
     expression — so the mounted row had no children at all and
@@ -2418,7 +2418,7 @@ reach.
 
     ~~OPEN — the fix is one guest file, and the wall arm does not own
     guests/.~~ — FIXED 2026-08-07 in `11bde48`, the same commit that
-    landed the orphan wall. `guests/swift/feed.swift:27-55` now declares
+    landed the orphan wall. `guests/swift/feed.swift:22-49` now declares
     every child inside `tx.row { }` and carries the reason at the site
     ("a widget parents at CREATION, and a bare expression never reaches
     buildExpression"). The correction is aadbe9e's: declare each child
@@ -2576,7 +2576,7 @@ reach.
   every fast gate.**~~ — CLOSED 2026-08-18, and the closing record is
   the "No gate compiles a Swift GUEST for iOS" section further down this
   file (the same gap, found again and written down twice).
-  tools/swift-typecheck.sh:160-214 is exactly the loop this asked for:
+  tools/swift-typecheck.sh:150-204 is exactly the loop this asked for:
   it reads IOS_SWIFT_SCENES and IOS_MIN out of tools/ios/run-sim.py,
   refuses when a shipped guest's source is missing, typechecks each
   against `-sdk iphonesimulator … arm64-apple-ios$ios_min-simulator`,
@@ -4244,7 +4244,7 @@ with nothing wrong in the tree.
 `target/rust-guests` (list derived from `$SCENES`, so a new scene cannot
 be built and then left running out of the build directory) and asserts
 that directory stays small. `tools/check-shell.py` refuses any `run`
-line that execs out of `target/{debug,release}/{examples,deps}`, with a
+line that execs out of `target/{debug, release}/{examples,deps}`, with a
 self-test, watched failing.
 
 **Nothing is left, and the measured result is bigger than the diagnosis
@@ -5178,7 +5178,7 @@ FIXED 2026-08-19, as one slice exactly as this entry required. Both
 `Fwd` lines went in beside `Fwd("Button", ["string text"], "text")` in
 tools/kaya-csgen/Program.cs (line 311 today, not the :322 below — the
 file shifted), the two generated façades moved with them
-(guests/csharp/{Item,Todo}Kaya.cs now carry `Button(Signal)` and
+(guests/csharp/{Item, Todo}Kaya.cs now carry `Button(Signal)` and
 `Button(Field<string>)`), and tpl-surfaces.py's façade clause compares
 ARITY-AND-TYPE instead of name sets — the C-family façades are keyed by
 `(name, (parameter types…))` through `_typed_members`, reusing the
@@ -5190,7 +5190,7 @@ OLD name-keyed clause measured GREEN against that same perturbed file,
 which is the whole point. Restored from the saved copy, `shasum -c` OK,
 census green, `dotnet build` clean.
 
-As filed: tools/kaya-csgen/Program.cs:322 forwards `Button(string text)` and
+As filed: tools/kaya-csgen/Program.cs:320 forwards `Button(string text)` and
 nothing else, so the `Button(Signal)` and `Button(Field<string>)`
 overloads added to `Tpl` on 2026-08-18 are missing from every generated
 `<Rec>Row`. A guest writing `foreach (var row in todos.Rows())` cannot
@@ -5378,7 +5378,7 @@ Slice 2b — depth then breadth, the standing pattern):
   BASELINE for a pinned string and names the fallback through
   DirectWrite. Findings the probe did not have, all measured on the lane:
   **the VM was never down** — Windows drops ICMP, so the probe's `ping`
-  test read a healthy guest as powered off (tools/probe-env.sh:31 already
+  test read a healthy guest as powered off (tools/probe-env.sh:24 already
   said so); **XAML's family lookup disagrees with DirectWrite's** (`Segoe
   UI Variable`, this SDK's `Control.FontFamily` default, is not in the
   system collection and XAML still lays it out as its `Text` sibling), so
@@ -5754,8 +5754,8 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   Rust one can — it must open the For itself. One of the two doctrines
   is wrong and ~~the scene that would decide it (menus, per-row) does not
   exist in C#~~ — CORRECTION 2026-08-19: IT DOES, and it is paying the
-  cost. `guests/csharp/MenusScene.cs:100-107` opens the For itself
-  exactly as this predicted, where `guests/rust/menus.rs:106-114` does
+  cost. `guests/csharp/MenusScene.cs:91-96` opens the For itself
+  exactly as this predicted, where `guests/rust/menus.rs:99-107` does
   the same work through the typed row façade
   (`item.label(Task::title())`, `item.context_menu(row, …)`). So this is
   no longer hypothetical: the C# façade header's own predicted failure
@@ -5934,7 +5934,7 @@ The scene is designed, and the design is the part worth keeping:
 no interpreter arm and no wire constant: the guest hands the vendored
 mark's asset to an Image, the platform's own decoder decodes it, and the
 harness reads the decoded size off the real image view — the gallery
-scene's shape (tools/scenes/gallery.steps:12) with an asset on the input
+scene's shape (tools/scenes/gallery.steps:8) with an asset on the input
 side. `expect_typeface` was rejected for this scene precisely because
 iOS depth-stubs it, which would have exempted the one lane whose asset
 delivery is the real packaging mechanism.
@@ -6172,9 +6172,9 @@ day: a tree-wide search for SWIFT near "cannot catch"/"catches
 nothing"/"no way to catch" over the bindings, the core, the guests and
 the `.steps` files returns ZERO lines, and every one of those sites now
 carries the pointer form instead — "Why a query and not just the raise:
-docs/deferred.md, the assets entry" (crates/kaya/src/app.rs:1504,
-bindings/go/app.go:1436, and the python/java/csharp/haskell/ocaml twins),
-with tools/scenes/assets.steps:20-23 carrying the replacement argument
+docs/deferred.md, the assets entry" (crates/kaya/src/app.rs:1355,
+bindings/go/app.go:1363, and the python/java/csharp/haskell/ocaml twins),
+with tools/scenes/assets.steps:1-1 carrying the replacement argument
 in the C floor's name rather than Swift's. The file-and-line list this
 paragraph used to carry is deliberately not reproduced: it was hundreds
 of lines out of date within two days, which is the argument for the
@@ -6832,7 +6832,7 @@ lane's container reads 2 lines with the lowering reverted, 0 with it in).
 STILL OPEN, one backend over: WinUI's own fills clause adds back
 `grid.RowSpacing()`, the toolkit property its lowering writes, so it
 mirrors rather than compares and could not catch a dropped spacing write
-either (crates/kaya/src/winui/mod.rs:14641-14673). Nothing is broken
+either (crates/kaya/src/winui/mod.rs:12080-12114). Nothing is broken
 there today — that lowering does write it — but the guard is not a guard.
 
 AND THE SIBLING ONE BACKEND OVER, same day: WinUI's container_fills
@@ -7712,7 +7712,7 @@ distinct six-delivered-and-ignored-taps face.
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 
-guests/rust/a11y.rs:34 draws its image from an inline TEST_PNG byte
+guests/rust/a11y.rs:23 draws its image from an inline TEST_PNG byte
 array, and its seven siblings do the same. The assets survey ruled the
 tree's inline PNGs 'stay' under one blanket reason — a DECODE-assertion
 scene must not fail because a file was not staged — but a11y is not a
@@ -8664,7 +8664,7 @@ belongs with it.
 The Haskell entry above was written as a Haskell gap. It is not: the
 sweep its fix required found the SAME two halves in five more bindings,
 each read in the source rather than assumed.
-- Go: `CollectionOf[K, T](tx *Tx)` (bindings/go/records.go:129) takes a
+- Go: `CollectionOf[K, T](tx *Tx)` (bindings/go/records.go:122) takes a
   `*Tx`, and `Tpl.tx` is unexported, so a template body cannot reach it;
   `RecordCollection[K, T]` EMBEDS `Collection`, so `rc.At(key)` returns
   the untyped `Collection` and T is gone. Go methods take no type

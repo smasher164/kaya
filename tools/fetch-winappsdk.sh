@@ -11,16 +11,13 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Fetch the Windows App SDK component packages and extract the WinRT
-# metadata (.winmd) plus the bootstrap DLL. Output lands in
-# third_party/winappsdk/ (gitignored; the bindings are committed).
-# Microsoft.WindowsAppSDK is a meta-package as of 2.x; the component
-# versions below come from its nuspec (2.2.0).
+# metadata plus the bootstrap DLL into third_party/winappsdk/
+# (gitignored). The component versions come from Microsoft.WindowsAppSDK
+# 2.2.0's nuspec.
 #
-# Each package names an exact version AND the sha256 of the .nupkg
-# nuget.org serves for it. This is a curl, not a package manager: no
-# lockfile covers it, and tools/check-pins.py's other four clauses read
-# gradle, .csproj, opam and SwiftPM, so this door was guarded by nobody
-# until its fifth (docs/canvas-plan.md §3.1).
+# Each package names an exact version AND the sha256 of the .nupkg. This
+# is a curl, not a package manager, so no lockfile covers it —
+# tools/check-pins.py's fifth clause is what guards this door.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

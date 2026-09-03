@@ -1,9 +1,5 @@
-// The table scene from Go: column headers and click-to-sort on the
-// For vocabulary (docs/tables-plan.md). A header click is a REQUEST —
-// this guest reorders its collection BY KEY (the reorder scene's
-// idiom) and re-declares the header with the new indicator; the
-// platform sorts nothing. The byte-frozen contract is
-// tools/scenes/table.steps.
+// The table scene (tools/scenes/table.steps): a header click is a REQUEST,
+// and the platform sorts nothing.
 package table
 
 import (
@@ -21,17 +17,13 @@ type Item struct {
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// The guest's sort policy — the platform never has one: clicking
-	// the sorted column flips it, clicking another starts ascending.
+	// The guest's sort policy; the platform never has one.
 	sortedCol := int64(-1)
 	sortedDesc := false
 
 	app.Build(func(tx *kaya.Tx) {
 		items := ItemCollection(tx)
-		// The root is a row so the For's container is the scene's only
-		// column-kind widget (the reorder scene's rule). The table IS
-		// the For: the bar and the click handler ride the same
-		// construction that stamps the rows.
+		// The root is a row: the For's container is the only column.
 		var table kaya.Widget
 		tx.Mount(tx.Row(func() {
 			rows := ItemRows(tx, items).
@@ -50,8 +42,7 @@ func App() *kaya.App {
 						}
 						return a < b
 					})
-					// Keys, never indices: moving each key to the end in
-					// the target order leaves the collection sorted.
+					// Each key to the end, in the target order.
 					for _, e := range entries {
 						items.MoveToEnd(tx, e.Key)
 					}
@@ -68,10 +59,7 @@ func App() *kaya.App {
 					row.Label(row.Size())
 				})
 			}
-			// Grown on purpose: this scene asserts the
-			// fill-and-scroll viewport, the grown half of the
-			// empty-row ruling — ungrown would hug its rows
-			// (tables-plan decision 8).
+			// Grown on purpose: ungrown, a table hugs its rows.
 			tx.SetGrow(table, 1)
 		}))
 		for _, seed := range []struct{ key, name, size string }{

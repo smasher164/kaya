@@ -12,73 +12,41 @@ dev_shell_or_die()
 # cause nobody had measured"). A sentence a why-not cannot NOT print is
 # a sentence that will be chased for every cause it does not name.
 #
-# TWO CLAUSES.
-#
-#   SOLE-ANSWER   A diagnostic that can return exactly one string
+# THE CONTRACT.
+#   SOLE-ANSWER   a diagnostic that can return exactly one string
 #                 distinguishes nothing.
-#   FIXED-PROSE   An answer that interpolates NOTHING is the same
-#                 sentence for every state that reaches it. A
-#                 diagnostic gets exactly ONE of those and it must be
-#                 its first clause: the early-out, whose entire content
-#                 is the guard it just tested. Every clause after it
-#                 stands on the failure path and must print at least
-#                 one value this process went and got.
+#   FIXED-PROSE   an answer that interpolates NOTHING is the same
+#                 sentence for every state that reaches it. A diagnostic
+#                 gets exactly ONE, and it must be its first clause: the
+#                 early-out, whose content is the guard it just tested.
+#                 Every clause after it stands on the failure path and
+#                 must print a value this process went and got.
+#   OPT-IN        by NAME, nothing to register: any function ending in
+#                 WhyNot, whyNot, why_not, Reason or reason.
+#   AN ANSWER     in SWIFT is the string literals at paren depth 0 of a
+#                 `return`, interpolating when one carries a \(…). In
+#                 RUST the VALUE POSITIONS are every `return E`, every
+#                 match arm `P => E` and the body's tail expression (a
+#                 block's value is whatever follows its last top-level
+#                 `;`), and the ANSWER LITERALS of one are the strings
+#                 at bracket depth 0 plus those at depth 1 inside a
+#                 prose builder. Several literals in one position are
+#                 ONE answer; INTERPOLATION is a format placeholder in a
+#                 format!/panic! string, so a `concat!` argument is a
+#                 constant however many braces it has.
+#   TRANSPORT     is not authorship, and the SHAPE says which is which:
+#                 `kaya_asset_why_not` returns a usize and authors no
+#                 word, so it is CENSUSED and raises nothing.
 #
-# WHAT THIS GATE DOES NOT DO: it does not read English. A causal-claim
-# regex was costed and REJECTED — over 220k lines its false-positive
-# rate would mute the gate. It also cannot tell a measurement from a
-# constant. What it enforces is the shape.
-#
-# HOW A NEW DIAGNOSTIC OPTS IN: by its NAME, with nothing to register.
-# Any function ending in WhyNot, whyNot, why_not, Reason or reason is
-# read as a diagnostic from the next run.
-#
-# TWO LANGUAGES, EACH WITH ITS OWN ANSWER RULE — Swift and Rust, where
-# the tree's diagnostics are. An arm no source exercises rots, so a
-# language joins when a diagnostic in it lands and not before; a
-# diagnostic named in a language still unread FAILS this gate naming
-# the extension point rather than being skipped. Same reason the census
-# fails when EMPTY.
-#
-# WHAT AN ANSWER IS, IN SWIFT: the string literals at paren depth 0 of
-# a `return` expression, interpolating when one carries a \(…).
-#
-# WHAT AN ANSWER IS, IN RUST — necessarily a different rule, because a
-# Rust answer is `return format!("… {x} …")` and every literal sits one
-# bracket down from where Swift's rule looks:
-#
-#   THE VALUE POSITIONS of a body are (1) every `return E`, (2) every
-#   match arm `P => E`, and (3) the body's own tail expression. The
-#   value of a BLOCK is whatever follows its last top-level `;`; a
-#   block whose statements all end in `;` contributes nothing, its
-#   `return`s having been counted by (1).
-#
-#   THE ANSWER LITERALS of a value position are the string literals at
-#   bracket depth 0, plus those at depth 1 when the bracket belongs to
-#   a prose builder — `format!`, `panic!`, `concat!`, `String::from`.
-#   (`.to_owned()`/`.to_string()` need no rule: their literal is the
-#   RECEIVER, already at depth 0.) Several literals in one position are
-#   ONE answer in pieces.
-#
-#   INTERPOLATION is a format placeholder — a `{` that is not the `{{`
-#   escape — in a format!/panic! format string. A `concat!` or
-#   `String::from` argument is a constant however many braces it has.
-#
-# TAIL EXPRESSIONS ARE READ rather than a `return` demanded: demanding
-# `return` would have been blind to exactly the arms that go to the
-# filesystem. NOT read: an answer built by an if/else tail, a `?`
-# chain, a helper, or a `write!` into a buffer. A prose-returning
-# function whose answers are ALL invisible fails, naming what to
-# write; one whose answers are PARTLY invisible is under-read in
-# silence, which is why neither rule may be widened without a
-# self-test that watches it bite.
-#
-# TRANSPORT IS NOT AUTHORSHIP, and the SHAPE says which is which — no
-# name list, no exemption. `kaya_asset_why_not` and
-# `ring_asset_why_not` match the naming convention and author no word:
-# they return a `usize` and a `JByteArray`, and no value position in
-# either carries a string literal. They are CENSUSED and raise
-# nothing.
+# IT DOES NOT READ ENGLISH: a causal-claim regex was costed and REJECTED
+# (over 220k lines its false-positive rate would mute the gate), and it
+# cannot tell a measurement from a constant. NOT READ: an answer built
+# by an if/else tail, a `?` chain, a helper, or a `write!` into a buffer
+# — a function whose answers are ALL invisible fails naming what to
+# write, one PARTLY invisible is under-read in silence, which is why
+# neither rule may be widened without a self-test that watches it bite.
+# A language joins when a diagnostic in it lands and not before; one
+# named in a still-unread language FAILS naming the extension point.
 
 import os
 import re
@@ -104,17 +72,12 @@ FIXED_REV = "4f40e59"    # the rewrite that made it answer in facts
 RUST_TARGET = "crates/kaya/src/assets.rs"
 
 # ------------------------------------------------------------- lexing
-# String and comment spans, so that neither brace counting nor the
-# convention's name match can be fooled by a brace, a `func` or a
-# `return` inside a message or a doc comment. A \(…) interpolation
-# belongs to the literal that contains it: `joined(separator: "/")`
-# inside one is part of that answer, not a second answer.
-#
-# ONE LEXER PER LANGUAGE, because the differences are not cosmetic: a
-# Swift string may not contain a raw newline while a Rust one may,
-# Rust spells its raw strings `r#"…"#` where Swift spells them
-# `#"…"#`, and Rust has char literals that would derail a reader
-# written for the other language. Both return the same span shape.
+# String and comment spans, so a brace, `func` or `return` inside a
+# message or doc comment fools neither the counting nor the name match.
+# A \(…) interpolation belongs to the literal containing it. ONE LEXER
+# PER LANGUAGE: a Swift string may not contain a raw newline while a
+# Rust one may, the raw forms differ (`r#"…"#` against `#"…"#`), and
+# Rust has char literals that derail a Swift-shaped reader.
 CONTINUE_TAIL = ("+", "-", "*", "/", "%", ",", "(", "[", "{", "?", ":",
                  "=", "&", "|", ".", "!", "<", ">")
 CONTINUE_HEAD = ("+", "-", "*", "/", "%", ",", ")", "]", "}", "?", ":",
@@ -198,16 +161,13 @@ def spans_of(text, path):
     return spans, None
 
 
-# Rust's lexer. `//` and `///` line comments, NESTED `/* */`, `"…"`
-# with backslash escapes and raw newlines allowed (a `\` at end of line
-# is Rust's line continuation and the escape rule eats it), the raw
-# forms `r"…"` / `r#"…"#` / `r##"…"##` with their byte and c prefixes,
-# and CHAR LITERALS, which are lexed only so they cannot derail the
-# reader: `'"'` would otherwise open a string that never closes and
-# `'{'` would be counted as a bracket. A `'` that is not a well-formed
-# char literal is a lifetime (`&'static str`) and is left alone. Rust
-# has no `\(…)` interpolation — placeholders live INSIDE the literal
-# and are read later, by `placeholder()`.
+# Rust's lexer: line and NESTED block comments, strings with escapes and
+# raw newlines, the raw forms with their byte and c prefixes, and CHAR
+# LITERALS — lexed only so they cannot derail the reader, since `'"'`
+# would open a string that never closes and `'{'` would count as a
+# bracket. A `'` that is not a well-formed char literal is a lifetime
+# and is left alone; Rust placeholders live INSIDE the literal and are
+# read later, by `placeholder()`.
 IDENT = re.compile(r"[A-Za-z0-9_]")
 RUST_RAW = re.compile(r'(?:b|c)?r(#*)"')
 RUST_CHAR = re.compile(r"b?'(?:\\u\{[0-9a-fA-F_]+\}|\\.|[^'\\\n])'")
@@ -407,9 +367,8 @@ def answers(code, spans, body_start, body_end):
 
 
 # ------------------------------------------------------ the rust rule
-# The header states this rule in prose; what follows is the same thing
-# in code. FMT builders can interpolate, PROSE builders cannot: their
-# argument is a constant, braces and all.
+# FMT builders can interpolate, PROSE builders cannot: their argument is
+# a constant, braces and all.
 FMT_CALLEE = re.compile(r"(?:\bformat!|\bpanic!)\s*$")
 PROSE_CALLEE = re.compile(r"(?:\bconcat!|\bString::from)\s*$")
 

@@ -1,5 +1,5 @@
-// The select conformance scene, Swift port. See
-// guests/rust/select.rs and tools/scenes/select.steps.
+// The select scene, Swift port — guests/rust/select.rs,
+// tools/scenes/select.steps.
 
 import Foundation
 

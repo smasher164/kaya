@@ -1,8 +1,4 @@
-(* The table scene from OCaml: column headers and click-to-sort on the
-   For vocabulary (docs/tables-plan.md). A header click is a REQUEST —
-   this guest reorders its collection BY KEY (the reorder scene's
-   idiom) and re-declares the header with the new indicator; the
-   platform sorts nothing. The byte-frozen contract is
+(* The table scene, OCaml port — guests/rust/table.rs,
    tools/scenes/table.steps. *)
 
 open Kaya_wire
@@ -10,8 +6,7 @@ open Kaya_app
 
 type table_item = { name : string; size : string } [@@deriving kaya_gen]
 
-(* The guest's sort policy — the platform never has one: clicking the
-   sorted column flips it, clicking another starts ascending. *)
+(* The guest's sort policy; the platform never has one. *)
 let sorted_col = ref (-1)
 let sorted_desc = ref false
 
@@ -20,9 +15,8 @@ let () =
 
   build app (fun () ->
      let items = collection_of table_item_record in
-     (* The For first, because its handle registers the sort handler
-        and re-declares the header; [w] slots it into the root after
-        (the binding's own handlers-need-the-handle-first idiom). *)
+     (* The For first, because its handle registers the sort handler and
+        re-declares the header. *)
      let table, _ =
        for_each (record_handle items)
          (fun () ->
@@ -35,9 +29,8 @@ let () =
                ()))
          ()
      in
-     (* Grown on purpose: this scene asserts the fill-and-scroll
-        viewport, the grown half of the empty-row ruling — ungrown
-        would hug its rows (tables-plan decision 8). *)
+     (* Grown on purpose: ungrown would hug its rows (docs/tables-plan.md
+        decision 8). *)
      set_grow table 1.0;
      let on_sort column =
        let desc = !sorted_col = column && not !sorted_desc in
@@ -52,8 +45,7 @@ let () =
              if desc then -c else c)
            entries
        in
-       (* Keys, never indices: moving each key to the end in the
-          target order leaves the collection sorted. *)
+       (* Keys, never indices. *)
        List.iter (fun (key, _) -> move_to_end (record_handle items) key) ordered;
        columns table [ "Name"; "Size" ]
          (if desc then sort_desc column else sort_asc column)

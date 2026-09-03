@@ -3,10 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The toolbar conformance scene, JVM port: the {@code primary} bit as
- * real window chrome (docs/chrome-plan.md C2). One catalog, two actions
- * marked primary, and every host promotes the same first two. Canonical
- * semantics in guests/rust/toolbar.rs; the byte-frozen contract in
+ * The toolbar scene from the JVM — guests/rust/toolbar.rs,
  * tools/scenes/toolbar.steps.
  */
 public final class Toolbar {
@@ -17,15 +14,11 @@ public final class Toolbar {
 
         app.build(tx -> {
             KayaApp.Signal<String> status = tx.signal("ready");
-            // Written against the MENU ITEM and nothing else: the
-            // promoted button is that same item, so it follows or the
-            // lowering kept a copy.
+            // Written against the MENU ITEM: the promoted button IS that item.
             KayaApp.Signal<Boolean> canSave = tx.signal(true);
 
-            // CATALOG PREORDER DECIDES PROMOTION — groupings in
-            // menubar-append order, then children depth-first. Save is
-            // the first primary and Find the second, so every host's
-            // promoted set is [Save, Find] whatever its own k is.
+            // CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
+            // children depth-first, so every host promotes [Save, Find].
             KayaApp.WindowRef win = tx.window(0).title("toolbar");
             KayaApp.MenuItem file = win.menu("File");
             file.item("Save")

@@ -1,19 +1,12 @@
-//! THROWAWAY undo probe for the WinUI backend — docs/undo-plan.md §0,
-//! probe plan cells P3-win, P4, P5. Measures; builds nothing.
-//!
+//! THROWAWAY undo probe for the WinUI backend — docs/undo-plan.md §0.
 //! A MODULE OF THE BACKEND, not a standalone app: the questions are
-//! about the TextBox kaya itself creates, with kaya's minimal template,
-//! through kaya's own SetProp path and under its thread-scoped chord
-//! hook.
+//! about the TextBox kaya itself creates, through kaya's own SetProp
+//! path and under its thread-scoped chord hook.
 //!
 //! Wiring (temporary, reverted after the run — see hook.patch):
 //!   crates/kaya/src/winui/mod.rs
 //!     #[path = "../../../../tools/win/undoprobe/probe.rs"] mod undoprobe;
 //!     ... and `undoprobe::maybe_spawn();` at the end of `setup`.
-//!
-//! Everything it prints is prefixed PROBE with a millisecond stamp;
-//! the guest's own observations print PROBEGUEST. The last line is
-//! PROBEDONE.
 
 // A probe keeps its unused instruments (right_click_area, call_redo).
 #![allow(dead_code)]

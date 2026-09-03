@@ -36,14 +36,10 @@ static PRESENT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
 /// dev.kaya.KayaAssets and the Context an asset read needs, taken at
-/// attach for the same reason: an asset is read from the APP THREAD,
-/// which resolves classes through the system class loader.
-///
-/// THE APPLICATION CONTEXT AND NOT THE ACTIVITY (docs/deferred.md's
-/// mount entry). Both reach the same AssetManager, but a configuration
-/// change recreates the Activity while this ref is a `OnceLock` — so the
-/// process would hold the FIRST, destroyed one for its whole life. The
-/// round trip is paid once, here.
+/// attach for the same reason: an asset is read from the APP THREAD.
+/// THE APPLICATION CONTEXT AND NOT THE ACTIVITY (docs/deferred.md's mount
+/// entry) — a configuration change recreates the Activity while this ref is
+/// a `OnceLock`, so the process would hold the first, destroyed one.
 static ASSETS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
@@ -70,8 +66,7 @@ fn init_logging() {
 }
 
 /// Android's attach: the shell Activity calls Kaya.attach(this) from
-/// onCreate on the UI thread, kaya spawns the app thread and returns that
-/// thread to the Looper.
+/// onCreate on the UI thread.
 pub fn attach(
     mut env: JNIEnv,
     activity: JObject,
@@ -100,8 +95,6 @@ pub fn attach(
 
 /// Attach when the JVM app itself is the guest: the app's own thread
 /// consumes the ring through KayaRing and answers with KayaRing.submit.
-/// The core ends stay in place — the Compose pump takes them through
-/// KayaPresent.nextCommands once the Activity mounts KayaCompose.
 /// Exported by name; this lives in kaya's own cdylib.
 #[unsafe(no_mangle)]
 extern "system" fn Java_dev_kaya_KayaRing_attach(
@@ -223,8 +216,7 @@ pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
 /// The platform does the walking, because `AssetManager.list` answers one
 /// directory at a time and says nothing about which entries are files.
 /// An empty list is also what a process that could not ask answers with,
-/// which is why the sentence upstream says "nothing this process could
-/// list" and not "carries nothing".
+/// which is what the miss sentence's wording upstream turns on.
 pub(crate) fn apk_asset_list() -> Vec<String> {
     let Some((mut env, class, context)) = assets_env() else {
         return Vec::new();
@@ -608,9 +600,7 @@ extern "system" fn present_stalled_ms(_env: JNIEnv, _class: JClass) -> i64 {
 }
 
 /// KayaPresent.fault: the core's latched fault as UTF-8, null for none.
-/// The Compose harness asks once per step, so a transaction that died
-/// inside `Scene::apply` reddens the leg carrying its sentence instead
-/// of aborting the process (crates/kaya/src/fault.rs).
+/// The Compose harness asks once per step (crates/kaya/src/fault.rs).
 extern "system" fn present_fault(env: JNIEnv, _class: JClass) -> jni::sys::jbyteArray {
     let Some(sentence) = crate::fault::latched() else {
         return std::ptr::null_mut();
@@ -670,8 +660,7 @@ extern "system" fn present_emit_text(
 
 /// KayaPresent.undoRoute / redoRoute: kaya_undo_route's and
 /// kaya_redo_route's JNI spelling — 0 nowhere, 1 the focused field's own
-/// stack, 2 the core's ledger. Crossed on every menu render carrying an
-/// Edit>Undo row, so it allocates nothing.
+/// stack, 2 the core's ledger.
 extern "system" fn present_undo_route(
     _env: JNIEnv,
     _class: JClass,
@@ -730,12 +719,9 @@ extern "system" fn present_note_native_undo(
 
 // --- Row windowing (docs/virtualization-plan.md §3) ------------------
 //
-// Straight-through to the C entries, like the undo tier above: the core
-// owns the band, the presumption and the arithmetic, and the tier owns
-// only the geometry it laid out. A refused target FAULTS rather than
-// aborting (crates/kaya/src/fault.rs), so the leg reddens with the
-// sentence — which is why the Compose tier asks only about a node it
-// knows is a For container.
+// A refused target FAULTS rather than aborting
+// (crates/kaya/src/fault.rs), which is why the Compose tier asks only
+// about a node it knows is a For container.
 
 extern "system" fn present_window_moved(
     _env: JNIEnv,
@@ -779,9 +765,9 @@ extern "system" fn present_scroll_to_row(
 
 /// KayaPresent.windowGeometry: the record's fields written into the
 /// caller's `double[]`, in KayaPresent's GEOMETRY_* order. The counts
-/// cross as doubles beside the three lengths because ONE array is one
-/// JNI call, and a row index is exact in a double past any collection
-/// that fits in memory.
+/// cross as doubles beside the three lengths: ONE array is one JNI call,
+/// and a row index is exact in a double past any collection that fits in
+/// memory.
 extern "system" fn present_window_geometry(
     env: JNIEnv,
     _class: JClass,
@@ -1019,15 +1005,11 @@ extern "system" fn present_emit_save_dialog_result(
 }
 
 /// One representation, unpacked from the six scalars Kotlin sent and LENT
-/// to the C struct for the length of one call.
-///
-/// The scalars cross flattened rather than assembled on the JVM side, so
-/// there is no second copy of capi.rs's layout to keep in step. `clip` 0
-/// crosses as a NULL representation — the universal no.
-///
-/// ONE STRING ARGUMENT carries text, html AND a custom format's id, so
-/// the struct's `text` and `id` name the same buffer and `clip` decides
-/// which of them the core reads.
+/// to the C struct for the length of one call. They cross flattened so
+/// there is no second copy of capi.rs's layout to keep in step, and `clip`
+/// 0 crosses as a NULL representation. ONE STRING ARGUMENT carries text,
+/// html AND a custom format's id: `text` and `id` name the same buffer and
+/// `clip` decides which the core reads.
 fn with_representation<'local, T>(
     env: &mut JNIEnv<'local>,
     clip: jint,
@@ -1061,9 +1043,8 @@ fn with_representation<'local, T>(
         count, named,
         "kaya: a clipboard answer carries {count} locators and {named} names"
     );
-    // A files answer WITH NO FILES is a caller bug and not the empty
-    // A files answer with no files is a caller bug, not the empty answer:
-    // the empty answer is clip 0.
+    // A files answer with no files is a caller bug, not the empty
+    // answer: the empty answer is clip 0.
     assert!(
         clip as u32 != crate::wire::CLIP_FILES || count > 0,
         "kaya: a clipboard answer names files and carries none — the empty \

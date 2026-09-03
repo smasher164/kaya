@@ -1,22 +1,12 @@
 // The macOS pane ladder, measured for real — compiled INTO the
-// interpreter's own module by tools/check-pane-ladder.py and run as an
-// executable. Two halves:
-//
+// interpreter's own module by tools/check-pane-ladder.py and run.
 //   1  ARITHMETIC: kayaPaneRung / kayaPaneLadderCommand, including the
-//      ordering constraint that keeps the regular band free of a
-//      one-pane state (content+detail < 600, the compact threshold) —
-//      the bare expect_panes invariant depends on that ordering, not on
-//      anybody remembering it.
+//      ordering constraint that keeps the regular band free of a one-pane
+//      state (content+detail < 600), which the bare expect_panes
+//      invariant depends on.
 //   2  RUNTIME: the real KayaSplitRoot3 in a real NSWindow, resized
-//      1400 -> 700 -> 1400, the REAL NSSplitView's columns counted at
-//      each rung. This is the middle rung's only live observation:
-//      no shared scene may sample 700 (check-steps' panes band — the
-//      platforms disagree there), so the ladder's shed-and-restore is
-//      proven here or nowhere.
-//
-// The scene model is populated directly (window 0, panes=3, two pushed
-// entries): only the node graph is written here, which is what a wire
-// batch would have built.
+//      1400 -> 700 -> 1400. No shared scene may sample 700 (check-steps'
+//      panes band), so the shed-and-restore is proven here or nowhere.
 
 import AppKit
 import SwiftUI

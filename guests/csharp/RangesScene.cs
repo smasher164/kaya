@@ -1,13 +1,5 @@
-// The text-ranges conformance scene, C# port — HIGHLIGHT a set of
-// ranges, SELECT one, REVEAL one. Canonical semantics in
-// guests/rust/ranges.rs; the byte-frozen contract in
+// The ranges scene, C# port — guests/rust/ranges.rs,
 // tools/scenes/ranges.steps.
-//
-// .NET's IndexOf answers in UTF-16 code units and kaya's ranges are
-// UTF-8 byte offsets, six apart on this document and silently so —
-// TextRange.In is the conversion (docs/traps.md, "A range offset is a
-// UTF-8 BYTE offset"). The search itself is the app's; kaya ships no
-// find engine (docs/ranges-plan.md §3).
 
 using System;
 using System.Collections.Generic;
@@ -15,10 +7,8 @@ using System.Text;
 
 static class RangesScene
 {
-    // Frozen: three occurrences of `alpha`, forty lines so the last one
-    // is below the viewport. Joined with an explicit \n rather than
-    // written as one verbatim literal, because a line-ending translation
-    // would move every absolute offset the scene asserts.
+    // Frozen, and joined with an explicit \n: a line-ending translation would
+    // move every absolute offset the scene asserts.
     static readonly string Doc = string.Join("\n", new[]
     {
         "line 00: 日本語 preface",
@@ -65,8 +55,7 @@ static class RangesScene
 
     const string Needle = "alpha";
 
-    // TextRange.In is not optional: `at` is a UTF-16 index and kaya's
-    // ranges are UTF-8 byte offsets (see the header).
+    // TextRange.In is not optional: `at` is a UTF-16 index, kaya's are bytes.
     static List<TextRange> FindAll(string doc, string needle)
     {
         var hits = new List<TextRange>();
@@ -78,8 +67,7 @@ static class RangesScene
 
     public static void Run()
     {
-        // A drifted document fails ranges.steps with unreadable numbers;
-        // this fails first, naming the length.
+    // A drifted document would fail ranges.steps with unreadable numbers.
         int bytes = Encoding.UTF8.GetByteCount(Doc);
         if (bytes != 813)
             throw new InvalidOperationException(
@@ -88,7 +76,6 @@ static class RangesScene
 
         var app = new KayaApp();
 
-        // The app's own copy, the only authority on what the offsets mean.
         string doc = Doc;
         Signal status = default;
         Widget editor = default;
@@ -105,8 +92,7 @@ static class RangesScene
                     doc = text;
                     t.Write(status, "0 matches");
                 });
-                // Every range assertion reads the accessibility tree, and
-                // this id is how a leg finds the control there.
+                // Every range assertion finds this control by its authored id.
                 tx.SetA11yId(editor, "doc");
                 tx.SetA11yLabel(editor, "Document");
                 tx.SetText(editor, Doc);
@@ -119,8 +105,8 @@ static class RangesScene
                     {
                         var hits = FindAll(doc, Needle);
                         t.HighlightRanges(editor, hits);
-                        // The second match, so a leg can tell the
-                        // selection apart from "the first thing found".
+                        // The SECOND match, so a leg can tell the selection
+                        // apart from "the first thing found".
                         if (hits.Count > 1)
                             t.SelectRange(editor, hits[1]);
                         t.Write(status, $"{hits.Count} matches");

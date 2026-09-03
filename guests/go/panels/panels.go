@@ -1,6 +1,4 @@
-// The panels conformance scene, Go port — the auxiliary-window
-// grammar via the chain spelling. See guests/rust/panels.rs and
-// tools/scenes/panels.steps.
+// The panels conformance scene (tools/scenes/panels.steps).
 package panels
 
 import (

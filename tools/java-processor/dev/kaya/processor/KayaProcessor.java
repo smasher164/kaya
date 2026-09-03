@@ -24,12 +24,8 @@ import dev.kaya.KayaGen;
  * The Java arm of the generator family. Reads a {@code @KayaGen}
  * declaration and writes {@code <Type>Kaya.java} beside it
  * ({@code -Akaya.out=<source root>}); the DECLARATION'S SHAPE decides
- * what comes out — a sealed interface is a sum (permitted records, in
- * permits-clause order, are the constructors) and gets the STAGED
- * BUILDER eliminator, where each stage's return type offers exactly the
- * next constructor's arm; a record gets the collection factory, field
- * tokens and a named-setter patch. Generated files are checked in;
- * tools/gen-guests.py regenerates and diffs.
+ * what comes out. Generated files are checked in; tools/gen-guests.py
+ * regenerates and diffs.
  */
 @SupportedAnnotationTypes("dev.kaya.KayaGen")
 @SupportedSourceVersion(SourceVersion.RELEASE_17)

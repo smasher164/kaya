@@ -1,18 +1,11 @@
-"""The canvas SIZE-POLICY scene, Python port — see guests/rust/sizepolicy.rs
-for the full rationale and tools/scenes/sizepolicy.steps for the frozen
-contract. Four grown canvases say the four things a drawing can say
-about its own size: nothing (scale), fixed, on_draw, on_tick.
-
-EVERY FIGURE IS DRAWN IN FRACTIONS OF THE BOX IT IS HANDED, which is why
-one frozen expectation serves four tracks that differ per platform.
-"""
+"""The canvas size-policy scene (tools/scenes/sizepolicy.steps). ALL FOUR
+CANVASES GROW, or an ungrown track IS its viewbox and nothing differs."""
 
 import sys
 
 import kaya
 
-# The declared box of the two CONSTANT-mode canvases: the one number
-# `scale` and `fixed` disagree about.
+# The declared box of the two CONSTANT-mode canvases.
 BOX = (300.0, 120.0)
 
 
@@ -52,30 +45,23 @@ app = kaya.App()
 
 with app.window(title="sizepolicy", width=480, height=420):
     with kaya.column():
-        # SCALE, the default: nothing is declared, and the core
-        # re-rasterizes this same display list at whatever track the
-        # column hands over, fitted uniformly and centred.
+        # SCALE, the default: declared by writing nothing.
         fit = kaya.canvas(BOX, grow=1)
         fit.a11y_id("fit").a11y_label("Scaled panel")
         with fit.draw() as d:
             figure(d, BOX)
 
-        # FIXED: the one true property. This one draws at BOX whatever
-        # the column does with it, and the backend blits it 1:1.
+        # FIXED: drawn at BOX and blitted 1:1.
         mark = kaya.canvas(BOX, grow=1, fixed=True)
         mark.a11y_id("mark").a11y_label("Fixed mark")
         with mark.draw() as d:
             figure(d, BOX)
 
-        # REDRAW: the drawing IS a function of size, and saying so is
-        # providing the function. The viewbox declared here is only the
-        # size before the first answer.
+        # REDRAW: this viewbox is only the size before the first answer.
         live = kaya.canvas(BOX, grow=1, on_draw=figure)
         live.a11y_id("live").a11y_label("Redrawn panel")
 
-        # TICK: the same, once a frame, at the time the platform
-        # supplied. Under the harness that clock is the core's own step
-        # and a verb advances it.
+        # TICK: once a frame, at the time the platform supplied.
         clock = kaya.canvas(
             BOX, grow=1,
             on_tick=lambda d, size, time: bar(d, size, frame_of(time)))

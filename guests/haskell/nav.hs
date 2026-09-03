@@ -1,8 +1,4 @@
--- The nav conformance scene, Haskell port — the serial navigation
--- grammar. The covered root is RETAINED (status keeps taking writes
--- while covered), and a programmatic 'popEntry' does NOT echo
--- entry_popped, so the settings round's final status stays "back
--- requested". See guests/rust/nav.rs and tools/scenes/nav.steps.
+-- The nav scene, Haskell port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 import Data.Word (Word64)
 import KayaApp
@@ -34,8 +30,7 @@ main = kayaMain $ \app -> do
               writeSignal s (VStr "pushed detail"),
           buttonOn "open settings" $
             buildTx app $ do
-              -- The veto class: nothing has popped, so the app agrees
-              -- itself. No entry_popped fires for that programmatic pop.
+              -- Nothing has popped, so no entry_popped follows this pop.
               pushEntry
                 settingsId
                 [ ETitle "settings",

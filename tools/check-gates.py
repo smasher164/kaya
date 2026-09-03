@@ -8,23 +8,15 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 
-# THE THREE LISTS OF GATES MUST BE ONE LIST.
-#
-#   what tools/gates.py RUNS   — the executable list
-#   what tools/validate-mac.py RUNS — exactly the above, by DELEGATION
-#                              and not by copy
-#   what CLAUDE.md DOCUMENTS   — rung 2, the list a session with no
-#                              context reads and believes
-#
-# Plus the CENSUS clause: every gate script ON DISK is either in the
-# list or in gates.py's EXCLUDED table WITH A REASON. A gate in neither
-# is a gate nobody runs, and nothing else in the tree can see that.
-# Plus the matrix launch: all five platform lanes are queued together,
-# then the niced gate sweep starts after Android exits; the runner/probe
-# agree on Android's four-phone pool.
-#
-# CLAUDE.md alone, not AGENTS.md: the two are true mirrors and
-# check-mirror.py is what holds that.
+# THE THREE LISTS OF GATES MUST BE ONE LIST: what tools/gates.py RUNS,
+# what tools/validate-mac.py runs BY DELEGATION and not by copy, and
+# what CLAUDE.md documents — rung 2, the list a session with no context
+# reads and believes. Plus the CENSUS clause (every gate script ON DISK
+# is in the list or in gates.py's EXCLUDED table WITH A REASON; nothing
+# else in the tree can see a gate nobody runs) and the matrix launch
+# (five lanes queued together, the niced sweep after Android exits, the
+# runner and probe agreeing on the four-phone pool). CLAUDE.md alone,
+# not AGENTS.md: check-mirror.py holds those two level.
 
 import json
 import re
@@ -44,9 +36,8 @@ def fail(msg):
 # A GATE'S SCRIPT PATH IS ITS NAME EVERYWHERE, so one pattern serves all
 # three readers. The naming clause below FORCES every gate into a shape
 # this pattern can see, or the prose scan goes quietly blind.
-# The gates are python since the 2026-08-31 conversion and their .sh
-# shims went 2026-09-02; swift-typecheck is the one gate still written
-# in shell (an in-toolchain launcher shape).
+# Every gate is python but tools/swift-typecheck.sh, which stays shell
+# (an in-toolchain launcher shape).
 SHELL_GATE = (r"tools/(?:(?:check-[a-z0-9-]+|gen-(?:header|bindings|guests)"
               r"|java-typecheck|js-typecheck)\.py|swift-typecheck\.sh)")
 PY_GATE = r"bindings/(?:python/[a-z0-9_]+\.py|js/[a-z0-9_]+\.ts)"
@@ -120,9 +111,8 @@ def census(on_disk, listed, excluded):
     return sorted(set(on_disk) - set(listed) - set(excluded))
 
 
-# The matrix driver is python since the runner conversion; these are
-# its exact launch spellings (the linux launch spans two lines — its
-# env rider — and is matched as a prefix).
+# The matrix driver's exact launch spellings (the linux launch spans two
+# lines — its env rider — and is matched as a prefix).
 PLATFORM_LAUNCHES = [
     'run_lane("mac", ["tools/validate-mac.py"])',
     'run_lane("linux", ["tools/validate-linux.py"],',
@@ -133,9 +123,8 @@ PLATFORM_LAUNCHES = [
 GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])'
 ANDROID_PID = "android_lane_proc = lane_procs[-1]"
 ANDROID_WAIT = "android_lane_proc.wait()"
-# The runners are python since the runner conversion; the probe stays
-# shell, so the two spellings of each one default diverge in language
-# and these clauses hold them BOTH.
+# The runners are python and the probe is shell, so each default is
+# spelled in two languages; these clauses hold BOTH.
 ANDROID_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "4"))'
 ANDROID_PROBE_POOL = 'ANDROID_POOL="${KAYA_ANDROID_EMUS:-4}"'
 IOS_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_IOS_SIMS", "3"))'
@@ -221,13 +210,11 @@ LANE_RUNNERS = {
     "tools/validate-mac.py": ("validate-mac", "mac"),
     "tools/ios/run-sim.py": ("run-sim", "ios"),
     "tools/linux/run-suites.sh": ("run-suites", "linux"),
-    # Python since the runner conversion; the .sh beside each is the
-    # pinned shim (check-python rule 9), so the contract reads the body.
     "tools/android/run-emulator.py": ("run-emulator", "android"),
     "tools/deploy-win.py": ("deploy-win", "windows"),
 }
 
-# A converted runner records through tools/lib/flightrec_lane.py rather
+# A python runner records through tools/lib/flightrec_lane.py rather
 # than the sourced shell library: the lane's recorder CLASS declares its
 # lane name once, in its constructor, and every journaled leg rides it.
 PY_RECORDERS = {"windows": "WinRecorder", "ios": "IosRecorder",
@@ -634,8 +621,7 @@ if direct:
            "lists again and the count in one of them means nothing")
 # The delegation sits inside the matrix-handshake conditional
 # (ratified 2026-08-20); the clause's real quarry is DIRECT gate
-# invocations, held above. Python since the runner conversion, so the
-# spelling is the argv path.
+# invocations, held above, and the spelling is the argv path.
 if not re.search(r'ROOT / "tools/gates\.py"', mac_text):
     fail("tools/validate-mac.py does not call tools/gates.py — the lane runs "
          "no gate sweep at all")
@@ -699,9 +685,7 @@ else:
 # tools/lib/flightrec_lane.py; a pattern that never matches would call
 # that lane uncovered — or, if every lane journaled directly, would pass
 # while reading nothing. This doctors the LIBRARY, which is the only
-# half N15/N16 never touch. (The shell-era version of this negative
-# earned its keep: the first draft of the clause carried a literal
-# backspace where `\b` belonged.)
+# half N15/N16 never touch.
 doctored, n = re.subn(
     r'super\(\).__init__\("windows"', 'super().__init__("ghostlane"',
     flightrec_pylib_text, count=1)

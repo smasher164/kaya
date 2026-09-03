@@ -43,7 +43,7 @@ opt-in) ones. The list is every control kaya renders:
 A `{ThemeResource}` reference is re-resolved against the lookup chain, so
 an app-level dictionary that redefines the key **wins** — this is exactly
 the mechanism `apply_brand` already uses for the six accent stops
-(crates/kaya/src/winui/mod.rs:6218-6263), including its ordering rule:
+(crates/kaya/src/winui/mod.rs:4956-4989), including its ordering rule:
 merged dictionaries are searched in REVERSE, so kaya's must be appended
 after `XamlControlsResources`.
 
@@ -219,7 +219,7 @@ measurements saying so.
    — `ITextProvider` is not among its interfaces, where
    `ButtonAutomationPeer` does declare `IInvokeProvider` beside its own.
 2. **kaya's own prior live measurement**, already written into this
-   backend at `crates/kaya/src/winui/mod.rs:9345-9361`: "WinUI's
+   backend at `crates/kaya/src/winui/mod.rs:7574-7590`: "WinUI's
    in-process automation peer for a text control publishes no Text
    pattern at all, so `GetAttributeValue(BackgroundColor)` — the read the
    plan named — has no provider to answer it in this process. The SDK
@@ -426,7 +426,7 @@ runs on no lane.** `tools/deploy-win.py` filters the unit-test binary to
 ## 6. WHAT IS MEASURED HERE AND WHAT NEEDS THE VM — plainly, per question
 
 **The VM is powered off.** `ping 192.168.64.2` (the host in
-`tools/probe-env.sh:198`, `akhil@192.168.64.2`) — 2 packets sent, 0
+`tools/probe-env.sh:181`, `akhil@192.168.64.2`) — 2 packets sent, 0
 received, 100% loss. So this is not "I chose not to run the lane"; there
 is no guest to read. Nothing below was attempted against Windows.
 

@@ -3,15 +3,11 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The standard-commands scene, JVM port: a chord on every leaf kind,
- * the punctuation keys those chords need, and the `settings` role —
- * which macOS shows in the application menu while the item stays
- * addressable where it was declared. See guests/rust/commands.rs and
+ * The commands scene from the JVM — guests/rust/commands.rs,
  * tools/scenes/commands.steps.
  */
 public final class Commands {
-    // Java lambdas cannot assign captured locals; the settings counter
-    // lives here.
+    // Java lambdas cannot assign captured locals.
     private static int settingsCount;
 
     public static void app() {
@@ -25,15 +21,12 @@ public final class Commands {
 
             KayaApp.WindowRef win = tx.window(0).title("commands");
 
-            // An ordinary command sits beside Settings so the menu that
-            // declared it is not left empty once macOS moves it.
+            // Reload keeps this menu non-empty once macOS moves Settings out.
             KayaApp.MenuItem file = win.menu("File");
             file.item("Reload");
             file.item("Settings…").shortcut("primary+comma").role(KayaApp.ROLE_SETTINGS)
                     .onActivate(t -> {
-                        // Fires twice on purpose: once by the chord,
-                        // once by activating the item at its declared
-                        // path.
+                        // Fires twice on purpose: the chord and the declared path.
                         settingsCount++;
                         t.write(status, "settings " + settingsCount);
                     });

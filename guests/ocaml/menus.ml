@@ -1,7 +1,4 @@
-(* The menus conformance scene, OCaml port: a File/View/Sort menu bar,
-   context menus on a live label and on stamped rows, and a live
-   rename/append/promotion rework. Canonical semantics in
-   guests/rust/menus.rs; the byte-frozen contract in
+(* The menus scene, OCaml port — guests/rust/menus.rs,
    tools/scenes/menus.steps. *)
 
 open Kaya_wire
@@ -23,9 +20,8 @@ let () =
        let file =
          menu ~label:"File" ~bind_enabled:can_export
            [
-             (* A symbol names a CONCEPT, drawn by each platform in its
-                own set (docs/styling-plan.md D6); the vocabulary has no
-                `save`, so [Done] is the checkmark idiom. *)
+             (* No `save` in the symbol vocabulary; [Done] is the checkmark
+                idiom (docs/styling-plan.md D6). *)
              item ~label:"Save" ~symbol:Done ~shortcut:"primary+s"
                ~on_activate:(fun () -> write status (Str "saved"));
              item ~label:"Export" ~bind_enabled:can_export ~symbol:Forward;
@@ -55,9 +51,8 @@ let () =
 
        let groups = collection () in
        let items_ref = ref None in
-       (* One catalog shared across every stamped copy; the template
-          only attaches it. [items_ref] is how the handler reaches a
-          collection the [for_each] below has not returned yet. *)
+       (* One catalog shared across every stamped copy. [items_ref] is how
+          the handler reaches a collection [for_each] has not returned yet. *)
        let catalog =
          context_catalog
            [
@@ -81,9 +76,7 @@ let () =
                  column
                    [
                      each items (fun () ->
-                         (* label#2 once g2/a stamps. [element] is the
-                            scalar collection's token: its element IS the
-                            value, so there is no field name to give. *)
+                         (* label#2 once g2/a stamps. *)
                          let row = label ~bind_field:element () in
                          context_menu row catalog);
                    ]
@@ -103,17 +96,11 @@ let () =
                ~on_click:(fun () -> write can_export (Bool true)) (* button#0 *);
              button ~text:"reset menu state"
                ~on_click:(fun () ->
-                 (* The folds never echo the user's pick, so these writes
-                    are real records, never coalesced away, and they
-                    reset the backend's own user-state mirror. *)
                  write details (Bool false);
                  write sort (F64 0.0);
                  write status (Str "ready")) (* button#1 *);
              button ~text:"extend menus"
                ~on_click:(fun () ->
-                 (* Append-only: rename the retained File, move the
-                    promotion hint from Share to Publish, grow the bar by
-                    Tools. *)
                  set_menu_primary share false;
                  set_menu_label file "Document";
                  menu_append file
@@ -144,7 +131,7 @@ let () =
        (groups, items))
   in
 
-  (* Seed after mount: the stamp path attaches the shared catalog and keys. *)
+  (* Seeded after the mount, so the copy stamps from a closed template. *)
   build app (fun () ->
      insert groups (Str "g2") (Str "Home");
      insert (at items (Str "g2")) (Str "a") (Str "water plants"));

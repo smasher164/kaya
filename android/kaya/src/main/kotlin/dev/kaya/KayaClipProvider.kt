@@ -12,19 +12,11 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * The bytes half of an Android clip: `ClipData.Item` carries no byte
- * array at any API level (docs/clipboard-plan.md §7 finding 2), so
- * kaya's image, custom-format and file representations ride
- * `content://` URIs and this is the provider behind them.
- *
- * FROM DISK, NEVER FROM MEMORY. The clip outlives this process — a
- * paste after kaya has died starts it again and asks for the bytes, so
- * a `HashMap` filled at copy time would answer an empty clipboard with
- * no error anywhere.
- *
- * NO THREAD AFFINITY: providers are called on binder threads, from
- * whatever process pasted, so nothing here touches the interpreter's
- * model or the main looper.
+ * The bytes half of an Android clip (docs/clipboard-plan.md §7).
+ * FROM DISK, NEVER FROM MEMORY: the clip outlives this process, so a
+ * map filled at copy time would answer an empty clipboard with no error
+ * anywhere. NO THREAD AFFINITY — providers are called on binder threads,
+ * so nothing here touches the interpreter's model or the main looper.
  */
 class KayaClipProvider : ContentProvider() {
     override fun onCreate() = true
@@ -32,7 +24,7 @@ class KayaClipProvider : ContentProvider() {
     /**
      * SystemUI asks this across the process boundary after every copy,
      * so it stays a couple of file reads. The custom id is served
-     * VERBATIM from its sidecar — nothing on this path validates or
+     * VERBATIM from its sidecar — nothing else on this path validates or
      * normalizes a mime type, so nothing here may either.
      */
     override fun getType(uri: Uri): String? {
@@ -49,11 +41,10 @@ class KayaClipProvider : ContentProvider() {
     }
 
     /**
-     * The payload, and the WHOLE read path: a consumer's
-     * `openInputStream` reaches `openTypedAssetFile`, whose default
-     * short-circuits to `openAssetFile` and then to this. The typed
-     * pair would only be needed to serve alternate representations of
-     * one URI, and one kaya URI is one representation.
+     * The payload, and the WHOLE read path: `openInputStream` reaches
+     * this through the default `openTypedAssetFile`/`openAssetFile`. The
+     * typed pair would only serve alternate representations of one URI,
+     * and one kaya URI is one representation.
      */
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val file = fileFor(uri) ?: return null
@@ -69,7 +60,7 @@ class KayaClipProvider : ContentProvider() {
     }
 
     /** OpenableColumns: how a consumer asks a pasted file its display
-     * name. The answer is the one the interpreter stored beside the
+     * name; the answer is the one the interpreter stored beside the
      * bytes. */
     override fun query(
         uri: Uri,
@@ -139,10 +130,10 @@ class KayaClipProvider : ContentProvider() {
         private const val FILE = "file"
 
         /**
-         * PER APPLICATION ID, never a constant: both validation APKs
-         * install on the same emulator, and two packages declaring one
-         * authority is INSTALL_FAILED_CONFLICTING_PROVIDER on the
-         * second install (docs/handoff-clipboard.md). The manifest says
+         * PER APPLICATION ID, never a constant: two installed packages
+         * declaring one authority is
+         * INSTALL_FAILED_CONFLICTING_PROVIDER on the second install
+         * (docs/handoff-clipboard.md). The manifest says
          * `${applicationId}.clip` and this must keep computing it.
          */
         fun authority(context: Context): String = context.packageName + ".clip"
@@ -150,7 +141,7 @@ class KayaClipProvider : ContentProvider() {
         /**
          * App-private cache, which the platform may reclaim between
          * runs — correct, because the system clears the clip itself
-         * (one hour, since Android 13). Created on demand.
+         * (one hour, since Android 13).
          */
         fun dir(context: Context): File =
             File(context.cacheDir, "kaya-clip").apply { mkdirs() }
@@ -188,10 +179,10 @@ class KayaClipProvider : ContentProvider() {
             File(dir(context), "$FILE-$slot.name")
 
         /**
-         * Forget the last clip's payloads — the writer calls this
-         * before laying a new one down. The platform never says a clip
-         * was replaced, so a shorter clip would otherwise leave a
-         * richer one's slots on disk.
+         * Forget the last clip's payloads — the writer calls this before
+         * laying a new one down. The platform never says a clip was
+         * replaced, so a shorter clip would otherwise leave a richer
+         * one's slots on disk.
          */
         fun clear(context: Context) {
             dir(context).listFiles()?.forEach { it.delete() }

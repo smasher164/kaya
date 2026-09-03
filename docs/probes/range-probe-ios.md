@@ -14,8 +14,8 @@ deliverable.
 
 | thing | where | note |
 |---|---|---|
-| entry | `swift/KayaSwiftUI.swift:8578` `struct KayaEntry` | SwiftUI `TextField("", text:)` + `.textFieldStyle(.roundedBorder)` + `.frame(maxWidth: 200)`, `@FocusState` |
-| textarea | `swift/KayaSwiftUI.swift:8619` `struct KayaTextarea` | SwiftUI `TextEditor(text:)` + `.frame(width: 240, height: 96)` + `.border(...)`, `@FocusState` |
+| entry | `swift/KayaSwiftUI.swift:7789` `struct KayaEntry` | SwiftUI `TextField("", text:)` + `.textFieldStyle(.roundedBorder)` + `.frame(maxWidth: 200)`, `@FocusState` |
+| textarea | `swift/KayaSwiftUI.swift:7830` `struct KayaTextarea` | SwiftUI `TextEditor(text:)` + `.frame(width: 240, height: 96)` + `.border(...)`, `@FocusState` |
 | binding shape | `:8592` / `:8625` | UNCONTROLLED toward the app: get returns `node.text`, set writes the node and emits `text_changed`. Nothing is read back from the app. |
 | a11y identifier | `:2967` | `.accessibilityIdentifier(node.a11yId)` applied by the universal wrapper |
 | render dispatch | `:5706` `case kindTextarea:` | |
@@ -57,7 +57,7 @@ the only one:
 
 `NSTextLayoutManager` is `API_AVAILABLE(ios(15.0))`; a UITextView only
 has one from **iOS 16** (`:271`), which is exactly kaya's iOS floor
-(`tools/ios/run-sim.py:101` `IOS_MIN = "16.0"`).
+(`tools/ios/run-sim.py:91` `IOS_MIN = "16.0"`).
 
 **AppKit's `setTemporaryAttributes:forCharacterRange:` HAS NO iOS
 SIBLING.** Grepping `NSLayoutManager.h` in the iOS SDK for
@@ -385,7 +385,7 @@ would give a supported handle and cost the SwiftUI-native behaviours
 
 ## Availability against kaya's floor
 
-kaya's iOS floor is **16.0** (`tools/ios/run-sim.py:101`); the interpreter
+kaya's iOS floor is **16.0** (`tools/ios/run-sim.py:91`); the interpreter
 is typechecked at 17.0 (`tools/swift-typecheck.sh:117`).
 
 | route | needs | verdict at floor 16 |

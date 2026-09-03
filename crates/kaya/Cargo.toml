@@ -7,47 +7,26 @@ description = "Cross-platform GUI library that wraps each platform's native widg
 repository = "https://github.com/smasher164/kaya"
 
 [lib]
-# staticlib is for iOS, where app bundles prefer static linking and the
-# Swift validation leg links libkaya.a directly.
+# staticlib is iOS's: the Swift validation leg links libkaya.a directly.
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [features]
-# The scene-script harness: the parser, the Step vocabulary, all the
-# verbs, and each backend's ~1000-line Stage implementation. OFF BY
-# DEFAULT because none of it belongs in a shipped app — a user building
-# a GUI should not carry kaya's test interpreter, and any dependency the
-# harness needs (an AT-SPI/dbus client for the GTK accessibility read)
-# would otherwise land in every user's binary to serve a verb only the
-# suites ever call. The runners build with --features harness.
+# OFF BY DEFAULT: a shipped app must carry neither the scene interpreter
+# nor a dependency only the suites' verbs need (atspi's dbus client).
+# CLAUDE.md's validation ladder, rung 1; the runners pass it.
 harness = ["dep:atspi"]
 
 [dependencies]
-# Compile-time only (proc-macro): #[derive(KayaGen)] — the type's shape
-# is the schema.
 kaya-derive = { path = "../kaya-derive" }
 
-# THE CANVAS RASTER STACK (docs/canvas-plan.md §1.4, §4.1). CPU only and
-# pure Rust on every target, which is the property that makes the
-# byte-hash observable possible at all — a buffer whose pixels depend on
-# a GPU driver is a buffer no scene can freeze, and the linux lane has no
-# GPU anyway.
-#
-# THE CRATE LANDSCAPE WAS VERIFIED 2026-08-26 AGAINST THE ARCHIVED-CRATE
-# WAVE and re-checked at pin time: the plan's first draft named rustybuzz
-# and ttf-parser, which resvg uses and which are BOTH ABANDONED
-# (rustybuzz archived 2026-08-06, RUSTSEC-2026-0206). A dependency is
-# never cited from memory here.
-#
-# tiny-skia rasterizes PATHS — its own "text is out of scope" is the
-# correct division, not a gap, because the shaper turns text into paths
-# before it arrives. It lives under the Linebender org and is active;
-# vello_cpu is the named successor to revisit when it stabilizes, a
-# one-crate swap with zero binding churn (§1.4).
+# The canvas raster stack (docs/canvas-plan.md §1.4, §4.1): CPU only and
+# pure Rust on every target, which is what makes the byte-hash observable
+# possible — a buffer whose pixels depend on a GPU driver is one no scene
+# can freeze. A dependency here is never cited from memory (§4.1's
+# archived-crate near-miss).
 tiny-skia = "0.12.0"
-# harfrust is the HarfBuzz project's own Rust port; skrifa/read-fonts is
-# googlefonts/fontations, Chrome-production. harfrust runs ON read-fonts
-# by its own design, so the shaper and the outline scaler share ONE font
-# parser and a canvas has exactly one thing reading a font file.
+# harfrust runs ON read-fonts by its own design, so the shaper and the
+# outline scaler share ONE font parser.
 harfrust = "0.13.3"
 skrifa = "0.46.2"
 
@@ -57,97 +36,54 @@ static_vcruntime = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-core = "0.62"
-# Foundation_Collections: IObservableVector + VectorChangedEventHandler,
-# ItemCollection's default interface (ComboBox.Items) — the pinned
-# windows-collections 0.3 ships only the plain vector types, so the
-# bindgen post-fix re-points the observable ones here.
-# Foundation_Collections: see above. The file-dialog arm adds the Win32
-# COM surface, and none of it needs the winmd bindgen — these are Win32
-# namespaces the crate already carries, unlike the Microsoft.UI.* types
-# in winui/bindings.rs.
+# Foundation_Collections: the pinned windows-collections 0.3 ships only the
+# plain vector types, so the bindgen post-fix re-points IObservableVector
+# and VectorChangedEventHandler here.
 #
-# Win32_UI_Shell is IFileOpenDialog, the Shell's common item dialog.
-# Shell_Common carries COMDLG_FILTERSPEC, and it is NOT optional even
-# though only the filter uses it: windows-bindgen omits a method whose
-# parameter types are outside the enabled feature set, so without it
-# SetFileTypes does not exist and the error names the method rather than
-# the missing feature. Win32_UI_Accessibility is UI Automation, which
-# this backend needs because a #32770 dialog is not in the XAML object
-# tree its other reads walk.
+# Shell_Common (COMDLG_FILTERSPEC) is NOT optional: windows-bindgen omits a
+# method whose parameter types are outside the enabled feature set, so
+# SetFileTypes silently would not exist (docs/traps.md: Show() with an owner
+# on another thread never comes back).
 windows = { version = "0.62", features = [
     "Foundation_Collections",
     "Win32_System_Com",
-    # The clipboard arm: classic Win32, DELIBERATELY — measured
-    # 2026-08-03 (docs/clipboard-plan.md §6). WinRT DataTransfer's
-    # SetContent works "only when the application is in the
-    # foreground", which a matrix leg cannot promise; its custom-format
-    # bridge to Win32 atoms is documented only in the read direction;
-    # and its content dies with the process unless flushed. Classic
-    # SetClipboardData has none of those charges: five formats set in
-    # one open outlive the process and read back byte-exact through
-    # stock PowerShell (tools/win/clipprobe). DataExchange is
-    # OpenClipboard/SetClipboardData/RegisterClipboardFormatW;
-    # Memory is the GlobalAlloc/GlobalLock family clipboard handles
-    # ride on.
+    # The clipboard arm is classic Win32, DELIBERATELY
+    # (docs/clipboard-plan.md §6): WinRT DataTransfer's SetContent needs
+    # the foreground and its content dies with the process.
+    # DataExchange is OpenClipboard/SetClipboardData/
+    # RegisterClipboardFormatW; Memory is the GlobalAlloc/GlobalLock
+    # family clipboard handles ride on.
     "Win32_System_DataExchange",
     "Win32_System_Memory",
-# NO Win32_UI_Accessibility, DELIBERATELY, and this is a wall rather
-# than a preference. UI Automation cannot be used against the Shell's
-# file dialog from a guest process: attaching any automation client
-# makes the shell's DirectUI raise event notifications during message
-# dispatch, each an outgoing COM call that Windows refuses from a thread
-# in an input-synchronous call, raising a NONCONTINUABLE
-# RPC_E_CANTCALLOUT_ININPUTSYNCCALL inside the guest. COM handles it and
-# four runtimes never notice; HotSpot's vectored exception handler on
-# windows-aarch64 reports it as a fatal error and kills the java leg.
-# Measured end to end; the read now goes through the shell's own
-# IFolderView instead (winui/mod.rs, sample_folder_view).
-#
-# Leaving the feature off means a future attempt to reach for
-# IUIAutomation fails `cargo build` here rather than dying as an
-# unexplained JVM crash on one lane.
+# NO Win32_UI_Accessibility, DELIBERATELY. The absent feature IS the
+# guard: reaching for IUIAutomation must fail `cargo build` here rather
+# than dying as an unexplained JVM crash on one lane (docs/traps.md: UI
+# Automation cannot read the Shell's file dialog from a guest). The read
+# goes through the shell's own IFolderView (winui/mod.rs,
+# sample_folder_view).
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
-    # DirectWrite — the layer BENEATH the XAML text stack, and the only
-    # place a font question gets a measured answer in this process
-    # (docs/styling-plan.md Slice 2b). Two calls, both of them things
-    # XAML cannot say:
-    #   IDWriteFontCollection::FindFamilyName — does this machine HAVE
-    #     that family. `FontFamily.Source` answers the request back and
-    #     nothing else, which is the read the slice forbids.
-    #   IDWriteFontFallback::MapCharacters — the family an unresolvable
-    #     request ACTUALLY renders in, named off the mapped font. The
-    #     fallback name is a property of the lane image (Windows build ×
-    #     locale × packaging; upstream microsoft-ui-xaml#10709 is still
-    #     unanswered), so it is measured at run time and never a
-    #     constant in this tree.
-    # It carries NONE of UI Automation's hazard above: DirectWrite is a
-    # local text API, not a cross-process automation client, so nothing
-    # here can raise RPC_E_CANTCALLOUT_ININPUTSYNCCALL in a file dialog.
+    # DirectWrite is the layer BENEATH the XAML text stack, where a font
+    # question gets a measured answer (docs/styling-plan.md Slice 2b):
+    # FindFamilyName says whether the machine HAS a family (FontFamily
+    # .Source only echoes the request back), MapCharacters names the
+    # family an unresolvable request actually renders in. It carries none
+    # of UI Automation's hazard above — a local text API is not a
+    # cross-process automation client.
     "Win32_Graphics_DirectWrite",
-    # Win32_UI_TextServices is the Text Services Framework, and it is
-    # NOT UI Automation — the wall above is about attaching an automation
-    # CLIENT, which reaches into other processes' UI; TSF is the input
-    # stack of this process's own focused control. The harness's
-    # `compose` verb needs it because Windows has no "insert marked text"
-    # call: a composition belongs to TSF, so the verb starts one the way
-    # a text service does (winui/mod.rs, tsf_compose). Without a real
-    # composition the ranges scene's D4 leg would be asserting against
-    # ordinary inserted text, which is the state the refusal exists to
-    # tell a composition apart from.
+    # TSF is NOT UI Automation: the wall above is about attaching an
+    # automation CLIENT to other processes' UI; TSF is this process's own
+    # input stack. The harness's `compose` verb needs it because Windows
+    # has no "insert marked text" call — a composition belongs to TSF
+    # (winui/mod.rs, tsf_compose).
     "Win32_UI_TextServices",
     # IShellBrowser derives from IOleWindow, so the metadata gates it
-    # behind Ole. It is the route from the file dialog to the view it is
-    # showing (sample_folder_view) — the read that replaced UI
-    # Automation, which cannot be used against this dialog at all.
+    # behind Ole; it is the route from the file dialog to the view it is
+    # showing (sample_folder_view).
     "Win32_System_Ole",
     # IBufferByteAccess, the ONE way to reach a WinRT IBuffer's bytes
-    # (docs/canvas-plan.md §8): `WriteableBitmap.PixelBuffer` hands back
-    # an IBuffer, and the interface that turns one into a `*mut u8` is a
-    # classic COM interface out of robuffer.h rather than anything in the
-    # WinUI metadata — so it comes from here and not from
-    # tools/winui-bindgen. Both the canvas blit and its ink read-back go
-    # through it.
+    # (docs/canvas-plan.md §8) — a classic COM interface out of
+    # robuffer.h, so it comes from here and not from tools/winui-bindgen.
     "Win32_System_WinRT",
 ] }
 windows-numerics = "0.3"
@@ -155,8 +91,7 @@ windows-collections = "0.3"
 # TextBox's metadata reaches IAsyncOperation (windows-bindgen emits
 # windows_future paths for it).
 windows-future = "0.3"
-# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
-# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+# The desktop JVM guest tier (jvm.rs).
 jni = "0.21"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -164,98 +99,48 @@ dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
-# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
-# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+# The desktop JVM guest tier (jvm.rs).
 jni = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The AT-SPI client, for the harness accessibility read ONLY — hence
-# optional, pulled in by the `harness` feature, and Linux-only.
-#
-# GTK deliberately exposes no getter for accessible properties: the
-# accessible surface IS AT-SPI, so reading it any other way would only
-# read kaya's own writes back. That makes a dbus client the honest
-# route, and makes it doubly important that it never reaches a shipped
-# app — a GUI library has no business linking dbus to serve a test verb.
+# optional and behind `harness`. GTK exposes no getter for accessible
+# properties (the accessible surface IS AT-SPI, so any other read would
+# only read kaya's own writes back), and a GUI library has no business
+# linking dbus into a shipped app to serve a test verb.
 atspi = { version = "0.30", optional = true, features = ["zbus"] }
-# v4_10 gates gtk::AlertDialog (the alert vocabulary's 1:1 dialog;
-# 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
-# image ships GTK 4.18.
-#
-# v4_12 IS THE CANVAS'S SCALE (docs/canvas-plan.md §5 rule 1): the core
-# rasterizes at the TRUE scale, and `gdk_surface_get_scale`'s double is
-# the only reading that carries a fraction —
-# `gtk_widget_get_scale_factor` is an integer and GTK's own docs say it
-# "returns the next higher integer value" under fractional scaling, so
-# a 1.25 display would raster at 2 and blit a stale-size buffer. The
-# feature adds gdk/v4_12 and nothing else.
+# v4_10 gates gtk::AlertDialog and covers v4_6's gdk::Texture::from_bytes.
+# v4_12 IS THE CANVAS'S SCALE (docs/canvas-plan.md §5 rule 1):
+# `gdk_surface_get_scale`'s double is the only reading that carries a
+# fraction, while `gtk_widget_get_scale_factor` "returns the next higher
+# integer value" under fractional scaling, so a 1.25 display would raster
+# at 2 and blit a stale-size buffer.
 gtk4 = { version = "0.11.4", features = ["v4_12"] }
-# Pango, named DIRECTLY (gtk4 already pulls it in) for one feature and
-# one call: `v1_56` gates `PangoFontMap::add_font_file`, which is how a
-# brand typeface's FONT BYTES reach the text system on this platform
-# (docs/styling-plan.md Slice 2b, gtk.rs's register_font_blob).
-#
-# The documented alternative — fontconfig's `FcConfigAppFontAddFile` —
-# was MEASURED returning success and doing nothing once GTK has
-# initialised, which is every position a kaya apply can occupy; the pango
-# call was measured working in that same position. The floor this sets is
-# pango >= 1.56 on Linux, one minor version below the validation image's
-# 1.56.3, and a build against anything older fails at link with the
-# symbol named rather than falling back silently.
+# Pango named DIRECTLY (gtk4 already pulls it in) for `v1_56`, which gates
+# `PangoFontMap::add_font_file` — the route a brand typeface's FONT BYTES
+# take on this platform (docs/styling-plan.md Slice 2b, gtk.rs's
+# register_font_blob). The documented alternative, fontconfig's
+# `FcConfigAppFontAddFile`, returns success and does nothing once GTK has
+# initialised (docs/deferred.md, the "DEPTH STUB: typeface on gtk" entry).
 pango = { version = "0.22.8", features = ["v1_56"] }
-# libadwaita: AdwNavigationSplitView is GNOME's list-detail component,
-# and adopting it is what gives the platform its own collapse animation,
-# pane proportions, separator, and back behaviour instead of geometry
-# kaya computed for itself.
-#
-# v1_4 is the floor that gates NavigationSplitView and BreakpointBin,
-# and it is deliberately not higher: the validation image ships
-# libadwaita 1.7.6, so anything above 1.7 would compile here and fail
-# there. Not optional — a semantics that appears only in some builds is
-# not a semantics.
+# libadwaita: AdwNavigationSplitView is GNOME's list-detail component, so
+# the platform's own collapse animation, pane proportions, separator and
+# back behaviour replace geometry kaya computed for itself. v1_4 gates it
+# and BreakpointBin, and is deliberately not higher — the validation image
+# ships 1.7.6, so anything above 1.7 would compile here and fail there.
+# Not optional: a semantics that appears only in some builds is not one.
 adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }
-# THE TWO DISPLAY BACKENDS, NAMED, so a declared app identity can move a
-# window's CLASS — the string a Linux desktop matches a running window to
-# an installed `.desktop` file by, and therefore what decides the launcher
-# icon, the dock grouping and the switcher entry.
-#
-# `g_set_prgname` alone cannot do it. GDK reads the program name when it
-# CREATES a surface, and this backend builds and presents its primary
-# window in `run_core`'s activate handler, before the app thread's first
-# transaction is drained — so a name arriving with the identity renames
-# every later surface and leaves the primary wearing the launcher
-# binary's name (MEASURED 2026-08-18: the identity leg's primary read
-# `WM_CLASS(STRING) = "identity", "identity"` while its second window read
-# `"Aurora Notes", "Aurora Notes"`). Moving an EXISTING surface's class is
-# per-protocol, and each protocol's route lives in its own crate:
-#
-#   wayland — `gdk_wayland_toplevel_set_application_id`, which the xdg-shell
-#     protocol explicitly allows after map ("Like other properties, a
-#     set_app_id request can be sent after the xdg_toplevel has been mapped
-#     to update the property").
-#   x11 — `XSetClassHint` on the surface's xid. GDK4 exposes NO wrapper for
-#     it: gdk4-x11's whole surface surface is xid/lookup/desktop/group/
-#     frame-sync/skip-hints/theme-variant/urgency/user-time/utf8-property,
-#     and `set_utf8_property` is not the route — WM_CLASS is ICCCM `STRING`,
-#     two NUL-separated latin-1 words, and a `UTF8_STRING` copy of it is a
-#     property with the right name and the wrong type. So the x11 arm needs
-#     the display's Xlib connection (`xdisplay()`, the `xlib` feature) and
-#     the Xlib call itself.
-#
-# `x11-dl` IS NOT A NEW NODE IN THE GRAPH: gdk4-x11's own `xlib` feature
-# already requires it (it is that crate's `x11` dependency, package
-# `x11-dl`), and naming it here is what makes `XSetClassHint` callable and
-# what makes the pointer types line up with `xdisplay()`'s return by
-# construction rather than by cast.
-#
-# The version floor is stated once, as gtk4's: one GTK install answers all
-# three pkg-config modules (`gtk4`, `gtk4-x11`, `gtk4-wayland` all report
-# 4.18.6 in the lane image).
+# BOTH display backends are named so a declared app identity can move an
+# EXISTING surface's WM_CLASS/app_id (docs/app-identity-plan.md);
+# `g_set_prgname` cannot, since GDK reads the program name when it CREATES a
+# surface. Wayland takes `gdk_wayland_toplevel_set_application_id`, x11
+# `XSetClassHint` through `xdisplay()` (the `xlib` feature), GDK4 wrapping it
+# nowhere. x11-dl is gdk4-x11's own `xlib` dependency, named here so the
+# pointer types line up.
 gdk4-x11 = { version = "0.11.4", features = ["v4_10", "xlib"] }
 gdk4-wayland = { version = "0.11.4", features = ["v4_10"] }
 x11-dl = "2.20"
-# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
-# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+# The desktop JVM guest tier (jvm.rs).
 jni = "0.21"
 
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -274,9 +159,9 @@ log = "0.4"
 android_logger = "0.15"
 log-panics = "2"
 
-# The example scenes live inguests/rust, beside the other languages'
+# The example scenes live in guests/rust, beside the other languages'
 # guests; explicit paths keep `cargo build --example <scene>` and the
-# target/…/examples output layout unchanged.
+# target/…/examples layout unchanged.
 [[example]]
 name = "milestone2"
 path = "../../guests/rust/milestone2.rs"
@@ -453,9 +338,8 @@ path = "../../guests/rust/adaptive.rs"
 name = "sizepolicy"
 path = "../../guests/rust/sizepolicy.rs"
 
-# Android has no native process entry (Zygote forks the process and an
-# Activity is the way in), so the Android packaging of milestone 0 is a
-# cdylib exporting the JNI entry rather than a bin.
+# Android has no native process entry (Zygote forks and an Activity is
+# the way in), so this one is a cdylib exporting the JNI entry, not a bin.
 [[example]]
 name = "rusthost"
 path = "../../guests/rust/rusthost.rs"

@@ -1,14 +1,5 @@
-/* The stamped-accessibility scene from C, on the function floor: a11y
- * id and label sourced from the row's own value, plus a second
- * collection whose prototype carries a stamped inset and role
- * (docs/tpl-props-plan.md).
- *
- * expect_ax resolves its target by the authored identifier and REFUSES
- * an ambiguous one, so copies may not share a constant id. That is why
- * the styling half needs a SECOND collection: a scalar row has one
- * field to spend on an id.
- *
- * Contract: tools/scenes/a11yrows.steps. */
+/* The stamped-a11y scene (tools/scenes/a11yrows.steps).
+ * expect_ax REFUSES an ambiguous id, so copies share no constant one. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -16,22 +7,19 @@
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one; collections count from 1 in their own
- * (DESIGN.md, Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the N_ run continues the
+ * W_ one; collections count from 1 in their own (tools/check-c-ids.py). */
 #define W_ROOT 1
 #define W_FOR_NOTES 2
 #define W_FOR_HEADS 3
 #define C_NOTES 1
 #define C_HEADS 2
 
-/* One run of the space across both templates. */
 #define N_FIELD 4
 #define N_BAR 5
 #define N_TITLE 6
 
-/* A scalar collection has no record: its element IS the string, at
- * field 0. */
+/* A scalar collection has no record: its element IS the string, at field 0. */
 #define F_NOTE 0
 #define F_HEAD 0
 
@@ -50,9 +38,7 @@ static void build_scene(void) {
     kaya_tx_bind_a11y_label_element(&tx, N_FIELD, 0, F_NOTE);
     kaya_tx_template_end(&tx);
 
-    /* `heading` is the one role with a real-tree observable on every
-     * platform. The role and inset are CONSTANTS: no binding has an
-     * element-sourced spelling of either. */
+    /* Role and inset are CONSTANTS: no element-sourced spelling exists. */
     kaya_tx_create_collection(&tx, C_HEADS,
                               (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_HEADS, C_HEADS);

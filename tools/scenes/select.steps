@@ -1,9 +1,3 @@
-# The select scene: the dropdown's contract — the collapsed control
-# shows the selected option's label (read from the REAL control, never
-# a model copy), choose drives the toolkit's own selection path, and
-# the pick reaches the guest as the new 0-based index (the label
-# proves the fold ran; the expects' bounded retries cover the round
-# trip).
 expect select#0 "Red"
 expect label#0 "picked: Red"
 choose select#0 2

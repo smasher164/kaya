@@ -7,28 +7,15 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE TRANSACTION-LIVENESS GATE: one rule, all nine tiers (CLAUDE.md).
-# A transaction is valid ONLY inside the build or handler that created
-# it, on the app thread; a background thread may call only the post.
-#
-#   HANDLE bindings hand the guest a transaction object, so a stale one
-#   can be refused. Rust does it at COMPILE TIME (Tx is !Send/!Sync,
-#   pinned by a compile_fail doctest); Go, Java, C# and Swift check a
-#   `closed` flag at ONE chokepoint every write goes through, AND the
-#   THREAD at that same chokepoint and at the build entry.
-#   AMBIENT bindings have no handle to invalidate, so Python, OCaml and
-#   Haskell check the THREAD at the entry to a build.
-#   The C floor has neither: its buffers are caller-owned.
-#
-# CLOSED WAS NEVER THE WHOLE RULE, and for four milestones this gate
-# only asked for that half: a transaction still OPEN, written from a
-# thread the handler spawned, passed every check here, and a background
-# Build opening one of its own reached no chokepoint at all. Both race
-# the app thread's model in silence (docs/deferred.md).
-#
-# This checks the STRUCTURE. The behaviour is pinned per language (Go's
-# app_test.go, C#'s AbortCheck.cs, Rust's compile_fail doctest,
-# kaya_app_checks.py).
+# THE TRANSACTION-LIVENESS GATE: one rule, all nine tiers (CLAUDE.md's
+# gate list). A transaction is valid ONLY inside the build or handler
+# that created it, on the app thread; a background thread may call only
+# the post. HANDLE bindings refuse a stale handle at ONE chokepoint and
+# check the THREAD there and at the build entry; AMBIENT ones have no
+# handle to invalidate and check the thread alone; the C floor has
+# neither, its buffers being caller-owned. This checks the STRUCTURE —
+# the behaviour is pinned per language (Go's app_test.go, C#'s
+# AbortCheck.cs, Rust's compile_fail doctest, kaya_app_checks.py).
 
 GO = "bindings/go/app.go"
 JAVA = "bindings/java/dev/kaya/KayaApp.java"
@@ -131,11 +118,9 @@ for file, want in [(GO, "App.Post"), (JAVA, "App.post"), (CS, "App.Post"),
              f"mutate from a background thread")
 
 # --- the handle bindings: the THREAD, at the same chokepoint ---------
-#
 # A CENSUS OVER EXTRACTED BODIES, not a grep for a name: the definition
-# matches the same pattern as the call, which is how three of this
-# gate's first five clauses passed with the guard deleted. Each fact
-# below is read out of the body it must live in.
+# matches the same pattern as the call, which is how three of this gate's
+# first five clauses passed with the guard deleted.
 
 # THE TX SCOPE IS LOAD-BEARING: `alive()` is also the name of the ASSET
 # handle's own liveness check in Java and Swift, and it comes FIRST in
@@ -269,9 +254,8 @@ if verdict == "bad":
     fail = 1
 
 
-# THE GUARD GUARDS ITSELF: every clause above was watched failing
-# through this block, each perturbation applied in memory to the real
-# bytes with its substitution count printed (the prelude's doctor).
+# Every clause above watched failing, each perturbation applied in memory
+# to the real bytes.
 def selftest(label, site, pattern, repl, expect):
     doctored = gate.doctor(label, REAL[site], pattern, repl)
     v, p = thread_clause({**REAL, site: doctored})

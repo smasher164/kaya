@@ -1,7 +1,5 @@
-//! The sections conformance scene: two peer roots in the primary
-//! window's section set. The visit count pins the echo doctrine from
-//! both sides — a user's switch emits, a programmatic select_section
-//! does not. The byte-frozen contract is tools/scenes/sections.steps.
+//! The sections conformance scene (tools/scenes/sections.steps): a user's
+//! switch emits, a programmatic select_section does not.
 
 use kaya::WindowId;
 
@@ -14,10 +12,8 @@ enum Msg {
 
 const FEED: WindowId = WindowId(7);
 const ARCHIVE: WindowId = WindowId(8);
-// The SIDEBAR arm, in an AUX WINDOW so one shared scene covers both:
-// this opens from a handler only the desktop tail's click reaches, so
-// create_window never runs where the capability is absent. Reachability
-// is the gate; no capability read is needed.
+// An AUX WINDOW, reached only by the desktop tail's click, so create_window
+// never runs where the capability is absent.
 const LIBRARY: WindowId = WindowId(1);
 const SHELVES: WindowId = WindowId(2);
 const LOANS: WindowId = WindowId(3);
@@ -29,8 +25,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("sections")
             .sections_presentation(kaya::SectionsPresentation::Bar);
-        // Semantic symbols, never assets (docs/styling-plan.md D6): SF
-        // Symbols are licensed to Apple platforms only.
+        // SF Symbols are licensed to Apple platforms: no shared asset.
         let feed = tx.add_section(FEED).title("Feed").symbol(kaya::Symbol::Home).id();
         let archive = tx
             .add_section(ARCHIVE)

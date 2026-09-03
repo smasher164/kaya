@@ -40,10 +40,9 @@ import sys
 RUNNERS = [
     ("tools/lib/lanes/mac.py", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    # The windows, ios and android rosters are DATA since the runner
-    # conversion: a tools/lib/lanes/ row is IMPORTED (lane_scenes
-    # below), never regexed — a regex over a module whose lists hold
-    # bare scene names would agree with everything.
+    # A tools/lib/lanes/ row is IMPORTED (lane_scenes below), never
+    # regexed: a regex over a module whose lists hold bare scene names
+    # would agree with everything.
     ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/lib/lanes/ios.py", "swift/KayaSwiftUI.swift", "ios"),
     ("tools/lib/lanes/android.py",
@@ -81,12 +80,10 @@ ROLE_FEATURE = {
     "settings": None,
 }
 
-# Verbs that name a feature outright, with no menu item in between.
-# Several of these features happen to share their scene's name TODAY, so
-# the name-fallback below would derive them anyway; they are keyed on the
-# VERB for this table's whole reason — the day another scene demands the
-# same lowering without being called after it, a backend still declaring
-# the depth stub must hold those legs off too.
+# Verbs that name a feature outright, with no menu item in between. Keyed
+# on the VERB even where the feature shares its scene's name today: the
+# day another scene demands the same lowering without being called after
+# it, a backend still declaring the stub must hold those legs off too.
 VERB_FEATURE = {
     "expect_clipboard": "clipboard",
     "clipboard_seed": "clipboard",
@@ -117,12 +114,10 @@ VERB_FEATURE = {
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is
-# deliberately NOT here: its argument is a chord ("primary+z"), which
-# names no role, so a scene reaching undo by keystroke instead of by menu
-# is a hole in this derivation. No scene does today (measured: the four
-# `shortcut` lines are primary+backslash, primary+2, primary+comma and
-# primary+s), and the honest fix if one ever does is a role argument on
-# the verb, not a chord table here that guesses at platform conventions.
+# deliberately NOT here: its argument is a chord, which names no role, so
+# a scene reaching undo by keystroke is a hole in this derivation. No
+# scene does today, and the honest fix if one ever does is a role argument
+# on the verb, not a chord table guessing at platform conventions.
 MENU_VERBS = ("menu_activate", "expect_menu", "expect_menu_presentation")
 
 # Every language's spelling of the depth-stub declaration, suffix-matched

@@ -3,10 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The window conformance scene from the JVM — see guests/rust/window.rs
- * for the rationale. 640x400 is deliberately off the 540x330 default so
- * an ignored size request cannot pass by luck. DESKTOP ONLY: phones
- * reject the size by physics.
+ * The window scene from the JVM — guests/rust/window.rs,
+ * tools/scenes/window.steps.
  */
 public final class Window {
     public static void app() {

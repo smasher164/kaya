@@ -1,8 +1,5 @@
-# The kaya Python binding as a real distribution. The code-level name
-# is `kaya` everywhere (the package directory); the distribution name
-# is kaya-gui because PyPI's `kaya` is squatted by an abandoned
-# package — registries govern artifact names, never import names.
-# The version mirrors the crates.io placeholder until a real release.
+# The distribution is kaya-gui because PyPI's `kaya` is squatted; the
+# import name stays `kaya`. Not a mismatch to fix.
 [project]
 name = "kaya-gui"
 version = "0.0.0"

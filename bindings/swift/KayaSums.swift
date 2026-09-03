@@ -1,11 +1,6 @@
-// Sum-typed collections: the enum is the sum, its cases the
-// constructors. Mirror walks one prototype per case, and
-// init(variant:values:) is the one hand-written member. Elimination is
-// Swift-shaped where the guest holds the value; the template takes a
-// product of arms checked complete at declaration, with the scene as the
-// second check. Mutation is WITNESSED: a field write names the
-// constructor the caller matched, and the model refuses a drifted
-// entry.
+// Sum-typed collections (DESIGN.md, Sum-typed elements): the enum is the
+// sum, its cases the constructors. Mirror walks one prototype per case,
+// and init(variant:values:) is the one hand-written member.
 
 import Foundation
 
@@ -233,9 +228,8 @@ extension KayaAppTx {
             schemas.count >= 2,
             "kaya: a sum needs two constructors or more (collection(of:) declares a record)")
         let c = collectionWithVariants(schemas)
-        // The record factory's decoder, variant-aware: an undo's
-        // payload names the constructor it restored (see
-        // KayaApp.registerDecoder).
+        // Variant-aware: an undo's payload names the constructor it
+        // restored (KayaApp.registerDecoder).
         app.registerDecoder(c.id) { variant, values in T(variant: variant, values: values) }
         return KayaSumCollection(collection: c)
     }

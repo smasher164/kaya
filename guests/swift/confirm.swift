@@ -1,7 +1,5 @@
-// The confirm conformance scene, Swift port — the modal-alert grammar:
-// three rounds take the three answer paths (action 0, action 1,
-// KAYA_ALERT_CHOICE_CANCEL, which is every platform-native dismissal).
-// See guests/rust/confirm.rs and tools/scenes/confirm.steps.
+// The confirm scene, Swift port — guests/rust/confirm.rs,
+// tools/scenes/confirm.steps.
 
 import Foundation
 

@@ -1,7 +1,5 @@
--- The confirm conformance scene, Haskell port — the modal-alert
--- grammar. The three rounds take the three answer paths (action 0,
--- action 1, alertChoiceCancel, which covers every platform-native
--- dismissal). See guests/rust/confirm.rs and tools/scenes/confirm.steps.
+-- The confirm scene, Haskell port — guests/rust/confirm.rs,
+-- tools/scenes/confirm.steps.
 
 import KayaApp
 import KayaWire (Value (..), alertChoiceCancel)

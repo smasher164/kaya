@@ -1,11 +1,5 @@
-// The dirty-state conformance scene, Swift port — see guests/rust/dirty.rs
-// and docs/dirty-plan.md. One boolean beside `title:` and `vetoClose:`;
-// the backend spells its platform's own affordance, and the phones have
-// none.
-//
-// TWO DECLARATIONS, ON PURPOSE. An edit writes the document AND says
-// `dirty: true`; saving writes it back and says `dirty: false`. kaya
-// does not watch your signals and guess.
+// The dirty scene, Swift port — guests/rust/dirty.rs,
+// tools/scenes/dirty.steps.
 
 import Foundation
 
@@ -18,7 +12,6 @@ app.build { tx in
     tx.window(
         title: "dirty", vetoClose: true,
         onCloseRequested: { tx in
-            // Nothing has closed: the veto class says so.
             tx.showAlert(
                 title: "unsaved changes",
                 message: "the document has unsaved changes",
@@ -28,8 +21,8 @@ app.build { tx in
                     // Answering a dialog is not saving: the mark stays up.
                     tx.write(status, .str("kept editing"))
                 } else {
-                    // This ABORTS if it ever runs: an app can VETO a
-                    // close but cannot AGREE to one (docs/traps.md).
+                    // Aborts if it ever runs: an app can VETO a close but not
+                    // AGREE to one (docs/traps.md).
                     tx.destroyWindow(0)
                 }
             }

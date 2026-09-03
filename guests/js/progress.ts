@@ -1,5 +1,4 @@
-// The progress conformance scene, JS port. See guests/rust/progress.rs
-// and tools/scenes/progress.steps.
+// The progress conformance scene (tools/scenes/progress.steps).
 
 import * as kaya from "kaya-gui";
 

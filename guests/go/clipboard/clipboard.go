@@ -1,8 +1,5 @@
-// The clipboard conformance scene, Go port — one clip in several
-// representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md). Canonical semantics in
-// guests/rust/clipboard.rs; the byte-frozen contract in
-// tools/scenes/clipboard.steps.
+// The clipboard conformance scene (tools/scenes/clipboard.steps).
+// Canonical semantics in guests/rust/clipboard.rs.
 package clipboard
 
 import (
@@ -16,9 +13,7 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// A 4x4 PNG: the scene asserts "4x4" through a FOREIGN decoder, so it has
-// to be a real encoded image. Written to disk for the seeding tool AND
-// handed to Copy as bytes — the same picture both ways.
+// A real 4x4 PNG: the scene asserts "4x4" through a FOREIGN decoder.
 var pixelPNG = []byte{
 	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
 	0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -32,32 +27,20 @@ var pixelPNG = []byte{
 	0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 }
 
-// The app-defined format's id: reverse-DNS and space-free, because it
-// reaches every platform's own registry VERBATIM.
+// Reverse-DNS and space-free: it reaches every registry VERBATIM.
 const noteID = "dev.kaya/note"
 
-// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and \\
-// in all three interpreters, with no \", so a quoted byte could not be
-// spelled in the expectation.
+// NO QUOTES IN THE PAYLOAD: the step grammar has no \" escape.
 var noteBytes = []byte("note=1")
 
-// sceneRoot is where this scene keeps the files an OUTSIDE process has to
-// reach, and it is not temp everywhere: on iOS simctl and the document
-// picker browse PROVIDERS and cannot see the app container, so the app's
-// own Documents directory is the one place both halves can look
-// (tools/ios/Info.plist.in is what makes it browsable).
-//
-// kaya.Env AND NEVER os.Getenv — tools/check-go-env.py's header carries
-// the measurement and the rule.
+// sceneRoot is not temp everywhere: on iOS the picker browses PROVIDERS
+// and cannot see the container. kaya.Env, never os.Getenv (check-go-env.py).
 func sceneRoot() string {
 	if runtime.GOOS == "ios" {
 		return filepath.Join(kaya.Env("HOME"), "Documents")
 	}
-	// Android uses the SHARED collection, and must: the outside reader
-	// is another app, which cannot see this one's cache — and
-	// os.TempDir falls back to /data/local/tmp here because $TMPDIR is
-	// empty under the JNI attach (tools/check-go-env.py), a directory
-	// this app cannot even create. The JVM guest draws the same line.
+	// The SHARED collection: the outside reader is another app, and
+	// os.TempDir would answer /data/local/tmp, which this app cannot create.
 	if runtime.GOOS == "android" {
 		ext := kaya.Env("EXTERNAL_STORAGE")
 		if ext == "" {
@@ -71,8 +54,7 @@ func sceneRoot() string {
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// Both halves compute this identically, and the pid keeps parallel
-	// legs from colliding.
+	// Both halves compute this identically; the pid separates parallel legs.
 	dir := filepath.Join(sceneRoot(), "kaya-clip-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
@@ -98,8 +80,7 @@ func App() *kaya.App {
 
 		answered := func(tx *kaya.Tx, clip kaya.Representation) {
 			switch clip := clip.(type) {
-			// EMPTY IS THE UNIVERSAL NO, and the guest does not try to
-			// tell its four causes apart; the platforms decline to say.
+			// EMPTY IS THE UNIVERSAL NO; no platform says which cause.
 			case nil:
 				tx.Write(status, "empty")
 			case kaya.TextClip:
@@ -109,8 +90,7 @@ func App() *kaya.App {
 			case kaya.CustomClip:
 				tx.Write(status, fmt.Sprintf("custom %s %s", clip.ID, clip.Bytes))
 			case kaya.ImageClip:
-				// STRAIGHT BACK OUT: the assertion that matters is a foreign
-				// DECODER's, because the byte count differs per host.
+				// A foreign DECODER's size: byte counts differ per host.
 				tx.Copy().Image(clip.Bytes).Send()
 				tx.Write(status, "image")
 			case kaya.FilesClip:
@@ -120,9 +100,7 @@ func App() *kaya.App {
 				}
 				file := clip.Files[0]
 				go func() {
-					// OFF THE APP GOROUTINE: Open blocks, and a pasted
-					// file is a picked one arriving through a second
-					// door.
+					// OFF THE APP GOROUTINE: Open blocks.
 					text := ""
 					f, _, err := file.Open(kaya.FileModeRead)
 					if err != nil {
@@ -187,10 +165,7 @@ func App() *kaya.App {
 
 			plain = tx.Entry(nil).A11yID("plain") // entry#1
 
-			// THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy: the
-			// accept list is declared on the TEMPLATE, which is the
-			// declaration that turns the node hook on. The row's value stays
-			// empty through the paste, and that is the assertion.
+			// On a STAMPED copy the accept list rides the TEMPLATE.
 			tx.Label(rowStatus).A11yID("row-status") // label#1
 			notes := tx.Collection()
 			for row := range tx.Rows(notes).All() {

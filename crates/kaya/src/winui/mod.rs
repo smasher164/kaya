@@ -1,9 +1,4 @@
 //! WinUI 3 backend: an interpreter of resolved apply-ops.
-//!
-//! The core owns the UI thread and the XAML dispatcher; a control's own
-//! handler pushes an occurrence and never calls app code; commands come
-//! back on their own channel; DispatcherQueue::TryEnqueue is the doorbell
-//! and carries no data.
 
 #[allow(
     non_snake_case,
@@ -28,8 +23,7 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 // The WINDOW's own caption height, a windowing fact and not a XAML one:
 // the `TitleBar` control sizes its own band and leaves the system's
-// caption buttons where they were (microsoft-ui-xaml#9863), so the two
-// halves of one band are reconciled here or nowhere.
+// caption buttons where they were (microsoft-ui-xaml#9863).
 use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
 use bindings::Microsoft::UI::Xaml::Controls::{
     AppBarButton, Button, CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
@@ -49,10 +43,9 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     ToggleMenuFlyoutItem, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
-// The RichEdit text object model: the textarea's control keeps its text,
-// its undo stack and its clipboard verbs on a document object rather than
-// on itself (docs/textarea-foundation-plan.md, the windows arm). The text
-// ranges ride the same model (docs/ranges-plan.md D1).
+// The RichEdit text object model: the textarea's text, undo stack and
+// clipboard verbs live on a document object, and the text ranges ride it
+// (docs/textarea-foundation-plan.md, the windows arm; docs/ranges-plan.md D1).
 use bindings::Microsoft::UI::Text::{PointOptions, TextConstants, TextGetOptions, TextSetOptions};
 use bindings::Windows::Foundation::{Point, TypedEventHandler};
 // The caption title's two text properties are vtable pads in this
@@ -65,23 +58,19 @@ use bindings::Microsoft::UI::Xaml::{
     GridLength, GridUnitType, HorizontalAlignment, Style, Thickness, Visibility,
 };
 // The styling pass's two resource types (docs/styling-plan.md D4): a role
-// lowers to a keyed Style or a keyed Brush, both looked up out of the
-// framework's own dictionary rather than constructed here.
+// lowers to a keyed Style or a keyed Brush, looked up out of the
+// framework's own dictionary.
 use bindings::Microsoft::UI::Xaml::Media::Brush;
 // The brand typeface's one type (docs/styling-plan.md Slice 2b); its
 // bindgen filter entry is in tools/winui-bindgen.
 use bindings::Microsoft::UI::Xaml::Media::FontFamily;
-// The accessibility read's control-type vocabulary, at module scope
-// because `ax_role` names it in its signature. Gated with the read
-// itself: a shipped app carries no scene interpreter.
 #[cfg(feature = "harness")]
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
 use bindings::Microsoft::UI::Xaml::Media::Imaging::{BitmapImage, WriteableBitmap};
 use bindings::Microsoft::UI::Xaml::ElementTheme;
-// The canvas's four: a stretch mode (the blit fills a box `set_drawing`
-// sized from the BUFFER, so Fill is exact rather than a stretch —
-// docs/canvas-plan.md §3.2.1), the frame drive and its timestamp
-// (§15.4), and the interface that turns a WinRT IBuffer into bytes.
+// The canvas's four (docs/canvas-plan.md §3.2.1, §15.4): the blit fills a
+// box `set_drawing` sized from the BUFFER, so Fill is exact rather than a
+// stretch.
 use bindings::Microsoft::UI::Xaml::Media::{
     CompositionTarget, ImageSource, RenderingEventArgs, Stretch,
 };
@@ -110,7 +99,6 @@ enum NativeWidget {
     Row(Grid),
     Checkbox { check: CheckBox, caption: TextBlock },
     Slider(Slider),
-    // The caption TextBlock is the button's text surface.
     Button { button: Button, caption: TextBlock },
     Label(TextBlock),
     Entry(TextBox),
@@ -123,14 +111,12 @@ enum NativeWidget {
     /// tracks, distinct from Column/Row's star-sized Grids.
     Grid2D(Grid),
     /// THE RICH-CAPABLE CONTROL, PINNED TO PLAIN TEXT
-    /// (docs/textarea-foundation-plan.md). TextBox has no document object
-    /// and no per-range formatting, so it cannot express an attributed run
-    /// at all; every rich opinion the RichEdit engine carries is pinned
-    /// off in `pin_plain_text`.
+    /// (docs/textarea-foundation-plan.md): TextBox has no document object and
+    /// no per-range formatting, and every rich opinion the RichEdit engine
+    /// carries is pinned off in `pin_plain_text`.
     Textarea(RichEditBox),
     /// The blit's widget: the same `Image` control, over a
-    /// `WriteableBitmap` the core's pixels are written straight into —
-    /// the raw-pixel sibling of `Image`'s encoded decode
+    /// `WriteableBitmap` the core's pixels are written straight into
     /// (docs/canvas-plan.md §8).
     Canvas(Image),
 }
@@ -168,27 +154,9 @@ impl NativeWidget {
     }
 }
 
-/// AN ORDINARY RANGE OVER WHATEVER THE SELECTION COVERS — the shape
-/// every textarea mutation takes, and it cost a crash to learn.
-///
-/// MEASURED ON THE VM, 2026-08-06, five builds deep into a bisection.
-/// A `ITextSelection` obtained from `TextDocument().Selection()` is fine
-/// to READ (positions, story length) and fine to MOVE (`SetRange`), and
-/// the harness's `type` verb does both on every run. But MUTATING THE
-/// DOCUMENT THROUGH IT — `Selection().SetText(..)` after a real Ctrl+V —
-/// produced the correct text and then killed the process at teardown
-/// with an access violation (0xC0000005), reproducibly, on every run.
-/// The same insertion through `GetRange(start, end)` — the identical
-/// span, read off that same selection — exits cleanly, as does a
-/// whole-document `SetText`. Deferring the mutation a dispatcher tick
-/// did NOT help, which is how the selection object rather than the
-/// paste's re-entrancy was identified as the cause.
-///
-/// So the rule this file states once, here: READ the selection, MUTATE
-/// a range. The cut and copy arms take the same shape by analogy rather
-/// than by their own measurement — they mutate through the same object,
-/// the cost of the range is one COM hop, and a second spelling of a rule
-/// that already crashed once is not worth the saving.
+/// AN ORDINARY RANGE OVER WHATEVER THE SELECTION COVERS: READ the
+/// selection, MUTATE a range (docs/traps.md: Mutating a RichEdit document
+/// through its ITextSelection kills the process at teardown).
 fn selection_range(
     doc: &bindings::Microsoft::UI::Text::RichEditTextDocument,
 ) -> windows_core::Result<bindings::Microsoft::UI::Text::ITextRange> {
@@ -199,12 +167,8 @@ fn selection_range(
 
 /// THE TWO NATIVE EDITABLES, BEHIND ONE CONTRACT.
 ///
-/// The entry is a `TextBox` and the textarea a `RichEditBox`, and the
-/// second is not a drop-in for the first: it has no `Text` property and
-/// none of TextBox's editing commands — every one of them lives on its
-/// `TextDocument` (docs/textarea-foundation-plan.md, the windows arm's
-/// measured table). Both are the SAME widget to the undo ledger, the
-/// clipboard roles, the menu-role enablement and the harness, so adding
+/// The textarea is a `RichEditBox`, whose editing commands all live on its
+/// `TextDocument` (docs/textarea-foundation-plan.md, the windows arm). Adding
 /// an operation means adding it here, for both, or it does not compile.
 #[derive(Clone)]
 enum Editable {
@@ -214,17 +178,11 @@ enum Editable {
 
 impl Editable {
     /// The text AS THE CONTROL STORES IT — CR line breaks, no trailing
-    /// paragraph mark. Callers apply `lf` on the way to the guest,
-    /// exactly as they did when both were TextBoxes.
+    /// paragraph mark; callers apply `lf` on the way to the guest.
     ///
-    /// `AdjustCrlf` IS A PIN (docs/textarea-foundation-plan.md). A
-    /// RichEdit story always ends in a paragraph mark, and
-    /// `GetText(None)` hands it out: `set 'abc'` reads back `'abc\r'`,
-    /// and after `lf` that is a trailing newline the guest never wrote —
-    /// invariant 6 broken (tools/scenes/textarea.steps compares its
-    /// strings byte-for-byte on five platforms). Measured on the VM
-    /// before it was written, all four cases: with `AdjustCrlf` the read
-    /// matches the source exactly, empty string included.
+    /// `AdjustCrlf` IS A PIN: without it the story's trailing paragraph mark
+    /// reads back as a newline the guest never wrote, breaking invariant 6
+    /// (docs/probes/range-probe-windows.md; docs/textarea-foundation-plan.md).
     fn text(&self) -> windows_core::Result<String> {
         match self {
             Editable::Entry(field) => Ok(field.Text()?.to_string()),
@@ -238,13 +196,11 @@ impl Editable {
         }
     }
 
-    /// `TextSetOptions::None` IS A PIN, and the enum says why: the same
-    /// call with `FormatRtf` PARSES the string as a document. A guest
-    /// whose textarea text happened to begin `{\rtf1` would then see it
-    /// rendered on windows and stored literally on the other four
-    /// platforms — measured on the VM 2026-08-06, `{\rtf1 KAYARTF}` set
-    /// with `FormatRtf` reads back as `KAYARTF`, and with `None` reads
-    /// back whole.
+    /// `TextSetOptions::None` IS A PIN: the same call with `FormatRtf` PARSES
+    /// the string as a document, so a guest whose textarea text began
+    /// `{\rtf1` would see it rendered on windows and stored literally on the
+    /// other four platforms (docs/traps.md: A RichEdit `SetText` with
+    /// `FormatRtf` parses the guest's string as a document).
     fn set_text(&self, text: &str) -> windows_core::Result<()> {
         match self {
             Editable::Entry(field) => field.SetText(&HSTRING::from(text)),
@@ -310,15 +266,12 @@ impl Editable {
         }
     }
 
-    /// The platform's own insertion — for a widget that declared no
-    /// accept list, this IS the paste (DESIGN.md's paste split).
+    /// The platform's own insertion — for a widget that declared no accept
+    /// list, this IS the paste (DESIGN.md's paste split).
     ///
-    /// PLAIN TEXT ON BOTH ARMS. RichEditBox's own `ITextRange::Paste(0)`
-    /// would take the RICHEST format the clipboard offers, so the textarea
-    /// reads CF_UNICODETEXT itself and sets it as text. The control's OWN
-    /// paste routes are turned into this same call by the `Paste` handler
-    /// `pin_plain_text` attaches, so no route into a kaya textarea can
-    /// carry formatting.
+    /// PLAIN TEXT ON BOTH ARMS: `ITextRange::Paste(0)` would take the RICHEST
+    /// format the clipboard offers, so the textarea reads CF_UNICODETEXT
+    /// itself; `pin_plain_text` routes the control's own pastes here too.
     fn paste_from_clipboard(&self) -> windows_core::Result<()> {
         match self {
             Editable::Entry(field) => field.PasteFromClipboard(),
@@ -326,16 +279,12 @@ impl Editable {
                 let Some(text) = clipboard_plain_text() else {
                     return Ok(());
                 };
-                // `ITextRange::SetText` — TOM's `put_Text`, the setter
-                // that takes no options at all, so there is no flag here
-                // to get wrong on the one string kaya controls least.
                 selection_range(&field.TextDocument()?)?.SetText(&HSTRING::from(text))
             }
         }
     }
 
-    /// Put the caret at `at` (in UTF-16 units), collapsed — what the
-    /// harness's `type` verb does before injecting a run of keys.
+    /// Put the caret at `at` (in UTF-16 units), collapsed.
     fn set_caret(&self, at: i32) -> windows_core::Result<()> {
         match self {
             Editable::Entry(field) => {
@@ -348,71 +297,60 @@ impl Editable {
 }
 
 struct CoreState {
-    /// The window content inset (wprop 8, docs/styling-plan.md D3):
-    /// stored because the Mount arm stamps it as Grid.Padding and the
-    /// harness's `offer` observation subtracts it from the root's
-    /// actual size.
+    /// The window content inset (wprop 8, docs/styling-plan.md D3): the Mount
+    /// arm stamps it as Grid.Padding and the harness's `offer` observation
+    /// subtracts it from the root's actual size.
     inset: f64,
-    /// A CONTAINER's own inset (prop 17, one level down): the declared
-    /// number per container, kept because a WinUI Grid has ONE Padding
-    /// where SwiftUI and Compose nest two boxes — see
-    /// `container_padding`, which is the only thing that writes it.
+    /// A CONTAINER's own inset (prop 17, one level down): a WinUI Grid has ONE
+    /// Padding where SwiftUI and Compose nest two boxes — see
+    /// `container_padding`, the only thing that writes it.
     container_insets: HashMap<WidgetId, f64>,
-    /// The minted padding host around a SCROLL mounted as a window's
-    /// root: a ScrollViewer's default template ignores Control.Padding
-    /// (the retemplated entry ScrollViewer in this file exists for that
-    /// reason), so the window inset lives on a Grid AROUND the viewer —
-    /// the same nesting the other three backends have. Keyed by the
+    /// The minted padding host around a SCROLL mounted as a window's root: a
+    /// ScrollViewer's default template ignores Control.Padding (the
+    /// retemplated entry ScrollViewer in this file exists for that reason), so
+    /// the window inset lives on a Grid AROUND the viewer. Keyed by the
     /// scroll's widget id; written only by the Mount arm.
     scroll_root_hosts: HashMap<WidgetId, Grid>,
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
-    /// The directory the next picker opens on. ARMED, NOT SET: a dialog
-    /// reads its folder when it is shown, so the harness's
-    /// file_dialog_goto stores it here and the apply arm applies it.
+    /// The directory the next picker opens on. ARMED, NOT SET: a dialog reads
+    /// its folder when it is shown, so the harness's file_dialog_goto stores
+    /// it here and the apply arm applies it.
     pending_dialog_dir: RefCell<Option<String>>,
     widgets: HashMap<WidgetId, NativeWidget>,
     // Which grid each widget sits in, for Destroy's detach.
     parents: HashMap<WidgetId, Grid>,
-    /// The stacked fold's memory (D7): folded child -> its table's id.
-    /// reindex filters these out of a container's tracks, and the unfold
-    /// op carries table 0, so the map is what routes the element home.
+    /// The stacked fold's memory (docs/adaptive-layout-plan.md D7): folded
+    /// child -> its table's id. The unfold op carries table 0, so the map is
+    /// what routes the element home.
     folded_into: HashMap<u64, u64>,
     // Grid places by attached Row/Column index, not by child order
-    // (docs/traps.md), so the logical order is tracked here and stamped
-    // back onto the children after every structural change. It is also
-    // the order the definitions are rebuilt in, one per child — and the
-    // structural change only MARKS its container; `flush_tracks` is what
-    // stamps, once per batch (winui/order.rs).
+    // (docs/traps.md), so the logical order is tracked here and stamped back
+    // onto the children after every structural change — which only MARKS its
+    // container; `flush_tracks` stamps, once per batch (winui/order.rs).
     child_order: ChildOrder,
     grow: HashMap<WidgetId, f64>,
-    /// Container align modes (the align spec enum's wire values):
-    /// reindex stamps the cross alignment onto every child after any
-    /// structural change, so late arrivals are covered by the same
-    /// path that keeps Grid indices honest.
+    /// Container align modes (the align spec enum's wire values): reindex
+    /// stamps the cross alignment onto every child after any structural
+    /// change, so late arrivals take the same path.
     aligns: HashMap<WidgetId, i64>,
-    /// Axis overrides (prop 18, docs/adaptive-layout-plan.md D2): the
-    /// creation kind names the default and `effective_vertical` folds
-    /// this over it — reindex, spacing and the harness read all key on
-    /// the fold, never the variant alone.
+    /// Axis overrides (prop 18, docs/adaptive-layout-plan.md D2): the creation
+    /// kind names the default and `effective_vertical` folds this over it —
+    /// reindex, spacing and the harness read all key on the fold.
     axes: HashMap<WidgetId, i64>,
-    /// Container spacing as KAYA declared it (default 8) — what
-    /// container_fills sums with, deliberately NOT the Grid's own
-    /// RowSpacing/ColumnSpacing: reading the toolkit back mirrors the
-    /// lowering's write and can never catch it dropped (the GTK
-    /// spacing GAP's sibling, found 2026-08-22).
+    /// Container spacing as KAYA declared it (default 8), deliberately NOT the
+    /// Grid's own RowSpacing/ColumnSpacing: reading the toolkit back mirrors
+    /// the lowering's write and can never catch it dropped.
     spacings: HashMap<WidgetId, f64>,
-    // Per-kind registries in creation order (stamped copies included):
-    // the harness names targets as kind#index. Clicks emit the stored tag
+    // Per-kind registries in creation order (stamped copies included): the
+    // harness names targets as kind#index. Clicks emit the stored tag
     // directly; the other controls fire their real events for the stage's
-    // direct writes — that is the stage's user path, and the APPLY path
-    // arms apply_quiet instead (see that field).
+    // direct writes, and the APPLY path arms apply_quiet instead.
     buttons: Vec<Vec<u8>>,
-    /// The controls beside those tags, creation order: what `button@id`
-    /// reads its AutomationId off and what `button@id[key.path]` matches
-    /// a tag against (2026-09-01 — before this the buttons registry held
-    /// tags alone and answered None for any `button@id`).
+    /// The controls beside those tags, creation order: what `button@id` reads
+    /// its AutomationId off and what `button@id[key.path]` matches a tag
+    /// against.
     button_controls: Vec<Button>,
     checkboxes: Vec<CheckBox>,
     labels: Vec<TextBlock>,
@@ -420,15 +358,12 @@ struct CoreState {
     /// Aligned with `entries`: the widget id per registry slot (the
     /// stage indexes by creation order; the maps below key by id).
     entry_ids: Vec<u64>,
-    /// TextChanged is raised ASYNCHRONOUSLY, so programmatic text
-    /// paths cannot ride it in order: SetProp, the clear command,
-    /// and the stage's set_text all bump this counter, write the
-    /// text, and (for the emitting paths) send the occurrence
-    /// SYNCHRONOUSLY themselves — the late native raise is swallowed
-    /// 1:1. User typing bumps nothing and emits through the real
-    /// raise. Caught live 2026-07-22: without this, a click's
-    /// occurrence OVERTAKES the edit and the guest's add handler
-    /// runs on an empty draft.
+    /// Per-entry swallow counters (docs/traps.md: A windows `type` verb that
+    /// settles on the CONTROL leaves the undo ledger one edit behind): SetProp,
+    /// the clear command and the stage's set_text
+    /// bump this, write the text, and emit the occurrence SYNCHRONOUSLY where
+    /// they must — the late native raise is swallowed 1:1. User typing bumps
+    /// nothing and emits through the real raise.
     entry_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     entry_tags: HashMap<u64, Vec<u8>>,
     sliders: Vec<Slider>,
@@ -445,33 +380,27 @@ struct CoreState {
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
-    /// Grid layout state: ordered children + column count; both the
-    /// adds and the columns prop re-flow the attach positions
-    /// (children-first sugars emit adds before the prop).
+    /// Grid layout state: ordered children + column count; both the adds and
+    /// the columns prop re-flow the attach positions (docs/traps.md: Sugar
+    /// construction order differs per language).
     grid_children: HashMap<u64, Vec<UIElement>>,
     grid_cols: HashMap<u64, i32>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
     radio_options: HashMap<u64, (RadioButtons, u32)>,
-    /// Option-label plumbing: label widget id -> (its select's
-    /// ComboBox, its option row's own TextBlock). A select's label
-    /// children are its OPTIONS — ComboBoxItems in the popup, not
-    /// standalone widgets — so their SetProp text lands on the row
-    /// as STRING content and they leave the harness's label
-    /// registry. Strings, never a TextBlock: a UIElement content is
-    /// STOLEN into the collapsed box's SelectionBoxItem while its
-    /// row is selected (one visual tree), and the row's Content()
-    /// reads back null — caught live 2026-07-22 as a null-interface
-    /// panic that wedged the dispatcher.
+    /// Option-label plumbing: label widget id -> (its select's ComboBox, its
+    /// option row's own TextBlock). A select's label children are its OPTIONS
+    /// — ComboBoxItems in the popup, not standalone widgets — so their SetProp
+    /// text lands on the row as STRING content, never a TextBlock
+    /// (docs/traps.md: A WinUI ComboBoxItem with UIElement content gets STOLEN
+    /// by the collapsed box).
     select_options: HashMap<u64, (ComboBox, ComboBoxItem)>,
-    /// Echo guard for EVERY interactive kind: WinUI's change events
-    /// cannot tell a user act from a programmatic write, and only the
-    /// USER path may emit an occurrence. Armed around every SetProp write
-    /// to an interactive widget. Commands (clear) and the harness stage's
-    /// direct writes stay unguarded ON PURPOSE: a command acts like the
-    /// user. Atomic because WinRT event handlers are Send-bound (they
-    /// still fire on this thread).
+    /// Echo guard for EVERY interactive kind: WinUI's change events cannot
+    /// tell a user act from a programmatic write, and only the USER path may
+    /// emit an occurrence. Armed around every SetProp write; commands (clear)
+    /// and the harness stage's writes stay unguarded ON PURPOSE. Atomic
+    /// because WinRT event handlers are Send-bound.
     apply_quiet: std::sync::Arc<std::sync::atomic::AtomicBool>,
     columns: Vec<Grid>,
     /// Aligned with `columns`, including retained dead slots, so a keyed
@@ -499,9 +428,8 @@ struct CoreState {
     nav_entries: HashMap<u64, WinNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
     /// The declared pane CEILING per window (wprop 6;
-    /// docs/multicolumn-plan.md D2), and the presentation refresh_nav
-    /// ACTUALLY rendered — stamped by the arm that ran, never derived
-    /// (docs/traps.md).
+    /// docs/multicolumn-plan.md D2), and the presentation refresh_nav ACTUALLY
+    /// rendered — stamped by the arm that ran, never derived (docs/traps.md).
     panes: HashMap<u64, i64>,
     split_presentation: HashMap<u64, &'static str>,
     /// The live split view per window, kept so the next render can
@@ -512,33 +440,29 @@ struct CoreState {
     /// bits), and the panes reading folds both views' Modes.
     inner_splits: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
-    /// The WIDGET ID of each mounted surface root, by surface (window,
-    /// pushed navigation entry or section pane). It is what tells
-    /// `container_padding` which containers carry the window inset in
-    /// their own Padding.
+    /// The WIDGET ID of each mounted surface root, by surface (window, pushed
+    /// navigation entry or section pane): it tells `container_padding` which
+    /// containers carry the window inset in their own Padding.
     mounted_roots: HashMap<u64, WidgetId>,
     window_titles: HashMap<u64, String>,
-    /// Unsaved work per window (wprop 7). Windows publishes no
     /// Unsaved work per window (wprop 7). Windows publishes no modified
-    /// affordance at any layer (docs/dirty-plan.md, the windows arm), so
-    /// the caption IS the chrome here and this flag is the third input to
-    /// the caption composition. Kept as STATE rather than read back out of
-    /// the caption string: the app's title is never touched
-    /// (docs/dirty-plan.md D1/D2).
+    /// affordance at any layer (docs/dirty-plan.md, the windows arm), so the
+    /// caption IS the chrome here. Kept as STATE rather than read back out of
+    /// the caption string: the app's title is never touched (D1/D2).
     window_dirty: HashMap<u64, bool>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
     /// containers by section id, the NavigationView that materializes the
-    /// switcher, and the selection mirror. A section's pane swaps between
-    /// its own root and its stack's top entry (stacks are per-surface;
-    /// nav_stacks keys sections too).
+    /// switcher, and the selection mirror. A section's pane swaps between its
+    /// own root and its stack's top entry (stacks are per-surface; nav_stacks
+    /// keys sections too).
     sections: HashMap<u64, Vec<u64>>,
     section_panes: HashMap<u64, WinSection>,
     section_navs: HashMap<u64, NavigationView>,
     section_items: HashMap<u64, NavigationViewItem>,
-    /// The TextChanged lesson applied to the switcher: WinRT raises
-    /// SelectionChanged ASYNCHRONOUSLY, so programmatic moves swallow
-    /// the late raise via a counter (a flag's guard window closes too
-    /// early), and only real user switches reach the handler body.
+    /// The switcher's swallow counter: SelectionChanged is raised
+    /// ASYNCHRONOUSLY, so programmatic moves swallow the late raise (a flag's
+    /// guard window closes too early) and only real user switches reach the
+    /// handler body.
     section_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     /// What the CONTROL last showed — a no-op SetSelectedItem raises
     /// nothing, so the swallow only increments on a real move.
@@ -546,10 +470,9 @@ struct CoreState {
     selected_sections: HashMap<u64, u64>,
     sections_presentation: HashMap<u64, i64>,
     /// Menus (DESIGN.md, Menus): the retained item model — kind fixed at
-    /// create, every applicable prop live. This map is the POST-USER
-    /// MIRROR (docs/traps.md): a toggle's Click handler updates checked
-    /// here BEFORE emitting, and every rebuild starts from it. Items are
-    /// never destroyed.
+    /// create, every applicable prop live. This map is the POST-USER MIRROR
+    /// (docs/traps.md): a toggle's Click handler updates checked here BEFORE
+    /// emitting, and every rebuild starts from it. Items are never destroyed.
     menu_models: HashMap<u64, MenuModel>,
     /// Per-window top-level catalog items, in menubar-append order.
     menu_windows: HashMap<u64, Vec<u64>>,
@@ -566,14 +489,13 @@ struct CoreState {
     /// copy's keys ARE the noun — a flat per-item map is the wrong-noun
     /// bug (docs/traps.md). Separators and NESTED radio groups mint none.
     menu_natives: HashMap<(MenuAttachment, u64), MenuNative>,
-    /// The window shell (the ratified lowering): the TITLEBAR's Auto row
-    /// at the top of a shell Grid, the MenuBar in the Auto row under it,
-    /// the window's real content in the Star-row slot beneath both.
-    /// Built once per window at the first menubar_append; every content
-    /// swap goes through the slot.
+    /// The window shell (the ratified lowering): the TITLEBAR's Auto row at
+    /// the top of a shell Grid, the MenuBar in the Auto row under it, the
+    /// window's real content in the Star-row slot beneath both. Built once per
+    /// window at the first menubar_append; every content swap goes through the
+    /// slot.
     menubars: HashMap<u64, MenuBar>,
     menu_slots: HashMap<u64, Grid>,
-    /// The shell Grid itself, kept so the titlebar row can be filled
     /// The shell Grid itself, kept so the titlebar row can be filled LATER
     /// than the shell is built — a window earns its caption `TitleBar` and
     /// the `CommandBar` inside it only when its catalog promotes something
@@ -583,152 +505,88 @@ struct CoreState {
     /// `refresh_toolbar`. Absent = this window has no toolbar, which is
     /// a state the harness read reports rather than papers over.
     toolbars: HashMap<u64, CommandBar>,
-    /// The window's custom `TitleBar` control — the caption row the
-    /// toolbar MERGES INTO (docs/chrome-plan.md C2's WinUI row, revised
-    /// 2026-08-17). Minted by the SAME first promotion that mints the
-    /// CommandBar and by nothing else: **extended is DERIVED from
-    /// toolbar presence**, so a window whose catalog promotes nothing
-    /// never has one and keeps the standard system caption it always
-    /// had.
-    ///
-    /// Kept because `refresh_caption` has to reach it — the caption text
-    /// it hosts is a SECOND SINK for the composed caption, never a second
-    /// author of it (see the doc comment there).
+    /// The window's custom `TitleBar` control — the caption row the toolbar
+    /// MERGES INTO (docs/chrome-plan.md C2's WinUI row). Extended is DERIVED
+    /// from toolbar presence: minted by the first promotion and by nothing
+    /// else, so a window that promotes nothing keeps the system caption.
+    /// `refresh_caption` reaches it as a SECOND SINK, never a second author.
     window_titlebars: HashMap<u64, TitleBar>,
     /// The caption's TITLE TEXT, in the control's CENTRE slot.
     ///
-    /// NOT THE CONTROL'S `Title` PROPERTY, for two reasons. The control
-    /// lays that property out immediately after `LeftHeader`, and as of
-    /// the one-band revision `LeftHeader` is the window's MENU — the band
-    /// read `File  Edit  View  toolbar` and the title was
-    /// indistinguishable from a fourth menu item. And `TitleBar` writes
-    /// `appWindow.Title` from it (microsoft-ui-xaml @
-    /// winui3/release/2.2.0, `TitleBar.cpp:483-516`), which would make the
-    /// control a second caption WRITER and clobber the dirty marker. Left
-    /// empty from birth it never writes at all (docs/chrome-plan.md C2).
+    /// NOT THE CONTROL'S `Title` PROPERTY: it lays that out right after
+    /// `LeftHeader`, which is kaya's MENU, and `TitleBar` writes
+    /// `appWindow.Title` from it (microsoft-ui-xaml 2.2.0,
+    /// `TitleBar.cpp:483-516`), clobbering the dirty marker (chrome-plan C2).
     window_caption_texts: HashMap<u64, TextBlock>,
     /// (window, item id) -> the promoted action's `AppBarButton`.
     ///
-    /// THE WRITE SIDE ONLY: enablement is stamped through this map (here
-    /// and in `refresh_role_enablement`, which must reach the button as
-    /// well as the menu row), while every harness READ walks the bar's own
-    /// `PrimaryCommands`/`SecondaryCommands`. A read through this map
-    /// would agree with kaya's model no matter what the window holds.
+    /// THE WRITE SIDE ONLY: enablement is stamped through this map, while
+    /// every harness READ walks the bar's own
+    /// `PrimaryCommands`/`SecondaryCommands` — a read through this map would
+    /// agree with kaya's model no matter what the window holds.
     toolbar_buttons: HashMap<(u64, u64), AppBarButton>,
-    /// Canonical shortcut spelling -> action item id for the PRIMARY
-    /// window's catalog. Gates the shortcut verb: a chord no catalog
-    /// action owns is a silent no-op, checked before any OS-global
-    /// injection (docs/traps.md). It also DISPATCHES every chord (The
-    /// chord route), so what the verb gates on and what the app answers
-    /// cannot disagree.
+    /// Canonical shortcut spelling -> action item id for the PRIMARY window's
+    /// catalog. Gates the shortcut verb: a chord no catalog action owns is a
+    /// silent no-op, checked before any OS-global injection (docs/traps.md).
+    /// It also DISPATCHES every chord, so what the verb gates on and what the
+    /// app answers cannot disagree.
     menu_shortcuts: HashMap<String, u64>,
-    /// The harness's OPEN context menu: anchor widget id plus the
-    /// flyout handle, kept until Closed is awaited (the staged
-    /// ShowAt ruling — the anchor row may be destroyed by the very
-    /// occurrence the activation emits).
+    /// The harness's OPEN context menu: anchor widget id plus the flyout
+    /// handle, kept until Closed is awaited — the anchor row may be destroyed
+    /// by the very occurrence the activation emits.
     open_context: Option<(u64, MenuFlyout)>,
     /// Coalesced per drain: any op touching the command surface sets
     /// it; one rebuild follows the batch.
     menus_touched: bool,
-    /// Accept lists by widget id (the accepts prop; empty = unset =
-    /// absent here). The paste split and Paste's enablement both read
-    /// it. The root admits the prop on entries and textareas
-    /// (scene.rs), whose identity tags entry_tags already carries.
+    /// Accept lists by widget id (the accepts prop; empty = unset = absent
+    /// here). The paste split and Paste's enablement both read it.
     accepts: HashMap<u64, String>,
     /// A ROLE surface appeared — an authored role, or a clipboard surface
-    /// (accepts / copy / read): the refresh sites consult it, so scenes
-    /// that declare no role pay nothing for the recomputation. Undo's
-    /// enablement is live in a scene that never touches the clipboard
-    /// (docs/undo-plan.md D6), which is why this is not clipboard-only.
+    /// (accepts / copy / read): the refresh sites consult it, so scenes that
+    /// declare no role pay nothing for the recomputation. Not clipboard-only,
+    /// because undo's enablement is live in a scene that never touches the
+    /// clipboard (docs/undo-plan.md D6).
     roles_armed: bool,
     /// What the LEDGER has been shown for each field — the last text
     /// `bank_text_changed` handed the core.
     ///
-    /// THE `type` VERB'S SETTLE READS IT, and that is the whole reason
-    /// it exists (contract point 4: the verb blocks until every
-    /// character is "delivered AND processed"). On this backend
-    /// TextChanged is raised ASYNCHRONOUSLY, so the CONTROL shows the
-    /// typed text a beat before kaya has been told about it — and a
-    /// verb that settled on the control alone returns into a
-    /// `menu_activate "Edit>Undo"` whose routing then asks a ledger that
-    /// has not heard of the last keystroke. MEASURED, as the first
-    /// windows leg of this scene: the undo took the STAR GROUP instead
-    /// of the typing, one entry too deep, and the field kept the text
-    /// the user had just typed.
+    /// THE `type` VERB'S SETTLE READS IT: TextChanged is async here, so a
+    /// settle on the control alone let `menu_activate "Edit>Undo"` undo the
+    /// STAR GROUP instead of the typing (measured, the first windows leg).
     banked_text: HashMap<u64, String>,
-    /// Q2's LEDGER-QUIET BRACKET (docs/undo-plan.md §3, the "report it
-    /// once" rule): field id -> the text a native undo THIS BACKEND
-    /// ROUTED left in the widget, recorded when the sample was taken.
+    /// Q2's LEDGER-QUIET BRACKET (docs/undo-plan.md §3, "report it once"):
+    /// field id -> the text a native undo THIS BACKEND ROUTED left in the
+    /// widget, recorded when the sample was taken.
     ///
-    /// A BRACKET AND NOT A FLAG-WITH-A-TIMER, for the reason the mac arm
-    /// reached from the opposite premise and this one MEASURED: a routed
-    /// `TextBox.Undo()` raises the control's ordinary TextChanged a
-    /// runloop turn LATER (7ms in the probe, `inside_undo_call=false`),
-    /// long after a boolean set and cleared around the call would be
-    /// gone. Matching the sampled TEXT is exact, needs no clock, and
-    /// self-clears — the entry is consumed by the edit it was written
-    /// for. Only the BANKING is suppressed; the occurrence still reaches
-    /// the app, because the field is uncontrolled and a native undo is
-    /// an edit like any other from the app's side.
+    /// A BRACKET AND NOT A FLAG-WITH-A-TIMER: a routed `TextBox.Undo()` raises
+    /// TextChanged a runloop turn LATER (7ms, `inside_undo_call=false`).
     ledger_quiet: HashMap<u64, String>,
 }
 
 // ---- Text ranges: the two pieces of state that CANNOT live in
 // ---- CoreState (docs/ranges-plan.md D2, D4)
 //
-// Both are written by CONTROL EVENT HANDLERS, and a handler that touched
-// `CORE` would be one synchronous raise away from aborting the process:
-// `CORE.with_borrow_mut` PANICS on a live borrow, the harness's own
-// `set_text` writes the control from inside `on_ui_mut` (which holds that
-// borrow), and a panic crossing a dispatcher callback aborts rather than
-// unwinds. The existing TextChanged handler is safe only because its
-// swallow test returns BEFORE it reaches the core; D2's compare has to run
-// on every raise, so it cannot stand behind that test.
-//
-// Thread-local rather than static: every one of these paths is the UI
-// thread, and a `RefCell` says so where a `Mutex` would only imply it.
+// Both are written by CONTROL EVENT HANDLERS, and `CORE.with_borrow_mut`
+// PANICS on a live borrow — `set_text` writes the control under that borrow,
+// and a panic crossing a dispatcher callback aborts rather than unwinds.
 
 thread_local! {
-    /// D2'S CLEAR-ON-EDIT, THIS BACKEND'S SPELLING: the widget's text at
-    /// the moment a highlight set was declared over it. The rule is that
-    /// painted offsets were validated against the text they are painted
-    /// on, so a set survives exactly as long as this string is still
-    /// what the control holds; any edit — a keystroke, a programmatic
-    /// write, a native undo — makes it stale and `drop_stale_highlights`
-    /// unpaints everything with nothing said.
-    ///
-    /// THE COMPARE IS AGAINST THE TEXT AND NOT AGAINST THE EVENT, which
-    /// is why this holds a string rather than a generation number.
-    /// TextChanged is raised ASYNCHRONOUSLY here, so a transaction that
-    /// writes new text and declares ranges over it — the obvious
-    /// spelling, and the one the core's same-batch text read exists to
-    /// serve — has its TextChanged land AFTER the highlight. A backend
-    /// that dropped on the event would destroy every set declared in the
-    /// same batch as a write; one that compares the text sees the string
-    /// it just recorded and leaves the set alone.
-    ///
-    /// AND IT IS NOT BELT-AND-BRACES FOR THE PLATFORM'S OWN BEHAVIOUR.
-    /// Rich Edit anchors character formatting to the TEXT, not to
-    /// offsets: an insertion before a painted run MOVES the run
-    /// (measured, range-probe-windows.md §5 — a run painted at 20-30
-    /// read back at 25-35 after a five-character insert at 0), and text
-    /// typed at either edge of a run INHERITS its background. Tracking
-    /// is exactly what D2 refuses to ship, so without this compare a
-    /// stale set would keep painting, drifting and growing, until the
-    /// app happened to declare something else.
+    /// D2'S CLEAR-ON-EDIT: the widget's text when a highlight set was declared
+    /// over it; any edit makes it stale and `drop_stale_highlights` unpaints
+    /// everything with nothing said. The compare is against the TEXT, never
+    /// TextChanged — that event is async here, so an event-driven drop would
+    /// destroy every set declared in the same batch as a write
+    /// (range-probe-windows.md §5).
     static HIGHLIGHT_TEXT: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
 
     /// Widgets with a LIVE INPUT-METHOD COMPOSITION, from the control's
-    /// own `TextCompositionStarted`/`TextCompositionEnded` (D4). The
-    /// only party that can know this is the control: a composition is on
-    /// no kaya channel and never will be, so a `select_range` arriving
-    /// mid-word is a race the app cannot see and must not lose.
+    /// own `TextCompositionStarted`/`TextCompositionEnded` (D4): a
+    /// composition rides no kaya channel, so only the control knows, and
+    /// a `select_range` arriving mid-word is a race the app cannot see.
     static COMPOSING: RefCell<std::collections::HashSet<u64>> =
         RefCell::new(std::collections::HashSet::new());
 }
 
-/// One section's materialized state: the pane Grid (the mount
-/// target), its title, its own mounted root, and the hosting window.
 struct WinSection {
     window: u64,
     pane: Grid,
@@ -741,8 +599,7 @@ struct WinSection {
 
 /// One navigation entry: a pushed scene root, retained while covered
 /// (the wrapper Grid holds it), destroyed at pop. The wrapper's top
-/// row is the backend-owned back bar — WinUI's back affordance here;
-/// visible only while the entry is on screen by construction.
+/// row is the backend-owned back bar.
 struct WinNavEntry {
     window: u64,
     title: String,
@@ -752,7 +609,6 @@ struct WinNavEntry {
     back_button: Option<Button>,
 }
 
-/// The live alert's identity and its REAL dialog object.
 struct WinLiveAlert {
     window: u64,
     actions: usize,
@@ -770,26 +626,22 @@ struct MenuModel {
     checked: bool,
     value: f64,
     primary: bool,
-    /// A standard-command role from the closed vocabulary ("" =
-    /// none). PLACEMENT is inert here (no dress-owned application
-    /// menu), but the clipboard roles change BEHAVIOR: activation
-    /// performs the command on the focused widget, and enablement
-    /// folds in role_enabled (refresh_role_enablement).
+    /// A standard-command role from the closed vocabulary ("" = none).
+    /// PLACEMENT is inert here (no dress-owned application menu); the
+    /// clipboard roles change BEHAVIOR — activation performs the command
+    /// on the focused widget, and enablement folds in role_enabled
+    /// (refresh_role_enablement).
     role: String,
     shortcut: String,
     /// The SEMANTIC ICON (spec enum "symbol"; 0 = none). Retained because
-    /// `rebuild_menus` builds every native from this model. It is NOT what
-    /// the harness reads — `menu_symbol` asks the materialized item, so a
-    /// lowering that dropped this value still fails.
+    /// `rebuild_menus` builds every native from this model; the harness
+    /// reads the materialized item instead (`menu_symbol`).
     symbol: i64,
     children: Vec<u64>,
     parent: Option<u64>,
 }
 
-/// An item's materialized WinUI chrome, per the ratified 1:1 lowering:
-/// MenuBarItem for a top-level grouping node (a bar-level radio_group
-/// included — its options inline under the group's own title),
-/// MenuFlyoutSubItem for a nested menu, and the three leaf item kinds.
+/// An item's materialized WinUI chrome, per the ratified 1:1 lowering.
 #[derive(Clone)]
 enum MenuNative {
     Bar(MenuBarItem),
@@ -828,15 +680,13 @@ impl MenuNative {
     }
 
     /// The REAL chrome's icon — what expect_menu_symbol reads through
-    /// [`icon_uia_name`]. Never the model: a backend that decoded the
-    /// symbol prop and drew nothing has to fail the assertion, and the
-    /// only way to guarantee that is to ask the materialized item.
+    /// [`icon_uia_name`]. Never the model: a lowering that decoded the
+    /// symbol prop and drew nothing has to fail the assertion.
     fn icon(&self) -> MenuIcon {
         let slot: &dyn IconSlot = match self {
             // The top-level bar grouping has no icon slot at all in WinUI,
-            // so its symbol is dropped rather than drawn. The mac arm does
-            // put one on its bar holders; the read below names the
-            // difference as a platform's missing affordance.
+            // so its symbol is dropped rather than drawn (the mac arm does
+            // put one on its bar holders).
             MenuNative::Bar(_) => return MenuIcon::NoSlot,
             MenuNative::Sub(i) => i,
             MenuNative::Action(i) => i,
@@ -845,26 +695,11 @@ impl MenuNative {
         };
         match slot.icon_element() {
             Ok(icon) => MenuIcon::Present(icon),
-            // AN UNSET Icon IS AN `Err` WHOSE HRESULT SAYS SUCCESS, and
-            // that sentence is the whole reason this returns four cases
-            // instead of an Option. The property call itself returns
-            // S_OK with a NULL pointer; windows-core's `Type::from_abi`
-            // turns a null interface pointer into `Error::empty()`,
-            // whose `code()` is `HRESULT(0)` — NOT `E_POINTER`, which is
-            // what `Interface::cast` uses for its own null case and what
-            // this arm was first written against. So EMPTY is "the call
-            // succeeded and there is no icon", and only a genuine
-            // failure HRESULT means the slot could not be read.
-            //
-            // Read out of windows-core 0.62.2 (src/type.rs's
-            // InterfaceType `from_abi`) and windows-result 0.4.1
-            // (`S_EMPTY_ERROR`, whose `code()` reports 0), because this
-            // backend's host is not reachable from a mac and a branch
-            // nobody can make print is a guess about a state nobody has
-            // reached (CLAUDE.md invariant 3). Against E_POINTER the
-            // Empty arm was DEAD, and every icon-less item would have
-            // reported an unreadable slot with an empty message —
-            // a sentence blaming a failure that did not happen.
+            // AN UNSET Icon IS AN `Err` WHOSE HRESULT SAYS SUCCESS: the
+            // property returns S_OK with a NULL pointer, which windows-core
+            // turns into `Error::empty()`, whose `code()` is `HRESULT(0)` and
+            // NOT `E_POINTER` (windows-core 0.62.2 type.rs; windows-result
+            // 0.4.1 `S_EMPTY_ERROR`). Only a real failure HRESULT is one.
             Err(e) if e.code().is_ok() => MenuIcon::Empty,
             Err(e) => MenuIcon::Unreadable(e),
         }
@@ -873,51 +708,10 @@ impl MenuNative {
 
 // --- The semantic icon vocabulary: the FLUENT column -------------------
 //
-// An app names a CONCEPT (`Symbol::Copy`) and this backend draws
-// Windows' own glyph for it. Every identifier in the table below was
-// taken from docs/styling/symbols-fluent.md and NONE of it from memory: that
-// report extracted 1413 codepoint/name pairs out of the Segoe Fluent
-// Icons catalog mechanically, parsed the shipped font's cmap to prove
-// each codepoint resolves to a real glyph, and RENDERED the candidates
-// to check the shapes. The shape check is not ceremony — it is what
-// caught `Error` (U+E783) being a circle with an EXCLAMATION MARK
-// rather than the circle-X the name promises. kaya's v1 vocabulary has
-// no `error` concept, so no row here uses it, but `warning` sits one
-// glyph away and a future reader "fixing" it to the same-named glyph
-// would ship the collision.
-//
-// TWO ROUTES, BOTH REQUIRED. `Symbol` is an enum of stable API names —
-// preferred, because kaya then never writes a codepoint — but it covers
-// only a subset of the font, and three of kaya's twenty concepts (info,
-// warning, lock) have NO member at all. Those three can only be spelled
-// as codepoints through `FontIcon`. Neither route sets a FontFamily:
-// both resolve through the `SymbolThemeFontFamily` theme resource,
-// which is also what makes the Windows 10 story free — that resource
-// falls back to Segoe MDL2 Assets there, and all the codepoints kaya
-// uses are in that catalog too (33/33, checked mechanically).
-//
-// THE MEMBER NAMES ARE NOT THE GLYPH NAMES, and three of them bite:
-//   * `Symbol::Find` IS the magnifier whose catalog name is `Search`.
-//     There is no `Symbol::Search`. (`Symbol::Zoom` is a DIFFERENT
-//     magnifier meaning zoom — not search.)
-//   * `Symbol::Setting` is SINGULAR, though the Fluent catalog names
-//     the glyph `Settings`. Spelling it from the glyph name does not
-//     compile.
-//   * `Symbol::Back`/`Forward` are full ARROWS, not chevrons, which is
-//     the Windows convention for navigation — the concept kaya's back
-//     and forward name. The chevron spellings (U+E76B/U+E76C) have no
-//     enum member and belong to a disclosure affordance, not to this.
-// One more that is a choice rather than a trap: `star` takes
-// `OutlineStar` because `SolidStar` is its obvious sibling for a set
-// state later, while `Symbol::Favorite` is a mere duplicate of
-// OutlineStar (same U+E734).
-//
-// WHAT IS NOT ESTABLISHED: whether Windows mirrors the back/forward
-// arrows under a right-to-left layout. The catalog report makes no
-// claim either way and nothing here has been run on an RTL system, so
-// this comment does not make one — the concepts are direction-relative
-// by kaya's definition (crates/kaya/src/app.rs), and proving the
-// mirroring is a separate measurement on the Windows lane.
+// Every identifier below comes from docs/styling/symbols-fluent.md (the
+// extraction, the rendered-shape checks and the member-name traps). Three of
+// the twenty concepts have no `Symbol` member and are codepoints; neither
+// route sets a FontFamily. UNMEASURED: RTL mirroring of back/forward.
 enum FluentIcon {
     /// Route 1: a `Symbol` enum member — 17 of the 20 concepts.
     Member(bindings::Microsoft::UI::Xaml::Controls::Symbol),
@@ -927,30 +721,21 @@ enum FluentIcon {
 }
 
 /// The Fluent spelling of a concept. EXHAUSTIVE ON PURPOSE: a 21st
-/// entry in the vocabulary fails the windows build right here, naming
-/// the file that has to grow, rather than compiling into an icon that
-/// silently never draws.
+/// entry in the vocabulary fails the windows build right here rather
+/// than compiling into an icon that silently never draws.
 const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
     use bindings::Microsoft::UI::Xaml::Controls::Symbol as Fluent;
     use crate::app::Symbol as S;
     match symbol {
         S::Add => FluentIcon::Member(Fluent::Add),
         S::Remove => FluentIcon::Member(Fluent::Remove),
-        // The trash can (U+E74D), distinct from Remove's single minus
-        // stroke — kaya draws the same distinction.
         S::Delete => FluentIcon::Member(Fluent::Delete),
         S::Edit => FluentIcon::Member(Fluent::Edit),
-        // The bare checkmark. `Completed` (U+E930) is the circled one,
-        // for a status rather than an action.
         S::Done => FluentIcon::Member(Fluent::Accept),
-        // The general-purpose X. `ChromeClose` is the heavier X for
-        // window close buttons, deliberately not used for in-content
-        // dismissal.
         S::Close => FluentIcon::Member(Fluent::Cancel),
         S::Search => FluentIcon::Member(Fluent::Find),
         S::Settings => FluentIcon::Member(Fluent::Setting),
         S::Refresh => FluentIcon::Member(Fluent::Refresh),
-        // The three with no enum member — FontIcon or nothing.
         S::Info => FluentIcon::Glyph("\u{E946}"),
         S::Warning => FluentIcon::Glyph("\u{E7BA}"),
         S::Back => FluentIcon::Member(Fluent::Back),
@@ -1006,8 +791,7 @@ const SYMBOL_ORDER: [crate::app::Symbol; 20] = {
 /// THE COMPILE-TIME PIN that makes the array above safe to hand-write:
 /// position by position, `SYMBOL_ORDER[i]`'s wire id must equal
 /// `wire::SYMBOLS[i]`'s. A 21st concept, a renumbered one, or a repeated
-/// entry all fail to build here. `const`, not a test: it rides
-/// `cargo check --target …-windows-msvc`, which the fast sweep runs.
+/// entry all fail to build here.
 const _: () = {
     assert!(
         SYMBOL_ORDER.len() == crate::wire::SYMBOLS.len(),
@@ -1025,24 +809,19 @@ const _: () = {
     }
 };
 
-/// The concept a wire value names, or None for the unset slot (0) — and
-/// for anything else, which the root already refused at declare time,
-/// so it can only mean this backend and the core disagree.
+/// The concept a wire value names, or None for the unset slot (0).
 fn symbol_from_wire(value: i64) -> Option<crate::app::Symbol> {
     SYMBOL_ORDER
         .into_iter()
         .find(|s| i64::from(symbol_wire(*s)) == value)
 }
 
-/// The platform icon for a wire symbol value, carrying THE SEMANTIC NAME
-/// as its UIA name.
+/// The platform icon for a wire symbol value, carrying THE SEMANTIC NAME as
+/// its UIA name.
 ///
-/// The name is this slice's OBSERVATION CHANNEL as well as the assistive
-/// surface: `menu_symbol` reads it back off the live element's automation
-/// peer, so reading kaya's own model instead would agree with itself no
-/// matter what was drawn. It comes from `wire::symbol_name` — the spec's
-/// own table — so a renamed concept cannot mean one thing to the harness
-/// and another to the icon.
+/// That name is the OBSERVATION CHANNEL: `menu_symbol` reads it back off the
+/// live element's automation peer, so reading kaya's own model instead would
+/// agree with itself no matter what was drawn.
 fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
     let Some(symbol) = symbol_from_wire(value) else {
         return Ok(None);
@@ -1058,9 +837,8 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
         }
         FluentIcon::Glyph(glyph) => {
             // NO FontFamily on purpose: an unset one resolves through
-            // SymbolThemeFontFamily, which is the theme resource that
-            // also carries the Windows 10 fallback. Naming a font here
-            // would opt out of both.
+            // SymbolThemeFontFamily, the theme resource that also carries
+            // the Windows 10 fallback (docs/styling/typeface-winui.md).
             let icon = FontIcon::new()?;
             icon.SetGlyph(&HSTRING::from(glyph))?;
             icon.cast()?
@@ -1076,14 +854,11 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
 /// The controls with an `Icon` slot, as one surface — WinUI puts `Icon`
 /// on each class separately with no common base. The impl list is the
 /// honest statement of WHICH kinds have the slot: `MenuBarItem` is absent
-/// because it has none (243 members in the pinned metadata, `Title` and
-/// `Items` among them and no `Icon` anywhere).
+/// because it has none in the pinned metadata.
 trait IconSlot {
     fn set_icon_element(&self, icon: &IconElement) -> windows_core::Result<()>;
-    /// `Err` for an EMPTY slot as much as for a failure: the property
-    /// returns a null pointer when nothing is set, and windows-core
-    /// turns that into `E_POINTER`. Callers that need to tell the two
-    /// apart compare the code (see [`MenuIcon`]).
+    /// `Err` for an EMPTY slot as much as for a failure. Callers that
+    /// need to tell the two apart compare the code (see [`MenuIcon`]).
     fn icon_element(&self) -> windows_core::Result<IconElement>;
 }
 
@@ -1100,14 +875,10 @@ macro_rules! icon_slot {
     )+};
 }
 
-// THE WINUI 3 HIERARCHY IS NOT THE UWP ONE, and this list is where it
-// shows. Under UWP `ToggleMenuFlyoutItem` derives from MenuFlyoutItemBase
-// and has no icon at all; in the pinned WinUI 2.2.1 metadata it derives
-// from `MenuFlyoutItem`, so the checkable kind and the radio option
-// inherit the slot. Read from the metadata, not from the UWP
-// documentation a search finds first. AppBarButton joins the list for the
-// toolbar (docs/chrome-plan.md C2): a promoted action's button takes the
-// SAME IconElement from the same `symbol_icon`.
+// THE WINUI 3 HIERARCHY IS NOT THE UWP ONE: in the pinned WinUI 2.2.1
+// metadata `ToggleMenuFlyoutItem` derives from `MenuFlyoutItem` (UWP's does
+// not), so the checkable kind and the radio option inherit the icon slot.
+// Read from the metadata, not the UWP documentation a search finds first.
 icon_slot!(
     MenuFlyoutItem,
     ToggleMenuFlyoutItem,
@@ -1117,9 +888,8 @@ icon_slot!(
     AppBarButton,
 );
 
-/// Stamp a concept onto a control's icon slot. One place, so every kind
-/// that HAS a slot gets identical treatment and an unset symbol is
-/// simply no icon (the `attach_accelerator` precedent).
+/// Stamp a concept onto a control's icon slot. One place, so an unset
+/// symbol is simply no icon.
 fn apply_symbol(target: &impl IconSlot, symbol: i64) -> windows_core::Result<()> {
     let Some(icon) = symbol_icon(symbol)? else {
         return Ok(());
@@ -1141,11 +911,8 @@ enum MenuIcon {
 }
 
 /// The semantic name an icon element publishes to UIA — the read half of
-/// [`symbol_icon`].
-///
-/// TOTAL: every failure is a short description of WHAT WAS MEASURED, and
-/// the three answers are kept distinguishable (no peer, an empty name, a
-/// name) because they fail for different reasons.
+/// [`symbol_icon`]. TOTAL: every failure is a short description of WHAT
+/// WAS MEASURED, and the three answers are kept distinguishable.
 fn icon_uia_name(icon: &IconElement) -> String {
     let Ok(fe) = icon.cast::<bindings::Microsoft::UI::Xaml::FrameworkElement>() else {
         return "the icon element is not a FrameworkElement".to_owned();
@@ -1156,27 +923,21 @@ fn icon_uia_name(icon: &IconElement) -> String {
 /// The name any live element publishes to UIA — what an assistive client
 /// hears — or a short description of which of the three ways the read
 /// failed. `what` names the thing being read so the sentence says what it
-/// measured ("the icon", "the toolbar button Save").
-///
-/// TOTAL: every failure is a short description of WHAT WAS MEASURED, and
-/// the three answers are kept distinguishable because they fail for
-/// different reasons.
+/// measured ("the icon", "the toolbar button Save"). TOTAL, and the three
+/// answers are kept distinguishable because they fail differently.
 fn uia_name(fe: &FrameworkElement, what: &str) -> String {
     use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
     // CreatePeerForElement first, FromElement second — the `ax` read's
-    // ladder, and for its measured reason: an element with no peer
-    // class of its own (a Grid there, an icon here) has no peer until
-    // one is made, and FromElement alone reported such elements absent
-    // from a tree UIA is perfectly willing to describe.
+    // ladder: an element with no peer class of its own (a Grid there, an
+    // icon here) has no peer until one is made, and FromElement alone
+    // reported such elements absent from a tree UIA will describe.
     let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(fe) {
         Ok(p) => p,
         Err(_) => match FrameworkElementAutomationPeer::FromElement(fe) {
             Ok(p) => p,
             // Same success-coded-error rule as MenuIcon::Empty: a NULL
-            // peer means the element genuinely has none, while a
-            // failure HRESULT means the call itself broke. The `ax`
-            // read collapses both into one sentence; they are different
-            // states and this one keeps them apart.
+            // peer means the element genuinely has none, while a failure
+            // HRESULT means the call itself broke.
             Err(e) if e.code().is_ok() => {
                 return format!("{what} has no automation peer")
             }
@@ -1185,14 +946,9 @@ fn uia_name(fe: &FrameworkElement, what: &str) -> String {
     };
     // An element with no name publishes the EMPTY string, not an error:
     // HSTRING is a clone type, so a null handle arrives as `Ok("")`
-    // (windows-core 0.62.2 src/type.rs, the CloneType `from_abi`) —
-    // which is why the empty case is a match guard here and not another
-    // error arm.
+    // (windows-core 0.62.2 src/type.rs, the CloneType `from_abi`).
     match peer.GetName() {
         Ok(name) if name.is_empty() => {
-            // A real defect this read can see: kaya's lowering always
-            // sets the name, so an icon without one was built somewhere
-            // else or by a path that dropped it.
             format!("{what} publishes no accessibility name")
         }
         Ok(name) => name.to_string(),
@@ -1211,15 +967,13 @@ thread_local! {
     /// Whether the two presentation edges are wired yet
     /// (`presentation_report`). UI thread only, like CORE.
     static PRESENTATION_WATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// A canvas-track report is already queued for this turn
-    /// (`schedule_canvas_tracks`) — the table's `scheduled` flag one
-    /// widget over, because LayoutUpdated fires per canvas per pass.
+    /// A canvas-track report is already queued for this turn, because
+    /// LayoutUpdated fires per canvas per pass.
     static CANVAS_TRACKS_DUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Whether the platform's frame drive is attached
     /// (`attach_frame_drive`). UI thread only, like CORE.
     static FRAME_DRIVE_ATTACHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// A window-metrics report is already queued for this turn
-    /// (`schedule_window_metrics`) — CANVAS_TRACKS_DUE's shape, for the
+    /// A window-metrics report is already queued for this turn, for the
     /// same per-pass LayoutUpdated fan.
     static WINDOW_METRICS_DUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -1251,9 +1005,9 @@ thread_local! {
 
 fn request_exit(code: i32) {
     // First writer wins: Application.Exit() closes the window, which
-    // fires Closed, which calls back in here with 0 — and a plain store
-    // therefore overwrote a failing verdict's 1, so every failing Windows
-    // leg exited 0 and a FAILED scene reported PASS (docs/traps.md).
+    // fires Closed, which calls back in here with 0, and a plain store
+    // would overwrite a failing verdict's 1 — a FAILED scene then reports
+    // PASS (docs/traps.md).
     if !EXIT_DECIDED.swap(true, std::sync::atomic::Ordering::Relaxed) {
         EXIT_CODE.store(code, std::sync::atomic::Ordering::Relaxed);
     }
@@ -1268,7 +1022,7 @@ fn request_exit(code: i32) {
 }
 
 /// Wake the UI thread so it drains pending transactions. Safe to call
-/// from any thread. The enqueued closure carries no data.
+/// from any thread.
 pub(crate) fn ring_doorbell() {
     if let Some(dispatcher) = DISPATCHER.get() {
         let handler = DispatcherQueueHandler::new(|| {
@@ -1302,27 +1056,18 @@ fn defer_role_refresh() {
 /// THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
 /// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
 /// these two numbers cross: no platform colour reaches a drawing.
-///
-/// `XamlRoot.RasterizationScale` is this platform's reading — the XAML
-/// island's own density, which is what `WM_DPICHANGED` moves — and
-/// `ActualTheme` is the appearance, the SAME reading `canvas_ink`'s
-/// answer names, so the report and the observation cannot disagree.
+/// `XamlRoot.RasterizationScale` is this platform's density reading —
+/// what `WM_DPICHANGED` moves — and `ActualTheme` the appearance, the
+/// same reading `canvas_ink`'s answer names.
 fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     let Ok(root) = core.window.Content() else { return Ok(()) };
     let element: FrameworkElement = windows_core::Interface::cast(&root)?;
     // The harness appearance, on the SAME element whose ActualTheme this
-    // function reads below. ELEMENT SCOPE, NOT APPLICATION SCOPE: the
-    // Remarks on Application.RequestedTheme say it "can only be set when
-    // the app is started, not while it's running. Attempting to set
-    // RequestedTheme while the app is running throws an exception", and
-    // kaya's content root arrives with the app's FIRST MOUNT, long after
-    // Application::Start — while FrameworkElement.RequestedTheme is the
-    // documented run-time route ("You can change specific theme values at
-    // run-time ... if you use the FrameworkElement.RequestedTheme
-    // property"). Re-applied on every report because a mount REPLACES the
-    // content root, and only when it differs, so setting it cannot loop
-    // through the ActualThemeChanged edge wired just below
-    // (tools/check-appearance.py).
+    // function reads. ELEMENT SCOPE, NOT APPLICATION SCOPE:
+    // Application.RequestedTheme throws if set while the app runs, and kaya's
+    // content root arrives with the app's FIRST MOUNT. Re-applied per report
+    // and only when it differs, so it cannot loop through the
+    // ActualThemeChanged edge below (tools/check-appearance.py).
     if let Some(mode) = crate::canvas::appearance_override() {
         let want = match mode {
             crate::canvas::Mode::Dark => ElementTheme::Dark,
@@ -1332,16 +1077,11 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
             element.SetRequestedTheme(want)?;
         }
     }
-    // THE TWO EDGES, wired the first time there is a XamlRoot to wire one
-    // of them to. Windows delivers a DPI change per top-level window and
-    // a theme change per element; without these a display move or an
-    // appearance flip would leave every canvas rastered for the old one
-    // until the next transaction happened to arrive.
-    //
-    // THE FLAG FOLLOWS THE XamlRoot, not the content: an element can be
-    // set as Content before it is in a live tree, and a run that took the
-    // flag on that pass would never wire the DPI edge at all. Every drain
-    // calls this, so trying again next time costs nothing.
+    // THE TWO EDGES, wired the first time there is a XamlRoot to wire one of
+    // them to: Windows delivers a DPI change per top-level window and a theme
+    // change per element. THE FLAG FOLLOWS THE XamlRoot, not the content: an
+    // element can be Content before it is in a live tree, and a run that took
+    // the flag on that pass would never wire the DPI edge at all.
     if !PRESENTATION_WATCHED.get() {
         if let Ok(xaml_root) = root.XamlRoot() {
             PRESENTATION_WATCHED.set(true);
@@ -1381,7 +1121,6 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
 /// The report, from a XAML event handler: those run on the UI thread but
 /// can land in a turn that already holds the CORE borrow, so this takes
 /// it only if it is free and lets the next event carry it otherwise.
-/// Every drain reports too, which is what makes a missed edge harmless.
 fn report_presentation_now() {
     CORE.with(|slot| {
         let Ok(mut core) = slot.try_borrow_mut() else { return };
@@ -1392,28 +1131,12 @@ fn report_presentation_now() {
     });
 }
 
-/// WHAT LAYOUT ASSIGNED ONE CANVAS, in points (docs/canvas-plan.md
-/// §3.2.1) — `kaya_window_moved`'s shape one widget over, and the report
-/// the stretch defect was missing. The core decides what to do with it:
-/// re-raster, ask the guest, or nothing at all.
-///
-/// A GROWN CANVAS'S TRACK IS ITS LAYOUT SLOT, never its own arranged
-/// box. `set_drawing` gives the Image an explicit Width/Height from the
-/// BUFFER — that is the 1:1 blit — and an explicit size is a HARD
-/// constraint in XAML, so `ActualWidth` reads back the raster's size
-/// however much room the row had. Reporting that would make the track
-/// and the raster agree BY CONSTRUCTION and leave the whole policy
-/// inert: it is the SwiftUI trap in this toolkit's spelling (§3.2.1,
-/// "the backend reader has to sit OUTSIDE the grow frame", measured
-/// there while the depth slice landed).
-///
-/// AN UNGROWN CANVAS IS ITS OWN BOX, and that conditional is the mac's
-/// `.frame(maxWidth: node.grow > 0 ? .infinity : nil)` verbatim: content
-/// is the floor, so its track IS its viewbox and all three policies
-/// agree. The slot would answer the whole COLUMN's width there — a Grid
-/// cell spans the panel's cross axis whatever the child does with it —
-/// and a `scale` canvas would then re-raster into that, letterboxed,
-/// with every frozen ink probe landing somewhere else.
+/// WHAT LAYOUT ASSIGNED ONE CANVAS, in points (docs/canvas-plan.md §3.2.1).
+/// A GROWN CANVAS'S TRACK IS ITS LAYOUT SLOT, never its arranged box:
+/// `set_drawing` gives the Image an explicit size from the BUFFER, a HARD
+/// constraint in XAML, so `ActualWidth` would answer the raster's own size.
+/// AN UNGROWN CANVAS IS ITS OWN BOX — its track IS its viewbox, where the
+/// slot would answer the whole COLUMN's width instead.
 fn canvas_track_of(core: &CoreState, id: WidgetId, image: &Image) -> Option<(f64, f64)> {
     let element: FrameworkElement = windows_core::Interface::cast(image).ok()?;
     if core.grow.get(&id).copied().unwrap_or(0.0) > 0.0 {
@@ -1423,14 +1146,10 @@ fn canvas_track_of(core: &CoreState, id: WidgetId, image: &Image) -> Option<(f64
     Some((element.ActualWidth().ok()?, element.ActualHeight().ok()?))
 }
 
-/// Every live canvas's track, reported to the core. A report that
-/// changes nothing emits nothing, so re-asking is free — which is what
-/// makes a missed layout edge harmless, exactly as with the
-/// presentation.
-///
-/// The registries are PUSH-ONLY (see the harness's `resolve_id`), so a
-/// destroyed canvas is skipped by asking `widgets` rather than by
-/// shrinking them.
+/// Every live canvas's track, reported to the core. A report that changes
+/// nothing emits nothing, so a missed layout edge is harmless. The registries
+/// are PUSH-ONLY, so a destroyed canvas is skipped by asking `widgets` rather
+/// than by shrinking them.
 fn report_canvas_tracks(core: &mut CoreState) {
     for i in 0..core.canvas_ids.len() {
         let id = WidgetId(core.canvas_ids[i]);
@@ -1460,17 +1179,13 @@ fn report_canvas_tracks(core: &mut CoreState) {
 
 /// Every window's content width, reported to the core for breakpoint
 /// evaluation (docs/adaptive-layout-plan.md D3). A same-width report is
-/// silent in the core, so re-asking on every layout pass is free — the
-/// canvas report's rule, one report over.
+/// silent in the core, so re-asking on every layout pass is free.
 fn report_window_metrics(core: &mut CoreState) {
     // A mounted root's key is a SURFACE — the primary or an aux window's
     // own id, a pushed entry's, a section's — and the width that governs
-    // a breakpoint is the OWNING WINDOW's. An entry id handed to
-    // window_client_width answers None, which is how every pushed
-    // screen's breakpoint sat dead on this backend while the adaptive
-    // scene (no entries) stayed green: measured on the portfolio's fold
-    // block, 2026-08-30, eighteen metrics passes over mounted_roots=[7]
-    // and not one width reaching the core.
+    // a breakpoint is the OWNING WINDOW's: an entry id handed to
+    // window_client_width answers None (docs/traps.md, docs/
+    // adaptive-layout-plan.md:217).
     let mut windows: Vec<u64> = core
         .mounted_roots
         .keys()
@@ -1511,9 +1226,8 @@ fn report_window_metrics(core: &mut CoreState) {
     }
 }
 
-/// `schedule_canvas_tracks`' shape for the window report, and for the
-/// same reason: the report applies ops, which must not run inside the
-/// layout pass that provoked it.
+/// The report applies ops, which must not run inside the layout pass
+/// that provoked it.
 fn schedule_window_metrics() {
     if WINDOW_METRICS_DUE.replace(true) {
         return;
@@ -1534,8 +1248,7 @@ fn schedule_window_metrics() {
     let _ = dispatcher.0.TryEnqueue(&handler);
 }
 
-/// The report, coalesced onto the dispatcher — `schedule_report`'s shape
-/// one widget over, and for its two reasons. LayoutUpdated fires once
+/// The report, coalesced onto the dispatcher: LayoutUpdated fires once
 /// per canvas per layout PASS, and the report can apply a re-raster,
 /// which must not run inside the pass that provoked it.
 fn schedule_canvas_tracks() {
@@ -1559,25 +1272,11 @@ fn schedule_canvas_tracks() {
 }
 
 /// THE PLATFORM'S FRAME DRIVE, outside the harness (docs/canvas-plan.md
-/// §15.4). `CompositionTarget.Rendering` is this platform's display-link
-/// schedule and `RenderingEventArgs.RenderingTime` is the frame's own
-/// timestamp, which is what the tick has to carry: a clock read inside
-/// the callback re-imports exactly the jitter a frame time removes.
-///
-/// NOT UNDER THE HARNESS, which is the determinism half of the ruling: a
-/// scene's frame count is what the `frame` verb advanced, so a second
-/// clock running beside it would make every animation leg a question
-/// about the machine's load. `KAYA_SELFTEST` is the same discriminator
-/// the harness spawn reads.
-///
-/// ONCE PER PROCESS, not once per canvas: this is a STATIC event on the
-/// UI thread rather than a per-view schedule, so N canvases would be N
-/// callbacks carrying one timestamp. Attached at the first canvas
-/// because a subscription holds the compositor in a continuous render
-/// loop, and an app with no canvas may not pay that.
-///
-/// NO LANE REACHES THIS (docs/deferred.md's size-policy entry): every
-/// scene drives frames by verb, deliberately.
+/// §15.4): `RenderingEventArgs.RenderingTime` is what the tick carries, since
+/// a clock read inside the callback re-imports the jitter a frame time
+/// removes. NOT UNDER THE HARNESS, where a scene's frame count is what the
+/// `frame` verb advanced. ONCE PER PROCESS, attached at the first canvas,
+/// because a subscription holds the compositor in a continuous render loop.
 fn attach_frame_drive() {
     if std::env::var("KAYA_SELFTEST").is_ok() || FRAME_DRIVE_ATTACHED.replace(true) {
         return;
@@ -1599,9 +1298,6 @@ fn attach_frame_drive() {
     }
 }
 
-/// One frame, at `time` seconds: every `tick` canvas is handed the size
-/// it was assigned and that time. The occurrences are asks, so they go
-/// out the same channel a click does.
 fn drive_frame(time: f64) {
     if !time.is_finite() {
         return;
@@ -1620,12 +1316,10 @@ fn drive_frame(time: f64) {
 fn drain_transactions() {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
-        // THE UNWIND STOPS HERE. Every route in is a XAML callback —
-        // the DispatcherQueue handler above, the WNDPROC — and none of
-        // them can unwind: a panic out of `Scene::apply`'s app-misuse
-        // assertions, or the `.expect`s this block used to carry,
-        // aborted with exit 0xC0000409 and no verdict list
-        // (crates/kaya/src/fault.rs; docs/deferred.md).
+        // THE UNWIND STOPS HERE: every route in is a XAML callback — the
+        // DispatcherQueue handler above, the WNDPROC — and none of them
+        // can unwind, so a panic aborts with exit 0xC0000409 and no
+        // verdict list (crates/kaya/src/fault.rs; docs/deferred.md).
         crate::fault::guard("draining a transaction", || {
             let mut failed = false;
             'drain: while let Ok(tx) = core.transactions.try_recv() {
@@ -1648,8 +1342,8 @@ fn drain_transactions() {
             // ONE coalesced track re-stamp for the whole drain — the
             // batch boundary the deferred reindex is deferred TO
             // (winui/order.rs). It runs even after a failed op, because a
-            // half-applied batch that also skipped this would leave the
-            // window's Grid tracks stale on top of incomplete.
+            // half-applied batch that skipped it would leave the window's
+            // Grid tracks stale on top of incomplete.
             if let Err(e) = flush_tracks(core) {
                 crate::fault::report(format!(
                     "kaya: restamping the container tracks failed: {e}"
@@ -1660,9 +1354,8 @@ fn drain_transactions() {
                 return;
             }
             // ONE coalesced menu-chrome rebuild per drain, from the
-            // post-user mirror. Quiet-armed as a belt: constructing and
-            // stamping native items must never read as user activation
-            // (the echo doctrine).
+            // post-user mirror. Quiet-armed: constructing and stamping
+            // native items must never read as user activation.
             if core.menus_touched {
                 core.menus_touched = false;
                 core.apply_quiet
@@ -1677,34 +1370,29 @@ fn drain_transactions() {
                     return;
                 }
             }
-            // ONE coalesced table pass per drain, same shape: a table's
-            // row set, its cells' texts and its declared titles can all
-            // have moved, and the column tracks are computed from all
-            // three.
+            // ONE coalesced table pass per drain: rows, cell texts and
+            // declared titles can all have moved, and the column tracks
+            // are computed from all three.
             sync_tables(core);
             // AND THE PRESENTATION, last: a window has no XamlRoot until
-            // something is mounted, so the first drain is where the
-            // scale and the appearance become askable at all
-            // (docs/canvas-plan.md §5, §6). Re-asking every drain costs
-            // nothing — an unchanged report emits no op — and it is what
-            // wires the two edges the first time round.
+            // something is mounted, so the first drain is where the scale
+            // and the appearance become askable at all, and it is what
+            // wires the two edges (docs/canvas-plan.md §5, §6).
             if let Err(e) = presentation_report(core) {
                 crate::fault::report(format!("kaya: reporting the presentation failed: {e}"));
             }
-            // AND EVERY CANVAS'S TRACK, for the presentation's reason:
-            // a canvas created in this batch has no layout yet, so the
-            // number here is usually rejected as non-positive and the
-            // real report comes off LayoutUpdated — but a layout edge
-            // that lands while the core is borrowed is dropped, and
-            // re-asking is what makes that harmless (§3.2.1).
+            // AND EVERY CANVAS'S TRACK: a canvas created in this batch
+            // has no layout yet, so the real report comes off
+            // LayoutUpdated — but a layout edge that lands while the core
+            // is borrowed is dropped, and re-asking makes that harmless
+            // (§3.2.1).
             report_canvas_tracks(core);
         });
     });
 }
 
 /// The head of an op's `Debug`, for a fault sentence. TRUNCATED because
-/// a whole one carries the document a `SetText` holds; the variant name
-/// and the ids in front of it are what name the failure.
+/// a whole one carries the document a `SetText` holds.
 fn op_head(op: &ApplyOp) -> String {
     let text = format!("{op:?}");
     match text.char_indices().nth(120) {
@@ -1731,22 +1419,11 @@ const ENTRY_STYLE_XAML: &str = r#"<Style xmlns="http://schemas.microsoft.com/win
 </Style>"#;
 
 /// The load-bearing piece of code-only WinUI: the XAML parser resolves
-/// non-core types through an IXamlMetadataProvider it obtains by QIing
-/// the Application object — normally the subclass the XAML compiler
-/// generates. Without one, deferred theme XAML fail-fasts the process
-/// (STOWED_EXCEPTION_80004005 … XamlSchemaContext::GetTypeInfoProvider —
-/// microsoft-ui-xaml discussions #7357/#8151; docs/traps.md).
-///
-/// HAND-ROLLED, not #[implement]: the Application is composed via COM
-/// aggregation with this object as the outer, and the aggregation
-/// contract requires the outer's QueryInterface to forward every IID it
-/// does not implement to the inner's non-delegating IUnknown
-/// (docs/traps.md, the NavigationView saga).
-///
-/// Layout is three vtable slots at fixed offsets (identity /
-/// IApplicationOverrides / IXamlMetadataProvider); the thunks recover the
-/// object by subtracting the slot index. Lifetime is the process, so
-/// AddRef/Release are counters in name only.
+/// non-core types through an IXamlMetadataProvider it QIs off the Application
+/// object, and without one deferred theme XAML fail-fasts the process
+/// (docs/traps.md; microsoft-ui-xaml #7357/#8151). HAND-ROLLED, not
+/// #[implement], because the Application is composed via COM aggregation with
+/// this object as the outer (docs/traps.md, the NavigationView saga).
 #[repr(C)]
 struct KayaOuter {
     identity: *const windows_core::IInspectable_Vtbl,
@@ -1808,7 +1485,6 @@ static KAYA_OUTER_METADATA_VTBL:
         GetXmlnsDefinitions: outer_get_xmlns_definitions,
     };
 
-/// Recover the object from a slot's `this` pointer.
 unsafe fn outer_from_slot<const SLOT: isize>(this: *mut core::ffi::c_void) -> *const KayaOuter {
     unsafe { (this as *mut *const core::ffi::c_void).offset(-SLOT) as *const KayaOuter }
 }
@@ -1927,24 +1603,11 @@ impl KayaOuter {
 static CONTROL_RESOURCES: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Refuse to build chrome whose default style lives in the resources this
-/// process could not load, and SAY SO (docs/traps.md, "WinUI resource
-/// resolution is anchored to the PROCESS exe's directory").
-///
-/// WHAT "log and continue" COST, measured 2026-08-05 (todos_go /
-/// todos_csharp, matrix, twice): the process walked into a bare
-/// `RaiseFailFastException` LATER, on a layout tick, with no message. The
-/// dump's stack is `DefaultStyles::GetDefaultStyleByTypeName`
-/// (0x800f1000) under `CControl::EnterImpl` under
-/// `CLayoutManager::UpdateLayout` — XAML realizing a MenuBarItem, asking
-/// for its built-in style, and finding none. Six harness steps had
-/// already run, so the crash pointed at the wrong step.
-///
-/// The menu surface is where the wall goes because it is where the
-/// dependency enters: a window MenuBar (ensure_menu_shell), a context
-/// MenuFlyout (ensure_context_flyout) and the toolbar's CommandBar
-/// (refresh_toolbar) are the three places kaya mints chrome from this
-/// dictionary. The TitleBar arrives through the same call as the
-/// CommandBar, so one gate stands in front of the whole set.
+/// process could not load, and SAY SO (docs/traps.md: WinUI resource
+/// resolution is anchored to the PROCESS exe's directory). WHAT "log and
+/// continue" COSTS: a bare `RaiseFailFastException` LATER, on a layout tick,
+/// with no message and pointing at the wrong step (docs/traps.md: A
+/// logged-and-continued control-resource merge fail-fasts LATER).
 fn require_control_resources(surface: &str) {
     let Some(Err(why)) = CONTROL_RESOURCES.get() else {
         return;
@@ -1972,13 +1635,11 @@ unsafe extern "system" fn outer_on_launched(
     _args: *mut core::ffi::c_void,
 ) -> windows_core::HRESULT {
     let _ = unsafe { outer_from_slot::<1>(this) };
-    // Merge the framework's control resources once, at launch: a
-    // code-only app has no App.xaml to do it. The merge is TIERED because
-    // it cannot always load — XamlControlsResources resolves through
-    // ms-appx, which needs the exe-adjacent resources.pri (docs/traps.md)
-    // — so where it fails kaya logs, RECORDS THE REASON and continues.
-    // The recorded reason is what turns the eventual death into a
-    // sentence rather than a hex code (require_control_resources).
+    // Merge the framework's control resources once, at launch: a code-only
+    // app has no App.xaml to do it. TIERED because XamlControlsResources
+    // resolves through ms-appx, which needs the exe-adjacent resources.pri
+    // (docs/traps.md), so where it fails kaya RECORDS THE REASON and
+    // continues — the reason turns the eventual death into a sentence.
     let launched: windows_core::Result<()> = APP.with_borrow(|app| {
         let Some(app) = app.as_ref() else {
             return Ok(());
@@ -2065,8 +1726,7 @@ unsafe extern "system" fn outer_get_xmlns_definitions(
 }
 
 /// Construct the Application composed with KayaOuter as the COM
-/// aggregation outer: the returned instance is the framework object and
-/// identity QIs route to the outer. Both live for the process lifetime.
+/// aggregation outer: identity QIs route to the outer.
 fn compose_application() -> windows_core::Result<Application> {
     use windows_core::Interface;
     let outer: &'static KayaOuter = Box::leak(Box::new(KayaOuter {
@@ -2102,16 +1762,11 @@ fn trace_enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_TRACE").is_some())
 }
 
-/// The Padding a container Grid must carry: the inset the container
-/// itself declares (prop 17), plus the WINDOW inset when it is a mounted
-/// surface root (wprop 8).
-///
-/// WinUI folds two boxes into one. SwiftUI and Compose NEST the window
-/// inset around the container's own padding; a WinUI Grid has a single
-/// Padding, and a mounted root's is already where the window inset lands.
-/// So a root's Padding is the SUM. Every writer goes through here — the
-/// prop's arm, the mount, the window prop's restamp — so none of them can
-/// drop the other's term.
+/// The Padding a container Grid must carry: the inset the container itself
+/// declares (prop 17), plus the WINDOW inset when it is a mounted surface
+/// root (wprop 8). WinUI folds two boxes into one — SwiftUI and Compose NEST
+/// the window inset around the container's own padding — so a root's Padding
+/// is the SUM, and every writer goes through here.
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     let own = core.container_insets.get(&id).copied().unwrap_or(0.0);
     let root = core.mounted_roots.values().any(|&r| r == id);
@@ -2127,17 +1782,12 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     own + card + if root { core.inset } else { 0.0 }
 }
 
-/// Write [`container_padding`] onto a container, or onto the minted
-/// HOST of a scroll-rooted window. The scroll arm is load-bearing for
-/// exactly one case: a `kaya.scroll` mounted as a window's root, where
-/// the window inset has nowhere else to land — matching containers
-/// alone dropped it silently, and the portfolio dashboard sat flush
-/// against the window edge from the morning its root grew a scroll
-/// until `expect_inset 16` joined the scene (measured 2026-08-30; the
-/// other three backends nest the window inset OUTSIDE the mounted tree
-/// and never had the hole). Padding cannot go on the viewer itself:
-/// ScrollViewer's default template does not bind Control.Padding.
-/// Anything else (or destroyed): nothing to stamp.
+/// Write [`container_padding`] onto a container, or onto the minted HOST of a
+/// scroll-rooted window. The scroll arm is load-bearing for one case: a
+/// `kaya.scroll` mounted as a window's root, where the window inset has
+/// nowhere else to land (docs/traps.md: A window inset stamped on containers
+/// alone is dropped by a scroll-rooted window). Padding cannot go on the
+/// viewer itself: ScrollViewer's default template does not bind it.
 fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let pad = container_padding(core, id);
     let pad = Thickness {
@@ -2159,14 +1809,10 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
 }
 
 /// Re-attach a 2D grid's children row-major per its current column count,
-/// with one Auto track per row/column — reached from `flush_tracks` once
-/// per batch, whether the children or the columns prop moved.
-///
-/// `reindex` below does the same job for a Column/Row: a Grid lays out by
+/// with one Auto track per row/column — reached from `flush_tracks` once per
+/// batch. `reindex` below does the same for a Column/Row: a Grid lays out by
 /// attached index rather than by child order (docs/traps.md), so the whole
-/// set is rebuilt after every structural change. Its track sizes carry
-/// the layout contract directly — `Auto` for a weight-0 child, `Star(w)`
-/// for a grower, which is what WinUI's star sizing already means.
+/// set is rebuilt after every structural change.
 fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
         return Ok(());
@@ -2202,10 +1848,9 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
-/// WHICH PANEL A CONTAINER'S CHILDREN ACTUALLY LIVE IN. For a declared
-/// table that is the band panel inside its scroll host, so the rows
-/// scroll and the header does not; for everything else it is the
-/// container's own Grid. `reindex` places into the same panel.
+/// WHICH PANEL A CONTAINER'S CHILDREN ACTUALLY LIVE IN: for a declared
+/// table the band panel inside its scroll host, so the rows scroll and
+/// the header does not; for everything else the container's own Grid.
 fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
     let own = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) => g.clone(),
@@ -2215,11 +1860,6 @@ fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
     Some(TABLES.with_borrow(|t| t.get(&parent.0).map(|w| w.band.clone())).unwrap_or(own))
 }
 
-/// Rebuild one container's tracks and re-place every child on them.
-/// Reached from `flush_tracks` — a structural change marks its container
-/// instead of calling this, because running it per child is N^2
-/// (winui/order.rs). The one other caller is Mount's Loaded one-shot,
-/// which re-measures the baseline containers with live metrics.
 /// A container's rendered direction: the creation kind's default under
 /// any axis override (prop 18). Every direction decision below keys on
 /// this fold — a variant-keyed read would call a flipped row a row.
@@ -2251,9 +1891,8 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     // A DECLARED TABLE OWNS THREE TRACKS OF ITS OWN — the header, the
     // rule and the scroll host — and its rows are placed inside the
     // host's band panel, one track down past the top spacer
-    // (docs/virtualization-plan.md §4). This is the only place a Column's
-    // children are placed, so it is the only place that can know
-    // (docs/tables-plan.md).
+    // (docs/virtualization-plan.md §4, docs/tables-plan.md). This is the
+    // only place a Column's children are placed.
     let table = if vertical {
         TABLES.with_borrow(|t| {
             t.get(&parent.0)
@@ -2275,10 +1914,8 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
             }
             // THE SPACERS ARE TRACKS, NOT WIDGETS: an empty pixel track
             // reserves its height, and both numbers are the CORE's
-            // arithmetic (`table_spacer_targets`). NO SCENE CAN SEE THEM
-            // — `expect_window` says which row is first and how many
-            // exist, both of which a tier that reserved nothing still
-            // answers correctly — so this pair is held statically, in
+            // arithmetic (`table_spacer_targets`). NO SCENE CAN SEE THEM,
+            // so the pair is held statically, in
             // `every_link_of_the_report_loop_is_still_wired`.
             let defs = band.RowDefinitions()?;
             defs.Clear()?;
@@ -2323,9 +1960,6 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         let Some(widget) = core.widgets.get(child) else {
             continue;
         };
-        // The attached setters take a FrameworkElement, one step down
-        // from the UIElement the widget table hands out; every widget
-        // kaya creates is one.
         let element: FrameworkElement = widget.element()?.cast()?;
         let track = track_of(index, head);
         // Both attached indices, so a flip leaves no stale placement on
@@ -2343,24 +1977,12 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         if let Some((_, _, _, gap)) = &table {
             element.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: *gap })?;
         }
-        // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES
-        // IT. 240x96 is the size all four backends declare, and on the
-        // other three it is a MINIMUM their layout stretches from
-        // (GTK's `set_size_request`, this arm's own MinWidth). The
-        // HEIGHT could not be one here — WinUI measures a control in an
-        // Auto row against infinite height and gives it whatever it
-        // asks for, so a 40-line document asked for 758 pixels and got
-        // them — and an explicit Height is the only thing that bounds
-        // it. It also OUTRANKS the star row's Stretch, which is how an
-        // editor asking for a full-window buffer with grow(1) got 96dip
-        // inside a correct 126dip track, with expect_shares (which
-        // reads the definition) passing all the way.
-        //
-        // So the explicit height is what a NON-GROWER keeps, and a
-        // grower on THIS grid's main axis trades it for the floor plus
-        // Stretch. Main axis only: a grower in a ROW divides width, and
-        // its height is align's business — releasing it there would
-        // hand the wart straight back.
+        // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT.
+        // 240x96 is the size all four backends declare; on the other three it
+        // is a MINIMUM. The HEIGHT cannot be one here — WinUI measures a
+        // control in an Auto row against infinite height, so a 40-line
+        // document asked for 758 pixels and got them — and an explicit Height
+        // OUTRANKS the star row's Stretch (docs/traps.md).
         if let NativeWidget::Textarea(field) = widget {
             let grows = vertical && core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
             field.SetMinHeight(if grows { 96.0 } else { 0.0 })?;
@@ -2368,30 +1990,24 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         }
         // Cross placement from the container's align mode. WinUI's own
         // default is Stretch; kaya's normalized default is start, stamped
-        // explicitly so the two never drift. Baseline (rows only) stamps
-        // Top here and gets its margin compensation after the pass below.
-        // THE BREADTH RULE outranks the mode: a nested container whose
-        // main axis crosses its parent's spans the parent's breadth under
-        // every align mode, and align only places what it does not size
-        // (the 2026-08-22 ruling; docs/deferred.md "Two breadth
-        // asymmetries the stretch ruling left open", and container_fills'
-        // breadth clause is what holds it).
+        // explicitly so the two never drift. Baseline (rows only) stamps Top
+        // and gets its margin compensation below. THE BREADTH RULE outranks
+        // the mode: a nested container whose main axis crosses its parent's
+        // spans the parent's breadth (container_fills' breadth clause holds it).
         let crossing = matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
             && effective_vertical(core, *child) != vertical;
         // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode
         // and under stretch (ruled 2026-09-02; the scene's expect_breadth
         // holds it): a viewport is a region, not content. Center and end
-        // still position a hugging one. Stamped through the same arm as
-        // the crossing rule, since both size where the mode would place.
+        // still position a hugging one.
         let crossing = crossing
             || (matches!(widget, NativeWidget::Scroll(_)) && matches!(mode, 0 | 3));
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks
-        // Stretch by WinUI's own rules (the textarea trade above). Left
-        // unstamped, a Button in a star track drew 57dip of a 372dip
-        // track — measured 2026-08-22 by grow.steps' expect_fills
-        // button#0, red on this lane alone.
+        // Stretch by WinUI's own rules. Left unstamped, a Button in a
+        // star track drew 57dip of a 372dip track (docs/traps.md: A
+        // stretched WinUI TextBlock arranges text-sized).
         if vertical {
             element.SetVerticalAlignment(
                 bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
@@ -2429,21 +2045,15 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     Ok(())
 }
 
-/// THE BATCH'S ONE RE-STAMP. `reindex` above is what an append costs, and
-/// running it per child is N^2/2 WinRT round trips (winui/order.rs), so a
-/// structural change marks its container and this drains the marks —
-/// every container once, in first-marked order.
-///
-/// It runs at both op runners' ends AND at every harness hop, so nothing
-/// — the screen or an observation — can be shown a tree a batch behind.
-/// A failure leaves the containers behind it marked: the next flush
-/// finishes them.
+/// THE BATCH'S ONE RE-STAMP: running `reindex` per child is N^2/2 WinRT round
+/// trips (winui/order.rs), so a structural change marks its container and this
+/// drains the marks — every container once, in first-marked order. It runs at
+/// both op runners' ends AND at every harness hop, so nothing can be shown a
+/// tree a batch behind; a failure leaves the rest marked for the next flush.
 fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
     while let Some(container) = core.child_order.next_due() {
-        // A 2D grid re-flows row-major instead, and is the same N^2 one
-        // branch over — `reflow_grid` clears the Children collection and
-        // re-appends every child. Either arm is a no-op for the other's
-        // kind, so this is a dispatch and not a guard.
+        // A 2D grid re-flows row-major instead: `reflow_grid` clears the
+        // Children collection and re-appends every child.
         match core.widgets.get(&container) {
             Some(NativeWidget::Grid2D(_)) => reflow_grid(core, container.0)?,
             _ => reindex(core, container)?,
@@ -2471,7 +2081,7 @@ fn baseline_compensate(
         let baseline = match widget {
             NativeWidget::Label(text) => Some(text.BaselineOffset()?),
             NativeWidget::Button { caption, .. } | NativeWidget::Checkbox { caption, .. } => {
-                // The caption sits inside the control; its baseline in
+                // The caption sits inside the control: its baseline in
                 // the CONTROL's space is its offset there plus its own
                 // BaselineOffset.
                 let at = caption
@@ -2480,13 +2090,10 @@ fn baseline_compensate(
                 Some(f64::from(at.Y) + caption.BaselineOffset()?)
             }
             // No text baseline: the bottom-edge rule — the child's
-            // baseline IS its bottom (the CSS replaced-element rule),
-            // so a tall image drags the common baseline down and the
-            // text children lift to meet it. Text-only compensation
-            // aligned label to checkbox at ~14dip and left the image
-            // at the top — geometrically indistinguishable from
-            // start, which is exactly how the first Windows run
-            // failed.
+            // baseline IS its bottom (the CSS replaced-element rule), so
+            // a tall image drags the common baseline down and the text
+            // children lift to meet it. Text-only compensation is
+            // geometrically indistinguishable from start.
             _ => Some(element.ActualHeight()?),
         };
         if let Some(b) = baseline {
@@ -2511,17 +2118,14 @@ fn baseline_compensate(
     Ok(())
 }
 
-/// One child's track: natural size, or a share of the leftover.
 /// Re-stamp the wrap's rows after a fold change (D7): one Auto row per
 /// folded element in sibling order, then the band. Its only callers are
 /// the Fold arm's two directions.
 fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
     // THE FOLD SEAM (D7): a SECTION gap between the folded children and
-    // the band, not the table's internal spacing — at nothing, the
-    // folded summary and the rows read as one surface (the maintainer's
-    // 2026-08-30 read of the phone captures). RowSpacing, so it clears
-    // itself when the last unfold empties the list. One number, four
-    // backends.
+    // the band, not the table's internal spacing — at nothing, the folded
+    // summary and the rows read as one surface. RowSpacing, so it clears
+    // itself when the last unfold empties the list.
     table
         .wrap
         .SetRowSpacing(if table.folded.is_empty() { 0.0 } else { 16.0 })?;
@@ -2541,9 +2145,8 @@ fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
 
 /// The folded block's extent above the band (D7): what every band-space
 /// coordinate must add to reach host space, and 0.0 with nothing folded.
-/// MEASURED as the band's own Y inside the wrap — heights, the seam's
-/// row spacing, everything the layout actually spent — rather than a
-/// second sum that would drift from it.
+/// MEASURED as the band's own Y inside the wrap — everything the layout
+/// actually spent — rather than a second sum that would drift from it.
 fn fold_extent(id: u64) -> f64 {
     TABLES.with_borrow(|tables| {
         tables.get(&id).map_or(0.0, |t| {
@@ -2567,9 +2170,8 @@ fn track(weight: f64) -> GridLength {
             GridUnitType: GridUnitType::Star,
         }
     } else {
-        // Auto and not `*`: a weight-0 child takes its natural size and
-        // takes no part in the division, which is what makes the growers'
-        // shares come out of the leftover rather than the whole.
+        // Auto and not `*`: a weight-0 child takes no part in the
+        // division, so the growers' shares come out of the leftover.
         GridLength {
             Value: 0.0,
             GridUnitType: GridUnitType::Auto,
@@ -2577,35 +2179,21 @@ fn track(weight: f64) -> GridLength {
     }
 }
 
-// ---------------------------------------------------------------------
 // TABLES: the details-view lowering (docs/tables-plan.md decision 6).
 //
-// The For's container is already a Grid here, so the header is two more
-// children of it — a header Grid in row 0, a rule in row 1 — and the
-// stamped rows shift down two tracks (`reindex`, which is the only thing
-// that places a Column's children).
-//
-// THE COLUMN WIDTHS ARE COMPUTED, NOT DECLARED, and that is forced:
-// WinUI's Grid has no SharedSizeGroup (a WPF-only feature), so the header
-// and the row Grids cannot share tracks, and star sizing with per-column
-// MinWidth resolves to EQUAL columns clamped up at content — not to the
-// plan's content-floor-plus-equal-leftover. So each column's floor is
-// measured off the real elements and the leftover is divided here, and
-// header and rows get the same explicit pixel tracks.
-// ---------------------------------------------------------------------
+// THE COLUMN WIDTHS ARE COMPUTED, NOT DECLARED, and that is forced: WinUI's
+// Grid has no SharedSizeGroup, so the header and the row Grids cannot share
+// tracks, and star sizing with per-column MinWidth resolves to EQUAL columns
+// clamped up at content, not to content-floor-plus-equal-leftover.
 
-/// The gap between adjacent columns, the rule's number on every
-/// synthesized tier.
+/// The gap between adjacent columns.
 const TABLE_COL_GAP: f64 = 24.0;
 
-/// A header cell. PARSED RATHER THAN CONSTRUCTED because `FontWeight` and
-/// the flat chrome are vtable pads in the generated bindings — the
-/// `caption_title_text` precedent, and the same flag: the cleaner home is
-/// three members in tools/winui-bindgen.
-///
-/// A Button and not a TextBlock so the header has a real activation path:
-/// its Click is what emits, and `header_click` drives it through the
-/// button's own automation peer (the alert's press precedent).
+/// A header cell. PARSED RATHER THAN CONSTRUCTED because `FontWeight` and the
+/// flat chrome are vtable pads in the generated bindings (the cleaner home is
+/// three members in tools/winui-bindgen). A Button and not a TextBlock so the
+/// header has a real activation path: its Click is what emits, and
+/// `header_click` drives it through the button's own automation peer.
 const TABLE_HEADER_CELL_XAML: &str = concat!(
     "<Button xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
     "Background=\"Transparent\" BorderThickness=\"0\" Padding=\"0,2,0,2\" ",
@@ -2621,30 +2209,12 @@ const TABLE_RULE_XAML: &str = concat!(
     "Height=\"1\" Background=\"#40808080\" HorizontalAlignment=\"Stretch\"/>"
 );
 
-/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry;
-/// ruled 2026-08-25) — Fluent's layer card, FLAT: fill, a 1 DIP stroke
-/// and the radius, no shadow and no elevation. A Grid for
-/// TABLE_RULE_XAML's reason.
-///
-/// THE CARD SITS BEHIND THE THREE TRACKS, NOT AROUND THEM. Written onto
-/// the container itself, a BorderThickness takes 2 DIP out of the box
-/// every track arithmetic here divides (`table_stamp`'s `inner`,
-/// `column_edges`' `drawn`) — the card must cost the cells nothing, so it
-/// is a child spanning the header, the rule and the scroll host, inserted
-/// at 0 because a XAML panel paints its children in order.
-///
-/// The radius is the 8 of Fluent's family, not the 4: `ControlCornerRadius`
-/// is for small controls and `OverlayCornerRadius` is the one the design
-/// language assigns to CARDS.
-///
-/// AND IT CARRIES A NEGATIVE MARGIN of exactly the card's interior
-/// padding. The padding rides the CONTAINER's own Padding
-/// (`container_padding`) because that is the one number every arithmetic
-/// here already subtracts — `table_stamp`'s `inner`, `column_edges`'
-/// content-box frame — so the card cannot move a cell edge. But the card
-/// is a CHILD of that container, so the same padding would push the card
-/// in too and it would hug the text again; the margin pulls it back out
-/// to the box the guest's own inset leaves it.
+/// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry) —
+/// Fluent's layer card, FLAT: fill, a 1 DIP stroke and the radius, no shadow.
+/// IT SITS BEHIND THE THREE TRACKS, NOT AROUND THEM: a BorderThickness on the
+/// container takes 2 DIP out of the box every track arithmetic divides. AND IT
+/// CARRIES A NEGATIVE MARGIN of the card's interior padding, which rides the
+/// CONTAINER's own Padding, so the card cannot move a cell edge.
 const TABLE_CARD_XAML: &str = concat!(
     "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
     "Background=\"{ThemeResource CardBackgroundFillColorDefaultBrush}\" ",
@@ -2653,42 +2223,36 @@ const TABLE_CARD_XAML: &str = concat!(
     "HorizontalAlignment=\"Stretch\" VerticalAlignment=\"Stretch\"/>"
 );
 
-/// The card's interior, per side. FLUENT'S CARD CONTENT INSET is 12epx —
-/// the number its own card-shaped surfaces use for content (the
-/// SettingsCard family's 12/16 pair, of which 12 is the tighter one and
-/// the one a DENSE table wants). Symmetric, because `pad` is one number
-/// for four sides here and splitting it would mean touching every
-/// `2.0 * pad` in the table's arithmetic.
+/// The card's interior, per side. FLUENT'S CARD CONTENT INSET is 12epx
+/// (the SettingsCard family's 12/16 pair, of which 12 is the tighter one
+/// and the one a DENSE table wants). Symmetric, because `pad` is one
+/// number for four sides here.
 const TABLE_CARD_PAD: f64 = 12.0;
 
 /// The ascending / descending indicator, appended to the sorted column's
-/// title. The GLYPHS the other synthesized tiers use; `columns_presented`
-/// reads them back off the control and turns them into the `^N`/`vN` the
-/// scene compares.
+/// title — the glyphs the other synthesized tiers use. `columns_presented`
+/// reads them back off the control as the scene's `^N`/`vN`.
 const TABLE_ASC: &str = " \u{25B2}";
 const TABLE_DESC: &str = " \u{25BC}";
 
 /// One declared table's native side.
 ///
-/// OUTSIDE `CoreState` FOR THE REASON HIGHLIGHT_TEXT IS (see that
-/// thread_local): the redistribution pass runs from a LayoutUpdated
-/// handler, and a handler that touched `CORE` would be one synchronous
-/// layout away from aborting the process. Everything the geometry pass
-/// needs is here, so that path never asks the core anything.
+/// OUTSIDE `CoreState` FOR THE REASON HIGHLIGHT_TEXT IS: the
+/// redistribution pass runs from a LayoutUpdated handler, and a handler
+/// that touched `CORE` would be one synchronous layout away from
+/// aborting the process.
 struct WinTable {
     titles: Vec<String>,
     sorted: u32,
     direction: u32,
     /// The click tag, handed back verbatim with the column index.
     tag: Vec<u8>,
-    /// The For's own container.
     grid: Grid,
     /// The card behind the three tracks (TABLE_CARD_XAML).
     card: Grid,
     /// The header's own scroller, driven to `host`'s horizontal offset so
-    /// the titles travel with the cells under them (the overflow ruling).
-    /// It is what hangs on the container — `header` is its child — and it
-    /// is also what CLIPS the titles, since a XAML panel does not.
+    /// the titles travel with the cells under them. It hangs on the
+    /// container, and it is what CLIPS the titles, since a panel does not.
     head: ScrollViewer,
     header: Grid,
     rule: Grid,
@@ -2700,18 +2264,13 @@ struct WinTable {
     /// the bottom spacer track. `reindex` is its only structural writer.
     band: Grid,
     /// The host's real content since the fold (D7): Auto rows holding the
-    /// folded children, then the band. With nothing folded it is one row
-    /// of band and changes nothing.
+    /// folded children, then the band.
     wrap: Grid,
     /// The folded elements in sibling order — the extent the report adds
-    /// back, since every band coordinate is band-space and the host's
-    /// offset now spans the folded block above it.
+    /// back, since every band coordinate is band-space.
     folded: Vec<FrameworkElement>,
-    /// The header cells, one per title, in visual order.
     cells: Vec<Button>,
-    /// The stamped row containers, refreshed from the core each drain.
     rows: Vec<Grid>,
-    /// The container's Padding, which the track arithmetic sits inside.
     pad: f64,
     /// Each column's MEASURED content width — the floor.
     floors: Vec<f64>,
@@ -2719,22 +2278,19 @@ struct WinTable {
     /// from a no-op and stop invalidating layout.
     applied: Vec<f64>,
     /// WHICH ROWS THOSE WIDTHS WERE WRITTEN TO. Without it the no-op
-    /// early-out above swallows a row ARRIVING at unchanged widths — the
-    /// new row would keep its container default (8dip gaps, Auto tracks)
-    /// while every older row carried the table's, and no width has moved
-    /// to say so.
+    /// early-out above swallows a row ARRIVING at unchanged widths: the
+    /// new row keeps its container default (8dip gaps, Auto tracks) while
+    /// every older row carries the table's.
     stamped: Vec<Grid>,
     /// The floors need re-measuring: set by every drain that could have
     /// moved content, cleared by the first layout pass that gets a real
-    /// answer out of the controls.
+    /// answer.
     dirty: bool,
     /// Measures spent waiting for that real answer. A measure taken
-    /// before the tree is live reads ZEROS — the baseline-compensation
-    /// lesson — and zero floors would leave the columns evenly split with
-    /// no content floor at all, passing every observable. So a zero
-    /// keeps the request open; this bounds how many layout passes that
-    /// may cost, because each measure invalidates layout and asks for
-    /// another one.
+    /// before the tree is live reads ZEROS, and zero floors leave the
+    /// columns evenly split with no content floor at all, passing every
+    /// observable. So a zero keeps the request open, and this bounds how
+    /// many layout passes that may cost.
     probes: u32,
 
     // --- The row window (docs/virtualization-plan.md §3-§4). ----------
@@ -2749,43 +2305,39 @@ struct WinTable {
     /// panel needs no RowSpacing of its own.
     gap: f64,
     /// The last visible range handed to `kaya_window_moved`, so an
-    /// unchanged range produces no applies (which is also what stops the
-    /// report loop from repeating).
+    /// unchanged range produces no applies, which is also what stops the
+    /// report loop from repeating.
     reported: Option<(usize, usize)>,
     /// What `expect_window` compares: the first VISIBLE row and the
     /// collection's declared total, refreshed by every report.
     first_visible: usize,
     total: usize,
     /// The ROW the viewport is parked on (§2.4) and the offset this tier
-    /// last commanded. A correction moves the row and the re-park follows
-    /// it; an offset we did not command is the user's scroll, and the
-    /// anchor yields to it.
+    /// last commanded. An offset we did not command is the user's scroll,
+    /// and the anchor yields to it.
     anchor: Option<usize>,
     at: f64,
     /// Cycles left for a commanded scroll to land. THIS BACKEND CANNOT
     /// SEE A SCROLL EVENT — its bindings project no `ViewChanged`
     /// (tools/winui-bindgen; the add is a vtable pad) — so a scroll is
-    /// observed as an OFFSET, and an offset that is neither where we put
-    /// it nor where the anchor says it belongs is the user's. This bounds
-    /// how long a command that never lands (a clamp at the end) may
-    /// suppress that reading.
+    /// observed as an OFFSET that is neither where we put it nor where
+    /// the anchor says it belongs. This bounds how long a command that
+    /// never lands may suppress that reading.
     commanded: u8,
-    /// One coalesced report per main-loop turn.
     scheduled: bool,
 
     // --- The columns' axis (the 2026-08-29 overflow ruling). ----------
     /// The columns' box as `host` last reported it: the resolved columns
     /// and the track they were laid out in. A table just laid out shows
     /// its FIRST column, so either half moving parks the offset back at
-    /// the leading edge — and a pass that moved neither keeps the scroll
-    /// the reader made (`table_columns_track`).
+    /// the leading edge (`table_columns_track`).
     hcontent: f64,
     htrack: f64,
 }
 
 /// How many settle rounds one report drives. Each round acts on at most
-/// one thing — re-park, re-band, measure, re-spacer — and stops when
-/// nothing moved, so this only bounds a tier that never converges.
+/// one thing and stops when nothing moved, so this only bounds a tier
+/// that never converges.
 const TABLE_SETTLE_ROUNDS: usize = 6;
 
 /// How many layout passes a table may spend trying to measure real
@@ -2796,8 +2348,6 @@ thread_local! {
     static TABLES: RefCell<HashMap<u64, WinTable>> = RefCell::new(HashMap::new());
 }
 
-/// The header cell's presented text: the title, plus the indicator when
-/// this column is the sorted one.
 fn table_cell_text(titles: &[String], sorted: u32, direction: u32, column: usize) -> String {
     let mut text = titles[column].clone();
     if sorted as usize == column && sorted != crate::wire::SORT_NONE {
@@ -2843,36 +2393,24 @@ fn declare_table(
             Bottom: -TABLE_CARD_PAD,
         })?;
         let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
-        // THE SCROLL CONTAINER (§4). BOTH AXES since the 2026-08-29
-        // overflow ruling (docs/tables-plan.md): a table whose columns
-        // need more width than its track scrolls to them, it does not
-        // compress and it does not clip — and Disabled here IS how "the
-        // last column is clipped" shipped (docs/probes/
-        // table-overflow-2026.md §4.4).
-        //
+        // THE SCROLL CONTAINER (§4). BOTH AXES since the overflow ruling
+        // (docs/tables-plan.md): Disabled here IS how "the last column is
+        // clipped" shipped (docs/probes/table-overflow-2026.md §4.4).
         // BOTH BARS ARE OVERLAYS (Auto, never Visible): a reserved gutter
-        // would take its width out of the rows and leave them narrower
-        // than the pinned header, which `column_edges` convicts as a
-        // ContentUnderfill — its per-line end is there for exactly this.
+        // would take its width out of the rows and leave them narrower than
+        // the pinned header, which `column_edges` convicts as ContentUnderfill.
         let host = ScrollViewer::new()?;
         host.SetHorizontalScrollMode(ScrollMode::Enabled)?;
         host.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Auto)?;
         host.SetVerticalScrollMode(ScrollMode::Enabled)?;
         host.SetVerticalScrollBarVisibility(ScrollBarVisibility::Auto)?;
         host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
-        // THE HEADER RIDES A SCROLLER OF ITS OWN, driven to the body's
-        // offset by `table_columns_track`. There is no shared adjustment
-        // to hang it off the way gtk.rs does, and no transform to
-        // translate it with — this backend's bindings project neither
-        // RenderTransform nor Clip (tools/winui-bindgen) — and a bare
-        // header would not be clipped either, since a XAML panel draws a
-        // child wider than itself.
-        //
-        // NO BAR OF ITS OWN (Hidden, not Disabled): Disabled is the one
-        // mode that also refuses ChangeView, so the sync would have
-        // nothing to write. The vertical half is Disabled precisely so
-        // this scroller reports the header's HEIGHT to the Auto track it
-        // sits in.
+        // THE HEADER RIDES A SCROLLER OF ITS OWN, driven to the body's offset
+        // by `table_columns_track`: this backend's bindings project neither
+        // RenderTransform nor Clip, and a bare header would not be clipped
+        // either. NO BAR OF ITS OWN (Hidden, not Disabled): Disabled also
+        // refuses ChangeView. The vertical half is Disabled precisely so this
+        // scroller reports the header's HEIGHT to the Auto track it sits in.
         let head = ScrollViewer::new()?;
         head.SetHorizontalScrollMode(ScrollMode::Enabled)?;
         head.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Hidden)?;
@@ -2908,8 +2446,7 @@ fn declare_table(
             header.Children()?.Append(&cell)?;
             // THE HEADER'S OWN ACTIVATION PATH. A click is a REQUEST: the
             // tag goes back verbatim with the column index and nothing on
-            // screen moves — the indicator arrives with the guest's
-            // re-declaration or not at all.
+            // screen moves.
             let sink = core.occurrences.clone();
             let owner = id.0;
             let handler = RoutedEventHandler::new(move |_, _| {
@@ -3011,8 +2548,7 @@ fn declare_table(
         // A scroll moves no frame of the container, so its LayoutUpdated
         // cannot be the only report trigger: the host's own is where a
         // view change lands (this backend's bindings project no
-        // ViewChanged — see `schedule_report`). It is also the only
-        // signal the header has to travel on.
+        // ViewChanged), and it is the only signal the header travels on.
         let host_id = id.0;
         let scrolled = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
             table_columns_track(host_id);
@@ -3038,16 +2574,14 @@ fn declare_table(
     }
     // The card's interior joins the container's padding the moment the
     // table exists, and container_padding only answers for a table it can
-    // already see in TABLES — so the stamp is re-run HERE rather than
-    // waiting for an inset prop that may never arrive.
+    // already see in TABLES, so the stamp is re-run HERE.
     stamp_container_padding(core, id)?;
     // The two head tracks the rows now shift down past.
     core.child_order.mark(id);
     Ok(())
 }
 
-/// Refresh what the geometry pass needs from the core — the live row
-/// containers in track order and the container's padding — and mark the
+/// Refresh what the geometry pass needs from the core and mark the
 /// floors stale. Called once per drain, the `menus_touched` shape.
 fn sync_tables(core: &CoreState) {
     let ids: Vec<u64> = TABLES.with_borrow(|tables| tables.keys().copied().collect());
@@ -3072,29 +2606,18 @@ fn sync_tables(core: &CoreState) {
     }
 }
 
-// ---------------------------------------------------------------------
-// THE ROW WINDOW (docs/virtualization-plan.md §3-§4), this tier's
-// spelling: top spacer, the realized band's real widgets, bottom spacer,
-// inside the scroll container the table owns.
-//
-// THE REPORT LOOP. Visible range -> kaya_window_moved on every scroll,
-// resize and first layout; the realized rows' measured extents ->
-// kaya_rows_measured, EXACTLY, no tolerance — which is also what stops
-// this loop repeating, since a report that agrees with the core produces
-// nothing.
-//
-// EVERY NUMBER LAID OUT HERE IS THE CORE'S. The spacers come from
-// `kaya_window_geometry`'s offset and extent; this file owns no height
-// cache, no pitch and no prefix sum (§2's one estimator).
-// ---------------------------------------------------------------------
+// THE ROW WINDOW (docs/virtualization-plan.md §3-§4), this tier's spelling:
+// top spacer, the realized band's real widgets, bottom spacer, inside the
+// scroll container the table owns. THE REPORT LOOP reports the realized rows'
+// measured extents EXACTLY, no tolerance, which is what stops it repeating.
+// EVERY NUMBER LAID OUT HERE IS THE CORE'S: this file owns no height cache,
+// no pitch and no prefix sum (§2's one estimator).
 
 /// One coalesced report per main-loop turn.
 ///
 /// IT MAY NOT RUN INSIDE A LAYOUT PASS: the report applies ops, which
-/// re-enters the Grid whose layout callback called us. The dispatcher hop
-/// is what keeps them apart — the mac tier's `scheduleReport` for the
-/// same reason one toolkit over (an @Observable write from inside
-/// -[NSView layout] aborts AppKit outright).
+/// re-enters the Grid whose layout callback called us, and the dispatcher
+/// hop is what keeps them apart.
 fn schedule_report(id: u64) {
     let due = TABLES.with(|tables| match tables.try_borrow_mut() {
         Ok(mut tables) => match tables.get_mut(&id) {
@@ -3136,15 +2659,11 @@ fn offset_ref(value: f64) -> windows_core::Result<IReference<f64>> {
 }
 
 /// THE HEADER TRAVELS WITH THE BODY, and a table just laid out shows its
-/// FIRST column (docs/tables-plan.md, the 2026-08-29 overflow ruling).
-///
-/// Reached from `host`'s LayoutUpdated, which is where a view change
-/// lands on this backend (`declare_table`); every write here is gated on
-/// a number that MOVED, or a pass would request a view on every layout
-/// and never let the tree settle.
-///
-/// THE RESET'S TRIGGER IS THE COLUMNS' BOX, never the offset: resetting
-/// on every view change would throw away the scroll the reader just made.
+/// FIRST column (docs/tables-plan.md, the overflow ruling). Reached from
+/// `host`'s LayoutUpdated; every write here is gated on a number that MOVED,
+/// or a pass would request a view on every layout. THE RESET'S TRIGGER IS THE
+/// COLUMNS' BOX, never the offset: resetting on every view change would throw
+/// away the scroll the reader made.
 fn table_columns_track(id: u64) {
     let Some((head, host)) =
         TABLES.with(|tables| match tables.try_borrow() {
@@ -3207,10 +2726,8 @@ fn band_tracks(band: &Grid) -> windows_core::Result<(f64, Vec<f64>)> {
 }
 
 /// The two spacer heights the core's arithmetic currently implies.
-/// Reached from layout callbacks that cannot unwind, so the window
-/// reads sit under the fault guard like every other report caller
-/// (the cross-caller census in fault.rs found this one unguarded on
-/// the breadth merge — the two worktrees never saw each other).
+/// Reached from layout callbacks that cannot unwind, so the window reads
+/// sit under the fault guard like every other report caller.
 fn table_spacer_targets(core: &mut CoreState, id: u64) -> (f64, f64) {
     crate::fault::guard("reading window geometry for the spacer tracks", || {
         let geometry = core.scene.window_geometry(id);
@@ -3223,8 +2740,6 @@ fn table_spacer_targets(core: &mut CoreState, id: u64) -> (f64, f64) {
     .unwrap_or_default()
 }
 
-/// Write them onto the band panel's two spacer tracks; answers whether
-/// they moved.
 fn table_write_spacers(
     core: &mut CoreState,
     id: u64,
@@ -3255,8 +2770,7 @@ fn table_write_spacers(
 
 /// THE VERIFY HALF (§2.2): the extents this tier laid the realized rows
 /// out at, reported only when they DISAGREE with what the core already
-/// holds — exactly, no tolerance (§2.3), which is also what stops the
-/// report loop repeating.
+/// holds — exactly, no tolerance (§2.3).
 fn table_measure_rows(
     core: &mut CoreState,
     id: u64,
@@ -3284,20 +2798,12 @@ fn table_measure_rows(
     .unwrap_or(false))
 }
 
-/// One report cycle. Answers whether anything moved, so the settle loop
-/// below knows to look again.
-///
-/// THE LAYOUT FOLLOWS THE CORE, THEN THE RANGE FOLLOWS THE LAYOUT, and
-/// the order is the whole correctness of this file. `y0` is measured in
-/// the BAND PANEL's own coordinates — the top spacer is what puts the
-/// realized rows where the core says they are — so a range read while
-/// that spacer still holds the PREVIOUS band's number is arithmetic over
-/// two different collections. Measured on the lane 2026-08-25: after one
-/// band move the tier read the stale 15,795dip spacer, found no track
-/// under the viewport, estimated a row from the mean, reported THAT, and
-/// moved the band again — 2,254 report cycles alternating between two
-/// bands, for the whole 15s retry window, with `expect_window` answering
-/// "6 300" where the scene wanted "200 300".
+/// One report cycle. Answers whether anything moved, so the settle loop knows
+/// to look again. THE LAYOUT FOLLOWS THE CORE, THEN THE RANGE FOLLOWS THE
+/// LAYOUT: `y0` is measured in the BAND PANEL's own coordinates, so a range
+/// read while that spacer still holds the PREVIOUS band's number is
+/// arithmetic over two collections (docs/traps.md: A range read against the
+/// PREVIOUS band's spacer alternates two bands forever).
 fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool> {
     let Some((host, band)) =
         TABLES.with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
@@ -3364,9 +2870,8 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
     if let Some(want) = want {
         if (y0 - want).abs() > 0.5 {
             // The parked row moved under a correction, or the last
-            // command has not landed: put the viewport back on the ROW
-            // and read nothing off an offset that is on its way
-            // somewhere.
+            // command has not landed: put the viewport back on the ROW and
+            // read nothing off an offset on its way somewhere.
             table_scroll_to(&host, id, want)?;
             return Ok(true);
         }
@@ -3400,8 +2905,7 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
     let Some(visible) = visible else {
         // No live viewport and no extent: nothing to report, and an
         // invented report comes back as a bigger band (see
-        // `table_visible_rows`). The next layout schedules the cycle
-        // that can measure.
+        // `table_visible_rows`).
         return Ok(false);
     };
     TABLES.with_borrow_mut(|t| {
@@ -3424,8 +2928,8 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
 
 /// Move the band to a reported range and put the applies it produces on
 /// screen. THE SECOND PRODUCER (§3.3), on this backend's own pump: the
-/// ops are ordinary stamp and teardown applies and go through the same
-/// `apply` the drain uses, with the same one re-stamp at the end.
+/// ops go through the same `apply` the drain uses, with the same one
+/// re-stamp at the end.
 fn table_band_to(
     core: &mut CoreState,
     id: u64,
@@ -3442,12 +2946,12 @@ fn table_band_to(
             return Ok(());
         }
     }
-    // THE SPACERS MOVE BEFORE THE RE-STAMP, not after it. `reindex`
-    // rebuilds the band panel's two spacer tracks from these stored
-    // numbers, and a re-stamp carrying the PREVIOUS band's would collapse
-    // the content for one layout pass — long enough for the ScrollViewer
-    // to clamp the offset out from under the reader (measured on the lane
-    // 2026-08-25: a scroll parked at 20,574dip came back at 540).
+    // THE SPACERS MOVE BEFORE THE RE-STAMP: `reindex` rebuilds the band
+    // panel's two spacer tracks from these stored numbers, and a re-stamp
+    // carrying the PREVIOUS band's collapses the content for one layout
+    // pass — long enough for the ScrollViewer to clamp the offset out
+    // from under the reader (docs/traps.md: A one-pass collapsed band
+    // lets the ScrollViewer clamp the reader's offset).
     let (top, bottom) = table_spacer_targets(core, id);
     TABLES.with_borrow_mut(|t| {
         if let Some(w) = t.get_mut(&id) {
@@ -3461,44 +2965,20 @@ fn table_band_to(
 }
 
 /// THE TWO SPACER HEIGHTS, from the core's three numbers: where the band
-/// starts, how far the whole collection reaches, and what the band's own
-/// rows occupy between them.
-///
-/// The identity this keeps is what makes the scrollbar honest and every
-/// realized row land where the core says: `top + banded + bottom` is the
-/// collection's extent, and the row at the band's start sits at `offset`.
-/// A band whose rows measure MORE than the extent below them (a
-/// correction landing between the geometry read and the layout) clamps
-/// rather than reserving negative space.
+/// starts, how far the collection reaches, and what the band's rows occupy.
+/// The identity `top + banded + bottom` = the collection's extent is what
+/// makes the scrollbar honest; a band whose rows measure MORE than the extent
+/// below them clamps rather than reserving negative space.
 fn band_spacers(offset: f64, extent: f64, banded: f64) -> (f64, f64) {
     (offset.max(0.0), (extent - offset - banded).max(0.0))
 }
 
 /// The rows the reader can actually SEE, as `(first, count)` over the
-/// COLLECTION's order — or `None` when this cycle measured NOTHING.
-///
-/// Read off the realized band's own tracks wherever the viewport sits
-/// inside it, which is every settled state — the band is the visible
-/// range plus one viewport each side. A viewport that has landed in a
-/// SPACER (a jump this tier has not banded for yet) has no row to read,
-/// so it says so with the only thing it can measure: the collection's
-/// mean row, from the core's own extent. The next cycle reads real
-/// tracks.
-///
-/// A REPORT IS A MEASUREMENT, so a cycle with no live viewport and no
-/// extent has none to make and answers `None`. The arm this replaces
-/// answered `(geometry.first, geometry.count.max(1))` — the REALIZED
-/// BAND's own count, handed back as the visible range — and
-/// `RowWindow::band` adds an overscan to every report, so a report of
-/// `(0, k)` bands `0..2k` and the next cycle reads `2k` and reports THAT.
-/// Measured on the lane 2026-08-25 (docs/traps.md, "The band that fed
-/// itself"): 128 -> 256 -> 512 -> 1024 -> 2048 -> 4096 -> 15,000 in
-/// seven cycles, every line carrying `vh 0.0`, undoing the
-/// declares-windowing seed before the first layout ever ran. The whole
-/// collection then cost 2.6s per `column_edges` read and 2.9s of XAML
-/// layout, and the transactions view's edges step (ledger_python then,
-/// portfolio_python since) burned 5.8s of its 15s retry
-/// window unloaded — which is what went red under the matrix.
+/// COLLECTION's order — or `None` when this cycle measured NOTHING. Read off
+/// the realized band's own tracks; a viewport that has landed in a SPACER has
+/// no row to read, so it answers with the collection's mean row. A REPORT IS
+/// A MEASUREMENT: answering the REALIZED BAND's own count is a doubling
+/// (docs/traps.md: The band that fed itself).
 fn table_visible_rows(
     geometry: &crate::scene::WindowGeometry,
     spacer_top: f64,
@@ -3599,11 +3079,9 @@ fn table_measure(table: &WinTable) -> windows_core::Result<Vec<f64>> {
 }
 
 /// THE GEOMETRY RULE, this backend's spelling: content is each column's
-/// FLOOR, the leftover track width divides equally across the columns,
-/// and header and rows take the same explicit tracks — so the cells share
-/// leading edges by construction and the table spans what it was given
-/// (docs/tables-plan.md decision 6; `column_edges` reads both halves back
-/// out of real layout).
+/// FLOOR, the leftover track width divides equally, and header and rows
+/// take the same explicit tracks, so the cells share leading edges by
+/// construction (docs/tables-plan.md decision 6).
 fn table_widths(table: &WinTable, track: f64) -> Vec<f64> {
     let cols = table.floors.len();
     let mut widths = table.floors.clone();
@@ -3626,24 +3104,12 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
     content <= viewport + 2.0
 }
 
-/// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half — the
-/// gtk.rs sibling of the same name, and gtk.rs's variant set except that
-/// `ColumnsUnreachable` reads a resolved ColumnDefinition sum GTK never
-/// sees. A disjunction here would print one sentence for six causes and
-/// five of them would read compliant (invariant 3).
-///
-/// EVERY NUMBER IS IN THE GRID'S CONTENT BOX, which is what makes these
-/// gtk.rs's clauses and not merely their names: XAML gives a UIElement's
-/// coordinate space its PADDING box, where GTK4 gives a widget's own
-/// space the content box, so `column_edges` takes both pads off before it
-/// classifies. Without that a table with a declared inset convicts itself
-/// of starting inside its own viewport.
-///
-/// COLUMNS PAST THE VIEWPORT ARE NOT THE DEFECT ANY MORE (the 2026-08-29
-/// overflow ruling): a table whose columns need more width than its track
-/// scrolls to them, so what is left to convict is columns the surface
-/// CANNOT REACH — hence `reach`, the toolkit's own scroll range and not
-/// `drawn - viewport`, which would make the clause agree with itself.
+/// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half — gtk.rs's
+/// variant set plus `ColumnsUnreachable`, since a disjunction would print one
+/// sentence for six causes (invariant 3). EVERY NUMBER IS IN THE GRID'S
+/// CONTENT BOX: XAML gives a UIElement's coordinate space its PADDING box
+/// where GTK4 gives the content box. COLUMNS PAST THE VIEWPORT ARE NOT THE
+/// DEFECT: what is left is columns the surface CANNOT REACH, hence `reach`.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
@@ -3655,28 +3121,19 @@ enum TableHorizontalIssue {
     ContentUnreachable,
 }
 
-/// `drawn` is the resolved column tracks plus their spacing, `track` what
-/// the parent gave the table, `viewport` the table surface's own width —
-/// all in the grid's content box, like the three ink/track numbers below.
-///
-/// THE THREE EDGE NUMBERS DO NOT SHARE A BASIS, and that is the whole
-/// lesson of 2026-08-25 (docs/deferred.md):
-///   `min_start`  the leftmost cell's INK. Where the content begins is a
-///                question ink answers, and this backend's cells sit at
-///                their tracks' leading edges, so it reads flush.
-///   `min_end`    the SHORTEST of the lines' TRACK ends. Ink cannot serve:
-///                a table cell here is not stretched to its track, so a
-///                correct line's ink stops at its text. This is the
-///                header-versus-rows instrument — a reserved scrollbar
-///                gutter takes its width out of the rows and not out of
-///                the pinned header, which `declare_table` promises this
-///                read can see.
-///   `max_end`    the furthest cell's INK, which is the only basis that
-///                can see ink spilling PAST its own track; tracks
-///                overflowing the viewport are `ColumnsUnreachable`'s job.
-///
-/// `reach` is how far the columns' axis can be scrolled — the host's own
-/// ScrollableWidth, never an arithmetic over the numbers beside it.
+/// `drawn` is the resolved column tracks plus their spacing, `track` what the
+/// parent gave the table, `viewport` the table surface's own width — all in
+/// the grid's content box. THE THREE EDGE NUMBERS DO NOT SHARE A BASIS
+/// (docs/deferred.md):
+///   `min_start`  the leftmost cell's INK — cells sit at their tracks'
+///                leading edges here, so it reads flush.
+///   `min_end`    the SHORTEST of the lines' TRACK ends. Ink cannot serve: a
+///                cell is not stretched to its track. This is the
+///                header-versus-rows instrument.
+///   `max_end`    the furthest cell's INK, the only basis that can see ink
+///                spilling PAST its own track.
+/// `reach` is the host's own ScrollableWidth, never an arithmetic over the
+/// numbers beside it.
 #[cfg(any(feature = "harness", test))]
 fn table_horizontal_issue(
     drawn: f64,
@@ -3705,16 +3162,10 @@ fn table_horizontal_issue(
 }
 
 /// ONE CELL'S TWO BASES, in the table surface's own space: where the cell
-/// DRAWS, and where its Grid TRACK is.
-///
-/// THEY ARE DIFFERENT ON THIS BACKEND, and believing otherwise cost a
-/// windows lane (2026-08-25, docs/deferred.md). `flush_tracks` stamps
-/// HorizontalAlignment::Stretch on FLEX children; a table's cells are not
-/// flex children — `table_stamp` writes explicit pixel tracks onto the
-/// header and every row, and the cells sit in the band panel inside them —
-/// so a cell's ActualWidth is its own content. Every table-bearing leg
-/// failed with "draws 289dip of a 508dip viewport", the 289 tracking the
-/// row's text.
+/// DRAWS, and where its Grid TRACK is. THEY ARE DIFFERENT ON THIS BACKEND,
+/// and believing otherwise cost a windows lane (docs/deferred.md):
+/// `flush_tracks` stamps Stretch on FLEX children and a table's cells are not
+/// flex children, so a cell's ActualWidth is its own content.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy)]
 struct TableCellBox {
@@ -3727,10 +3178,9 @@ struct TableCellBox {
 /// One line's trailing edge: the far side of the furthest TRACK any of its
 /// cells occupies, or None for a line with no placed cell.
 ///
-/// THE TRACK, NEVER THE INK. gtk.rs's cells FILL their columns (hexpand +
-/// halign Fill), so its line end IS the track edge and one read answers
-/// both; reading ink here would put a different question in the same
-/// sentence. `mod tests` pins the measured field geometry both ways.
+/// THE TRACK, NEVER THE INK. gtk.rs's cells FILL their columns, so its
+/// line end IS the track edge and one read answers both; reading ink here
+/// would put a different question in the same sentence.
 #[cfg(any(feature = "harness", test))]
 fn table_line_end(cells: &[TableCellBox]) -> Option<f64> {
     cells.iter().fold(None, |far: Option<f64>, cell| {
@@ -3739,14 +3189,10 @@ fn table_line_end(cells: &[TableCellBox]) -> Option<f64> {
 }
 
 /// `column_edges`' FIVE NUMBERS, moved into the grid's CONTENT box.
-///
 /// TransformToVisual's origin is the grid's PADDING box and
-/// `assigned_track`/`ActualWidth` are its OUTER one, so `pad` comes off
-/// each of them — and since 2026-08-25 `pad` includes the table card's
-/// interior (`container_padding`), which is exactly what lets the card
-/// hold content off its stroke without moving a cell edge. Pure and
-/// separate from the read so `mod tests` can pin the padded case; a basis
-/// that forgets this subtraction convicts every correct padded table.
+/// `assigned_track`/`ActualWidth` are its OUTER one, so `pad` comes off each —
+/// and `pad` includes the table card's interior (`container_padding`), which
+/// lets the card hold content off its stroke without moving a cell edge.
 #[cfg(any(feature = "harness", test))]
 fn table_content_frame(
     pad: f64,
@@ -3765,8 +3211,7 @@ fn table_content_frame(
 }
 
 /// The convicting sentence for each cause, or empty when there is none.
-/// PURE and separate from the read, because the sentence is the thing
-/// the next reader chases and `mod tests` has to be able to pin it.
+/// PURE and separate from the read, so `mod tests` can pin it.
 #[cfg(any(feature = "harness", test))]
 fn table_horizontal_complaint(
     drawn: f64,
@@ -3869,10 +3314,9 @@ fn table_stamp(table: &mut WinTable) -> windows_core::Result<()> {
     Ok(())
 }
 
-/// One table's measure-and-stamp. Reached from three places — the drain,
-/// the container's first layout, and every layout after it — so it is
-/// tolerant of a borrow it cannot take (the pass it skipped is the pass
-/// the next layout runs) and of a control that cannot be measured yet.
+/// One table's measure-and-stamp. Reached from the drain and from every
+/// layout, so it tolerates a borrow it cannot take (the pass it skipped
+/// is the pass the next layout runs) and a control it cannot measure.
 fn table_pass(id: u64) {
     TABLES.with(|tables| {
         let Ok(mut tables) = tables.try_borrow_mut() else {
@@ -3899,9 +3343,6 @@ fn table_pass(id: u64) {
         }
         let _ = table_stamp(table);
     });
-    // The container's own layout is also a window event — a resize
-    // changes how many rows fit, and the first one is where a band that
-    // has never been reported gets its viewport.
     schedule_report(id);
 }
 
@@ -3939,27 +3380,14 @@ fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
 /// The dirty marker: a LEADING ASTERISK, NO SPACE, prefixed to the
 /// caption — the convention Windows apps use, measured on Notepad
 /// 11.2606.15.0 (docs/dirty-plan.md, the windows arm).
-///
-/// Notepad's *visible* mark is a dot in its own tab strip because it
-/// draws its own title bar; the asterisk still lives in the HWND caption
-/// for the taskbar, Alt+Tab and automation. kaya draws a plain system
-/// caption, so here the caption string is both.
 const DIRTY_MARK: &str = "*";
 
 /// The caption a window SHOULD be showing, composed: the covering nav
 /// entry's title if the stack has one, else the window's own, with the
 /// dirty marker in front when the app has declared unsaved work.
 ///
-/// THE DECLARED TITLE IS NEVER TOUCHED (docs/dirty-plan.md D1). The
-/// marker is composed HERE, on the way to the OS, so `core.window_titles`
-/// keeps exactly the bytes the app wrote; scene titles are byte-compared
-/// across five platforms, so the declared string stays identical
-/// everywhere while the chrome diverges.
-///
-/// THE MARKER RIDES THE CAPTION, not the window's own title string, so a
-/// covering nav entry keeps it: `dirty` is a property of the WINDOW, and
-/// a marker that vanished on a nav push would be different observable
-/// semantics on this backend alone.
+/// THE DECLARED TITLE IS NEVER TOUCHED (docs/dirty-plan.md D1): the
+/// marker is composed here, on the way to the OS.
 fn window_caption(core: &CoreState, window: u64) -> String {
     let title = core
         .nav_stacks
@@ -3969,8 +3397,7 @@ fn window_caption(core: &CoreState, window: u64) -> String {
         .map(|e| e.title.clone())
         .unwrap_or_else(|| core.window_titles.get(&window).cloned().unwrap_or_default());
     // THE IDENTITY NAME IS THE WINDOW'S DEFAULT TITLE, never an override
-    // of one (docs/app-identity-plan.md I9). One string drives the
-    // caption, the taskbar tooltip and the alt-tab label on Windows.
+    // of one (docs/app-identity-plan.md I9).
     let title = if title.is_empty() {
         APP_IDENTITY.with_borrow(|slot| {
             slot.as_ref().map_or_else(String::new, |identity| identity.name.clone())
@@ -3985,27 +3412,12 @@ fn window_caption(core: &CoreState, window: u64) -> String {
     }
 }
 
-/// THE ONE CAPTION WRITER. Every `Window::SetTitle` past the pre-app
-/// placeholder in `setup()` goes through here, so the dirty composition
-/// has one place to happen instead of five places to be forgotten (the
-/// mark blinks out otherwise on a nav push, a pop or a split-mode
-/// change).
-///
-/// Idempotent by construction — it derives the whole caption from state,
-/// so calling it after ANY of the three inputs moves (the window's title,
-/// the nav stack, the dirty flag) is always correct.
-///
-/// TWO SINKS, STILL ONE AUTHOR. A promoted window draws its own caption
-/// text, so the composed string goes to the window AND to the TextBlock
-/// in the caption's centre slot. Two places it is DISPLAYED; one place it
-/// is decided.
-///
-/// AND THE CONTROL IS NOT ONE OF THEM. `TitleBar::UpdateTitle` writes
+/// THE ONE CAPTION WRITER: every `Window::SetTitle` past the pre-app
+/// placeholder in `setup()` goes through here, and a promoted window's
+/// caption TextBlock is the second sink. `TitleBar::UpdateTitle` writes
 /// `appWindow.Title` from its own `Title` property (microsoft-ui-xaml @
-/// winui3/release/2.2.0, `TitleBar.cpp:505-513`), and the first casualty
-/// of two writers is the dirty marker, silently, since
-/// `Stage::window_dirty` reads the live `Window::Title()`. The property
-/// is left empty from birth: the rival writer never exists.
+/// winui3/release/2.2.0, `TitleBar.cpp:505-513`), and the first casualty of
+/// two writers is the dirty marker — so that property is left empty.
 fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let caption = HSTRING::from(window_caption(core, window));
     let target = winui_window(core, window)?;
@@ -4017,12 +3429,9 @@ fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
 }
 
 /// The visible stack positions at a ceiling of three, folded from BOTH
-/// views' Modes — the control's own answer at each level of the nest,
-/// never a width kaya measured — plus slot occupancy: an empty slot is
-/// a visible column but not a pane (docs/multicolumn-plan.md D1/D4).
-/// Which pane a SinglePane view shows follows the PanePriority kaya
-/// declared, the platform's contract. None when no three-pane nest is
-/// up.
+/// views' Modes — never a width kaya measured — plus slot occupancy: an
+/// empty slot is a visible column but not a pane
+/// (docs/multicolumn-plan.md D1/D4). None when no three-pane nest is up.
 fn three_pane_positions(core: &CoreState, window: u64) -> Option<Vec<u64>> {
     let outer = core.split_views.get(&window)?;
     let inner = core.inner_splits.get(&window)?;
@@ -4057,9 +3466,7 @@ fn three_pane_positions(core: &CoreState, window: u64) -> Option<Vec<u64>> {
 
 /// The back affordance at a ceiling of three: the TOP entry's bar,
 /// visible exactly when popping would REVEAL a covered surface into a
-/// visible slot — the surface beneath the top is not on screen. The
-/// uniform rule (the mac chevron and the GTK button compute the same
-/// answer); every other entry's bar stays collapsed.
+/// visible slot; every other entry's bar stays collapsed.
 fn apply_three_pane_back_bar(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let entries = core.nav_stacks.get(&window).cloned().unwrap_or_default();
     let count = entries.len() as u64;
@@ -4080,16 +3487,11 @@ fn apply_three_pane_back_bar(core: &CoreState, window: u64) -> windows_core::Res
     Ok(())
 }
 
-/// The ceiling-3 arm: pane 0 the base root, pane 1 the first entry,
-/// the trailing pane the REST of the stack's top — two nested
-/// TwoPaneViews, the inner in the outer's STAR-SIZED Pane2 (an
-/// auto-sized parent would give it no width to measure its own
-/// threshold against). The priority is a CHAIN of PanePriority bits:
-/// outer keeps its content, inner keeps its detail — two binary
-/// declarations composing into D1's shallowest-sheds-first. The
-/// collapse ORDER is emergent from each view measuring the space the
-/// nest hands it; kaya declares no threshold and computes none.
-/// Returns false when the window has no root yet.
+/// The ceiling-3 arm: pane 0 the base root, pane 1 the first entry, the
+/// trailing pane the REST of the stack's top — two nested TwoPaneViews,
+/// the inner in the outer's STAR-SIZED Pane2 (an auto-sized parent gives
+/// it no width to measure its own threshold against). Returns false when
+/// the window has no root yet.
 fn refresh_three_panes(core: &mut CoreState, window: u64) -> windows_core::Result<bool> {
     let Some(base) = core.window_roots.get(&window).cloned() else {
         return Ok(false);
@@ -4159,9 +3561,8 @@ fn refresh_three_panes(core: &mut CoreState, window: u64) -> windows_core::Resul
     let el: UIElement = windows_core::Interface::cast(&outer)?;
     set_window_content(core, window, &el)?;
     refresh_caption(core, window)?;
-    // The back bar follows BOTH controls' modes, now and on every
-    // change — Mode is decided during layout, so the build-time read
-    // alone would predate this arrangement (docs/traps.md).
+    // Mode is decided during layout, so a build-time read alone would
+    // predate this arrangement (docs/traps.md).
     apply_three_pane_back_bar(core, window)?;
     let handler = TypedEventHandler::new(move |_, _| {
         CORE.with_borrow_mut(|core| {
@@ -4192,23 +3593,18 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     }
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
 
-    // ADAPTIVE LIST-DETAIL (DESIGN.md). A two-column arrangement rather
-    // than a width test of kaya's own — the semantic is side-by-side
-    // panes and WinUI's adaptive triggers ARE width thresholds anyway.
     // Whichever arm is about to run, the previous split render must let
     // go of the roots first.
     release_split(core, window)?;
-    // ADAPTIVE PANES (docs/multicolumn-plan.md): the ceiling is the
-    // app's one declaration; how many panes fit is each TwoPaneView's
-    // own Mode, decided level by level in the nest.
+    // docs/multicolumn-plan.md: the ceiling is the app's one declaration;
+    // how many panes fit is each TwoPaneView's own Mode.
     let ceiling = core.panes.get(&window).copied().unwrap_or(1);
     if ceiling >= 3 && refresh_three_panes(core, window)? {
         return Ok(());
     }
     let wants_split = ceiling == 2;
-    // SHORT-CIRCUITED on wants_split: a window reconciling before its
-    // first mount legitimately has no content to measure, and propagating
-    // the read unconditionally made every nav scene fail.
+    // Short-circuited on wants_split: a window reconciling before its
+    // first mount has no content to measure.
     let measured = window_client_width(core, window);
     if std::env::var("KAYA_SPLIT_TRACE").is_ok() {
         eprintln!(
@@ -4217,10 +3613,9 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             core.nav_stacks.get(&window).map(|s| s.len()).unwrap_or(0)
         );
     }
-    // NO width test here. TwoPaneView decides where one pane becomes two,
-    // off its own MinWideModeWidth. No `top.is_some()` either: an empty
-    // stack on a wide window shows the leading pane and an EMPTY trailing
-    // one, the same as every other backend.
+    // No width test here (TwoPaneView decides off its own
+    // MinWideModeWidth) and no `top.is_some()` either: an empty stack on
+    // a wide window shows the leading pane and an EMPTY trailing one.
     if wants_split {
         let base = core.window_roots.get(&window).cloned();
         let detail = top
@@ -4228,20 +3623,16 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             .and_then(|e| e.wrapper.clone());
         if let Some(base) = base {
             let view = TwoPaneView::new()?;
-            // TALL MODE IS KILLED, the platform's own way: without this,
-            // a compact-width window TALLER than 641 stacks both panes
-            // top-over-bottom — a screen no other backend can produce,
-            // with the leading pane's WIDTH applied as a HEIGHT and the
-            // back affordance gone. Every scene height happens to be
-            // 600, so the lane's green rested on a 41-DIP coincidence
-            // (docs/multicolumn-plan.md; the check-steps clause holds
-            // this call present on every TwoPaneView).
+            // Tall mode is killed the platform's own way: a
+            // compact-width window TALLER than 641 otherwise stacks both
+            // panes top-over-bottom, and every scene height is 600
+            // (docs/multicolumn-plan.md; check-steps holds this call
+            // present on every TwoPaneView).
             view.SetMinTallModeHeight(f64::INFINITY)?;
             view.SetWideModeConfiguration(TwoPaneViewWideModeConfiguration::LeftRight)?;
-            // Leading pane sized, trailing pane takes the rest — see
-            // protocol::leading_pane_width. TwoPaneView's OWN default is
-            // two equal panes, because it was built for dual-SCREEN
-            // devices; the proportion stays ours.
+            // TwoPaneView's own default is two equal panes (it was
+            // built for dual-SCREEN devices); the proportion stays ours —
+            // see protocol::leading_pane_width.
             let lead = crate::protocol::leading_pane_width(
                 window_client_width(core, window).unwrap_or(0.0),
             );
@@ -4253,9 +3644,6 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
                 Value: 1.0,
                 GridUnitType: GridUnitType::Star,
             })?;
-            // Which pane survives the collapse: the detail once the stack
-            // has one, else the list — TwoPaneView's spelling of
-            // libadwaita's show-content.
             view.SetPanePriority(if top.is_some() {
                 TwoPaneViewPriority::Pane2
             } else {
@@ -4272,15 +3660,12 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             core.split_views.insert(window, view.clone());
             let el: UIElement = windows_core::Interface::cast(&view)?;
             set_window_content(core, window, &el)?;
-            // WITH AN EMPTY STACK THE WINDOW KEEPS ITS OWN TITLE. This
-            // used to fall back to the empty string; caught on macOS,
-            // where AppKit substitutes the PROCESS NAME for an empty title
-            // (2026-07-27). Both arms now ask window_caption.
+            // With an empty stack the window keeps its OWN title: an
+            // empty one degrades to the process name
+            // (docs/multicolumn-plan.md).
             refresh_caption(core, window)?;
-            // The back bar follows the CONTROL's mode, now and every time
-            // Windows changes it. Mode is decided during layout, so
-            // reading it here alone would read the value from before this
-            // pane arrangement existed (docs/traps.md).
+            // Mode is decided during layout, so reading it here alone
+            // would predate this pane arrangement (docs/traps.md).
             apply_split_back_bar(core, window)?;
             let handler = TypedEventHandler::new(move |_, _| {
                 CORE.with_borrow_mut(|core| {
@@ -4292,14 +3677,12 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             return Ok(());
         }
     }
-    // The serial arm stamps too.
     core.split_presentation.insert(window, "stacked");
 
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
-            // Collapsed: the entry COVERS the leading pane, so back means
-            // something again and its bar comes back. Both arms must write
-            // it or the state is derived-by-default in one.
+            // Collapsed: the entry COVERS the leading pane, so back
+            // means something again. Both arms must write it.
             if let Some(back) = &entry.back_button {
                 let back: UIElement = back.cast()?;
                 back.SetVisibility(Visibility::Visible)?;
@@ -4316,16 +3699,12 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             }
         }
     }
-    // Both arms end the same way — the covering entry's title or the
-    // window's own, marker composed in — so the caption is written
-    // once, after the content, rather than once per arm.
     refresh_caption(core, window)
 }
 
-/// Fill a navigation entry at mount: the wrapper Grid is the
-/// backend's chrome — an auto-height back bar (the back affordance;
-/// its click runs the SAME user-pop path a pointer press does) over
-/// a star-height row holding the entry's root.
+/// Fill a navigation entry at mount: the wrapper Grid is the backend's
+/// chrome — an auto-height back bar over a star-height row holding the
+/// entry's root.
 fn mount_entry(
     core: &mut CoreState,
     entry_id: u64,
@@ -4373,13 +3752,12 @@ fn mount_entry(
     Ok(())
 }
 
-/// Assemble the window's sections chrome: a NavigationView — the
-/// platform's own idiom, viable now that the aggregation outer delegates
-/// QI (docs/traps.md) — whose items are the sections (string content, the
-/// ComboBox content-stealing trap) and whose Content is the active pane.
-/// Built ONCE and grown incrementally (XAML refuses re-parenting); a hint
-/// change is just SetPaneDisplayMode. SelectionChanged is the USER route,
-/// guarded by the swallow COUNTER — it raises async.
+/// Assemble the window's sections chrome: a NavigationView whose items
+/// are the sections (string content — docs/traps.md: a WinUI ComboBoxItem
+/// with UIElement content gets STOLEN) and whose Content is the active
+/// pane. Built ONCE and grown incrementally (XAML refuses re-parenting);
+/// SelectionChanged is the USER route, raised async and guarded by the
+/// swallow COUNTER.
 fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     let ids = core.sections.get(&window).cloned().unwrap_or_default();
     if ids.is_empty() {
@@ -4397,9 +3775,8 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         let handler = bindings::Windows::Foundation::TypedEventHandler::new(
             move |nav: windows_core::Ref<NavigationView>, _| {
                 use windows_core::Interface;
-                // A programmatic move's late raise: swallow it — the
-                // model and emit were handled synchronously at the
-                // set (the entry_swallow pattern).
+                // A programmatic move's late raise: the model and emit
+                // were handled synchronously at the set.
                 if swallow
                     .fetch_update(
                         std::sync::atomic::Ordering::Relaxed,
@@ -4421,7 +3798,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
                 };
                 let sid = sid_ref.Value()?;
                 // Fires from the message loop, never under an apply
-                // borrow (the back-button precedent).
+                // borrow.
                 let mut emit = false;
                 CORE.with_borrow_mut(|core| {
                     let Some(core) = core.as_mut() else { return };
@@ -4454,8 +3831,6 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         set_window_content(core, window, &nav_el)?;
     }
     let nav = core.section_navs[&window].clone();
-    // Grow incrementally: an item per section not yet appended (add
-    // order; the set is append-only by grammar).
     for sid in &ids {
         if core.section_items.contains_key(sid) {
             continue;
@@ -4466,9 +3841,8 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         // content-stealing trap (docs/traps.md).
         item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&**title))?)?;
         item.SetTag(&PropertyValue::CreateUInt64(*sid)?)?;
-        // The switcher entry's icon rides its OWN slot, not the
-        // content, so the title stays a plain string and the
-        // content-stealing trap above stays shut.
+        // The icon rides its OWN slot, not the content, so the title
+        // stays a plain string and the trap above stays shut.
         apply_symbol(&item, core.section_panes[sid].symbol)?;
         nav.MenuItems()?.Append(&item)?;
         core.section_items.insert(*sid, item);
@@ -4478,10 +3852,6 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         .get(&window)
         .copied()
         .unwrap_or(0);
-    // The number comes from the spec's enum rather than a literal, so a
-    // renumbering moves every generated surface together. Nothing mirrors
-    // it for the harness — the observation reads the property back off the
-    // live control, below.
     let bar_hint = i64::from(crate::wire::SECTIONS_PRESENTATION_BAR);
     nav.SetPaneDisplayMode(if hint == bar_hint {
         NavigationViewPaneDisplayMode::Top
@@ -4496,9 +3866,8 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
 }
 
 /// Move the switcher's selection programmatically: swallow the async
-/// SelectionChanged raise (counter, not flag) and skip no-op moves,
-/// which raise nothing and would leave the counter armed against a
-/// future real switch.
+/// SelectionChanged raise (counter, not flag) and skip no-op moves, which
+/// raise nothing and would leave the counter armed against a real switch.
 fn nav_set_selected(
     core: &mut CoreState,
     window: u64,
@@ -4558,16 +3927,12 @@ fn refresh_section_pane(core: &mut CoreState, sid: u64) -> windows_core::Result<
     Ok(())
 }
 
-/// WinUI's editable controls store every line break as a bare CR: text SET
-/// with LF reads back with CR (docs/traps.md). Guest-visible strings are
-/// compared byte-for-byte across languages, so CR is normalized to LF at
-/// every point where that text escapes toward the guest or is compared
-/// against guest text.
-///
-/// THE TRAILING PARAGRAPH MARK IS A SEPARATE PROBLEM AND IS NOT SOLVED
-/// HERE: a RichEdit story always ends in one, and `lf` would faithfully
-/// turn it into a newline no guest ever wrote. `Editable::text` reads
-/// with `TextGetOptions::AdjustCrlf`, which drops it.
+/// WinUI's editable controls store every line break as a bare CR
+/// (docs/traps.md: WinUI TextBox speaks CR, everything else speaks LF), so
+/// CR is normalized to LF wherever that text escapes toward the guest or
+/// is compared against guest text. The trailing paragraph mark is a
+/// separate problem, dropped by `Editable::text`'s
+/// `TextGetOptions::AdjustCrlf`.
 fn lf(s: String) -> String {
     if s.contains('\r') {
         s.replace("\r\n", "\n").replace('\r', "\n")
@@ -4578,9 +3943,7 @@ fn lf(s: String) -> String {
 
 /// KAYA_WINUI_NAV_PROBE: wrap the primary mount in a NavigationView
 /// ("bare" = no items; anything else adds two string items). The
-/// stowed-E_NOINTERFACE bisection instrument (docs/traps.md): it
-/// answers whether the control is viable in THIS hosting shape at
-/// all, independent of kaya's sections machinery.
+/// stowed-E_NOINTERFACE bisection instrument (docs/traps.md).
 fn nav_probe_wrap(element: &UIElement) -> windows_core::Result<UIElement> {
     use bindings::Microsoft::UI::Xaml::Controls::{NavigationView, NavigationViewItem};
     let level = std::env::var("KAYA_WINUI_NAV_PROBE").unwrap_or_default();
@@ -4588,10 +3951,9 @@ fn nav_probe_wrap(element: &UIElement) -> windows_core::Result<UIElement> {
         return Ok(element.clone());
     }
     eprintln!("kaya: NAV PROBE armed ({level})");
-    // The aggregation hypothesis: NavigationView's ResourceAccessor
-    // consults Application.Current at runtime; with the outer
-    // discarding the inner, identity QIs for IApplication die
-    // E_NOINTERFACE. Reproduce the exact lookup it would make.
+    // NavigationView's ResourceAccessor consults Application.Current at
+    // runtime; with the outer discarding the inner, identity QIs for
+    // IApplication die E_NOINTERFACE. Reproduce the exact lookup.
     match bindings::Microsoft::UI::Xaml::Application::Current() {
         Ok(app) => match app.Resources() {
             Ok(_) => eprintln!("kaya: PROBE Current().Resources() OK"),
@@ -4621,13 +3983,6 @@ fn nav_probe_wrap(element: &UIElement) -> windows_core::Result<UIElement> {
 }
 
 // --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
-//
-// One item vocabulary, two anchors. The WINDOW anchor is a real in-window
-// MenuBar in its own Auto row of the window shell Grid; the WIDGET/NODE
-// anchor is a MenuFlyout set as the element's ContextFlyout. Echo
-// doctrine: ONE dispatch path — chrome clicks, the accelerator route and
-// harness verbs all land in menu_user_activate and emit; programmatic
-// set_menu_prop writes mutate the model silently.
 
 /// Enablement is the AND of the item's own flag and every grouping
 /// ancestor's — the inherited rule every read, render, shortcut, and
@@ -4658,10 +4013,9 @@ fn menu_preorder(core: &CoreState, roots: &[u64], out: &mut Vec<u64>) {
 }
 
 /// Resolve a `>`-joined label path against root items, labels compared
-/// byte-for-byte (the shared-scene contract). The path walks the
-/// SEMANTIC tree: a grouping root's label is a path segment whether or
-/// not materialization mints a titled row — an inline nested
-/// radio_group has none, yet "View>Sort>Date" must still land on Date.
+/// byte-for-byte (the shared-scene contract). The path walks the SEMANTIC
+/// tree: a grouping root's label is a path segment whether or not
+/// materialization mints a titled row.
 fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64> {
     let mut current: Vec<u64> = roots.to_vec();
     let mut found = None;
@@ -4675,29 +4029,19 @@ fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64>
     found
 }
 
-/// Build the window shell at the first menubar_append: a Grid whose FIRST
-/// Auto row is the TITLEBAR's, whose second Auto row holds the MenuBar,
-/// and whose Star row is the content slot every later mount/nav/sections
-/// swap fills. Built ONCE; any content the window already presents moves
-/// into the slot (detached first — XAML refuses re-parenting;
-/// docs/traps.md).
-///
-/// THE TITLEBAR ROW IS DECLARED HERE AND FILLED ELSEWHERE. An Auto row
-/// with no child measures zero, so a window whose catalog promotes
-/// nothing keeps precisely the geometry it had before the toolbar slice.
-/// `refresh_toolbar` mints the `TitleBar` into it on the first promotion.
-///
-/// THE MENUBAR IS BORN IN ROW 1 AND MAY LEAVE IT (docs/chrome-plan.md C2,
-/// the one-band revision): a window that promotes an action wears one
-/// band and its menu migrates into `TitleBar.LeftHeader`, leaving this row
-/// empty. `rehost_menubar` owns both directions.
+/// Build the window shell at the first menubar_append: an Auto row for the
+/// TITLEBAR, an Auto row for the MenuBar, and a Star content slot every
+/// later mount/nav/sections swap fills. Built ONCE; content the window
+/// already presents is DETACHED first, since XAML refuses re-parenting
+/// (docs/traps.md). The titlebar row is filled later by `refresh_toolbar`;
+/// the MenuBar may leave row 1 for `TitleBar.LeftHeader` (chrome-plan C2).
 fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     if core.menubars.contains_key(&window) {
         return Ok(());
     }
     // The MenuBar's items are realized by a LAYOUT PASS, not by the
-    // append below, which is why the failure this guards used to land
+    // append below, so the failure this guards would otherwise land
     // milliseconds later on a dispatcher tick.
     require_control_resources("this window declares a menu");
     let target = winui_window(core, window)?;
@@ -4740,165 +4084,33 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     Ok(())
 }
 
-/// THE CAPTION BAND'S METRICS, every one of them the platform's own
-/// number read out of the pinned controls' theme resources
-/// (microsoft-ui-xaml @ winui3/release/2.2.0). They exist because two runs
-/// of buttons — the system's caption cluster and the app's promoted
-/// commands — have to sit in ONE band, and the first version of this arm
-/// put them in two: 68x48 command cells centred 9 DIP below a 46x32
-/// system cluster (docs/chrome-plan.md C2).
-///
-/// `CAPTION_COMMAND_CELL` — the width one promoted command occupies.
-/// `AppBarButton`'s own default is 68, which is a TOOLBAR metric: sized
-/// for a strip of its own, where the label sits under the icon. In a
-/// caption band the cell is square and its side is the band —
-/// `AppBarThemeCompactHeight` (48), the same resource the CommandBar's own
-/// "…" overflow button takes for its `MinHeight`.
+/// The width one promoted command occupies in the caption band: the cell
+/// is square and its side is the band — `AppBarThemeCompactHeight` (48).
+/// `AppBarButton`'s own default of 68 is a TOOLBAR metric, sized for a
+/// strip where the label sits under the icon (docs/chrome-plan.md C2).
 const CAPTION_COMMAND_CELL: f64 = 48.0;
 
 /// The theme key holding the height an `AppBarButton`'s own template is
-/// laid out for, which is NOT the height of the row it sits in.
-///
-/// WHAT IT REPAIRS, measured (docs/chrome/winui-clip.md §2). An
-/// `AppBarButton` in a CLOSED CommandBar is put in the `Compact` visual
-/// state, which sets its pointer-over visual's margin to
-/// `AppBarButtonInnerBorderCompactMargin` = **2,6,2,22**
-/// (`AppBarButton_themeresources.xaml:119,150`). Those 22 DIP are the
-/// collapsed label's row. On a button of `AppBarThemeMinHeight` — 64 —
-/// the hover border is y 6..42, 36 tall, centre 24, and
-/// `AppBarButtonContentViewboxCollapsedMargin` = 0,16,0,2 puts the 16 DIP
-/// icon at y 16..32, centre 24: concentric, which is the arrangement those
-/// two margins were written together for.
-///
-/// THE CAPTION ROW IS 48, and that is what breaks it. The `TitleBar`
-/// control's expanded row is 48 (`AppBarThemeCompactHeight` is the same
-/// 48), so the button is MEASURED against 48 and arranged 48 while both
-/// margins stay absolute: the hover border becomes `48 - 6 - 22` = 20 DIP
-/// tall, still top-aligned at 6, and its bottom edge cuts across the
-/// button's own icon at y 26 with six rows of glyph drawn below it on bare
-/// background. That is the maintainer's "the grey box on hover of the
-/// command buttons is also cut off" (2026-08-18) — and it is not a clip:
-/// pixel-measured, the box's edge profile is symmetric top and bottom, so
-/// it is a COMPLETE rounded rect that is 16 DIP too short.
-///
-/// SO THE BUTTON IS GIVEN THE HEIGHT ITS OWN TEMPLATE ASSUMES, read out of
-/// the dictionary rather than written here, and the CommandBar's own clip
-/// takes the empty label row back off: `LayoutRoot`'s `Grid.Clip` is
-/// `TemplateSettings.ClipRect`, the closed bar's compact height, so the
-/// 64 DIP button is clipped to the 48 DIP band for RENDERING AND FOR
-/// HIT-TESTING both. Measured after: `Root` 48x64, hover border 44x36 at
-/// y 6..42, and UIA still publishes each button as 48x48 — the clip, seen
-/// from outside.
-///
-/// The `MoreButton` beside them needs none of this: `EllipsisButton` is
-/// written for 48 outright (`MinHeight` = `AppBarThemeCompactHeight`,
-/// margin `AppBarEllipsisButtonInnerBorderMargin` = 2,6,6,6 → 40x36
-/// centred), which is why its hover box was the right shape all along and
-/// its neighbours' were not.
+/// laid out for (64), which is NOT the height of the caption row it sits
+/// in (48): laid out against 48 the hover border is 16 DIP too short and
+/// cuts across the icon. The button is given its own template's height and
+/// the CommandBar's `Grid.Clip` takes the empty label row back off, for
+/// rendering and hit-testing both (docs/chrome/winui-clip.md §2).
 const CAPTION_COMMAND_BUTTON_BOX_KEY: &str = "AppBarThemeMinHeight";
 
 /// The width of the drag strip between the promoted commands and the
-/// system's minimize/maximize/close, in DIP.
-///
-/// WHAT OWNS THAT GAP, read off the template rather than guessed. The
-/// `TitleBar` control's template is a twelve-column Grid
-/// (`docs/chrome/TitleBar-v220.xaml:168-193`). Column 9 is
-/// `PART_RightHeaderPresenter`, where kaya's `CommandBar` lives, and it
-/// carries no margin and no padding — neither in the template nor from
-/// this backend. Column 11 is `RightPaddingColumn`, which the control
-/// overwrites every layout with `AppWindowTitleBar.RightInset()`
-/// (`TitleBar.cpp:466-478`), so it is exactly the system caption
-/// cluster's own width. Between them sits column 10, which holds NO
-/// template child at all and whose whole width is
-/// `TitleBarMinDragRegionWidth` — 48 in the library's dictionary
-/// (`TitleBar_themeresources.xaml:85`). Measured on the lane before this
-/// constant existed: rightmost command's right edge 812, leftmost system
-/// button 860, gap 48 to the pixel. The gap is that column and nothing
-/// else.
-///
-/// WHY 48 IS THE WRONG NUMBER HERE. The column is a MINIMUM DRAG REGION:
-/// it exists so that a caption whose slots are full still leaves the user
-/// somewhere to grab. In this band that job is already done many times
-/// over, and the control's own source says why. `UpdateInteractableElementsList`
-/// (`TitleBar.cpp:753-811`) punches the Left and Right header presenters
-/// out WHOLE, but for `Content` it recurses through
-/// `FindInteractableElements`, which only punches out elements that are
-/// `Control`s and enabled (`TitleBar.cpp:1026-1038`). kaya's Content is a
-/// bare `TextBlock`, and `TextBlock` derives from `FrameworkElement`, not
-/// from `Control` — so nothing in column 8 is ever punched out, and
-/// column 8 is `Width="*"`. Every pixel between the menu and the commands
-/// is drag surface; on the measured 946-wide window that is a strip about
-/// 450 px across, with the title drawn in the middle of it. Column 10 is
-/// belt-and-suspenders, and 48 DIP of it is a caption button's worth of
-/// nothing next to commands the maintainer asked to read as one family
-/// with the system cluster.
-///
-/// WHERE 8 COMES FROM. It is the gap this band ALREADY draws between two
-/// caption-hosted controls, measured on the same run as the 48 above:
-/// the `MenuBar` items in `LeftHeader` sit 8 apart (`MenuBarItemMargin`
-/// is 4,4,4,4, `MenuBar_themeresources.xaml:44-46`), and the `TitleBar`
-/// dictionary spells the same number for the gap after the title
-/// (`TitleBarTitleMargin` = 0,0,8,0, `TitleBar_themeresources.xaml:93`).
-/// So the strip is not a new metric: it is the band's existing
-/// element-to-element gap, applied once more, at the one place that was
-/// still using a reserve-a-whole-button number.
-///
-/// WHAT THE STRIP IS FOR AT 8, stated honestly because the number is
-/// small: it is SEPARATION, not the drag affordance. A user who reaches
-/// for the overflow "…" must not be one rounding error away from Close.
-/// The drag affordance is column 8, which is measured above and which
-/// the lane drags by. 0 would be defensible for dragging and is not
-/// defensible for that neighbour.
+/// system's minimize/maximize/close, in DIP: the band's own
+/// element-to-element gap, overriding `TitleBarMinDragRegionWidth`'s 48
+/// (docs/chrome/winui-caption-gap.md). SEPARATION, not the drag affordance
+/// — the star-sized Content column is the drag surface.
 const CAPTION_DRAG_STRIP: f64 = 8.0;
 
 /// Write `CAPTION_DRAG_STRIP` into the application's resource dictionary
-/// under the `TitleBar` control's own key.
-///
-/// THIS IS THE PLATFORM'S OWN MECHANISM, not a workaround. Every metric
-/// in that template is a `{ThemeResource}` lookup, and a lookup from
-/// inside a control template walks out to `Application.Resources` before
-/// it reaches the framework's dictionaries. Overriding a theme key in the
-/// app dictionary is what an App.xaml would spell as
-///
-/// ```xml
-/// <Application.Resources>
-///   <ResourceDictionary>
-///     <ResourceDictionary.MergedDictionaries>
-///       <XamlControlsResources/>
-///     </ResourceDictionary.MergedDictionaries>
-///     <x:Double x:Key="TitleBarMinDragRegionWidth">8</x:Double>
-///   </ResourceDictionary>
-/// </Application.Resources>
-/// ```
-///
-/// kaya is a code-only app with no App.xaml (`outer_on_launched` merges
-/// `XamlControlsResources` by hand for the same reason), so this is that
-/// same document written through the same object. A DIRECT entry rather
-/// than another merged dictionary, deliberately: a dictionary's own keys
-/// are searched before any of its merged ones, so this wins regardless of
-/// what else is appended later — `apply_brand` appends after launch and
-/// the ordering rule in its doc comment does not have to be re-derived
-/// here. The value is a boxed `f64`, which is byte-for-byte what the
-/// library's own `<x:Double>` becomes at runtime, so the `GridLength`
-/// conversion on the far side sees exactly what it sees today.
-///
-/// CALLED AT THE MINT, BEFORE THE FIRST `TitleBar` EXISTS, and that
-/// placement is load-bearing: a resource VALUE changed after a tree is
-/// built does not re-flow it (the same rule `apply_brand`'s doc comment
-/// records — Microsoft's own theme editor cycles `RequestedTheme` to
-/// force it). The mint arm runs exactly once per promoted window and is
-/// the same chokepoint `require_control_resources` guards, so there is no
-/// path to a `TitleBar` that skips it.
-///
-/// THE READ-BACK PROVES THE DICTIONARY ANSWERS, AND ONLY THAT. `Insert`
-/// on a `ResourceDictionary` returns whether it replaced an existing key,
-/// which says nothing about whether the value arrived, so the value is
-/// read back through the same `Lookup` the rest of this module uses. What
-/// that cannot prove is that the CONTROL consumed it: column 10's width
-/// is not readable without a layout pass, and there is none here. That
-/// half is measured on the lane instead, by reading the gap between the
-/// last command and the first caption button off UIA — 48 before this
-/// function existed, 8 after (`docs/chrome/winui-caption-gap.md`).
+/// under the `TitleBar` control's own key. A DIRECT entry rather than a
+/// merged dictionary: a dictionary's own keys are searched first, so this
+/// wins whatever is appended later. CALLED AT THE MINT, BEFORE THE FIRST
+/// `TitleBar` EXISTS — a resource value changed after a tree is built does
+/// not re-flow it (docs/chrome/winui-caption-gap.md).
 fn apply_caption_drag_strip() -> windows_core::Result<()> {
     const KEY: &str = "TitleBarMinDragRegionWidth";
     APP.with_borrow(|app| {
@@ -4934,21 +4146,16 @@ fn apply_caption_drag_strip() -> windows_core::Result<()> {
 thread_local! {
     /// Set by `refresh_toolbar`, cleared by the first caption layout pass
     /// that had something arranged to measure. UI-thread only, and it
-    /// deliberately touches no core state: the layout callback that reads
-    /// it runs inside `refresh_toolbar`'s own `RecomputeDragRegions`, which
-    /// holds the `CORE` borrow.
+    /// touches no core state: the layout callback that reads it runs
+    /// inside `refresh_toolbar`'s own `RecomputeDragRegions`, which holds
+    /// the `CORE` borrow.
     static CAPTION_GEOMETRY_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The height an `AppBarButton`'s own template is laid out for, read out
-/// of the theme dictionary rather than written down here.
-///
-/// A MISSING KEY IS FATAL AND SAYS SO. The number is not a preference this
-/// backend could fall back from: `CAPTION_COMMAND_BUTTON_BOX_KEY`'s whole
-/// documentation is the arithmetic that ties this value to
-/// `AppBarButtonInnerBorderCompactMargin`'s 22 and
-/// `AppBarButtonContentViewboxCollapsedMargin`'s 16, and a guess would put
-/// the hover visual back across the icon with nothing to notice it.
+/// of the theme dictionary rather than written down here. A MISSING KEY IS
+/// FATAL: a guess would put the hover visual back across the icon with
+/// nothing to notice it.
 fn caption_command_button_box() -> windows_core::Result<f64> {
     APP.with_borrow(|app| {
         let app = app
@@ -4997,27 +4204,11 @@ fn named_descendant(root: &UIElement, name: &str) -> windows_core::Result<Option
 }
 
 /// THE TWO CAPTION-COMMAND GEOMETRIES THIS BACKEND OWNS, asserted against
-/// the arrangement XAML actually produced.
-///
-/// WHY A POST-CONDITION AND NOT A GATE. Both failures this checks for are
-/// SILENT and no scene can see either: a hover visual sitting 16 DIP above
-/// the icon it belongs to, and an overflow glyph with a row shaved off its
-/// dots, are pixels. Every harness read here goes through the button
-/// OBJECTS — `expect_toolbar_item` resolves a UIA name, `menu_state` reads
-/// a flag — and all of those answer the same whether or not the button is
-/// drawing itself correctly. The two writes that place them
-/// (`button.SetHeight`, `apply_caption_ellipsis_box`) are also both the
-/// kind that fail QUIETLY: a `{ThemeResource}` written after the template
-/// is applied is simply ignored, and a height that stops being written
-/// leaves a button that still measures 48x48 to UIA. So the wall is a
-/// measurement of the ARRANGEMENT, on the path every promoted window runs.
-///
-/// IT RUNS AFTER A LAYOUT, WHICH IS WHY IT IS DEFERRED. `refresh_toolbar`
-/// arms it and the caption's own `LayoutUpdated` fires it, because the
-/// rebuild may be adding the bar to the tree for the first time and there
-/// is nothing arranged to measure yet. An unarranged pass leaves it armed
-/// rather than passing vacuously — a check that answers "0x0, fine" is the
-/// census that read nothing and agreed with everything.
+/// the arrangement XAML actually produced: no scene can see either, since
+/// every harness read goes through the button OBJECTS, and both writes fail
+/// QUIETLY (a `{ThemeResource}` written after the template is applied is
+/// ignored, and a button given no height still measures 48x48 to UIA).
+/// Deferred to the caption's `LayoutUpdated`; an unarranged pass stays ARMED.
 fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<bool> {
     use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
     let band = titlebar.ActualHeight()?;
@@ -5028,7 +4219,6 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
         .RightHeader()
         .and_then(|header| header.cast::<UIElement>())
     else {
-        // No promoted commands: nothing in this band to measure.
         return Ok(true);
     };
 
@@ -5057,9 +4247,8 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
          which is why it is welded into mint_caption_titlebar."
     );
 
-    // EVERY PROMOTED COMMAND'S HOVER VISUAL IS CONCENTRIC WITH ITS ICON.
-    // Found by the names the AppBarButton template gives them: a button's
-    // `Root` is the node carrying both.
+    // EVERY PROMOTED COMMAND'S HOVER VISUAL IS CONCENTRIC WITH ITS ICON,
+    // found by the names the AppBarButton template gives them.
     fn walk(node: &UIElement, band: f64, checked: &mut usize) -> windows_core::Result<()> {
         use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
         let mut border = None;
@@ -5122,8 +4311,7 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
     let mut checked = 0usize;
     walk(&header, band, &mut checked)?;
     // A BAR WITH BUTTONS IN IT AND NOTHING MEASURED is the vacuous pass
-    // this check exists to refuse: it means the walk did not find the
-    // template parts, not that the geometry is right.
+    // this check exists to refuse.
     let buttons = VisualTreeHelper::GetChildrenCount(&header)?;
     if buttons > 0 && checked == 0 {
         return Ok(false);
@@ -5131,81 +4319,40 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
     Ok(true)
 }
 
-/// The one place a `TitleBar` is constructed, so that the one ordering it
-/// depends on cannot be got wrong.
-///
-/// THE FAILURE THIS EXISTS FOR IS SILENT, and it is the same shape as the
-/// one the previous revision measured for a menu that never reached the
-/// caption. `apply_caption_drag_strip` writes a `{ThemeResource}` value,
-/// and a theme resource is resolved when the template is applied — write
-/// it afterwards and the control keeps the library's 48, the band gets a
-/// caption button's worth of dead space back, and NOTHING FAILS: no
-/// harness verb reads a template column's width (there is no such concept
-/// on the other four backends, so there is no uniform read to add), the
-/// toolbar and menus scenes pass unchanged, and the only witness is a
-/// screenshot somebody has to think to take.
-///
-/// Two adjacent statements whose order matters is not a guard — a
-/// refactor reorders them without reading either comment. One function
-/// that does both, called from one site, is: the ordering is now a
-/// property of these three lines instead of a property of
-/// `refresh_toolbar`'s statement order.
-///
-/// WHAT WOULD FINISH THE WALL and is not in this arm's file list: a
-/// census in `tools/` that `TitleBar::new()` appears in this module only
-/// inside this function. That is the clause which survives someone adding
-/// a second caption; it is noted in
-/// `docs/chrome/winui-caption-gap.md` for the maintainer rather
-/// than left to memory.
+/// The one place a `TitleBar` is constructed, so the one ordering it depends
+/// on cannot be got wrong: `apply_caption_drag_strip` and
+/// `apply_caption_ellipsis_box` write `{ThemeResource}` values, which are
+/// resolved when the template is applied — write them afterwards and the
+/// control keeps the library's number while NOTHING FAILS
+/// (docs/chrome/winui-caption-gap.md).
 fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
     apply_caption_drag_strip()?;
     apply_caption_ellipsis_box()?;
     let titlebar = TitleBar::new()?;
     // THE FAR-LEFT SLOT IS MINTED WITH THE BAND, so that "what is in
-    // LeftHeader" has exactly one answer on a promoted window from the
-    // moment it exists — see `caption_left_header`.
+    // LeftHeader" has exactly one answer — see `caption_left_header`.
     titlebar.SetLeftHeader(&mint_caption_left_header()?.cast::<UIElement>()?)?;
     Ok(titlebar)
 }
 
 /// The mark's box and the gap after it, both the `TitleBar` control's own
-/// numbers for its own icon: `TitleBarIconMaxWidth` and
-/// `TitleBarIconMaxHeight` are 16, `TitleBarIconMargin` is `0,0,16,0`
-/// (`v220-TitleBar_themeresources.xaml:88-92`). kaya draws the mark in the
-/// column the control cannot put it in; it does not pick a size for it.
+/// numbers for its own icon: `TitleBarIconMaxWidth`/`MaxHeight` are 16 and
+/// `TitleBarIconMargin` is `0,0,16,0`
+/// (`v220-TitleBar_themeresources.xaml:88-92`).
 const CAPTION_MARK_BOX: f64 = 16.0;
 const CAPTION_MARK_GAP: f64 = 16.0;
 
 /// The band a promoted caption is arranged in: `TitleBarExpandedHeight`,
 /// the control's own 48 (`v220-TitleBar_themeresources.xaml:78`), which is
 /// also the height the window's own caption cluster is given in `Tall`
-/// mode — the two halves of this band are one band because they are both
-/// this number (the one-band revision).
+/// mode.
 const CAPTION_BAND_HEIGHT: f64 = 48.0;
 
-/// THE MARK'S LEADING GAP, AND IT IS DERIVED RATHER THAN CHOSEN.
-///
-/// The maintainer's acceptance criterion (2026-08-18): "ensure the icon on
-/// the toolbar is inset somewhat so that the top and left spacing is
-/// equal, so it mirrors how the X looks on the right. this is how vscode's
-/// icon looks."
-///
-/// A `CAPTION_MARK_BOX` box centred in a `CAPTION_BAND_HEIGHT` band sits
-/// exactly this far below the band's top — that is what vertical centring
-/// MEANS — so the same number to the left of it makes the two insets equal
-/// by construction, with nothing invented. The corner then reads the way
-/// the opposite one does: the system's Close cell is 48x48 flush into its
-/// corner with a ~10 DIP glyph centred in it, so its glyph carries ~19 DIP
-/// of air above and to the right; the mark carries 16 above and 16 to the
-/// left, which is the same shape at the size the platform gives an icon.
-///
-/// It also makes the mark's cell 16+16+16 = 48 DIP wide: one caption cell,
-/// the same cell the system's minimize/maximize/close and kaya's own
-/// promoted commands occupy.
-///
-/// The equality is not left to this comment — `assert_caption_mark_geometry`
-/// measures both insets off the arrangement and fails if they part, which
-/// is also what would catch a band that stopped being 48 DIP tall.
+/// THE MARK'S LEADING GAP, DERIVED RATHER THAN CHOSEN: a `CAPTION_MARK_BOX`
+/// box centred in a `CAPTION_BAND_HEIGHT` band sits exactly this far below
+/// the band's top, so the same number to its left makes the top and left
+/// insets equal. The mark's cell is then 16+16+16 = 48, one caption cell;
+/// `assert_caption_mark_geometry` fails if the two insets part.
 const CAPTION_MARK_LEAD: f64 = (CAPTION_BAND_HEIGHT - CAPTION_MARK_BOX) / 2.0;
 
 /// The two things that live at the caption's far left, in the order the
@@ -5214,21 +4361,11 @@ const CAPTION_MARK_COLUMN: i32 = 0;
 const CAPTION_MENU_COLUMN: i32 = 1;
 
 /// `LeftHeader` takes ONE element and this band has two things that belong
-/// at its left edge, so kaya owns a container there and both ride in it.
-///
-/// TWO AUTO COLUMNS, WHICH IS WHY THIS IS FREE. An Auto column measures
-/// exactly what its child asks for and an empty one measures ZERO, so a
-/// caption with no mark — every window in every scene that declares no
-/// identity — is arranged exactly as it was before this container existed.
-/// That is the claim the lane's caption-centre phase re-measures.
-///
-/// THE MARK'S WIDTH DOES NOT MOVE THE TITLE'S CLAMP, and the arithmetic is
-/// the template's: the control's own icon column (5) and the left-header
-/// column (3) are BOTH left of the content slot (8). Moving 16 DIP of mark
-/// plus its 16 DIP margin out of column 5 and into column 3 leaves the
-/// slot's left edge where it was, so `center_caption_title`'s `span0` — a
-/// max of the slot's edge and the menu's right edge plus the gap — is
-/// unchanged. Measured both ways; see the caption-centre sweep.
+/// at its left edge, so kaya owns a container there. Two Auto columns, so
+/// an empty one measures ZERO. THE MARK'S WIDTH DOES NOT MOVE THE TITLE'S
+/// CLAMP: the control's icon column (5) and the left-header column (3) are
+/// BOTH left of the content slot (8), so `center_caption_title`'s `span0`
+/// is unchanged.
 fn mint_caption_left_header() -> windows_core::Result<Grid> {
     let holder = Grid::new()?;
     let columns = holder.ColumnDefinitions()?;
@@ -5241,10 +4378,9 @@ fn mint_caption_left_header() -> windows_core::Result<Grid> {
         columns.Append(&def)?;
     }
     // The control centres `LeftHeader` in the band already
-    // (`TitleBarLeftHeaderVerticalAlignment`); this says the same thing
-    // about the container's own contents, so a mark 16 DIP tall and a menu
-    // 32 DIP tall share the band's centre line rather than stretching to
-    // it.
+    // (`TitleBarLeftHeaderVerticalAlignment`); this says the same about the
+    // container's own contents, so a 16 DIP mark and a 32 DIP menu share
+    // the band's centre line rather than stretching to it.
     holder.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
     Ok(holder)
 }
@@ -5253,9 +4389,7 @@ fn mint_caption_left_header() -> windows_core::Result<Grid> {
 ///
 /// A READ AND NOT A MAP, for the reason `rehost_menubar` gives about the
 /// menu's own parent: the tree is the state, and a second copy of it kept
-/// beside the tree is a second answer that can disagree. The mint above
-/// puts it there and nothing else ever writes `LeftHeader`, so a band
-/// without it is a defect rather than a case to handle.
+/// beside the tree is a second answer that can disagree.
 fn caption_left_header(window: u64, titlebar: &TitleBar) -> windows_core::Result<Grid> {
     match titlebar
         .LeftHeader()
@@ -5277,53 +4411,19 @@ fn caption_left_header(window: u64, titlebar: &TitleBar) -> windows_core::Result
     }
 }
 
-/// The height of the box the CommandBar's "…" glyph is drawn in, in DIP.
-///
-/// WHY THIS EXISTS, measured (docs/chrome/winui-clip.md §1-2). The
-/// CommandBar template draws its overflow affordance as
-///
-/// ```xml
-/// <FontIcon x:Name="EllipsisIcon" FontSize="20" Glyph="&#xE712;"
-///           Height="{ThemeResource AppBarExpandButtonCircleDiameter}" />
-/// ```
-///
-/// (`docs/chrome/v220-CommandBar_themeresources.xaml:839`) and that
-/// resource is **3** in the shipped dictionary — a key whose name is ONE
-/// DOT'S DIAMETER used as the whole icon's height. So a 20 DIP glyph is
-/// arranged in a 3 DIP box: read off the live tree, `EllipsisIcon` is
-/// `20.0x3.0` with its own TextBlock `20.0x20.0` centred on it and hanging
-/// 8.5 DIP out of it top and bottom. Only what falls inside the 3 DIP box
-/// is painted.
-///
-/// WHAT THAT COSTS ON THE GLASS, pixel-measured at 1:1 (dpi 96): each dot
-/// renders with an anti-aliased TOP row, two full rows, and then nothing —
-/// two byte-identical full rows followed by pure white, which is not a
-/// shape any font draws. With the box opened to the glyph's own type size
-/// the same three dots render FOUR rows and the new bottom row is the
-/// exact mirror of the top. One anti-aliased row of every dot was being
-/// cut off, and the glyph sat half a pixel low as well; it now centres on
-/// the band like every other icon in the row.
-///
-/// 20 IS THE GLYPH'S OWN FONT SIZE, the literal three lines up in the same
-/// element. The box is the type size the icon is drawn at, which is the
-/// smallest honest answer to "how tall is this icon"; kaya invents no
-/// number here any more than it does for the drag strip.
+/// The height of the box the CommandBar's "…" glyph is drawn in, in DIP —
+/// 20 is the glyph's own font size, the literal in the same element. The
+/// template gives `EllipsisIcon` a `Height` of
+/// `AppBarExpandButtonCircleDiameter`, which is **3** in the shipped
+/// dictionary: a 20 DIP glyph arranged in a 3 DIP box, with one
+/// anti-aliased row of every dot cut off (docs/chrome/winui-clip.md §1-2).
 const CAPTION_ELLIPSIS_ICON_BOX: f64 = 20.0;
 
-/// Give the CommandBar's "…" a box its own glyph fits in.
-///
-/// Written through `Application.Resources` under the platform's own key —
-/// the same lightweight-styling route, with the same timing rule, as
-/// `apply_caption_drag_strip`: a `{ThemeResource}` is resolved when the
-/// template is applied, so this has to be in the dictionary BEFORE the
-/// `CommandBar` exists. That is why it is welded into
-/// `mint_caption_titlebar` beside its sibling rather than left as a
-/// statement someone can move.
-///
-/// SCOPED IN PRACTICE THOUGH THE KEY IS GLOBAL: `CommandBar::new()` is
-/// called in exactly one place in this backend (`refresh_toolbar`), kaya
-/// exposes no CommandBar widget kind, so the only bar this can reach is
-/// the caption's own.
+/// Give the CommandBar's "…" a box its own glyph fits in, written through
+/// `Application.Resources` under the platform's own key. Same timing rule
+/// as `apply_caption_drag_strip`: a `{ThemeResource}` is resolved when the
+/// template is applied, so this must be in the dictionary BEFORE the
+/// `CommandBar` exists — hence welded into `mint_caption_titlebar`.
 fn apply_caption_ellipsis_box() -> windows_core::Result<()> {
     const KEY: &str = "AppBarExpandButtonCircleDiameter";
     APP.with_borrow(|app| {
@@ -5356,41 +4456,19 @@ fn apply_caption_ellipsis_box() -> windows_core::Result<()> {
 }
 
 /// The least room the caption's title may leave between itself and either
-/// header, in DIP.
-///
-/// IT IS `CAPTION_DRAG_STRIP`'S NUMBER, for `CAPTION_DRAG_STRIP`'S REASON:
-/// 8 is the gap this band already draws between two of its own elements —
-/// `MenuBarItemMargin` is 4,4,4,4 so the menu's items sit 8 apart
-/// (`MenuBar_themeresources.xaml:44-46`), and the `TitleBar` dictionary
-/// spells the same 8 for the gap after its own title
-/// (`TitleBarTitleMargin` = 0,0,8,0, `TitleBar_themeresources.xaml:93`).
-///
-/// A FLOOR IS NEEDED ONLY BECAUSE THE TITLE MOVED. Centred in the CONTENT
-/// SLOT — the arrangement this backend shipped until 2026-08-17 — the title
-/// could never approach a header: the slot is the space between them and
-/// the middle of it is as far from both as a point can be. Centred on the
-/// WINDOW it can, whenever one header outweighs the other, and on a narrow
-/// window it would cross one. So the floor is the band's existing rhythm
-/// applied once more rather than a new metric, exactly like the strip.
+/// header, in DIP: the gap this band already draws between two of its own
+/// elements (`MenuBarItemMargin` 4,4,4,4; `TitleBarTitleMargin` 0,0,8,0). A
+/// floor is needed at all only because the title is centred on the WINDOW
+/// rather than in the content slot, so on a narrow window it can cross a
+/// header.
 const CAPTION_TITLE_GAP: f64 = 8.0;
 
 /// How far the arranged title may sit from the centre this backend asked
-/// for before `center_caption_title`'s post-condition calls it a defect, in
-/// DIP.
-///
-/// IT IS NOT THE ACCEPTANCE FIGURE, and the difference is the point. The
-/// acceptance is 1 PHYSICAL PIXEL, measured off UIA by the probe that sits
-/// beside this file — `title-centre-probe.sh`, which drives
-/// `title-centre-probe.ps1` against a live guest on the VM and prints one
-/// line per geometry. This is the in-process
-/// wall, and what it exists to catch is a MODEL that stopped being true —
-/// a centring that was removed, a slot that is no longer the element this
-/// code measures, a header whose extent moved without a layout pass. Every
-/// one of those is tens of pixels wrong (the arrangement this replaces was
-/// 63 px off), so a generous tolerance still catches all of them, while a
-/// tight one would risk aborting a shipped app over XAML's own layout
-/// rounding — which is up to half a physical pixel, and is the ONLY
-/// discrepancy that can legitimately appear here.
+/// for before `center_caption_title`'s post-condition calls it a defect.
+/// NOT THE ACCEPTANCE FIGURE: acceptance is 1 PHYSICAL PIXEL, read off UIA
+/// by `title-centre-probe.sh` against a live guest on the VM. This is the
+/// in-process wall against a MODEL that stopped being true (tens of pixels
+/// wrong), where a tight number would abort an app over layout rounding.
 const CAPTION_TITLE_TOLERANCE: f64 = 1.5;
 
 /// The `TitleBar` template's name for the element that occupies column 8 —
@@ -5400,16 +4478,9 @@ const CAPTION_TITLE_TOLERANCE: f64 = 1.5;
 const CAPTION_CONTENT_SLOT_PART: &str = "PART_ContentPresenterGrid";
 
 /// What the last centring pass asked for, and the geometry it asked it
-/// from. One entry per promoted window; dropped with the window.
-///
-/// EVERY FIELD BUT `centre` IS AN INPUT, and that is what makes the
-/// post-condition safe to run: if this pass measures exactly what the last
-/// pass measured, then the arrangement in front of this code IS the one
-/// the last pass's margin produced, and the achieved centre may be compared
-/// with the asked-for one. If ANY input moved — a live resize, a menu that
-/// grew, a title that changed — the comparison is skipped for that pass,
-/// because the layout in front of us is then the answer to a question
-/// nobody asked any more.
+/// from. One entry per promoted window; dropped with the window. EVERY
+/// FIELD BUT `centre` IS AN INPUT, which is what makes the post-condition
+/// safe: if any input moved, the comparison is skipped.
 #[derive(Clone, Copy, PartialEq)]
 struct CaptionTitleAim {
     band: f64,
@@ -5424,53 +4495,20 @@ struct CaptionTitleAim {
 thread_local! {
     /// The centring's post-condition state, keyed by window.
     ///
-    /// A THREAD-LOCAL RATHER THAN `CoreState`, and it is the same rule the
-    /// text-range state at the top of this file records: this map is
-    /// written from a XAML LAYOUT CALLBACK, and a callback that touched
-    /// `CORE` would be one synchronous raise away from aborting the
-    /// process — `CORE.with_borrow_mut` panics on a live borrow, and
-    /// `refresh_toolbar` holds exactly that borrow while it calls
-    /// `RecomputeDragRegions`, which forces a synchronous layout. The
-    /// centring reads nothing from the core (a `TitleBar` can be asked for
-    /// its own headers and its own content), so the one thing it must
-    /// remember lives here instead.
+    /// A THREAD-LOCAL RATHER THAN `CoreState`: this map is written from a
+    /// XAML LAYOUT CALLBACK, and `CORE.with_borrow_mut` panics on a live
+    /// borrow — `refresh_toolbar` holds exactly that borrow while it calls
+    /// `RecomputeDragRegions`, which forces a synchronous layout.
     static CAPTION_TITLE_AIM: RefCell<HashMap<u64, CaptionTitleAim>> =
         RefCell::new(HashMap::new());
 }
 
 /// The caption's title `TextBlock`, minted with the two text properties the
-/// clamp depends on.
-///
-/// WHY MARKUP AND NOT `TextBlock::new()`. `TextTrimming` and `TextWrapping`
-/// are vtable PADS in this backend's generated bindings — the filter in
-/// `tools/winui-bindgen` has never named them, and that file is outside
-/// this arm's file list — so there is no setter to call. `XamlReader` is
-/// the platform's own parser and the values it writes are LOCAL VALUES,
-/// which beat a style's setters in XAML's property precedence; that
-/// matters, because `CaptionTextBlockStyle` inherits `BaseTextBlockStyle`,
-/// whose `TextWrapping` is `Wrap` and whose `TextTrimming` is `None`. The
-/// template's own `PART_TitleText` writes exactly these two attributes on
-/// top of exactly this style (`TitleBar-v220.xaml:238-242`), which is the
-/// control telling us the style does not supply them.
-///
-/// WHAT THEY BUY, and it is not decoration: a title clamped into a span
-/// narrower than the text must give way SOMEWHERE. `Wrap` gives way by
-/// growing a second line inside a 48 DIP band; `None` gives way by cutting
-/// the last glyph in half. `NoWrap` + `CharacterEllipsis` gives way by
-/// saying so, which is the only one of the three a reader can act on.
-///
-/// `HorizontalAlignment` is `Stretch`, which is the default and is written
-/// anyway because `center_caption_title` depends on it: the title fills the
-/// box its presenter gives it, and that box is its own measured width (or
-/// `MaxWidth`, when the clamp has narrowed it), so the rect UIA publishes
-/// is never wider than the ink by more than a rounded pixel. Under `Center`
-/// the ink would float inside a box a fraction wider, and the rect the
-/// probe reads a centre from would not be the rect this code aimed.
-///
-/// THE FLAG FOR THE COORDINATOR: the cleaner home for those two properties
-/// is two members in the bindgen filter, after which this function is
-/// `TextBlock::new()` and two setters. It is written this way because
-/// `tools/` is not in this arm's file list, not because markup is better.
+/// clamp depends on. MARKUP AND NOT `TextBlock::new()`: `TextTrimming` and
+/// `TextWrapping` are vtable PADS in this backend's bindings, and markup's
+/// LOCAL VALUES beat `BaseTextBlockStyle`'s Wrap/None. `Stretch` is written
+/// because `center_caption_title` needs UIA's rect to be the ink.
+/// TODO: name those two properties in tools/winui-bindgen's filter.
 fn caption_title_text() -> windows_core::Result<TextBlock> {
     const MARKUP: &str = concat!(
         "<TextBlock xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
@@ -5502,38 +4540,14 @@ fn element_origin_y(element: &FrameworkElement, within: &UIElement) -> windows_c
     Ok(f64::from(origin.Y))
 }
 
-/// THE MARK IS AT THE CAPTION'S FAR LEFT, ARRANGED, AND BEFORE THE MENU —
-/// asserted against the arrangement XAML produced, on every promoted
-/// window that declared an identity.
-///
-/// WHY THIS WALL EXISTS AT ALL: the harness read cannot see this. The
-/// identity scene's `expect_app_icon` reads `WM_GETICON` on the HWND —
-/// USER32's per-window icon, which is what the taskbar and alt-tab draw —
-/// and that answer is IDENTICAL whether the caption's mark was composed,
-/// composed in the wrong column, or never composed at all. Measured, not
-/// assumed: with the compose call deleted the scene still passes (see the
-/// watched negative in this arm's report). And no harness verb could ask
-/// it uniformly, for the reason `rehost_menubar`'s wall gives about the
-/// menu — "where does this window's mark live in its caption" has no
-/// answer on the other four backends, which draw their own bands. So the
-/// wall goes where the failure is, in the backend, on the path every
-/// promoted window's layout runs.
-///
-/// IT MEASURES FOUR THINGS AND NAMES ALL OF THEM. The mark is in the
-/// container; it is ARRANGED (a picture that failed to decode still
-/// arranges at its declared box, so this is the weakest of the four and it
-/// is stated as such); it is the FIRST thing in the band, ending before
-/// the menu begins; and it shares the band's centre line, which is the
-/// "sized and aligned to the band" half of the ruling.
-///
-/// DEFERRED LIKE ITS SIBLING: it returns `false` while there is nothing
-/// arranged to measure, which leaves the post-condition ARMED rather than
-/// passing vacuously — a check that answers "0x0, fine" is the census that
-/// read nothing and agreed with everything.
+/// THE MARK IS AT THE CAPTION'S FAR LEFT, ARRANGED, AND BEFORE THE MENU,
+/// asserted against the arrangement XAML produced. THE HARNESS READ CANNOT
+/// SEE THIS: `expect_app_icon` reads `WM_GETICON` on the HWND, which answers
+/// identically whether the mark was composed, composed in the wrong column,
+/// or never composed — measured with the compose call deleted, the scene
+/// still passes. Deferred: `false` leaves it ARMED rather than vacuous.
 fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_core::Result<bool> {
     if APP_ICON_BITMAP.with_borrow(|slot| slot.is_none()) {
-        // No identity declared, or one with a name and no picture: this
-        // band is supposed to have no mark in it.
         return Ok(true);
     }
     let band_height = titlebar.ActualHeight()?;
@@ -5584,14 +4598,11 @@ fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_cor
          refresh_caption_mark and picks no size of its own; a different arranged size \
          means something else is sizing it."
     );
-    // THE TWO INSETS ARE EQUAL, which is the corner-mirror criterion of
-    // 2026-08-18 measured rather than trusted: the mark's gap from the
-    // band's left edge and its gap from the band's top are the same
-    // number, so the caption's left corner reads the way its right one
-    // does. Both are read off the ARRANGEMENT, in the band's own
-    // coordinates, and the wall is what makes `CAPTION_MARK_LEAD`'s
-    // derivation from the band height true rather than merely intended —
-    // a band that stopped being CAPTION_BAND_HEIGHT tall parts them.
+    // THE TWO INSETS ARE EQUAL, the corner-mirror criterion of 2026-08-18
+    // measured rather than trusted, and the wall that makes
+    // `CAPTION_MARK_LEAD`'s derivation from the band height true rather
+    // than merely intended: a band that stopped being CAPTION_BAND_HEIGHT
+    // tall parts them.
     assert!(
         (x - y).abs() <= 0.5,
         "kaya: winui: window {window}'s caption mark is arranged {x} DIP from the band's \
@@ -5639,116 +4650,16 @@ fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_cor
 }
 
 /// THE TITLE CENTRES ON THE WINDOW, not on the space left over between the
-/// headers — the maintainer's ruling of 2026-08-17, and VS Code's rule:
-/// "if we're doing the one bar thing we have to commit and fully go with
-/// vscode's behavior".
-///
-/// WHAT IT REPLACES, and why the previous answer was not good enough. The
-/// `TitleBar` template puts the Content presenter in column 8 and centres
-/// it there (`TitleBar-v220.xaml:262-272`, `HorizontalAlignment` =
-/// `{ThemeResource TitleBarContentHorizontalAlignment}` = Center), so the
-/// title lands in the middle of the space BETWEEN the menu and the
-/// commands. That space is not the window: the right side carries the
-/// commands, the drag strip and the system's caption cluster while the left
-/// carries only the menu, and the title came out 83 px left of the window's
-/// centre in the toolbar scene (63 after the strip shrank to 8). Two
-/// previous arms recorded that as the platform's answer and left it. It
-/// reads as a title that missed.
-///
-/// HOW IT AIMS: A BIAS THAT COSTS NO SIZE, PLUS ONE MEASURED CORRECTION.
-/// The margin written is `(d, 0, -d, 0)`. Its two halves cancel in the
-/// title's DESIRED size — which is the whole point, see the ratchet below —
-/// while its arranged box moves by `d`, so `d` is pure position. The width
-/// is a separate property, `MaxWidth`, because that one genuinely must not
-/// enter the desired size either.
-///
-/// AND `d` IS CORRECTED, NOT PREDICTED: `d += wanted x - measured x`. Both
-/// terms are read (the second off the live tree), so no model of the
-/// template's arithmetic can be wrong here, and the correction converges in
-/// ONE step rather than iterating, because the presenter's own position
-/// does not depend on `d` — the bias cancels out of everything the layout
-/// uses to place the presenter. The wanted x is snapped to the physical
-/// pixel grid first, since XAML arranges there (`UseLayoutRounding`); an
-/// off-grid target would be rounded by the layout, re-measured as an error,
-/// and corrected forever.
-///
-/// THE RATCHET, WHICH IS THE REASON FOR ALL OF THAT, and it was measured on
-/// the lane rather than feared. The obvious spelling of "put the title
-/// HERE" is a margin pair that carves the wanted rect out of the slot:
-/// `Left = x - slot0`, `Right = slot1 - (x + width)`. It aims perfectly —
-/// drift 0 at every width — and it makes the title's desired width equal
-/// the SLOT's width, because a margin is part of what an element asks for.
-/// That travels: the star column asks for it, the template's Grid asks for
-/// it, the window's content asks for it, and a window whose content asks
-/// for 1098 DIP does not lay out again when it is dragged narrower. The
-/// measured symptom was a band frozen at its widest, with the title, the
-/// menu and the commands all where the widest window had left them, and NOT
-/// ONE further layout pass to notice — the caption stopped following its
-/// own window and nothing anywhere failed.
-///
-/// EVERY NUMBER IT USES IS MEASURED OFF THE LIVE TREE. The band's width is
-/// the control's own `ActualWidth` (the `TitleBar` fills the shell's top
-/// row, so it is the window's client width). The slot is the title's
-/// GRANDPARENT — `PART_ContentPresenter`'s own parent is
-/// `PART_ContentPresenterGrid`, the element that occupies column 8 — read
-/// by transform and `ActualWidth` rather than reconstructed from
-/// `TitleBarLeftHeaderPaddingWidth` and the insets, so no theme constant
-/// can go stale underneath it. The headers are `LeftHeader()` and
-/// `RightHeader()`, which are the menu and the command bar themselves. The
-/// title's untrimmed width comes from measuring it against an infinite
-/// constraint, which is the only reading that does not already have this
-/// function's own clamp folded into it.
-///
-/// THE CLAMP. The title may not come nearer either header than
-/// `CAPTION_TITLE_GAP`, and it may not leave the slot on the left (the
-/// control's own left-header padding column already holds 14 DIP there, so
-/// the slot's edge is the stricter bound — both are computed and the
-/// stricter wins). When the ideal position would cross either bound the
-/// title is pushed back to it, and when the span itself is narrower than
-/// the text the text is given the span and ellipsizes inside it. The order
-/// matters: a title never overlaps a header, and never disappears rather
-/// than shortening.
-///
-/// THE HOOK IS `LayoutUpdated`, and it is the honest one. The geometry
-/// moves for four different reasons — the window resizes, the menu's items
-/// change, the promoted command set changes (including the `CommandBar`'s
-/// OWN dynamic overflow, which kaya never hears about), and the caption
-/// text changes — and every one of them is a layout pass by definition,
-/// while only three of them are anything kaya calls a function for. It is
-/// also the hook the control itself uses for the same class of problem:
-/// `AutoRefreshDragRegions` subscribes to `Content()`'s `LayoutUpdated`
-/// (microsoft-ui-xaml @ winui3/release/2.2.0, `TitleBar.cpp:603-606`).
-/// That subscription is also why this function does not touch the drag
-/// regions: the Content IS the title, so a margin written here raises the
-/// event the control is already listening to, and the rects are recomputed
-/// by the control on the pass that follows. (The title contributes nothing
-/// to those rects in any case — `FindInteractableElements` punches out only
-/// `Control`s, and a `TextBlock` is not one; see `CAPTION_DRAG_STRIP`.)
-///
-/// IT CONVERGES, AND THE REASON IS STRUCTURAL RATHER THAN A LIMIT. Nothing
-/// this function measures depends on what it writes: column 8 is `Width="*"`
-/// so the slot's span does not follow the title's margin, and the headers
-/// are in their own columns. The margin is therefore a pure function of
-/// geometry the title cannot influence, so the second pass computes the
-/// same `Thickness`, writes nothing, and the layout settles. A version that
-/// inferred the slot's centre from the title's own arranged position would
-/// have layout rounding in its feedback path and could oscillate forever;
-/// this one has no feedback path at all.
-///
-/// THE POST-CONDITION IS THE WALL — see `CaptionTitleAim`. The failure this
-/// arm can have is the silent kind: delete the write and the title goes
-/// back to the slot's centre, every scene still passes (no harness verb
-/// reads a caption's geometry, and there is no uniform read to add — the
-/// other four backends draw their own band), and the only witness is a
-/// screenshot somebody has to think to take. So the arrangement is checked
-/// against what was asked for, on every pass whose inputs have not moved
-/// since the pass that asked. Measured with the write deleted: it fires.
+/// headers (docs/chrome-plan.md, the WinUI row, "the title centres on the
+/// WINDOW"). THE MARGIN IS A BIAS, `(d, 0, -d, 0)`, whose halves cancel in
+/// the desired size: margins that carve the wanted rect out of the slot
+/// RATCHET THE WINDOW, measured as a band frozen at its widest. `d` is
+/// CORRECTED, not predicted; the post-condition is the wall (`CaptionTitleAim`).
 fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Result<()> {
     let band = titlebar.ActualWidth()?;
     if band <= 0.0 {
-        // Before the first arrange, and while the caption is collapsed
-        // (the promotion emptied), there is no geometry to read. The pass
-        // that follows the next arrange does the work.
+        // Before the first arrange, and while the caption is collapsed,
+        // there is no geometry to read.
         return Ok(());
     }
     let Ok(title) = titlebar.Content().and_then(|content| content.cast::<TextBlock>()) else {
@@ -5757,19 +4668,11 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
     let title_fe: FrameworkElement = title.cast()?;
     let within: UIElement = titlebar.cast()?;
 
-    // THE SLOT, BY THE NAME THE TEMPLATE GIVES IT.
-    // `PART_ContentPresenter` centres the title inside itself, so the
-    // presenter is not the slot; the slot is the element carrying
-    // `Grid.Column="8"`, which the template calls
-    // `PART_ContentPresenterGrid` (`TitleBar-v220.xaml:262-266`).
-    //
-    // NOT BY WALKING UP FROM THE TITLE, and that is measured rather than
-    // preferred: `FrameworkElement.Parent` is the LOGICAL parent and it
-    // is NULL here — a `TemplateBinding` to `TitleBar.Content` puts the
-    // element in a presenter without giving it a logical parent, so the
-    // first version of this function read `Err` and silently centred
-    // nothing (the lane measured the title still 63 px left of the
-    // window's centre, with no error anywhere).
+    // THE SLOT, BY THE NAME THE TEMPLATE GIVES IT: `PART_ContentPresenter`
+    // centres the title inside itself, so the slot is the element carrying
+    // `Grid.Column="8"`, which the template calls `PART_ContentPresenterGrid`
+    // (`TitleBar-v220.xaml:262-266`). NOT BY WALKING UP FROM THE TITLE
+    // (docs/traps.md: a TemplateBinding gives the element no logical parent).
     let slot = titlebar
         .GetTemplateChild(&HSTRING::from(CAPTION_CONTENT_SLOT_PART))
         .ok()
@@ -5797,8 +4700,7 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
     let slot1 = slot0 + slot_width;
 
     // THE HEADERS. Absent ones do not clamp: a caption with no menu has
-    // nothing on the left to collide with, and one with no command bar
-    // ends its content slot where the drag strip begins.
+    // nothing on the left to collide with.
     let left_edge = match titlebar
         .LeftHeader()
         .ok()
@@ -5816,7 +4718,6 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
         None => slot1,
     };
 
-    // WHERE THE TITLE IS NOW, and by how much this code already moved it.
     // The bias is written as `(d, -d)`, so reading `Left` reads `d`.
     let bias = title.Margin()?.Left;
     let origin = element_origin_x(&title_fe, &within)?;
@@ -5824,39 +4725,30 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
 
     // THE SPAN THE TITLE MAY OCCUPY. The slot's own edge is the stricter
     // bound on the left (the control's left-header padding column already
-    // holds 14 DIP there) and keeping inside it is not only manners: an
-    // element biased out of its slot is at the mercy of whatever the
-    // template clips.
+    // holds 14 DIP there), and an element biased out of its slot is at the
+    // mercy of whatever the template clips.
     let span0 = slot0.max(left_edge + CAPTION_TITLE_GAP);
     let span1 = right_edge.min(slot1) - CAPTION_TITLE_GAP;
     let available = (span1 - span0).max(0.0);
 
-    // The window's centre, which is the whole ruling in one expression,
-    // then the clamp, then the pixel grid.
     let scale = title.RasterizationScale()?.max(1.0);
     let ideal = band / 2.0 - width / 2.0;
-    // DOES IT FIT AT ALL? On a window narrow enough, or under a menu wide
-    // enough, the span between the headers is smaller than the title's own
-    // floor — a `TextBlock` will ellipsize down to one "…" and no further,
-    // and `MaxWidth` cannot take it below that. Measured on the menus scene
-    // at 540 DIP: a 9 DIP slot and a 19.5 DIP ellipsis.
+    // DOES IT FIT AT ALL? A `TextBlock` ellipsizes down to one "…" and no
+    // further, and `MaxWidth` cannot take it below that. Measured on the
+    // menus scene at 540 DIP: a 9 DIP slot and a 19.5 DIP ellipsis.
     let fits = width < available;
     let x = if fits {
         ideal.max(span0).min(span1 - width)
     } else {
-        // NOTHING TO CENTRE, SO CHOOSE WHICH SIDE OVERFLOWS. The right edge
-        // is pinned its 8 DIP clear of the commands and the overflow goes
-        // LEFT, into the control's own left-header padding column, which is
-        // empty — where overflowing right would put an ellipsis under a
-        // button. Written as one branch rather than as `max(span0)` followed
-        // by `min(span1 - width)`, which silently produces this same number
-        // by having the second clamp undo the first.
+        // NOTHING TO CENTRE, SO CHOOSE WHICH SIDE OVERFLOWS. The right
+        // edge is pinned its 8 DIP clear of the commands and the overflow
+        // goes LEFT, into the control's own empty left-header padding
+        // column, where overflowing right would put an ellipsis under a
+        // button.
         span1 - width
     };
     // SNAPPED TO A WHOLE PHYSICAL PIXEL, which keeps the correction a
-    // one-step move instead of a feedback loop: XAML arranges on the pixel
-    // grid (`UseLayoutRounding`), so an off-grid target would be rounded
-    // by the layout and re-corrected forever.
+    // one-step move instead of a feedback loop (`UseLayoutRounding`).
     let x = (x * scale).round() / scale;
     let centre = x + width / 2.0;
     let delta = x - origin;
@@ -5871,19 +4763,15 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
         centre,
     };
     let previous = CAPTION_TITLE_AIM.with_borrow(|aims| aims.get(&window).copied());
-    // THE POST-CONDITION SAYS NOTHING ABOUT A TITLE THAT DOES NOT FIT, and
-    // that is the honesty rule rather than a convenience. Below its own
-    // floor the title's arranged width is no longer the width its box was
-    // given, so `origin + width / 2` is not the centre of anything this
-    // code chose, and an assertion about it would be an assertion about the
-    // font's ellipsis metrics. Measured before it was gated: the menus
-    // scene, whose menu leaves a 9 DIP slot, aborted five legs on a 4 DIP
-    // disagreement that no aim could have removed.
+    // THE POST-CONDITION SAYS NOTHING ABOUT A TITLE THAT DOES NOT FIT:
+    // below its own floor the title's arranged width is no longer the width
+    // its box was given, so an assertion about it would be an assertion
+    // about the font's ellipsis metrics. Measured before it was gated: the
+    // menus scene, whose menu leaves a 9 DIP slot, aborted five legs on a
+    // 4 DIP disagreement no aim could have removed.
     if fits && previous == Some(aim) {
         // Every input is what the previous pass measured, so the
-        // arrangement in front of us is that pass's margin, arranged. It
-        // is the only moment at which the achieved centre can honestly be
-        // compared with the asked-for one.
+        // arrangement in front of us is that pass's margin, arranged.
         let achieved = element_origin_x(&title_fe, &within)? + title.ActualWidth()? / 2.0;
         assert!(
             (achieved - centre).abs() <= CAPTION_TITLE_TOLERANCE,
@@ -5944,15 +4832,12 @@ const TITLEBAR_ROW: i32 = 0;
 const MENUBAR_ROW: i32 = 1;
 const TOOLBAR_CONTENT_ROW: i32 = 2;
 
-/// The window's PROMOTED actions, in catalog preorder — `action` items
-/// with `primary` set, the same filter every other backend's promotion
-/// applies.
-///
-/// NO CAPACITY *k* IS APPLIED HERE, and that is measured rather than
-/// chosen: a WinUI `CommandBar` has DYNAMIC OVERFLOW ON BY DEFAULT
-/// (docs/chrome-plan.md C2's WinUI row), so how many buttons this window
-/// can show is a question the platform answers per resize. The phones
-/// apply a k because their bars have none.
+/// The window's PROMOTED actions, in catalog preorder — `action` items with
+/// `primary` set, the same filter every other backend's promotion applies.
+/// NO CAPACITY *k* IS APPLIED HERE: a WinUI `CommandBar` has DYNAMIC
+/// OVERFLOW ON BY DEFAULT (docs/chrome-plan.md C2's WinUI row), so how many
+/// buttons show is the platform's answer per resize. The phones apply a k
+/// because their bars have none.
 fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
     let roots = core.menu_windows.get(&window).cloned().unwrap_or_default();
     let mut order = Vec::new();
@@ -5967,121 +4852,25 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
         .collect()
 }
 
-/// THE PROMOTION (docs/chrome-plan.md C2's WinUI row): the window's
-/// primary catalog actions as real `AppBarButton`s in its `CommandBar`,
-/// appended to `PrimaryCommands` in catalog preorder — and the bar rides
-/// IN THE WINDOW'S CAPTION ROW, not in a strip below it.
-///
-/// THE 2026-08-17 REVISION, and it is a mount-point decision, nothing
-/// else. The first lowering hung the stock `CommandBar` in its own Auto
-/// row under the MenuBar; the capture
-/// (`docs/chrome/cap-toolbar-windows.png`) showed what the
-/// research already implied — a sparse third strip with a standard
-/// caption above it is not the shell Windows 11 ships. Files, Terminal
-/// and Settings MERGE the command surface into the title bar, and the
-/// research's own §5 named the move exactly: "on Windows the genre is
-/// decided by the bar's PARENT, not by a style on the bar. The same
-/// `CommandBar` object, moved from row 0 of the shell Grid into the
-/// title bar, becomes the Files-app look." So the SAME object moved,
-/// and no knob was added anywhere: `Microsoft.UI.Xaml.Controls.TitleBar`
-/// (WASDK 1.7+, Microsoft's recommended custom-caption path per
-/// `Window.SetTitleBar`'s own remarks) goes in the shell's top row, the
-/// bar goes in its `RightHeader`, and `Window.ExtendsContentIntoTitleBar`
-/// makes the row the real caption.
-///
-/// EXTENDED IS DERIVED FROM TOOLBAR PRESENCE — the ledger's rule, and
-/// the reason this branch is inside `refresh_toolbar` and nowhere else.
-/// A window whose catalog promotes nothing never reaches here past the
-/// early return, never mints a `TitleBar`, never has
-/// `ExtendsContentIntoTitleBar` written, and keeps precisely the
-/// standard system caption it had before this slice. There is no app
-/// surface for "extended" and no knob to set: promoting an action is the
-/// whole declaration.
-///
-/// ONE BAND, which is the 2026-08-17 revision's second half. The window
-/// wears exactly one horizontal band of chrome and everything the app
-/// declared is in it: the MENU migrates out of its own row into
-/// `LeftHeader` (`rehost_menubar`), the title is the control's own, the
-/// commands are right in `RightHeader`. The menu's row is left empty, and
-/// an empty Auto row measures zero — so "the separate menu row is
-/// deleted" is a fact about the geometry and not only about the picture.
-///
-/// THE HEIGHT IS DERIVED, AND NOW BOTH HALVES OF THE BAND ARE TOLD.
-/// `TitleBar::UpdateHeight` goes to the compact state (32px) when
-/// Content, LeftHeader and RightHeader are ALL null and to the expanded
-/// state (48px) otherwise (microsoft-ui-xaml @ winui3/release/2.2.0,
-/// `src/controls/dev/TitleBar/TitleBar.cpp:493`, heights from
-/// `TitleBar_themeresources.xaml:77-78`). Filling the slots is what makes
-/// the caption tall, and kaya still writes no height on the control.
-///
-/// BUT THE CONTROL DOES NOT TELL THE WINDOW, and that omission is what
-/// the first version of this arm shipped: the XAML band went to 48 while
-/// the system's caption buttons stayed in their standard 32 band, so two
-/// runs of buttons shared one row with their centres 9 DIP apart. That is
-/// upstream microsoft-ui-xaml#9863, and the app-side answer is
-/// `AppWindowTitleBar.PreferredHeightOption` — written here as `Tall`
-/// exactly when this window's caption is extended and `Standard` when the
-/// promotion empties. Same derivation `ExtendsContentIntoTitleBar`
-/// follows, both directions, same path, no knob, no app surface.
-///
-/// WHAT KAYA WRITES IS THE LIST, THE BAND, AND NOTHING ELSE. The
-/// transparent bar that takes the window's own surface, the 20px→16px
-/// icon rescaling, the "…" affordance, the dynamic overflow at width
-/// breakpoints, the label hidden while the bar is closed and re-laid
-/// beside the icon in the overflow — every one of those is still the
-/// default of having the control (measured against the pinned WinUI 2.2.1
-/// metadata and the 2.2.0 theme resources,
-/// docs/chrome/toolbar-winui.md §3). The one metric written per button is
-/// `CAPTION_COMMAND_CELL`; that constant carries why a 68px toolbar cell
-/// is the wrong cell in a caption band and where 48 comes from. Restyling
-/// the platform's control to the platform's OWN caption metrics is
-/// lowering fidelity, not a styling knob — it is the difference between
-/// commands that are part of the caption and commands dropped onto it.
-///
-/// THE DRAG REGIONS ARE THE CONTROL'S JOB, and the reason to use the
-/// control at all: C1's recorded failure mode for a custom caption is
-/// "a window nobody can drag". `TitleBar` computes the passthrough rects
-/// itself — `UpdateInteractableElementsList` collects the back button,
-/// the pane toggle, the Content subtree and THE RIGHT HEADER AREA WHOLE
-/// (TitleBar.cpp:798-806), and `UpdateDragRegion` hands them to
-/// `InputNonClientPointerSource` — so the bar's slot is clickable and
-/// everything left of it drags the window.
-///
-/// `AutoRefreshDragRegions` IS SET AND IS NOT SUFFICIENT ALONE, which is
-/// measured in the control's source rather than assumed: the automatic
-/// refresh subscribes to `Content()`'s `LayoutUpdated` and only that
-/// (TitleBar.cpp:603-606, and :843-849 on re-subscribe), so a bar living
-/// in `RightHeader` gets no automatic recompute when its own width
-/// changes — which it does on every catalog rebuild, as buttons come and
-/// go. `RecomputeDragRegions()` is therefore called at the end of every
-/// rebuild below; it forces a synchronous layout first, so the rects it
-/// publishes are the ones the bar actually occupies.
-///
-/// SECONDARY COMMANDS STAY EMPTY, and that is this backend's one
-/// deviation from the research's shape — the same deviation, for the
-/// same reason, that the GTK arm records. `SecondaryCommands` was to be
-/// the catalog remainder's home; this window already has exactly one,
-/// because `rebuild_menus` renders THE WHOLE CATALOG into a real
-/// `MenuBar` one row above (`ensure_menu_shell`). Filling the overflow
-/// with those same rows would be a second copy of them, 48px below
-/// their own menu bar. So the remainder's home is `menubar`, read from
-/// the real bar by `toolbar_remainder_home` rather than asserted.
-///
-/// NO SECOND KEYBOARD ACCELERATOR, and this is the one hazard the
-/// research named that a lowering can walk into by being thorough:
-/// `attach_accelerator` already installs the chord on the item's
-/// `MenuFlyoutItem`, and a second `KeyboardAccelerator` on a second
-/// element is a SECOND HANDLER for one key. The button therefore takes
-/// no accelerator at all. (WinUI's dress-only property for drawing the
-/// chord text on a command is `KeyboardAcceleratorTextOverride`, which
-/// takes a rendered string like "Ctrl+S"; kaya has no such renderer —
-/// `accelerator_chord` maps the canonical spelling to enums — so
-/// nothing is written there rather than a guess being formatted.)
+/// THE PROMOTION (docs/chrome-plan.md C2's WinUI row;
+/// docs/chrome/toolbar-winui.md): the window's primary catalog actions as
+/// `AppBarButton`s in its `CommandBar`, in catalog preorder, and the bar
+/// rides IN THE CAPTION ROW — extended is DERIVED from toolbar presence, so
+/// a window that promotes nothing keeps the system caption. Four facts:
+///   * the control fills to 48px when a header slot fills
+///     (`TitleBar.cpp:493`) and does NOT tell the WINDOW, so
+///     `AppWindowTitleBar.PreferredHeightOption` is written in step, or the
+///     two runs of buttons sit 9 DIP apart (microsoft-ui-xaml#9863);
+///   * `AutoRefreshDragRegions` watches `Content()`'s `LayoutUpdated` ALONE
+///     (`TitleBar.cpp:603-606`), so `RecomputeDragRegions()` is called by
+///     hand at the end of every rebuild;
+///   * SECONDARY COMMANDS STAY EMPTY — `rebuild_menus` renders the whole
+///     catalog into a `MenuBar`, so the remainder's home is `menubar`;
+///   * NO SECOND KEYBOARD ACCELERATOR: the chord is already on the item's
+///     `MenuFlyoutItem`, and a second is a SECOND HANDLER for one key.
 fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     let promoted = promoted_items(core, window);
     if promoted.is_empty() && !core.toolbars.contains_key(&window) {
-        // A window that never promotes anything never mints a bar, so
-        // its tree is exactly what it was before this slice.
         return Ok(());
     }
     let bar = match core.toolbars.get(&window) {
@@ -6089,32 +4878,14 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         None => {
             // AT MINT, NOT AT FIRST LAYOUT: a CommandBar whose template
             // cannot resolve its theme keys fail-fasts the process on a
-            // dispatcher tick, milliseconds after the step that caused
-            // it (docs/traps.md; the wall's own docstring records the
-            // dump this cost when MenuBarItem did it). CommandBar,
-            // AppBarButton and TitleBar are the same shape of control as
-            // the ones already on that list — MUX types whose default
-            // styles live in the framework dictionary the merge brings
-            // in.
+            // dispatcher tick, milliseconds after the step that caused it
+            // (docs/traps.md).
             require_control_resources("this window promotes an action into its toolbar");
             // EXTENDED IS DERIVED FROM TOOLBAR PRESENCE, and this is the
-            // wall that says so on a path nobody can avoid — every
-            // caption this backend ever mints runs this line.
-            //
-            // IT IS HERE BECAUSE NOTHING ELSE CATCHES IT, measured: with
-            // the early return above deleted, every menu-bearing window
-            // takes an extended caption it never asked for, and
-            // `commands_rust`, `todos_rust`, `clipboard_rust`,
-            // `undo_rust`, `window_rust`, `styling_rust` and
-            // `toolbar_rust` ALL PASSED — seven green legs over a window
-            // wearing chrome no app declared. No harness verb reads
-            // "is this caption extended" (there is no such concept on
-            // the other four backends, so there is no uniform read to
-            // add), so the shared scenes structurally cannot see it.
-            //
-            // The assertion is what a scene would have said if it could:
-            // a window whose catalog promotes nothing has no business
-            // owning a custom title bar.
+            // wall on the path nobody can avoid. MEASURED: with the early
+            // return above deleted, every menu-bearing window took an
+            // extended caption it never asked for and seven rust legs ALL
+            // PASSED — no harness verb reads "is this caption extended".
             assert!(
                 !promoted.is_empty(),
                 "kaya: winui: window {window} reached the caption mint with \
@@ -6124,66 +4895,35 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
                  TitleBar here would give it chrome no app declared."
             );
             let Some(shell) = core.menu_shells.get(&window).cloned() else {
-                // No shell means no menubar_append has run, and the
-                // promotion bit only ever reaches items that are in a
-                // window's catalog — so there is nothing to promote and
-                // nowhere to put it.
                 return Ok(());
             };
             let target = winui_window(core, window)?;
 
             // THE TITLE IS NOT WRITTEN HERE, and the control's own
-            // `Title` property is never written at all. A caption
-            // composed in two places is the five-writer defect
-            // docs/dirty-plan.md D2 was written about, and a filled
-            // `Title` makes the control one of the writers (see
-            // refresh_caption). The mint puts an EMPTY TextBlock in the
-            // centre slot and the ONE writer fills it, below, on this
-            // rebuild and on every later one.
+            // `Title` property is never written at all: a filled `Title`
+            // makes the control a second caption writer
+            // (docs/dirty-plan.md D2, and see `refresh_caption`). The mint
+            // puts an EMPTY TextBlock in the centre slot.
             let titlebar = mint_caption_titlebar()?;
             let tb_el: FrameworkElement = titlebar.cast()?;
             Grid::SetRow(&tb_el, TITLEBAR_ROW)?;
             shell.Children()?.Append(&titlebar.cast::<UIElement>()?)?;
 
-            // THE CAPTION TEXT, in the control's centre slot, wearing the
-            // control's own caption type. `CaptionTextBlockStyle` is the
-            // key `PART_TitleText` itself uses (`TitleBar-v220.xaml:238`),
-            // so the title is the platform's caption type at the
-            // platform's caption size — no font, no size, no colour
-            // chosen here.
             let caption_text = caption_title_text()?;
             titlebar.SetContent(&caption_text.cast::<UIElement>()?)?;
             core.window_caption_texts.insert(window, caption_text);
 
-            // THE TITLE CENTRES ON THE WINDOW, and this is the hook that
-            // keeps it there — see `center_caption_title` for why
-            // `LayoutUpdated` is the one event that cannot miss a reason
-            // the geometry moved.
-            //
-            // A WEAK REFERENCE, for two reasons that both bite. A strong
-            // one would be a cycle — the control holds the delegate and
-            // the delegate would hold the control — and this backend's
-            // delegates are not tracked by XAML's reference tracker, so
-            // the caption of every closed window would leak. And
-            // `EventHandler::new` demands `Send`, which a projected XAML
-            // interface is not and `Weak` is.
-            //
-            // IT TOUCHES NO CORE STATE, deliberately, and the rule is the
-            // one the text-range thread-locals at the top of this file
-            // record: a layout callback that borrowed `CORE` would abort
-            // the process the first time it fired inside `refresh_toolbar`
-            // — which holds that borrow while it calls
-            // `RecomputeDragRegions`, and that forces a synchronous
-            // layout. A `TitleBar` can be asked for its own headers and
-            // its own content, so the callback needs nothing else.
+            // The hook that keeps the title centred (`center_caption_title`).
+            // A WEAK REFERENCE for two reasons that both bite: a strong one
+            // is a cycle XAML's reference tracker cannot see, so every
+            // closed window's caption would leak, and `EventHandler::new`
+            // demands `Send`, which a projected XAML interface is not. IT
+            // TOUCHES NO CORE STATE: `refresh_toolbar` holds that borrow.
             let weak_titlebar = titlebar.downgrade()?;
             let recentre = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                 match weak_titlebar.upgrade() {
                     Some(titlebar) => {
                         center_caption_title(window, &titlebar)?;
-                        // The armed post-condition, fired on the first pass
-                        // that has something arranged to measure. Costs one
-                        // bool test on every other pass.
                         if CAPTION_GEOMETRY_ARMED.get()
                             && assert_caption_command_geometry(&titlebar)?
                             && assert_caption_mark_geometry(window, &titlebar)?
@@ -6202,23 +4942,19 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             titlebar.SetAutoRefreshDragRegions(true)?;
 
             // ORDER IS LOAD-BEARING AND DOCUMENTED: "To specify a custom
-            // title bar, you must first set ExtendsContentIntoTitleBar
-            // to true… If ExtendsContentIntoTitleBar is false, the call
-            // to SetTitleBar does not have any effect."
-            // (Window.SetTitleBar remarks, windows-app-sdk-2.0). Swap
-            // these two lines and the window silently keeps its system
-            // caption with a second one drawn under it.
+            // title bar, you must first set ExtendsContentIntoTitleBar to
+            // true… If ExtendsContentIntoTitleBar is false, the call to
+            // SetTitleBar does not have any effect." (Window.SetTitleBar
+            // remarks, windows-app-sdk-2.0). Swapped, the window silently
+            // keeps its system caption with a second one drawn under it.
             target.SetExtendsContentIntoTitleBar(true)?;
             target.SetTitleBar(&tb_el)?;
 
             core.window_titlebars.insert(window, titlebar);
-            // THE CAPTION SINK OPENS HERE and nowhere else, because this
-            // is the only place a TitleBar is minted — the promotion
+            // THE CAPTION SINK OPENS HERE and nowhere else: the promotion
             // that replaces the system caption is also what takes the
-            // system-drawn icon away, so the repair belongs beside it
-            // (docs/app-identity-plan.md I3). A window that promotes
-            // nothing keeps the system caption and its icon, and never
-            // reaches this line.
+            // system-drawn icon away (docs/app-identity-plan.md I3). A
+            // window that promotes nothing never reaches this line.
             apply_identity_to_window(core, window)?;
             core.toolbars.insert(window, bar.clone());
             bar
@@ -6234,34 +4970,23 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         };
         let enabled = menu_effective_enabled(core, id);
         let button = AppBarButton::new()?;
-        // THE CAPTION CELL. The only metric this arm writes, and it is
-        // written because the button's own default is a metric for a
-        // different place — see CAPTION_COMMAND_CELL. Everything else
-        // about the button, including its height, comes from the closed
-        // CommandBar it sits in.
+        // THE CAPTION CELL, written because the button's own default is a
+        // metric for a different place — see CAPTION_COMMAND_CELL.
         button.SetWidth(CAPTION_COMMAND_CELL)?;
-        // THE CAPTION CELL'S OTHER HALF, and the second metric this arm
-        // writes: the height the button's OWN template is laid out for,
-        // read out of the theme dictionary. See
-        // CAPTION_COMMAND_BUTTON_BOX_KEY for why a 48 DIP row makes a
-        // 64 DIP button draw its hover visual across its own icon, and
-        // why the CommandBar's own clip is what keeps the extra 16 out
-        // of the client area.
+        // The height the button's OWN template is laid out for, read out
+        // of the theme dictionary — see CAPTION_COMMAND_BUTTON_BOX_KEY for
+        // why a 48 DIP row makes a 64 DIP button draw its hover visual
+        // across its own icon.
         button.SetHeight(caption_command_button_box()?)?;
         // THE LABEL IS THE BUTTON'S NAME, not decoration: a closed
-        // CommandBar draws icons only (it overwrites each button's
-        // IsCompact as it opens and closes), so `Label` is what the
-        // overflow row shows and what the button publishes to UIA — the
-        // sentence a Narrator user hears, and the address
+        // CommandBar draws icons only, so `Label` is what the overflow row
+        // shows, what the button publishes to UIA, and the address
         // `expect_toolbar_item "Save"` resolves through.
         button.SetLabel(&HSTRING::from(&*label))?;
         apply_symbol(&button, symbol)?;
         button.SetIsEnabled(enabled)?;
         let attachment = MenuAttachment::Window(window);
         let handler = RoutedEventHandler::new(move |_, _| {
-            // ONE DISPATCH PATH (the module's echo doctrine): a toolbar
-            // click is the same activation a menu click is, so it lands
-            // in the same function and emits the same occurrence.
             menu_user_activate(id, attachment);
             Ok(())
         });
@@ -6269,13 +4994,11 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         primary.Append(&button.cast::<ICommandBarElement>()?)?;
         core.toolbar_buttons.insert((window, id), button);
     }
-    // An emptied promotion list leaves the bar in the tree with nothing
-    // in it; a CommandBar with no commands still measures 48px, so it
-    // is collapsed instead — and so is the caption row it rides in, and
-    // the window goes back to the system caption. THE WHOLE EXTENDED
-    // STATE FOLLOWS THE ONE NUMBER, in both directions, because
-    // "extended is derived from toolbar presence" has to be as true on
-    // the way down as on the way up.
+    // An emptied promotion list leaves the bar in the tree with nothing in
+    // it, and a CommandBar with no commands still measures 48px — so it is
+    // collapsed, and so is the caption row, and the window goes back to the
+    // system caption. The extended state follows the one number in BOTH
+    // directions.
     let holds = primary.Size()? + bar.SecondaryCommands()?.Size()?;
     let extended = holds > 0;
     let visibility = if extended {
@@ -6289,14 +5012,13 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         let target = winui_window(core, window)?;
         // READ BEFORE WRITE: this runs on every catalog rebuild, and
         // re-asserting the flag re-enters the window's frame/inset
-        // recomputation for no reason. Written only when it moves.
+        // recomputation for no reason.
         if target.ExtendsContentIntoTitleBar()? != extended {
             target.SetExtendsContentIntoTitleBar(extended)?;
         }
-        // THE SYSTEM'S HALF OF THE BAND, derived from the same number.
-        // The XAML control sizes itself; the caption BUTTONS are the
-        // window's, and this is the only thing that moves them. Read
-        // before write for the same reason as the line above.
+        // THE SYSTEM'S HALF OF THE BAND, derived from the same number: the
+        // caption BUTTONS are the window's, and this is the only thing that
+        // moves them. Read before write, as above.
         let caption = target.AppWindow()?.TitleBar()?;
         let wanted = if extended {
             TitleBarHeightOption::Tall
@@ -6306,69 +5028,30 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         if caption.PreferredHeightOption()? != wanted {
             caption.SetPreferredHeightOption(wanted)?;
         }
-        // ONE BAND: the menu rides in the caption exactly while there is
-        // a caption to ride in, and goes back to its own row when the
-        // promotion empties. Before RecomputeDragRegions, deliberately —
-        // the move changes LeftHeader's extent, and the rects published
-        // below have to be the ones the bar ends up occupying.
+        // Before RecomputeDragRegions, deliberately: the move changes
+        // LeftHeader's extent, and the rects published below have to be the
+        // ones the bar ends up occupying.
         rehost_menubar(core, window, extended)?;
-        // ARM THE GEOMETRY POST-CONDITION. It cannot run here: this
-        // rebuild may be the one that puts the bar in the tree, so there
-        // is nothing arranged yet to measure. The caption's own
-        // LayoutUpdated fires it on the first pass that has.
+        // ARM THE GEOMETRY POST-CONDITION: this rebuild may be the one
+        // that puts the bar in the tree, so there is nothing arranged yet
+        // to measure.
         CAPTION_GEOMETRY_ARMED.set(true);
-        // The bar's width just changed and it lives in RightHeader,
-        // which the control's automatic refresh does not watch (see the
-        // doc comment). Without this the passthrough rects describe the
-        // PREVIOUS set of buttons: the window would still drag, and the
-        // buttons under the stale hole would be the wrong ones. The menu
-        // has the same problem for the same reason — the control watches
-        // `Content`'s LayoutUpdated and neither header's.
+        // The bar's width just changed and it lives in RightHeader, which
+        // the control's automatic refresh does not watch. Without this the
+        // passthrough rects describe the PREVIOUS set of buttons. The menu
+        // has the same problem for the same reason.
         titlebar.RecomputeDragRegions()?;
-        // THE ONE CAPTION WRITER FILLS THE CONTROL'S TITLE, here and on
-        // every rebuild. Idempotent by construction (it derives the
-        // whole caption from state), so a rebuild that changed only the
-        // button set rewrites the same string and the control's own
-        // `appWindow.Title` write is a no-op.
         refresh_caption(core, window)?;
     }
     Ok(())
 }
 
-/// THE MENU'S PARENT IS DERIVED, exactly like the caption it moves into.
-/// A window that promotes an action wears ONE band, and the menu is part
-/// of it: the same `MenuBar` object leaves its shell row and becomes the
-/// caption's `LeftHeader`. When the promotion empties, it goes back. A
-/// window that never promotes has no caption control to migrate into and
-/// never leaves the row — which is "extended is derived from toolbar
-/// presence" read from the menu's side.
-///
-/// THE SAME OBJECT MOVES, which is the whole reason this is a mount-point
-/// change and not a rebuild. Every harness read of the menus — the item
-/// walk, `expect_menu`, the enablement reads — goes through
-/// `core.menubars`, and that map still holds the bar it always held. A
-/// menu that was rebuilt into a different control would have to prove all
-/// of that again; a menu that changed parents proves it by being the same
-/// pointer.
-///
-/// XAML REFUSES RE-PARENTING AND DOES NOT WARN. Appending an element that
-/// still has a parent takes a non-unwinding panic through the XAML layer
-/// and ABORTS THE PROCESS (`release_split`'s docstring records the same
-/// trap from the split arm). So each direction detaches before it
-/// attaches, and the state is read off the tree rather than tracked
-/// beside it — `IndexOf` on the shell's own children is the question
-/// "where is this bar right now", and a bookkeeping bool would be a
-/// second answer that can disagree.
-///
-/// THE MENU STAYS CLICKABLE IN THE CAPTION, and that is not a hope:
-/// `TitleBar::UpdateInteractableElementsList` pushes the whole
-/// `PART_LeftHeaderPresenter` area onto the passthrough list whenever
-/// `LeftHeader()` is non-null (microsoft-ui-xaml @ winui3/release/2.2.0,
-/// `src/controls/dev/TitleBar/TitleBar.cpp:849-858`), and
-/// `UpdateDragRegion` hands those rects to `InputNonClientPointerSource`.
-/// The rects are only as fresh as the last recompute, which is why the
-/// caller does this move BEFORE `RecomputeDragRegions`. Proved by
-/// clicking, not by reading: the menus legs open `File` in the caption.
+/// THE MENU'S PARENT IS DERIVED, like the caption it moves into: the same
+/// `MenuBar` object leaves its shell row for the caption's `LeftHeader` and
+/// goes back when the promotion empties, so `core.menubars` still holds the
+/// bar every harness read goes through. XAML REFUSES RE-PARENTING AND DOES
+/// NOT WARN (an append with a parent still set ABORTS THE PROCESS), so each
+/// direction detaches first, and the move precedes `RecomputeDragRegions`.
 fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_core::Result<()> {
     let Some(bar) = core.menubars.get(&window) else {
         return Ok(());
@@ -6382,17 +5065,16 @@ fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_co
     let mut at = 0u32;
     let in_row = children.IndexOf(&bar_el, &mut at)?;
     let titlebar = core.window_titlebars.get(&window);
-    // A window with no caption control has nowhere else to put it. This
-    // is the shape EVERY non-promoting window has, so it is a branch and
-    // not an assumption.
+    // A window with no caption control has nowhere else to put it — the
+    // shape EVERY non-promoting window has.
     let in_caption = in_caption && titlebar.is_some();
     match (in_caption, in_row, titlebar) {
         (true, true, Some(titlebar)) => {
             children.RemoveAt(at)?;
             // INTO THE CONTAINER'S SECOND COLUMN, not into `LeftHeader`
-            // itself: the first column is the app's mark, which goes
-            // BEFORE the menu (the ruling of 2026-08-18). `LeftHeader` is
-            // written once, at the mint, and by nothing else.
+            // itself: the first column is the app's mark, which goes BEFORE
+            // the menu (the ruling of 2026-08-18). `LeftHeader` is written
+            // once, at the mint, and by nothing else.
             Grid::SetColumn(&bar_fe, CAPTION_MENU_COLUMN)?;
             caption_left_header(window, titlebar)?
                 .Children()?
@@ -6407,36 +5089,21 @@ fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_co
                 }
             }
             Grid::SetRow(&bar_fe, MENUBAR_ROW)?;
-            // The column it wore in the caption travels with the element;
-            // the shell's grid has one column, and a child left claiming
-            // column 1 there is a child in a column that does not exist.
+            // The column it wore in the caption travels with the element,
+            // and the shell's grid has only column 0.
             Grid::SetColumn(&bar_fe, 0)?;
             children.Append(&bar_el)?;
         }
-        // Already where it belongs. Idempotent because this runs on
-        // EVERY catalog rebuild, and a move that re-ran would detach and
-        // re-attach a live control for nothing.
+        // Already where it belongs. Idempotent because this runs on EVERY
+        // catalog rebuild.
         _ => {}
     }
 
     // THE POST-CONDITION, AND IT IS A WALL BECAUSE NOTHING ELSE IS ONE.
-    // MEASURED, not feared: with `SetLeftHeader` deleted from the arm
-    // above — one substitution, printed and asserted — the bar is
-    // detached from its row and attached to nothing, the window shows NO
-    // MENU AT ALL, and `menus_rust` PASSED (2s).
-    //
-    // The reason is structural and worth stating where the next reader
-    // will be: every menu question this backend answers goes through
-    // `core.menubars` (the bar OBJECT) or `core.menu_natives` (the item
-    // objects). `menu_presentation` asks the bar how many Items it
-    // holds; `menu_state` asks a MenuFlyoutItem for its flag; activation
-    // invokes that same item. Not one of them asks whether the bar is in
-    // a TREE, and no harness verb could ask it uniformly — the question
-    // "where does this window's menu live" has no answer on the other
-    // four backends. So the shared scenes structurally cannot see this,
-    // exactly as they could not see an unearned extended caption
-    // (`refresh_toolbar`'s mint carries that sibling assertion), and the
-    // check goes here, on the path every promoted window runs.
+    // MEASURED: with `SetLeftHeader` deleted the bar is attached to nothing,
+    // the window shows NO MENU AT ALL, and `menus_rust` PASSED — every menu
+    // question this backend answers goes through the bar OBJECT or the item
+    // objects, and none of them asks whether the bar is in a TREE.
     let in_caption_now = match titlebar {
         Some(titlebar) => {
             let kids = caption_left_header(window, titlebar)?.Children()?;
@@ -6467,19 +5134,12 @@ fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_co
     Ok(())
 }
 
-/// What the window's REAL toolbar holds: how many items are in it, and
-/// the addressable buttons among them with the name each publishes to
-/// UIA.
-///
+/// What the window's REAL toolbar holds: how many items are in it, and the
+/// addressable buttons among them with the name each publishes to UIA.
 /// WALKED FROM THE BAR'S OWN COLLECTIONS, never from `toolbar_buttons`,
 /// which would answer "yes" whether or not the promotion reached the
-/// chrome. Both collections are walked because the button object is the
-/// same object wherever it sits.
-///
-/// WHAT IT CANNOT SEE: dynamic overflow moves a primary command into the
-/// "…" menu WITHOUT moving it between collections (it flips
-/// `IsInOverflow`), so "in the chrome" here means in the bar's command
-/// list and never "wide enough to be showing right now".
+/// chrome. WHAT IT CANNOT SEE: dynamic overflow flips `IsInOverflow`
+/// without moving a command, so "in the chrome" is not "showing now".
 #[cfg(feature = "harness")]
 fn toolbar_read(
     core: &CoreState,
@@ -6495,9 +5155,6 @@ fn toolbar_read(
             held += 1;
             let element = commands.GetAt(index)?;
             let Ok(button) = element.cast::<AppBarButton>() else {
-                // An item that is not a button — a separator, say — is
-                // an item the chrome holds and not one this read can
-                // address. Counted, not named.
                 continue;
             };
             let Ok(fe) = button.cast::<FrameworkElement>() else {
@@ -6512,10 +5169,8 @@ fn toolbar_read(
 
 /// Where this window's unpromoted catalog lives, from the closed set the
 /// harness contract names — READ, not asserted: the window's real
-/// `MenuBar` with real items in it (`rebuild_menus` puts the WHOLE
-/// catalog there). `none` the moment that stops being true, which is the
-/// answer that would fail the step rather than quietly claiming a home
-/// the window does not have.
+/// `MenuBar` with real items in it, and `none` the moment that stops being
+/// true rather than a home the window does not have.
 #[cfg(feature = "harness")]
 fn toolbar_remainder_home(core: &CoreState, window: u64) -> windows_core::Result<&'static str> {
     let Some(bar) = core.menubars.get(&window) else {
@@ -6529,10 +5184,9 @@ fn toolbar_remainder_home(core: &CoreState, window: u64) -> windows_core::Result
 }
 
 /// KAYA_WINUI_TOOLBAR_TRACE=1: dump every candidate surface of the real
-/// bar at every toolbar step. It is how the two questions this arm could
-/// not answer from the framework's closed sources were settled — what an
-/// `AppBarButton` publishes as its UIA name with `Label` set and `Content`
-/// null, and which enablement surface a disable actually moves.
+/// bar at every toolbar step. It settled what an `AppBarButton` publishes
+/// as its UIA name with `Label` set and `Content` null, and which
+/// enablement surface a disable actually moves.
 #[cfg(feature = "harness")]
 fn toolbar_trace(core: &CoreState, window: u64) {
     if std::env::var_os("KAYA_WINUI_TOOLBAR_TRACE").is_none() {
@@ -6566,30 +5220,17 @@ fn toolbar_trace(core: &CoreState, window: u64) {
 
 /// Every content swap for a window goes through here: into the menu
 /// shell's slot when the window carries a bar, straight onto the Window
-/// otherwise.
-///
-/// `window_client_width` reads the WINDOW and not whatever element
-/// occupies it. Reading `Content().XamlRoot().Size()` is circular for the
-/// list-detail arm, which REPLACES the content: a UIElement's XamlRoot is
-/// null until it is parented into a live tree, so an element mid-reparent
-/// legitimately has none, and the trace showed `measured` alternating
-/// between Some(900.0) and None as the tree was swapped underneath the
-/// reading. GetClientRect answers about the WINDOW and is available before
-/// XAML has laid anything out.
+/// otherwise. `window_client_width` reads the WINDOW and not whatever
+/// element occupies it — a UIElement's XamlRoot is null until it is
+/// parented, so `Content().XamlRoot().Size()` is circular for the
+/// list-detail arm, whose trace alternated Some(900.0)/None mid-swap.
 #[cfg(feature = "harness")]
 /// Is the Shell's file dialog on screen? Plain Win32, no COM.
 ///
-/// THE GONE-CHECK MUST NOT WALK THE DIALOG. `choose_file` presses Open and
-/// then asks whether the dialog left, and asking that through UI
-/// Automation means enumerating a tree being torn down at that moment:
-/// uiautomationcore raises RPC_E_DISCONNECTED, COM surfaces it as a
-/// STRUCTURED EXCEPTION rather than a failed HRESULT, and the JVM's
-/// process-wide handler turns that into a FATAL error report. The java leg
-/// died there while the other four merely raced unseen.
-///
-/// Existence is a window question, so it is asked of the window manager.
-/// EnumWindows cannot fault on a dead provider because it never speaks to
-/// one.
+/// THE GONE-CHECK MUST NOT WALK THE DIALOG (docs/traps.md: UI Automation
+/// cannot read the Shell's file dialog from a guest — the structured
+/// exception it raises is fatal under a JVM). EnumWindows never speaks to
+/// a provider.
 #[cfg(feature = "harness")]
 fn file_dialog_is_up() -> bool {
     unsafe extern "system" fn visit(hwnd: isize, found: isize) -> i32 {
@@ -6640,30 +5281,11 @@ fn window_text(hwnd: isize) -> String {
 }
 
 /// Answer the save dialog's overwrite confirmation, if one is up.
-///
-/// WHY THERE IS ANYTHING TO ANSWER: `FOS_OVERWRITEPROMPT` is in the save
-/// dialog's DEFAULT options (measured `0x880a`) and this backend keeps it,
-/// because clearing it would make Windows the only platform that replaces
-/// a file without asking. Unanswered, `Show()` NEVER RETURNS — the
-/// apartment thread stays in its nested modal loop, `file_save` reports
-/// "the dialog is still up" twenty seconds later, and the leg's real
-/// failure is invisible behind that.
-///
-/// FOUND BY IDENTITY, NOT BY CAPTION AND NOT BY SHAPE. Measured
-/// (docs/probes/save-probe-windows.md §B.3): the prompt is a SECOND
-/// top-level `#32770` whose 17 descendants are a `DirectUIHWND` plus
-/// `CtrlNotifySink`-wrapped Buttons **with id 0** — so no id lookup finds
-/// anything and `dialog_control` is useless here. Matching its caption
-/// ("Confirm Save As") would make the answer stop working on a Windows
-/// that speaks anything else; matching its shape would risk taking the
-/// SAVE DIALOG for the prompt mid-teardown and pressing an unknown
-/// button. The caller already knows which window it pressed Save on, so
-/// the prompt is simply "the other one".
-///
-/// THE FIRST VISIBLE BUTTON, and the failure mode of guessing wrong is the
-/// safe one: measured enumeration order is `"&Yes"` then `"&No"`, and
-/// pressing No CANCELS the save — the destination never arrives and the
-/// leg fails loudly — rather than overwriting something quietly.
+/// `FOS_OVERWRITEPROMPT` is in the dialog's DEFAULT options (measured
+/// `0x880a`) and unanswered `Show()` NEVER RETURNS. FOUND BY IDENTITY: the
+/// prompt is a SECOND top-level `#32770` whose Buttons carry id 0
+/// (docs/probes/save-probe-windows.md §B.3), so it is "the other window";
+/// enumeration order is `"&Yes"` then `"&No"`, and pressing No fails safe.
 #[cfg(feature = "harness")]
 fn answer_overwrite_prompt(dialog: isize) {
     struct Hunt {
@@ -6713,9 +5335,8 @@ fn answer_overwrite_prompt(dialog: isize) {
         return;
     }
     // ONCE, and it is the record that this arm ran at all: the shared
-    // scene cannot reach here (it saves to a name in a per-pid directory
-    // nobody has made), so a log line is the only thing that distinguishes
-    // "the prompt never came up" from "the answer did nothing".
+    // scene cannot reach here, so the log line is what distinguishes "the
+    // prompt never came up" from "the answer did nothing".
     eprintln!(
         "kaya: answered the save dialog's overwrite prompt {:?} with {:?}",
         window_text(hunt.found),
@@ -6746,33 +5367,11 @@ fn sample_dialog() -> Option<sampler::Sampled> {
 }
 
 /// What the live dialog is SHOWING, sampled through the shell's own
-/// interfaces rather than through UI Automation.
-///
-/// UIA IS THE THING THAT MUST NOT HAPPEN, and moving the client out of
-/// process could never have fixed it, because the fault is on the
-/// PROVIDER side — inside this process. Measured stack, bottom up:
-/// USER32 dispatches a message, DirectUI (DUI70) handles it, and while
-/// handling it uiautomationcore raises an automation event to whatever
-/// client has attached, which needs an outgoing COM call. Windows
-/// refuses one from a thread dispatching an input-synchronous call and
-/// raises RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) — flagged
-/// NONCONTINUABLE, so no handler may dismiss it. COM catches it and
-/// carries on; four runtimes never notice; HotSpot's vectored exception
-/// handler on windows-aarch64 sees the same first-chance event and
-/// reports a fatal error. So MERELY ATTACHING A UIA CLIENT makes this
-/// dialog fatal to a JVM, and nothing on the client side can help —
-/// which is why a helper process was built, measured, and thrown away.
-///
-/// The dialog is ours, created in this process, so the shell will
-/// simply say what its view holds: IServiceProvider ->
-/// SID_STopLevelBrowser -> IShellBrowser -> the active IShellView ->
-/// IFolderView -> its items. No automation client, no WM_GETOBJECT, no
-/// event notifications, no exception.
-///
-/// SAMPLED ON THE DIALOG'S OWN THREAD, because the dialog is an STA
-/// object and belongs to the thread that created it. The harness thread
-/// posts a request to a message-only window living on that thread and
-/// reads the answer out of a mutex; nothing crosses an apartment.
+/// interfaces rather than through UI Automation: MERELY ATTACHING A UIA
+/// CLIENT makes this dialog fatal to a JVM (docs/traps.md: UI Automation
+/// cannot read the Shell's file dialog from a guest). The dialog is ours, so
+/// IServiceProvider -> SID_STopLevelBrowser -> IShellBrowser -> IShellView
+/// -> IFolderView answers, sampled ON THE DIALOG'S OWN STA THREAD.
 #[cfg(feature = "harness")]
 mod sampler {
     use std::sync::Mutex;
@@ -6782,11 +5381,10 @@ mod sampler {
     pub(crate) static WINDOW: std::sync::atomic::AtomicIsize =
         std::sync::atomic::AtomicIsize::new(0);
 
-    /// WHICH DIALOG THIS SAMPLE CAME OFF, carried in the type rather than
-    /// left to the reader to assume. One process may have one live file
-    /// dialog and this backend has one sampler window, so the picker's
-    /// reader and the save dialog's reader share a slot; the variant makes
-    /// each reader's `None` mean "no dialog OF MINE is live".
+    /// WHICH DIALOG THIS SAMPLE CAME OFF, carried in the type: one process
+    /// may have one live file dialog and this backend has one sampler
+    /// window, so the variant makes each reader's `None` mean "no dialog OF
+    /// MINE is live".
     #[derive(Clone)]
     pub(crate) enum Sampled {
         /// A picker: the directory it is browsing, and every row its view
@@ -6794,9 +5392,8 @@ mod sampler {
         Open(String, Vec<String>),
         /// A save dialog: the directory it is browsing, and the text
         /// currently in its file-name box. NEVER ROWS — the platform whose
-        /// save panel publishes none at all is why the observation is
-        /// shaped this way in every backend (harness.rs,
-        /// Stage::save_dialog_state).
+        /// save panel publishes none at all is why the observation is shaped
+        /// this way in every backend (harness.rs, Stage::save_dialog_state).
         Save(String, String),
     }
 
@@ -6804,16 +5401,14 @@ mod sampler {
     /// can never satisfy an assertion about a new one.
     pub(crate) static VIEW: Mutex<Option<Sampled>> = Mutex::new(None);
     /// WM_APP: "sample now". pub(crate) and not pub: cbindgen scrapes
-    /// public constants into the C header regardless of the privacy of
-    /// the module holding them, and this is an internal detail of one
-    /// backend rather than part of the ABI.
+    /// public constants into the C header regardless of the privacy of the
+    /// module holding them (docs/traps.md).
     pub(crate) const SAMPLE: u32 = 0x8000;
 }
 
-/// A shell-allocated wide string, read and RELEASED. Every `PWSTR` the
+/// A shell-allocated wide string, read and RELEASED: every `PWSTR` the
 /// Shell answers with is CoTaskMemAlloc'd and belongs to the caller, and
-/// these reads sit inside a poll — an assertion samples the dialog tens
-/// of times — so the release is per-sample rather than per-dialog.
+/// these reads sit inside a poll that samples tens of times.
 #[cfg(feature = "harness")]
 fn take_pwstr(text: windows_core::PWSTR) -> windows_core::Result<String> {
     let owned = unsafe { text.to_string() };
@@ -6859,11 +5454,10 @@ fn sample_folder_view(
     let mut rows = Vec::new();
     for i in 0..unsafe { items.GetCount()? } {
         let item = unsafe { items.GetItemAt(i)? };
-        // PARENTRELATIVEFORUI is WHAT THE USER SEES, which is what
-        // every other backend reports and what the shared scene
-        // compares byte for byte. It honours Explorer's HideFileExt,
-        // so the deploy still has to set that to 0 — the same guard
-        // as before, for the same reason.
+        // PARENTRELATIVEFORUI is WHAT THE USER SEES, which every other
+        // backend reports and the shared scene compares byte for byte. It
+        // honours Explorer's HideFileExt, so the deploy still has to set
+        // that to 0.
         rows.push(take_pwstr(unsafe {
             item.GetDisplayName(SIGDN_PARENTRELATIVEFORUI)?
         })?);
@@ -6872,26 +5466,11 @@ fn sample_folder_view(
 }
 
 /// The save dialog's observation: where it is browsing, and THE NAME IT
-/// WOULD SAVE UNDER.
-///
-/// `IFileDialog::GetFileName` and not the file-name Edit's text, though
-/// both were on the table and the control is right there (id 1001, class
-/// `Edit`, measured — docs/probes/save-probe-windows.md §B.3). Reading the
-/// control would mean `WM_GETTEXT`, whose lParam is a POINTER: only
-/// `SendMessage` marshals one, and a send is what puts the receiving
-/// thread into the input-synchronous call that makes this dialog fatal to
-/// a JVM (see `sample_folder_view`). The send would be safe HERE, from
-/// the dialog's own thread, and that is exactly the kind of "safe in this
-/// one caller" reasoning that stops being true when someone moves the
-/// call. The Shell's own accessor asks no id and sends no message.
-///
-/// IT IS A LIVE READ, not the echo of `SetFileName` — the leg is the
-/// proof: `file_dialog_name final` types over the suggested `copy` with
-/// posted `WM_CHAR`s, and the very next step asserts the field reads
-/// `final`. Posted messages leave a thread's queue in the order they
-/// entered it, so the characters are dispatched before the SAMPLE that
-/// follows them, and a stale accessor would fail that assertion with
-/// `save dialog names "copy", wanted "final"`.
+/// WOULD SAVE UNDER. `IFileDialog::GetFileName` and not the file-name
+/// Edit's text: reading the control means `WM_GETTEXT`, whose lParam is a
+/// POINTER, so only `SendMessage` marshals it — and a send puts the
+/// receiving thread into the input-synchronous call that makes this dialog
+/// fatal to a JVM. A LIVE read, not the echo of `SetFileName`.
 #[cfg(feature = "harness")]
 fn sample_save_state(
     dialog: &windows::Win32::UI::Shell::IFileSaveDialog,
@@ -6901,9 +5480,9 @@ fn sample_save_state(
     Ok(sampler::Sampled::Save(directory, name))
 }
 
-/// Sample whichever dialog is live, on ITS thread. A failed read leaves
-/// the previous answer alone rather than publishing a half one: the
-/// callers poll, and `open_sampler` is what clears the slot.
+/// Sample whichever dialog is live, on ITS thread. A failed read leaves the
+/// previous answer alone rather than publishing a half one; `open_sampler`
+/// is what clears the slot.
 #[cfg(feature = "harness")]
 fn sample_live(live: &LiveDialog) {
     let sampled = match live {
@@ -6917,11 +5496,10 @@ fn sample_live(live: &LiveDialog) {
     }
 }
 
-/// A control of the dialog by its classic id and class. The ids were
-/// confirmed against the real dialog by tools/win/dialogprobe rather
-/// than taken from documentation: 1 is Open, 2 is Cancel, and 1148 is
-/// the file-name box, which is an Edit inside a ComboBoxEx32 that
-/// shares its id.
+/// A control of the dialog by its classic id and class, confirmed against
+/// the real dialog by tools/win/dialogprobe rather than taken from
+/// documentation: 1 is Open, 2 is Cancel, and 1148 is the file-name box, an
+/// Edit inside a ComboBoxEx32 that shares its id.
 #[cfg(feature = "harness")]
 fn dialog_control(dialog: isize, id: i32, class: &str) -> Option<isize> {
     struct Hunt<'a> {
@@ -6952,14 +5530,11 @@ const ID_OK: i32 = 1;
 const ID_CANCEL: i32 = 2;
 #[cfg(feature = "harness")]
 const ID_FILENAME: i32 = 1148;
-/// The SAVE dialog's file-name box, and it is a DIFFERENT CONTROL — not
-/// the same id in a different place. Measured in one session against both
-/// dialogs (docs/probes/save-probe-windows.md §B.3): the save dialog has no
-/// id 1148 at all, and `dialog_control(dialog, 1148, "Edit")` answers
-/// nothing, which is a SILENT no-op rather than an error. Its box is id
-/// 1001, class `Edit` — and the class half of the lookup is load-bearing
-/// here, because id 1001 is ALSO the address bar (`ToolbarWindow32`) in
-/// both dialogs.
+/// The SAVE dialog's file-name box, a DIFFERENT CONTROL rather than the
+/// same id in a different place (docs/probes/save-probe-windows.md §B.3):
+/// the save dialog has no id 1148 at all and `dialog_control(dialog, 1148,
+/// "Edit")` is a SILENT no-op. Its box is id 1001, class `Edit`, and the
+/// class half is load-bearing — id 1001 is ALSO the address bar.
 #[cfg(feature = "harness")]
 const ID_SAVE_FILENAME: i32 = 1001;
 #[cfg(feature = "harness")]
@@ -6969,9 +5544,8 @@ const EM_SETSEL: u32 = 0x00B1;
 #[cfg(feature = "harness")]
 const BM_CLICK: u32 = 0x00F5;
 
-/// The WNDCLASSW the sampler window registers. Hand-declared beside
-/// the user32 calls this file already names, rather than by enabling
-/// Win32_UI_WindowsAndMessaging for one struct.
+/// The WNDCLASSW the sampler window registers, hand-declared rather than by
+/// enabling Win32_UI_WindowsAndMessaging for one struct.
 #[cfg(feature = "harness")]
 #[repr(C)]
 struct WndClassW {
@@ -6989,12 +5563,10 @@ struct WndClassW {
 
 /// The message-only window the harness posts its sample request to.
 ///
-/// It lives on the DIALOG'S thread, because that is the only thread
-/// allowed to touch an STA object, and it is a window rather than a
-/// channel because that thread is inside a modal Show() loop — a loop
-/// that pumps the thread's queue and so dispatches to this window
-/// without knowing anything about it. Nothing here crosses an
-/// apartment, which is the entire point.
+/// It lives on the DIALOG'S thread, the only thread allowed to touch an STA
+/// object, and it is a window rather than a channel because that thread is
+/// inside a modal Show() loop — which pumps the queue and so dispatches to
+/// this window without knowing anything about it.
 #[cfg(feature = "harness")]
 unsafe extern "system" fn sampler_proc(
     hwnd: isize,
@@ -7013,11 +5585,10 @@ unsafe extern "system" fn sampler_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// The dialog the sampler is holding, and WHICH KIND IT IS. The two are
-/// separate COM interfaces — `IFileOpenDialog` and `IFileSaveDialog`,
-/// siblings under `IFileDialog` rather than one deriving from the other,
-/// so unlike AppKit's panels there is no single type to hold and ask
-/// about later.
+/// The dialog the sampler is holding, and WHICH KIND IT IS.
+/// `IFileOpenDialog` and `IFileSaveDialog` are siblings under `IFileDialog`
+/// rather than one deriving from the other, so there is no single type to
+/// hold and ask about later.
 #[cfg(feature = "harness")]
 #[derive(Clone)]
 enum LiveDialog {
@@ -7049,10 +5620,9 @@ fn open_sampler(dialog: LiveDialog) {
     wc.instance = instance;
     wc.class_name = class.as_ptr();
     // Registering the same class twice simply fails; the class outlives
-    // any one dialog and that is fine.
+    // any one dialog.
     unsafe { RegisterClassW(&wc) };
-    // HWND_MESSAGE is -3: no screen presence, no z-order, nothing but a
-    // queue endpoint.
+    // HWND_MESSAGE is -3: a queue endpoint and nothing else.
     let hwnd = unsafe {
         CreateWindowExW(
             0,
@@ -7089,12 +5659,11 @@ fn close_sampler() {
     SAMPLED_DIALOG.with(|held| *held.borrow_mut() = None);
 }
 
-/// Show the Shell's common item dialog and return (name, path) per
-/// file. Runs on the dialog apartment's thread; see `dialog_apartment`.
+/// Show the Shell's common item dialog and return (name, path) per file.
+/// Runs on the dialog apartment's thread; see `dialog_apartment`.
 ///
-/// The empty vector IS cancel: Show() answers ERROR_CANCELLED, which is
-/// not an error condition to report but the platform's way of saying the
-/// selection was empty.
+/// The empty vector IS cancel: Show() answers ERROR_CANCELLED, which is the
+/// platform's way of saying the selection was empty.
 fn file_dialog_show(
     hwnd: isize,
     multiple: bool,
@@ -7113,10 +5682,8 @@ fn file_dialog_show(
         // THE APARTMENT IS THE THREAD'S, NOT THIS CALL'S — the caller
         // entered it and never leaves it. See `dialog_apartment`.
         //
-        // WHICH CALL FAILED, not merely that one did: a bare
-        // "The parameter is incorrect" from a chain of six COM calls
-        // names nothing, and the first run cost a deploy cycle to learn
-        // that much.
+        // WHICH CALL FAILED, not merely that one did: a bare "The parameter
+        // is incorrect" from a chain of six COM calls names nothing.
         let mut stage = "CoCreateInstance";
         let result = (|| -> windows_core::Result<()> {
             let dialog: IFileOpenDialog =
@@ -7124,10 +5691,8 @@ fn file_dialog_show(
 
             stage = "GetOptions";
             let mut options = dialog.GetOptions()?;
-            // FORCEFILESYSTEM keeps the answer to things that HAVE a
-            // path: the design hands back a capability the guest opens
-            // with its own file API, and a virtual shell item has
-            // nothing to open.
+            // FORCEFILESYSTEM: the guest opens the path with its own file
+            // API, and a virtual shell item has nothing to open.
             options |= FOS_FORCEFILESYSTEM;
             if multiple {
                 options |= FOS_ALLOWMULTISELECT;
@@ -7135,9 +5700,8 @@ fn file_dialog_show(
             stage = "SetOptions";
             dialog.SetOptions(options)?;
 
-            // ADVISORY on every platform (DESIGN.md): a default view,
-            // never a guarantee. The HSTRINGs must outlive SetFileTypes,
-            // which borrows their pointers.
+            // Advisory, never a guarantee (DESIGN.md). The HSTRINGs must
+            // outlive SetFileTypes, which borrows their pointers.
             let specs: Vec<(HSTRING, HSTRING)> = filters
                 .iter()
                 .map(|(label, suffix)| {
@@ -7156,8 +5720,6 @@ fn file_dialog_show(
             dialog.SetFileTypes(&raw)?;
             }
 
-            // The armed directory, applied HERE because that is the only
-            // moment it is read.
             if let Some(dir) = folder {
                 let wide = HSTRING::from(dir);
                 stage = "SHCreateItemFromParsingName";
@@ -7167,26 +5729,19 @@ fn file_dialog_show(
             dialog.SetFolder(&item)?;
             }
 
-            // The sampler lives exactly as long as the modal loop:
-            // stood up immediately before Show, taken down the instant
-            // it returns (below, outside this closure, because cancel
-            // leaves through the `?`).
+            // The sampler lives exactly as long as the modal loop: stood
+            // up immediately before Show, taken down the instant it returns
+            // (below, outside this closure, because cancel leaves via `?`).
             #[cfg(feature = "harness")]
             open_sampler(LiveDialog::Open(dialog.clone()));
 
             stage = "Show";
-            // NO OWNER, and that is not laziness. Show() disables its
-            // owner and waits on the owner's input queue, and this runs
-            // on a thread that is not the UI thread — so passing the
+            // NO OWNER: Show() disables its owner and waits on the owner's
+            // input queue, and this runs off the UI thread, so passing the
             // app window blocks inside Show() before the dialog is ever
-            // created. Measured: the thread entered Show and never
-            // returned, and UI Automation reported no #32770 anywhere on
-            // the desktop.
-            //
-            // Modality is not lost by this. kaya already allows exactly
-            // one live file dialog per process (capi::file_dialog_shown
-            // refuses a second and the op is dropped), which is the
-            // guarantee the vocabulary actually makes.
+            // created (docs/traps.md: Show() with an owner on another
+            // thread never comes back). Modality is kept by
+            // capi::file_dialog_shown, which refuses a second.
             let _ = hwnd;
             dialog.Show(None)?;
 
@@ -7204,14 +5759,10 @@ fn file_dialog_show(
             }
             Ok(())
         })();
-        // OUTSIDE THE CLOSURE, because Show() answers cancel with an
-        // Err that leaves it early — a teardown inside would run on the
-        // happy path only, and the harness would go on posting into a
-        // queue nobody pumps.
+        // OUTSIDE the closure: Show() answers cancel with an Err that leaves
+        // it early, so a teardown inside would run on the happy path only.
         #[cfg(feature = "harness")]
         close_sampler();
-        // A cancelled dialog returns ERROR_CANCELLED from Show(); the
-        // empty vector already says that, so nothing is logged for it.
         if let Err(err) = result {
             const CANCELLED: windows_core::HRESULT = windows_core::HRESULT(0x8007_04C7u32 as i32);
             if err.code() != CANCELLED {
@@ -7226,37 +5777,11 @@ fn file_dialog_show(
 }
 
 /// Show the Shell's SAVE dialog and return the one (name, path) it was
-/// pointed at, or nothing for cancel. Runs on the dialog apartment's
-/// thread, exactly as the picker does.
-///
+/// pointed at, or nothing for cancel; runs on the dialog apartment's thread.
 /// `IFileSaveDialog` AND NOT `FileSavePicker`, measured
-/// (docs/probes/save-probe-windows.md §B.1) rather than assumed, and the
-/// first charge is the one that decides it: the WinRT picker's
-/// `SetSuggestedStartLocation` takes a `PickerLocationId` — an ENUM of
-/// well-known folders — so it cannot be aimed at `<temp>/kaya-save-<pid>`
-/// at all, which is precisely the charge `PresentFileDialog` already
-/// records against `FileOpenPicker`. Three more: a non-packaged desktop
-/// app must hand it an owner HWND; the documentation says the
-/// `Windows.Storage.Pickers` APIs "don't work when apps run as
-/// administrator", and every leg on this lane runs `schtasks /rl highest`;
-/// and it is async, so it wants a pump on the STA rather than the blocking
-/// modal `Show()` this thread already runs. Microsoft's own documented
-/// remedy for a desktop app is the call sequence below.
-///
-/// IT CREATES NOTHING, measured three times with three names:
-/// `exists_after_show=false` every one. So the path handed back names a
-/// file that is not there, and the ONE thing that will ever create it is
-/// the core's `SaveDestination::open` (docs/save-plan.md D1). This
-/// function must not "help" by touching the file system — Android and iOS
-/// hand back a document that exists, mac/linux/windows hand back a name,
-/// and the core is where those two are made one behaviour.
-///
-/// THE OVERWRITE PROMPT STAYS ON. `FOS_OVERWRITEPROMPT` is in the save
-/// dialog's default options (measured: `0x880a`), and clearing it would
-/// make Windows the one platform that replaces a file without asking —
-/// NSSavePanel prompts too. What that costs is a second window the harness
-/// has to answer, and `Stage::confirm_save` answers it; leaving it
-/// unanswered does not fail, it WEDGES, because `Show()` never returns.
+/// (docs/probes/save-probe-windows.md §B.1). IT CREATES NOTHING — the core's
+/// `SaveDestination::open` does (docs/save-plan.md D1). The overwrite prompt
+/// stays on, and unanswered it WEDGES, because `Show()` never returns.
 fn file_save_show(
     hwnd: isize,
     suggested_name: &str,
@@ -7272,8 +5797,6 @@ fn file_save_show(
 
     let mut out = None;
     unsafe {
-        // WHICH CALL FAILED, not merely that one did — the picker's rule,
-        // and it cost a deploy cycle there.
         let mut stage = "CoCreateInstance";
         let result = (|| -> windows_core::Result<()> {
             let dialog: IFileSaveDialog =
@@ -7281,10 +5804,8 @@ fn file_save_show(
 
             stage = "GetOptions";
             let mut options = dialog.GetOptions()?;
-            // FORCEFILESYSTEM for the picker's reason: the guest is handed
-            // a capability it opens with its own file API, and a virtual
-            // shell item has no path to open. The defaults this ORs into
-            // (OVERWRITEPROMPT, NOREADONLYRETURN, PATHMUSTEXIST,
+            // FORCEFILESYSTEM for the picker's reason. The defaults this ORs
+            // into (OVERWRITEPROMPT, NOREADONLYRETURN, PATHMUSTEXIST,
             // NOCHANGEDIR) are the platform's own and are kept.
             options |= FOS_FORCEFILESYSTEM;
             stage = "SetOptions";
@@ -7306,30 +5827,20 @@ fn file_save_show(
                     .collect();
                 stage = "SetFileTypes";
                 dialog.SetFileTypes(&raw)?;
-                // THE SAME EXTENSION RULE THE OTHER DESKTOP HAS. With
-                // `allowedContentTypes` set, NSSavePanel completes an
-                // extension-less name with the first allowed extension;
-                // SetDefaultExtension is how this platform spells that, so
-                // a filtered save answers the same shape of name on both
-                // (measured: typing `bare` under a `txt` filter answers
-                // `bare.txt`). Only under a filter — with none there is no
-                // extension to be the default, and the shared scene sends
-                // none for exactly that reason (docs/save-plan.md, and
-                // docs/probes/save-depth.md §8: a completed name would be
-                // read back by `expect_save_dialog` on one platform and
-                // not another).
+                // SetDefaultExtension is this platform's spelling of the
+                // extension completion NSSavePanel does, so a filtered save
+                // answers the same shape of name on both (measured: `bare`
+                // under a `txt` filter answers `bare.txt`). ONLY under a
+                // filter, and the shared scene sends none for that reason
+                // (docs/save-plan.md, docs/probes/save-depth.md §8).
                 stage = "SetDefaultExtension";
                 dialog.SetDefaultExtension(&HSTRING::from(filters[0].1.as_str()))?;
             }
 
-            // THE NAME THE DIALOG OPENS WITH — advisory, like the filters:
-            // the user renames it, and the guest reads back the name it
-            // GOT rather than the one it asked for.
+            // Advisory, like the filters: the guest reads back the name it GOT.
             stage = "SetFileName";
             dialog.SetFileName(&HSTRING::from(suggested_name))?;
 
-            // The armed directory, applied HERE because that is the only
-            // moment it is read.
             if let Some(dir) = folder {
                 let wide = HSTRING::from(dir);
                 stage = "SHCreateItemFromParsingName";
@@ -7343,11 +5854,7 @@ fn file_save_show(
             open_sampler(LiveDialog::Save(dialog.clone()));
 
             stage = "Show";
-            // NO OWNER, and for the measured reason at `file_dialog_show`:
-            // Show() waits on its owner's input queue, and this is not the
-            // UI thread, so passing the app window blocks before the
-            // dialog is ever created. One live file dialog per process is
-            // the guarantee kaya actually makes.
+            // NO OWNER, for the measured reason at `file_dialog_show`.
             let _ = hwnd;
             dialog.Show(None)?;
 
@@ -7397,28 +5904,20 @@ unsafe extern "system" {
     ) -> *mut c_void;
 }
 
-/// How many times the Shell has been caught calling into an apartment
-/// this process had already closed. THE HARNESS FAILS THE SCENE ON A
-/// NON-ZERO COUNT (see `Stage::finish`).
-///
-/// It is a count and not a print because the failure it names is
-/// SILENT IN FOUR LANGUAGES OUT OF FIVE. Measured 2026-08-03 on the
-/// windows lane, per-dialog apartments, 5 runs each with this handler
-/// armed: rust raised 0x80010108 on 2 of 5 runs and PASSED all five;
-/// java raised it on 3 of 5 and died on exactly those three. Only the
-/// JVM notices, because its top-level filter reports any exception
-/// code as a fatal VM error even on a thread it does not own — so
-/// leaving the detection to a runtime's temperament leaves it to luck.
+/// How many times the Shell has been caught calling into an apartment this
+/// process had already closed. THE HARNESS FAILS THE SCENE ON A NON-ZERO
+/// COUNT (see `Stage::finish`). A count and not a print because the failure
+/// is SILENT IN FOUR RUNTIMES OUT OF FIVE: measured 2026-08-03, rust raised
+/// 0x80010108 on 2 of 5 runs and PASSED all five, while java raised it on 3
+/// of 5 and died on those three (docs/deferred.md, the filedialog_java entry).
 static COM_DISCONNECTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// KAYA_WINUI_SEH_PROBE: also name every COM/RPC first-chance code and
 /// the thread it landed on, for the next investigation.
 static PROBE_VERBOSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// A VECTORED handler is the only place in this process that can see
-/// these: they run ahead of every frame-based `__except`, and the one
-/// that matters here is swallowed by combase before any other code
-/// gets a look. It decides nothing — always EXCEPTION_CONTINUE_SEARCH
-/// — it only counts.
+/// A VECTORED handler is the only place in this process that can see these:
+/// they run ahead of every frame-based `__except`, and combase swallows the
+/// one that matters. It decides nothing — always EXCEPTION_CONTINUE_SEARCH.
 unsafe extern "system" fn seh_probe(info: *mut ExceptionPointers) -> i32 {
     use std::sync::atomic::Ordering::Relaxed;
     const CONTINUE_SEARCH: i32 = 0;
@@ -7427,10 +5926,8 @@ unsafe extern "system" fn seh_probe(info: *mut ExceptionPointers) -> i32 {
     if code == RPC_E_DISCONNECTED {
         COM_DISCONNECTS.fetch_add(1, Relaxed);
     }
-    // FACILITY_RPC's HRESULT range. C++ throws (0xE06D7363) and the
-    // loader's own breakpoints are noise for this question. Printing
-    // is opt-in: a handler that takes stderr's lock runs on threads
-    // this process does not own.
+    // FACILITY_RPC's HRESULT range. Printing is opt-in: a handler that takes
+    // stderr's lock runs on threads this process does not own.
     if PROBE_VERBOSE.load(Relaxed) && code & 0xFFFF_0000 == 0x8001_0000 {
         eprintln!(
             "kaya: first-chance COM exception {code:#010x} on thread {}",
@@ -7440,8 +5937,7 @@ unsafe extern "system" fn seh_probe(info: *mut ExceptionPointers) -> i32 {
     CONTINUE_SEARCH
 }
 
-/// Armed for every harness build, because that is the build being
-/// TESTED and the guard is worthless if someone has to remember it. A
+/// Armed for every harness build, because that is the build being TESTED. A
 /// shipped app carries no handler unless it asks for the probe.
 fn install_seh_probe() {
     let verbose = std::env::var_os("KAYA_WINUI_SEH_PROBE").is_some();
@@ -7453,10 +5949,9 @@ fn install_seh_probe() {
     unsafe { AddVectoredExceptionHandler(1, seh_probe) };
 }
 
-/// WHICH DIALOG, and everything that differs between the two. The
-/// picker's `multiple` and the save dialog's `suggested_name` are each
-/// meaningless to the other, so they sit in the variant rather than beside
-/// a flag: a save request PHYSICALLY CANNOT carry two destinations
+/// WHICH DIALOG, and everything that differs between the two: the picker's
+/// `multiple` and the save dialog's `suggested_name` are meaningless to the
+/// other, so a save request PHYSICALLY CANNOT carry two destinations
 /// (docs/save-plan.md D2).
 enum DialogKind {
     Open { multiple: bool },
@@ -7479,11 +5974,9 @@ static DIALOG_QUEUE: std::sync::Mutex<Vec<DialogRequest>> = std::sync::Mutex::ne
 static DIALOG_APARTMENT: OnceLock<()> = OnceLock::new();
 /// The doorbell the apply arm rings after queueing.
 ///
-/// AN EVENT AND NOT A POSTED MESSAGE. Posting needs the thread's id, so
-/// the caller would have to WAIT for the thread on the UI thread inside
-/// apply — the one place this backend must never block — and a thread
-/// message is discarded by any modal loop that dispatches it, which is
-/// what a picker runs.
+/// AN EVENT AND NOT A POSTED MESSAGE: posting needs the thread's id, so the
+/// caller would have to WAIT for the thread on the UI thread inside apply,
+/// and a thread message is discarded by any modal loop that dispatches it.
 static DIALOG_DOORBELL: OnceLock<isize> = OnceLock::new();
 
 fn dialog_doorbell() -> isize {
@@ -7493,39 +5986,16 @@ fn dialog_doorbell() -> isize {
 
 /// The ONE STA the pickers live in, for the life of the process.
 ///
-/// WHY IT IS SHARED AND NEVER TORN DOWN, measured 2026-08-03 on the
-/// windows lane. A thread per dialog called CoUninitialize the moment
-/// Show() returned, and CoUninitialize "forces all RPC connections on
-/// the thread to close" — its own documentation, which also says it
-/// belongs "on application shutdown, as the last call made to the COM
-/// library". The Shell's own workers are still calling back into this
-/// apartment at that moment (comdlg32 -> combase -> RPCRT4 ->
-/// RaiseException), so RPCRT4 raised RPC_E_DISCONNECTED (0x80010108)
-/// on a thread nobody in this process owns. Every runtime absorbed it
-/// but the JVM, whose top-level filter reports ANY exception code as a
-/// fatal VM error even on a thread it does not own: filedialog_java
-/// passed 2 of 10 while filedialog_rust passed 10 of 10 ON THE SAME
-/// BUILD, which is why this read as flake for the four milestones it
-/// shipped in.
-///
-/// THE GRACE PERIOD WAS MEASURED AND REJECTED. Keeping the per-dialog
-/// thread pumping before the uninit, java, 15 runs each: 5ms -> 13/15
-/// (both failures carried exactly one 0x80010108), 50ms -> 15/15,
-/// 250ms -> 15/15. So the safe margin is somewhere under 50ms on an
-/// idle 6-core VM and unknown anywhere else — a race won by margin,
-/// not a fix. This shape has no race to win: with no CoUninitialize
-/// there is no forced disconnect, and the same 15 runs raised zero
-/// COM first-chance exceptions of any kind.
-///
-/// Nor is it a kaya invention. A real app's picker runs on a thread
-/// whose apartment outlives it by the whole session; Chromium gives
-/// its shell dialogs a dedicated COM STA task runner rather than a
-/// thread per dialog.
-///
-/// It PUMPS while idle rather than blocking on the queue, because
-/// those same Shell workers reach into this apartment by posting to
-/// it; a thread that owns an STA and does not dispatch is a thread
-/// other people's calls hang on.
+/// WHY IT IS SHARED AND NEVER TORN DOWN, measured 2026-08-03 (the numbers
+/// docs/deferred.md's filedialog_java entry points at): a thread per dialog
+/// called CoUninitialize the moment Show() returned, forcing every RPC
+/// connection on the thread to close while the Shell's own workers were
+/// still calling back, so RPCRT4 raised RPC_E_DISCONNECTED (0x80010108) —
+/// absorbed by every runtime but the JVM, whose top-level filter reports ANY
+/// exception code as fatal: filedialog_java passed 2 of 10 where
+/// filedialog_rust passed 10 of 10 ON THE SAME BUILD. A grace period was
+/// measured and rejected (5ms -> 13/15, 50ms and 250ms -> 15/15: a race won
+/// by margin). It PUMPS while idle, because those workers post into it.
 fn dialog_apartment() {
     DIALOG_APARTMENT.get_or_init(|| {
         let doorbell = dialog_doorbell();
@@ -7538,9 +6008,8 @@ fn dialog_apartment() {
                 const MWMO_INPUTAVAILABLE: u32 = 0x0004;
                 const PM_REMOVE: u32 = 0x0001;
                 unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED) };
-                // NO CoUninitialize ANYWHERE BELOW, deliberately, and
-                // no way out of this loop: the apartment ends with the
-                // process. That is the whole fix.
+                // NO CoUninitialize ANYWHERE BELOW, deliberately, and no way
+                // out of this loop: the apartment ends with the process.
                 loop {
                     // One at a time, and never under the lock: a picker
                     // runs a nested modal loop for as long as the user
@@ -7569,12 +6038,10 @@ fn dialog_apartment() {
 
 /// Put one dialog up and answer it. Runs ON the apartment thread.
 ///
-/// ONE ANSWERING PATH FOR BOTH (docs/save-plan.md D2): the save dialog
-/// answers on the picker's result grammar. What is NOT shared is the
-/// source each registers, which is D1 on this platform — the picker
-/// registers a `PathSource`, the save dialog a `SaveDestination` whose
-/// open creates. The backend hands over the locator UNCHANGED and creates
-/// nothing itself.
+/// ONE ANSWERING PATH FOR BOTH (docs/save-plan.md D2). What is NOT shared is
+/// the source each registers: the picker a `PathSource`, the save dialog a
+/// `SaveDestination` whose open creates. The backend hands over the locator
+/// UNCHANGED and creates nothing itself.
 fn run_dialog_request(request: DialogRequest) {
     let picked = match request.kind {
         DialogKind::Open { multiple } => file_dialog_show(
@@ -7620,11 +6087,8 @@ fn run_dialog_request(request: DialogRequest) {
         })
         .collect::<Vec<_>>(),
     };
-    // Cancel is the EMPTY LIST, faithfully: Show() returns
-    // ERROR_CANCELLED and no platform can confirm an empty selection,
-    // so there is no sentinel to invent (DESIGN.md, File dialogs). The
-    // save dialog spells the same thing as `Option::None`, which is why
-    // its arm above iterates an Option rather than a Vec.
+    // Cancel is the EMPTY LIST: no platform can confirm an empty selection, so
+    // there is no sentinel to invent (DESIGN.md, File dialogs).
     crate::capi::file_dialog_retire(request.dialog);
     request.sink.send(Occurrence::FileDialogResult {
         dialog: crate::protocol::FileDialogId(request.dialog),
@@ -7649,11 +6113,10 @@ fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
     Some(f64::from(client.right - client.left) / scale)
 }
 
-/// Show or hide the covered entry's back bar according to the CONTROL's
-/// mode. TwoPaneView decides whether the detail covers the list or sits
-/// beside it, so the affordance follows its Mode rather than a width kaya
-/// measured. Called from ModeChanged too, because Mode is settled during
-/// layout and not before.
+/// Show or hide the covered entry's back bar according to the CONTROL's mode.
+/// TwoPaneView decides whether the detail covers the list, so the affordance
+/// follows its Mode rather than a width kaya measured. Called from
+/// ModeChanged too, because Mode is settled during layout and not before.
 fn apply_split_back_bar(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let Some(view) = core.split_views.get(&window) else {
         return Ok(());
@@ -7674,37 +6137,29 @@ fn apply_split_back_bar(core: &CoreState, window: u64) -> windows_core::Result<(
 }
 
 /// Release the roots a previous list-detail render is still holding.
-/// A UIElement lives in exactly ONE Children collection, and appending
-/// a parented one does not warn the way GTK does — it takes a
-/// non-unwinding panic through the XAML layer and ABORTS the process.
-/// The split Grid is the only container that keeps a root outside the
-/// window's own content path, so emptying it is the whole job.
+/// A UIElement lives in exactly ONE Children collection, and appending a
+/// parented one takes a non-unwinding panic through the XAML layer and ABORTS
+/// the process.
 fn release_split(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
-    // DEPTH-FIRST: the inner view's panes first, then the outer's.
-    // Nulling the outer alone leaves the inner still holding two roots,
-    // and the next render's append is the same non-unwinding abort one
-    // level down.
+    // DEPTH-FIRST: the inner view's panes first, then the outer's. Nulling the
+    // outer alone leaves the inner still holding two roots.
     if let Some(inner) = core.inner_splits.remove(&window) {
         inner.SetPane1(None::<&UIElement>)?;
         inner.SetPane2(None::<&UIElement>)?;
     }
     if let Some(view) = core.split_views.remove(&window) {
         // TwoPaneView holds its panes as PROPERTIES, not in a Children
-        // collection, so emptying it means nulling both. Same reason as
-        // before: a UIElement lives in exactly one parent, and handing a
-        // still-parented one to the next view aborts the process.
+        // collection, so emptying it means nulling both.
         view.SetPane1(None::<&UIElement>)?;
         view.SetPane2(None::<&UIElement>)?;
     }
     Ok(())
 }
 
-/// Let go of whatever the WINDOW itself is currently showing. The
-/// split Grid is not the only holder: on the FIRST split render the
-/// base root is still the window's own content, and appending it to
-/// the Grid then fails with "Element is already the child of another
-/// element" — which arrives as a non-unwinding panic and takes the
-/// process with it.
+/// Let go of whatever the WINDOW itself is currently showing. On the FIRST
+/// split render the base root is still the window's own content, and appending
+/// it to the Grid then fails with "Element is already the child of another
+/// element" — a non-unwinding panic that takes the process with it.
 fn detach_window_content(core: &CoreState, window: u64) -> windows_core::Result<()> {
     if let Some(slot) = core.menu_slots.get(&window) {
         slot.Children()?.Clear()
@@ -7728,9 +6183,7 @@ fn set_window_content(
     }
 }
 
-/// One real MenuFlyout per context anchor, set as the element's
-/// ContextFlyout; its items rebuild from the attached roots with the
-/// catalog.
+/// One real MenuFlyout per context anchor, set as the element's ContextFlyout.
 fn ensure_context_flyout(core: &mut CoreState, widget: u64) -> windows_core::Result<()> {
     if core.context_flyouts.contains_key(&widget) {
         return Ok(());
@@ -7750,9 +6203,8 @@ fn ensure_context_flyout(core: &mut CoreState, widget: u64) -> windows_core::Res
 }
 
 /// The canonical shortcut spelling (root-validated: lowercase,
-/// `primary`/`shift`/`alt` order, one key) onto the accelerator
-/// enums. `primary` = Control on Windows. The same key table feeds
-/// the verb's keybd_event injection, so matching is by construction.
+/// `primary`/`shift`/`alt` order, one key) onto the accelerator enums.
+/// `primary` = Control on Windows.
 fn accelerator_chord(spelling: &str) -> Option<(VirtualKey, VirtualKeyModifiers)> {
     let mut mods = VirtualKeyModifiers::None;
     let mut key = None;
@@ -7767,9 +6219,8 @@ fn accelerator_chord(spelling: &str) -> Option<(VirtualKey, VirtualKeyModifiers)
     Some((key?, mods))
 }
 
-/// One closed key floor (DESIGN.md, Menus) onto Windows.System
-/// VirtualKey values. `escape` never arrives — the root rejects every
-/// spelling of it.
+/// One closed key floor (DESIGN.md, Menus) onto Windows.System VirtualKey
+/// values. `escape` never arrives — the root rejects every spelling of it.
 fn virtual_key(name: &str) -> Option<VirtualKey> {
     match name {
         "enter" => return Some(VirtualKey(0x0D)),
@@ -7778,9 +6229,8 @@ fn virtual_key(name: &str) -> Option<VirtualKey> {
         "up" => return Some(VirtualKey(0x26)),
         "right" => return Some(VirtualKey(0x27)),
         "down" => return Some(VirtualKey(0x28)),
-        // The punctuation set onto the OEM keys. VK_OEM_* are defined
-        // by POSITION on the US layout, which is exactly what the
-        // canonical names denote.
+        // The punctuation set onto the OEM keys. VK_OEM_* are defined by
+        // POSITION on the US layout, which is what the canonical names denote.
         "minus" => return Some(VirtualKey(0xBD)),        // VK_OEM_MINUS
         "equal" => return Some(VirtualKey(0xBB)),        // VK_OEM_PLUS (the = key)
         "comma" => return Some(VirtualKey(0xBC)),        // VK_OEM_COMMA
@@ -7806,10 +6256,9 @@ fn virtual_key(name: &str) -> Option<VirtualKey> {
     None
 }
 
-/// Rebuild every window bar and context flyout from the model — which
-/// IS the post-user mirror, so a rebuild forced by an unrelated prop
-/// write preserves the user's toggle/radio state (docs/traps.md). Also
-/// re-derives the shortcut table. Coalesced per drain (menus_touched).
+/// Rebuild every window bar and context flyout from the model — which IS the
+/// post-user mirror, so a rebuild forced by an unrelated prop write preserves
+/// the user's toggle/radio state (docs/traps.md). Coalesced per drain.
 fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
     assert_chord_premise();
     if std::env::var_os("KAYA_WINUI_MENU_PROBE").is_some() {
@@ -7837,16 +6286,10 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
             let bar_item = MenuBarItem::new()?;
             bar_item.SetTitle(&HSTRING::from(&*label))?;
             bar_item.SetIsEnabled(menu_effective_enabled(core, top))?;
-            // NO SYMBOL HERE, AND IT IS THE PLATFORM'S GAP, NOT AN
-            // OVERSIGHT: MenuBarItem has no Icon slot in the pinned
-            // metadata (Title and Items, 243 members, no Icon), so a
-            // symbol declared on a top-level grouping cannot be drawn
-            // on this host. It is dropped rather than approximated, and
-            // `menu_symbol` reports exactly that for a bar path instead
-            // of the "no icon" that would blame the app.
-            // A bar-level radio_group is a top-level menu whose
-            // options use the checkmark idiom — the same inline
-            // materialization, one level up (the mac segment's shape).
+            // NO SYMBOL HERE, and it is the platform's gap: MenuBarItem has no
+            // Icon slot in the pinned metadata (Title and Items, 243 members),
+            // so a symbol declared on a top-level grouping is dropped rather
+            // than approximated, and `menu_symbol` reports exactly that.
             let children: Vec<u64> = if kind == MenuItemKind::RadioGroup {
                 vec![top]
             } else {
@@ -7876,27 +6319,22 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
     menu_preorder(core, &roots, &mut order);
     for id in order {
         let m = &core.menu_models[&id];
-        // Every LEAF command may carry a chord — a checkable item and
-        // one option of a group as readily as a plain action. This
-        // table also GATES the shortcut verb, so a kind missing here is
-        // a chord the harness silently never presses.
+        // This table also GATES the harness's shortcut verb, so a kind missing
+        // here is a chord that is never pressed (docs/traps.md: A harness verb
+        // gated on a table is a chord that never fires).
         if !m.shortcut.is_empty() && m.kind.takes_shortcut() {
             core.menu_shortcuts.insert(m.shortcut.clone(), id);
         }
     }
-    // THE TOOLBAR REBUILDS WITH THE CATALOG, from the same mirror and in
-    // the same pass: `primary`, `label`, `symbol` and `enabled` all
-    // arrive as prop writes that set `menus_touched`, and every
-    // structural mutation lands here too, so this is the one place that
-    // sees them all (docs/chrome-plan.md C2: the promotion is recomputed
-    // on every catalog mutation).
+    // THE TOOLBAR REBUILDS WITH THE CATALOG, from the same mirror and in the
+    // same pass: this is the one place that sees every catalog mutation
+    // (docs/chrome-plan.md C2).
     let shells: Vec<u64> = core.menu_shells.keys().copied().collect();
     for window in shells {
         refresh_toolbar(core, window)?;
     }
-    // The rebuild stamped STRUCTURAL enablement alone onto the fresh
-    // natives, which would un-gray a role item whose clipboard half
-    // says no — the role factor goes back on top.
+    // The rebuild stamped STRUCTURAL enablement alone onto the fresh natives,
+    // which would un-gray a role item whose clipboard half says no.
     if core.roles_armed {
         refresh_role_enablement(core);
     }
@@ -7904,15 +6342,9 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
 }
 
 /// Attach a chord to a native item — every LEAF command may carry one.
-/// The accelerator is DRESS, not dispatch: WinUI draws the chord text
-/// beside the item from it, and the key hook eats the keystroke before any
-/// default action of it can run (see The chord route).
-///
-/// `build_menu_items` below materializes one child list 1:1 per the
-/// ratified lowering. Every leaf's Click routes to the shared dispatch
-/// carrying ITS OWN attachment, so no rebuild order can cross the stamped
-/// copies' nouns, and every native is stamped with the inherited AND of
-/// enablement and keyed under its attachment.
+/// The accelerator is DRESS, not dispatch: WinUI draws the chord text beside
+/// the item from it, and the key hook eats the keystroke before any default
+/// action of it can run (see The chord route).
 fn attach_accelerator(
     accels: &windows_collections::IVector<KeyboardAccelerator>,
     shortcut: &str,
@@ -7926,9 +6358,9 @@ fn attach_accelerator(
     let accel = KeyboardAccelerator::new()?;
     accel.SetKey(key)?;
     accel.SetModifiers(mods)?;
-    // The default action is a UI Automation pattern lookup — Invoke, else
-    // Toggle, else Selection — and it is dead from this backend's side:
-    // the hook consumes the key first.
+    // The default action is a UIA pattern lookup, and dead from this side: the
+    // hook consumes the key first (docs/traps.md: A WinUI accelerator's default
+    // action is a UI Automation PATTERN).
     accels.Append(&accel)?;
     Ok(())
 }
@@ -7977,9 +6409,8 @@ fn build_menu_items(
                 item.SetText(&HSTRING::from(&*label))?;
                 item.SetIsChecked(checked)?;
                 item.SetIsEnabled(enabled)?;
-                // The checkable kind takes an icon like any other leaf,
-                // because in WinUI 3 it descends from MenuFlyoutItem (see
-                // the IconSlot impl list).
+                // The checkable kind takes an icon like any other leaf: in
+                // WinUI 3 it descends from MenuFlyoutItem.
                 apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
@@ -8000,13 +6431,10 @@ fn build_menu_items(
                 core.menu_natives.insert((attachment, id), MenuNative::Sub(sub));
             }
             MenuItemKind::RadioGroup => {
-                // Inline with the platform's checkmark idiom: the
-                // options join the enclosing vector directly
-                // (RadioMenuFlyoutItem.GroupName per radio group);
-                // the GROUP mints no chrome of its own here.
+                // Inline with the platform's checkmark idiom: the options join
+                // the enclosing vector directly (RadioMenuFlyoutItem.GroupName
+                // per radio group); the GROUP mints no chrome of its own here.
                 for (index, &option) in children.iter().enumerate() {
-                    // EACH OPTION'S OWN symbol, never the group's: the
-                    // group mints no chrome here for one to ride.
                     let (option_label, option_shortcut, option_symbol) = {
                         let m = &core.menu_models[&option];
                         (m.label.clone(), m.shortcut.clone(), m.symbol)
@@ -8041,44 +6469,15 @@ fn build_menu_items(
 
 // --- The chord route (Win32) -------------------------------------------
 //
-// EVERY chord this catalog owns dispatches from here. The hook is
-// THREAD-scoped (never global): it watches this UI thread's key-downs,
-// matches the canonical spelling against the same catalog table the
-// verb gates on, performs the state change the platform would have
-// performed, and consumes only a chord this catalog owns — so the
-// accelerator route cannot double-fire behind it.
-//
-// It used to serve ONE kind. ToggleMenuFlyoutItem is the one leaf kind
-// whose KeyboardAccelerator WinUI never matches: measured on the VM,
-// with the chord genuinely injected, a plain command's accelerator
-// fires (Invoke pattern), one option of a group fires (SelectionItem
-// pattern), and a checkable command's does nothing — not the pattern,
-// not an explicit Invoked handler, not a copy on the MenuBar or on the
-// content Grid, and not a collapsed companion item. So the checkable
-// kind came here and the other two rode the platform.
-//
-// THAT SPLIT WAS A RACE, and what it raced was how far behind the UI
-// thread had fallen — which is exactly what the chord BEFORE it put
-// there. Measured 2026-08-03, commands scene, one leg 16 times: the
-// group-option chord (primary+2, the accelerator route) landed 67ms
-// and 81ms after the preceding chord's activation in the two runs that
-// passed, and within 42ms in all fourteen that failed. Failed means
-// LOST, not late: no Click, no occurrence, and nothing for the
-// harness's five seconds of polling to find, while the same chord
-// fires normally seconds later. The hook saw every one of those
-// keystrokes and resolved every one against menu_shortcuts — right
-// item, right kind, modifiers correct at message-retrieval time — so
-// the chord was always in the window and only the platform's dispatch
-// of it went missing. A scene that presses one chord, waits for its
-// occurrence and presses the next walks into that window by
-// construction, which is why it read as an intermittent WinUI-only
-// failure of the step AFTER a menu mutation.
-//
-// The whole point of this route is that it does not depend on XAML's
-// input pipeline having caught up: the message-time key state is read
-// as the message is retrieved, and the answer comes from kaya's own
-// table. The accelerators stay attached for the chord TEXT WinUI draws
-// beside each item, which is all they are now for.
+// EVERY chord this catalog owns dispatches from here: a THREAD-scoped hook
+// that matches the canonical spelling against the same catalog table the
+// verb gates on and consumes only a chord this catalog owns. THE TWO-ROUTE
+// SPLIT IT REPLACED WAS A RACE — the XAML accelerator route PERMANENTLY
+// DROPS a chord arriving within ~45ms of the previous chord's activation
+// (measured 2026-08-03: the two passing runs landed 67ms and 81ms after the
+// preceding activation, the fourteen failures within 42ms, LOST not late;
+// docs/deferred.md, "Follow-ups from the WinUI chord-drop fix"). The
+// accelerators stay attached for the chord TEXT WinUI draws beside items.
 unsafe extern "system" {
     fn SetWindowsHookExW(id: i32, proc_: HookProc, module: isize, thread: u32) -> isize;
     fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
@@ -8144,29 +6543,17 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                 Some((item, kind, menu_effective_enabled(core, item)))
             });
             if let Some((item, kind, enabled)) = hit {
-                // A disabled item is INERT, exactly as native chrome
-                // leaves it — the chord is still this catalog's, so it
-                // is eaten rather than sprayed at whatever is behind.
-                //
-                // WHICH IS WHY THE UNDO ROUTING LIVES ON THIS PATH
-                // (docs/undo-plan.md §1.1, measured on a TextBox and
-                // true of either editable): a focused field never sees
-                // Ctrl+Z once this catalog owns the chord —
-                // the hook returns 1 and the WM_KEYDOWN never reaches
-                // XAML — so native text undo would die in every field of
-                // the app if dispatch alone happened here. It does not:
-                // `menu_user_activate` below performs the undo role, and
-                // that role ASKS THE FOCUSED FIELD FIRST
-                // (perform_undo_role -> undo_route -> CanUndo). The
-                // eaten chord is answered by the same tier the key would
-                // have reached, plus the ledger the key could not.
+                // A disabled item is INERT, exactly as native chrome leaves
+                // it — the chord is still this catalog's, so it is eaten
+                // rather than sprayed at whatever is behind. WHICH IS WHY
+                // THE UNDO ROUTING LIVES ON THIS PATH (docs/undo-plan.md
+                // §1.1): a focused field never sees Ctrl+Z once this catalog
+                // owns the chord.
                 if enabled {
-                    // The native owns the immediate user change, exactly
-                    // as it does for a click; menu_user_activate mirrors
-                    // from it and emits. EXHAUSTIVE over the kind: a new
-                    // leaf kind that may carry a chord fails to COMPILE
-                    // here rather than reaching a catch-all that leaves
-                    // its chord dispatching nothing.
+                    // The native owns the immediate user change, exactly as it
+                    // does for a click. EXHAUSTIVE over the kind: a new leaf
+                    // kind that may carry a chord fails to COMPILE here rather
+                    // than reaching a catch-all that dispatches nothing.
                     let _ = CORE.with_borrow(|core| -> windows_core::Result<()> {
                         let Some(core) = core.as_ref() else { return Ok(()) };
                         let native = core.menu_natives.get(&(MenuAttachment::Window(0), item));
@@ -8177,9 +6564,9 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                                     native.SetIsChecked(!now)?;
                                 }
                             }
-                            // One option of a group: checking it is what
-                            // the platform's own Select() does, and the
-                            // shared GroupName clears the sibling.
+                            // One option of a group: checking it is what the
+                            // platform's own Select() does, and the shared
+                            // GroupName clears the sibling.
                             MenuItemKind::RadioOption => {
                                 if let Some(MenuNative::Option(native)) = native {
                                     native.SetIsChecked(true)?;
@@ -8187,9 +6574,8 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                             }
                             // A plain command owns no state of its own.
                             MenuItemKind::Action => {}
-                            // Not leaf kinds: menu_shortcuts holds only
-                            // what takes_shortcut admits, and the rebuild
-                            // is the one writer.
+                            // Not leaf kinds: menu_shortcuts holds only what
+                            // takes_shortcut admits.
                             MenuItemKind::Menu
                             | MenuItemKind::RadioGroup
                             | MenuItemKind::Separator => {}
@@ -8216,18 +6602,17 @@ fn ensure_key_hook() {
     });
 }
 
-/// THE user dispatch path: chrome clicks, the accelerator route and
-/// harness verbs all land here. Fires from the message loop, never under
-/// an apply borrow. Mirrors FIRST (the post-user-mirror rule), then emits
-/// with the item's identity and the noun of the attachment whose copy
-/// fired — resolved HERE, at dispatch, from that anchor. Disabled items —
-/// the inherited AND — stay inert.
+/// THE user dispatch path: chrome clicks, the accelerator route and harness
+/// verbs all land here. Fires from the message loop, never under an apply
+/// borrow. Mirrors FIRST (the post-user-mirror rule), then emits with the
+/// item's identity and the noun of the attachment whose copy fired. Disabled
+/// items — the inherited AND — stay inert.
 fn menu_user_activate(item: u64, attachment: MenuAttachment) {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
-        // Echo doctrine belt: no programmatic write path raises Click
-        // on these controls (the MENU PROBE verifies), but if one
-        // ever did, the apply guard keeps it quiet.
+        // Echo doctrine belt: no programmatic write path raises Click on these
+        // controls (the MENU PROBE verifies), but the apply guard keeps one
+        // quiet if it ever did.
         if core.apply_quiet.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
@@ -8241,10 +6626,9 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
             return;
         }
         // A DISABLED ROLE ITEM IS INERT beyond the structural AND: the
-        // intersection half lives on the native's IsEnabled, which
-        // this route does not consult — so it is recomputed here, the
-        // same freshness rule the harness activation applies (the mac
-        // finding, docs/clipboard-plan.md §3).
+        // intersection half lives on the native's IsEnabled, which this route
+        // does not consult, so it is recomputed here (docs/clipboard-plan.md
+        // §3).
         if matches!(role.as_str(), "cut" | "copy" | "paste" | "undo" | "redo")
             && !role_enabled(core, &role)
         {
@@ -8258,12 +6642,10 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
         };
         match kind {
             MenuItemKind::Action => {
-                // A GESTURE ROLE PERFORMS RATHER THAN REPORTS: the item is
-                // the platform's own command acting on the focused widget,
-                // so no menu occurrence goes up (DESIGN.md — gestures are
-                // commands). UNDO FIRST: an undo is not a clipboard
-                // command, and this is the ONE dispatch both the chord hook
-                // and the harness activation reach.
+                // A GESTURE ROLE PERFORMS RATHER THAN REPORTS: no menu
+                // occurrence goes up (DESIGN.md — gestures are commands). UNDO
+                // FIRST: an undo is not a clipboard command, and this is the ONE
+                // dispatch both the chord hook and the harness activation reach.
                 if perform_undo_role(core, &role) {
                     return;
                 }
@@ -8280,10 +6662,9 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
                 });
             }
             MenuItemKind::Toggle => {
-                // The native control owns the immediate user change (it
-                // flipped IsChecked before raising Click): mirror from the
-                // firing copy's own native, by its attachment key, then
-                // emit (docs/traps.md).
+                // The native control owns the immediate user change (it flipped
+                // IsChecked before raising Click): mirror from the firing copy's
+                // own native, by its attachment key, then emit (docs/traps.md).
                 let checked = match core.menu_natives.get(&(attachment, item)) {
                     Some(MenuNative::Toggle(native)) => {
                         native.IsChecked().unwrap_or(!was_checked)
@@ -8312,9 +6693,8 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
                 else {
                     return;
                 };
-                // Re-selecting the selected option is not a change and
-                // emits nothing, exactly as the platform's own change
-                // route behaves (the choice contract).
+                // Re-selecting the selected option is not a change and emits
+                // nothing (the choice contract).
                 if core.menu_models[&group].value == index as f64 {
                     return;
                 }
@@ -8333,18 +6713,16 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
                     }
                 });
             }
-            // Grouping nodes and separators have no activation; native
-            // chrome opens or ignores them.
+            // Grouping nodes and separators have no activation.
             _ => {}
         }
     });
 }
 
-/// The harness's REAL invoke route (the ContentDialog precedent): the
-/// item's automation peer, cast to the provider pattern it exposes —
-/// Invoke for plain/radio items, Toggle for toggle items. The peer
-/// pipeline runs the control's own OnInvoke, which raises the same
-/// Click a pointer press does. Grouping chrome has no activation.
+/// The harness's REAL invoke route (the ContentDialog precedent): the item's
+/// automation peer, cast to the provider pattern it exposes — Invoke for
+/// plain/radio items, Toggle for toggle items. The peer pipeline runs the
+/// control's own OnInvoke, which raises the same Click a pointer press does.
 fn invoke_menu_native(native: &MenuNative) -> windows_core::Result<()> {
     use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
     use bindings::Microsoft::UI::Xaml::Automation::Provider::{IInvokeProvider, IToggleProvider};
@@ -8365,14 +6743,10 @@ fn invoke_menu_native(native: &MenuNative) -> windows_core::Result<()> {
 
 /// The PREMISE the peer-invoke route rests on, checked once per process —
 /// not flag-gated, because a silent change here is a dead harness
-/// activation or a checkmark that never moves.
-///
-/// [`invoke_menu_native`] asks for Invoke FIRST and falls back to Toggle,
-/// which is the platform's own priority: `MenuFlyoutItem` has Invoke,
-/// `ToggleMenuFlyoutItem` does not. A future WinUI that changed either
-/// answer would silently reroute the harness's activation, so the premise
-/// fails loudly here rather than as a scene that stopped observing
-/// anything. The CHORD route rests on none of it (see The chord route).
+/// activation or a checkmark that never moves. [`invoke_menu_native`] asks
+/// for Invoke FIRST and falls back to Toggle, the platform's own priority
+/// (docs/traps.md: A WinUI accelerator's default action is a UI Automation
+/// PATTERN). The CHORD route rests on none of it.
 fn assert_chord_premise() {
     static CHECKED: OnceLock<()> = OnceLock::new();
     if CHECKED.set(()).is_err() {
@@ -8410,13 +6784,11 @@ fn assert_chord_premise() {
     }
 }
 
-/// KAYA_WINUI_MENU_PROBE: the flag-gated instrument (the
-/// KAYA_WINUI_NAV_PROBE pattern) answering this backend's two menu
-/// behavior questions in-band, on detached canary items:
-/// (1) echo doctrine — programmatic IsChecked writes must not raise
-/// Click; (2) the peer-invoke route must raise Click on an item whose
-/// flyout has never opened (the bar-activation mechanism). Runs once,
-/// at the first rebuild.
+/// KAYA_WINUI_MENU_PROBE: the flag-gated instrument (the KAYA_WINUI_NAV_PROBE
+/// pattern) answering this backend's two menu behaviour questions in-band, on
+/// detached canary items — (1) echo doctrine: a programmatic IsChecked write
+/// must not raise Click; (2) the peer-invoke route must raise Click on an item
+/// whose flyout has never opened. Runs once, at the first rebuild.
 fn menu_probe() {
     static RAN: OnceLock<()> = OnceLock::new();
     if RAN.set(()).is_err() {
@@ -8469,24 +6841,12 @@ fn menu_probe() {
     }
 }
 
-// ---------------------------------------------------------------------
-// Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §6 for what
-// this platform was measured to charge — tools/win/clipprobe).
-//
-// CLASSIC WIN32, DELIBERATELY. WinRT DataTransfer's SetContent is
-// documented to work "only when the application is in the foreground",
-// which a matrix leg cannot promise; its custom-format bridge to Win32
-// atoms is documented only in the read direction; and its content dies
-// with the process unless flushed. Classic SetClipboardData has none of
-// those charges — measured: five formats set in one open outlive the
-// setter's exit and read back byte-exact through stock PowerShell, and
-// RegisterClipboardFormatW carries the ratified slashed custom id
-// VERBATIM (atom name reads back "dev.kaya/note").
-//
-// Reads are synchronous pulls here, so "answered exactly once" needs no
-// async bridge: the arm chooses the richest offered∩accepted format off
-// the ENUMERATED offer and reads it in one open.
-// ---------------------------------------------------------------------
+// ---- Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §6, the
+// windows section; tools/win/clipprobe) --------------------------------
+// CLASSIC WIN32, DELIBERATELY: WinRT DataTransfer's SetContent is
+// documented to work "only when the application is in the foreground", its
+// custom-format bridge to Win32 atoms is documented only in the read
+// direction, and its content dies with the process unless flushed.
 
 const CF_UNICODETEXT: u32 = 13;
 const CF_HDROP: u32 = 15;
@@ -8535,11 +6895,9 @@ fn clip_available(format: u32) -> bool {
     unsafe { windows::Win32::System::DataExchange::IsClipboardFormatAvailable(format).is_ok() }
 }
 
-/// One format's bytes, inside an already-open clipboard. GlobalSize
-/// may exceed the written length (the allocator rounds up), so
-/// self-delimiting formats must trust their own delimiters; a custom
-/// format's bytes are whatever the allocation says, which is the
-/// platform's own grammar for them.
+/// One format's bytes, inside an already-open clipboard. GlobalSize may exceed
+/// the written length (the allocator rounds up), so self-delimiting formats
+/// must trust their own delimiters.
 fn clip_get_bytes(format: u32) -> Option<Vec<u8>> {
     unsafe {
         let handle = windows::Win32::System::DataExchange::GetClipboardData(format).ok()?;
@@ -8555,12 +6913,11 @@ fn clip_get_bytes(format: u32) -> Option<Vec<u8>> {
     }
 }
 
-/// CF_UNICODETEXT and nothing else — the read behind the textarea's
-/// plain-text paste pin (`Editable::paste_from_clipboard`).
+/// CF_UNICODETEXT and nothing else — the read behind the textarea's plain-text
+/// paste pin (`Editable::paste_from_clipboard`).
 ///
-/// NOT `materialize_clipboard`: that one answers the RICHEST
-/// representation an accept list takes, and this is the path for a widget
-/// that declared none, where the platform itself would have inserted.
+/// NOT `materialize_clipboard`: that one answers the RICHEST representation an
+/// accept list takes, and this is the path for a widget that declared none.
 fn clipboard_plain_text() -> Option<String> {
     if clip_open_retry().is_err() {
         return None;
@@ -8574,9 +6931,8 @@ fn clipboard_plain_text() -> Option<String> {
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .take_while(|&u| u != 0)
                 .collect();
-            // The lf boundary, same as every other read here: clipboard
-            // text is CRLF by Windows convention and the control
-            // re-normalizes on the way in.
+            // The lf boundary: clipboard text is CRLF by Windows convention
+            // and the control re-normalizes on the way in.
             lf(String::from_utf16_lossy(&units))
         });
     unsafe {
@@ -8592,13 +6948,11 @@ fn clip_utf16z(s: &str) -> Vec<u8> {
         .collect()
 }
 
-/// CF_HTML with 10-digit fixed-width offsets. Fixed width is what
-/// makes the header length a CONSTANT rather than a fixpoint; pad
-/// while computing but print unpadded and every offset is silently
-/// short. Microsoft's own doc example is arithmetically wrong (its
-/// fragment offsets mix two relative bases) — this construction is
-/// verified byte-exact against a worked example and round-trips
-/// through PresentationCore's own reader (tools/win/clipprobe).
+/// CF_HTML with 10-digit fixed-width offsets. Fixed width is what makes the
+/// header length a CONSTANT rather than a fixpoint; pad while computing but
+/// print unpadded and every offset is silently short. Microsoft's own doc
+/// example is arithmetically wrong (docs/clipboard-plan.md §3); this
+/// construction is verified byte-exact by tools/win/clipprobe.
 fn build_cf_html(fragment: &str) -> Vec<u8> {
     const HEADER_LEN: usize = 105;
     const PREFIX: &str = "<html>\r\n<body>\r\n<!--StartFragment-->";
@@ -8617,13 +6971,11 @@ fn build_cf_html(fragment: &str) -> Vec<u8> {
     out
 }
 
-/// The read side's equal and opposite parser: kaya's html
-/// representation is the raw fragment, so a CF_HTML payload — whose
-/// header kaya may not have written — is sliced by its own
-/// StartFragment/EndFragment BYTE offsets. Proven against a foreign
-/// header with different padding than ours (PowerShell 5.1's -AsHtml
-/// pads to 9 digits with trailing spaces; digits-then-stop parses
-/// both).
+/// The read side's equal and opposite parser: kaya's html representation is the
+/// raw fragment, so a CF_HTML payload — whose header kaya may not have written
+/// — is sliced by its own StartFragment/EndFragment BYTE offsets. Proven
+/// against a foreign header with different padding than ours (PowerShell 5.1's
+/// -AsHtml pads to 9 digits with trailing spaces; digits-then-stop parses both).
 fn parse_cf_html(payload: &[u8]) -> Option<String> {
     let head = String::from_utf8_lossy(&payload[..payload.len().min(400)]).into_owned();
     let grab = |key: &str| -> Option<usize> {
@@ -8668,9 +7020,8 @@ fn parse_dropfiles(bytes: &[u8]) -> Vec<String> {
     let p_files = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
     let f_wide = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
     if f_wide == 0 {
-        // An ANSI list is legal but nothing modern writes one; a
-        // foreign ANSI writer would surface here as an empty answer
-        // rather than mojibake.
+        // An ANSI list is legal but nothing modern writes one; a foreign ANSI
+        // writer surfaces here as an empty answer rather than mojibake.
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -8693,13 +7044,10 @@ fn parse_dropfiles(bytes: &[u8]) -> Vec<String> {
     out
 }
 
-/// Choose the RICHEST representation the clipboard offers that the
-/// accept list takes, read exactly that one, and answer — None for no
-/// intersection, the universal no. Shared by the privileged read and
-/// the declared-paste delivery, because the two differ in their
-/// trigger and never in what they can materialize. Descending clip
-/// value — custom (accept-list order), files, image, html, text — the
-/// canonical order (§1).
+/// Choose the RICHEST representation the clipboard offers that the accept list
+/// takes, read exactly that one, and answer — None for no intersection, the
+/// universal no. Descending clip value — custom (accept-list order), files,
+/// image, html, text — the canonical order (§1).
 fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::protocol::Representation>> {
     use crate::protocol::Representation as R;
     let (kinds, custom) = crate::wire::parse_accept_list(accepting);
@@ -8727,10 +7075,9 @@ fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    // The picker's capability arriving through the
-                    // second door: the same registration the file
-                    // dialog result makes, so kaya_open_picked
-                    // redeems a pasted file identically.
+                    // The picker's capability arriving through the second door:
+                    // the same registration the file dialog result makes, so
+                    // kaya_open_picked redeems a pasted file identically.
                     let handle = crate::capi::picked_register(std::sync::Arc::new(
                         crate::protocol::PathSource { name: name.clone(), path: path.clone() },
                     ));
@@ -8753,8 +7100,7 @@ fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .take_while(|&u| u != 0)
                     .collect();
-                // The lf boundary: clipboard text is CRLF by Windows
-                // convention, guest strings are LF everywhere.
+                // The lf boundary: guest strings are LF everywhere.
                 R::Text(lf(String::from_utf16_lossy(&units)))
             });
         }
@@ -8764,9 +7110,9 @@ fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::
     Ok(answer)
 }
 
-/// The focused editable widget, if any: the root admits `accepts` on
-/// entries and textareas alone (scene.rs), and each control IS its own
-/// focus target here — no GtkText delegation to walk.
+/// The focused editable widget, if any: the root admits `accepts` on entries
+/// and textareas alone (scene.rs), and each control IS its own focus target
+/// here — no GtkText delegation to walk.
 fn focused_editable_id(core: &CoreState) -> Option<u64> {
     let focused = |field: &Editable| {
         field
@@ -8797,49 +7143,19 @@ fn editable_by_id(core: &CoreState, id: u64) -> Option<Editable> {
         .map(|i| Editable::Textarea(core.textareas[i].clone()))
 }
 
-/// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT — the pins, in one place,
-/// with their read-back (docs/textarea-foundation-plan.md).
-///
-/// The textarea's control can express attributed runs, which is why the
-/// ranges milestone can be cheap; it must express NONE of them today.
-/// RichEditBox's defaults are the opposite of what kaya wants — measured
-/// on the VM before this was written — so each one is set, and each one
-/// is READ BACK:
-///
+/// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT — the pins, in one place, with
+/// their read-back (docs/textarea-foundation-plan.md; the measured defaults
+/// are in docs/probes/range-probe-windows.md):
 /// - `ClipboardCopyFormat` defaults to `AllFormats`, so a copy out of a
-///   kaya textarea would put RTF on the clipboard beside the text and a
-///   paste in would take formatting. `PlainText` is the entry's
-///   behaviour, which TextBox has no way not to have.
-/// - `DisabledFormattingAccelerators` defaults to `None`, which does
-///   NOT mean "no accelerators" — it means none are disabled, so
-///   Ctrl+B/I/U actively bold, italicize and underline the user's text
-///   inside a kaya textarea. `All` is the pin; the chords then either
-///   reach kaya's own keyboard hook (where a menu carries them) or do
-///   nothing at all.
-/// - The control's OWN paste routes — Ctrl+V and its context menu —
-///   bypass every kaya path, so the `Paste` event is cancelled and kaya
-///   inserts the clipboard's plain text itself. `ClipboardCopyFormat`
-///   governs the COPY side only; without this handler, RTF still
-///   arrives by the two doors the user has.
-///
-/// THE READ-BACK IS THE GUARD, and it is deliberately a panic on a path
-/// nobody can avoid: every scene that builds a textarea runs this line.
-/// A pin someone deletes — or one a future App SDK refuses — fails the
-/// FIRST textarea leg with a sentence, rather than shipping a control
-/// with opinions kaya never agreed to. That is the failure mode this
-/// milestone is named after.
-///
-/// Two more pins are not properties and live at their chokepoints
-/// instead: the read's `TextGetOptions::AdjustCrlf` (`Editable::text`,
-/// watched by the textarea scene itself) and the write's
-/// `TextSetOptions::None` (`Editable::set_text` — `FormatRtf` in that
-/// slot renders a guest's `{\rtf1`-shaped string as a document).
-///
-/// SPELL-CHECK AND TEXT PREDICTION ARE NOT PINNED, on purpose. Both
-/// controls carry `IsSpellCheckEnabled` and `IsTextPredictionEnabled`
-/// with the same defaults (measured: True on both), so they are not
-/// opinions the swap introduces — they are the entry's existing
-/// behaviour, and turning them off HERE would be the divergence.
+///   kaya textarea would put RTF on the clipboard beside the text;
+/// - `DisabledFormattingAccelerators` defaults to `None` — none are
+///   DISABLED — so Ctrl+B/I/U actively format inside one; `All` is the pin;
+/// - the control's OWN paste routes bypass every kaya path, so the `Paste`
+///   event is cancelled and kaya inserts the clipboard's plain text itself.
+/// THE READ-BACK IS THE GUARD, a panic on a path nobody can avoid. Two more
+/// pins are not properties: `AdjustCrlf` (`Editable::text`) and
+/// `TextSetOptions::None` (`Editable::set_text`). Spell-check and text
+/// prediction are NOT pinned — the entry carries the same defaults.
 fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
     field.SetClipboardCopyFormat(RichEditClipboardFormat::PlainText)?;
     field.SetDisabledFormattingAccelerators(DisabledFormattingAccelerators::All)?;
@@ -8850,18 +7166,14 @@ fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
         if let Some(args) = args.as_ref() {
             args.SetHandled(true)?;
         }
-        // Then paste what the entry would have pasted. INLINE, and
-        // through a range rather than through the live selection — see
-        // `selection_range`, whose measurement started right here.
-        //
-        // The swallow counter is deliberately not bumped: a paste acts
-        // like the user, and the control's TextChanged is the report
-        // (the same rule the role's paste arm states).
+        // Then paste what the entry would have pasted. INLINE, and through a
+        // range rather than through the live selection — see `selection_range`.
+        // The swallow counter is deliberately not bumped: a paste acts like the
+        // user, and the control's TextChanged is the report.
         pasting.paste_from_clipboard()
     });
     field.Paste(&paste_handler)?;
 
-    // AND NOW ASK THE CONTROL WHAT IT ACTUALLY HAS.
     let copy_format = field.ClipboardCopyFormat()?;
     let accelerators = field.DisabledFormattingAccelerators()?;
     assert!(
@@ -8882,29 +7194,12 @@ fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
     Ok(())
 }
 
-/// D7/A1's clear, in this platform's one available spelling.
-///
-/// MEASURED A NO-OP ON THE ENTRY, AND CALLED ANYWAY (§1.1, re-verified
-/// by the undo arm's probe: CanUndo true -> SetText -> false -> explicit
-/// clear -> false). Setting `TextBox.Text` resets the control's undo
-/// buffer by itself, so D7's semantics already hold on Windows before
-/// any code is added. NOT MEASURED ON THE TEXTAREA'S RichEditBox, whose
-/// undo stack is the RichEdit engine's rather than the XAML control's —
-/// which is precisely why the call is not skipped anywhere: this is the
-/// lever that makes the rule hold whether or not the write happens to.
-/// The call costs one COM hop on a path that already crosses COM, it
-/// makes the uniform rule visible and greppable beside GTK's
-/// begin/end_irreversible_action and Compose's undoState.clearHistory(),
-/// and it is the ONLY lever left if a future WinUI stops resetting on
-/// the Text setter — WinUI 3 having already dropped WPF's
-/// IsUndoEnabled, which had exactly these semantics (A5). A guard that
-/// is redundant today is cheap; finding out later that the redundancy
-/// was carrying the rule is not.
-///
-/// A3 IS THE CALLER'S: every call site sits inside a text-DIFFERS
-/// branch, because an app that mirrors a field into a signal and writes
-/// it back would otherwise lose the user's native history on every
-/// keystroke.
+/// D7/A1's clear, in this platform's one available spelling. MEASURED A
+/// NO-OP ON THE ENTRY, AND CALLED ANYWAY (docs/undo-plan.md §1.1): setting
+/// `TextBox.Text` resets the control's undo buffer by itself, but that is
+/// NOT measured on the textarea's RichEditBox, whose stack is the RichEdit
+/// engine's. A3 IS THE CALLER'S: every call site sits inside a text-DIFFERS
+/// branch, or an app mirroring a field into a signal would lose the history.
 fn clear_native_undo(field: &Editable) {
     if let Err(e) = field.clear_undo_redo_history() {
         eprintln!("kaya: winui ClearUndoRedoHistory failed: {}", e.message());
@@ -8912,28 +7207,15 @@ fn clear_native_undo(field: &Editable) {
 }
 
 // ---- Text ranges (docs/ranges-plan.md D1-D5) ------------------------
-//
-// The three primitives on the one widget that can carry them; TextBox
-// cannot express a decorated run at all (docs/ranges-plan.md).
-//
-// OFFSETS ARRIVE NATIVE AND ARE NEVER CONVERTED HERE. An `ApplyOp`
-// carries a `NativeRange`, which the core built against the text it
-// validated it on; Rich Edit's character positions are UTF-16 code
-// units, so a lowered range is used as it stands. The only offset
-// arithmetic in this file is in the READING direction, where the
-// harness's spelling is in the protocol's byte offsets
-// (`range_spelling`).
-//
-// AND THE LINE BREAK DOES NOT MOVE THEM, which is worth writing down
-// because its GTK sibling is the opposite. A Rich Edit story stores every
-// line break as a single CR where kaya's text has a single LF, so the
-// counts agree 1:1 and `lf()` shifts nothing. (GTK's buffer stores a
-// pasted CRLF as two characters and every range after one lands early.)
+// OFFSETS ARRIVE NATIVE AND ARE NEVER CONVERTED HERE: Rich Edit's positions
+// are UTF-16 code units, and the only offset arithmetic in this file is in
+// the READING direction (`range_spelling`). THE LINE BREAK DOES NOT MOVE
+// THEM either — a story stores every break as a single CR against kaya's
+// single LF, so the counts agree 1:1 (GTK's buffer is the opposite).
 
-/// The background a declared range wears. Rich Edit's background is
-/// opaque — `ITextCharacterFormat` has no alpha channel of its own —
-/// so this is the flattened equivalent of the mac arm's 55%-yellow over
-/// white rather than a second opinion about what a highlight looks like.
+/// The background a declared range wears. Rich Edit's background is opaque —
+/// `ITextCharacterFormat` has no alpha channel of its own — so this is the
+/// flattened equivalent of the mac arm's 55%-yellow over white.
 const HIGHLIGHT_BACKGROUND: bindings::Windows::UI::Color = bindings::Windows::UI::Color {
     A: 255,
     R: 255,
@@ -8944,9 +7226,8 @@ const HIGHLIGHT_BACKGROUND: bindings::Windows::UI::Color = bindings::Windows::UI
 /// The textarea behind a widget id, or None if this id is not one.
 ///
 /// TEXTAREA ONLY, and the core already refused anything else at the one
-/// chokepoint (scene.rs: "text ranges are a TEXTAREA surface"), so this
-/// answering None means the widget vanished between the transaction and
-/// its apply — the same race every other arm here tolerates.
+/// chokepoint (scene.rs), so None here means the widget vanished between the
+/// transaction and its apply.
 fn textarea_by_id(core: &CoreState, id: u64) -> Option<RichEditBox> {
     core.textarea_ids
         .iter()
@@ -8954,10 +7235,10 @@ fn textarea_by_id(core: &CoreState, id: u64) -> Option<RichEditBox> {
         .map(|i| core.textareas[i].clone())
 }
 
-/// One background write: get the range, take its format COPY, set the
-/// colour, assign the copy back. Four COM hops, and the round trip is
-/// not optional — `ITextRange::CharacterFormat` hands out a snapshot,
-/// so a colour set on it changes nothing until it is assigned.
+/// One background write: get the range, take its format COPY, set the colour,
+/// assign the copy back. The round trip is not optional —
+/// `ITextRange::CharacterFormat` hands out a snapshot, so a colour set on it
+/// changes nothing until it is assigned.
 fn set_background(
     range: &bindings::Microsoft::UI::Text::ITextRange,
     color: bindings::Windows::UI::Color,
@@ -8970,10 +7251,9 @@ fn set_background(
 /// Unpaint the whole story.
 ///
 /// EXPLICIT, AND ON EVERY DECLARATION, because `SetText` does NOT reset
-/// character formatting on this control (measured, range-probe-windows.md
-/// §5: new text takes the ambient format, and a probe that painted eight
-/// characters red ended up with an 80,513-pixel red document after one
-/// re-set). The clear is one range write and the batch pays for it.
+/// character formatting on this control (measured,
+/// docs/probes/range-probe-windows.md §5: a probe that painted eight
+/// characters red ended up with an 80,513-pixel red document after a re-set).
 fn clear_highlights(field: &RichEditBox) -> windows_core::Result<()> {
     let doc = field.TextDocument()?;
     let story = doc.GetRange(0, TextConstants::MaxUnitCount()?)?;
@@ -8986,9 +7266,9 @@ fn paint_highlights(
     ranges: &[crate::protocol::NativeRange],
 ) -> windows_core::Result<()> {
     let doc = field.TextDocument()?;
-    // Batched unconditionally: measured 2.2x faster per range (96µs ->
-    // 44µs) and it keeps the clear below from being a visible flash of
-    // undecorated text before the new set lands.
+    // Batched unconditionally: measured 2.2x faster per range
+    // (docs/probes/range-probe-windows.md, 96µs -> 44µs) and it keeps the clear
+    // below from being a visible flash of undecorated text.
     doc.BatchDisplayUpdates()?;
     let painted = (|| -> windows_core::Result<()> {
         clear_highlights(field)?;
@@ -9000,20 +7280,16 @@ fn paint_highlights(
         }
         Ok(())
     })();
-    // ALWAYS, even on the failure above: an unmatched
-    // BatchDisplayUpdates leaves the control's rendering suspended for
-    // the rest of the process, which would turn one failed paint into a
-    // window that stops updating at all.
+    // ALWAYS, even on the failure above: an unmatched BatchDisplayUpdates leaves
+    // the control's rendering suspended for the rest of the process.
     doc.ApplyDisplayUpdates()?;
     painted
 }
 
-/// D2, ENFORCED WHERE THE EDIT ARRIVES. Called from the textarea's
-/// TextChanged BEFORE the swallow test, so it sees every edit whatever
-/// its origin — a keystroke, a paste, kaya's own write, a native undo.
-///
-/// The compare is against the recorded text, never against the event:
-/// see HIGHLIGHT_TEXT for why that distinction is the whole design.
+/// D2, ENFORCED WHERE THE EDIT ARRIVES. Called from the textarea's TextChanged
+/// BEFORE the swallow test, so it sees every edit whatever its origin — a
+/// keystroke, a paste, kaya's own write, a native undo. The compare is against
+/// the recorded text, never against the event (see HIGHLIGHT_TEXT).
 fn drop_stale_highlights(id: u64, field: &RichEditBox) {
     let Some(declared) = HIGHLIGHT_TEXT.with_borrow(|map| map.get(&id).cloned()) else {
         return;
@@ -9032,24 +7308,11 @@ fn drop_stale_highlights(id: u64, field: &RichEditBox) {
 }
 
 /// The painted runs the control is actually holding, in its own units.
-///
-/// THE READ GOES TO THE DOCUMENT MODEL, not to kaya's bookkeeping, and
-/// that is the difference between a test and a tautology: delete the
-/// paint and this answers `""` while HIGHLIGHT_TEXT still remembers
-/// everything. It is NOT the accessibility tree, which is what the mac
-/// arm reads and what this arm would prefer — WinUI's in-process
-/// automation peer for a text control publishes no Text pattern at all
-/// (`RichEditBoxAutomationPeer` declares exactly one interface in the
-/// SDK metadata, and live reflection agreed: `GetPattern(Text)` is
-/// NULL), and the only route that does publish it is an out-of-process
-/// UIA CLIENT, which is the file-dialog era's crash class and is barred
-/// at the Cargo.toml. So this reads the layer underneath: Rich Edit's
-/// own model of what it is rendering.
-///
-/// A run is "painted" when its background is not the platform's own
-/// `AutoColor` sentinel — the value an untouched run carries — rather
-/// than when it matches kaya's colour, so a clear that wrote the WRONG
-/// colour reads as still-painted instead of silently passing.
+/// THE READ GOES TO THE DOCUMENT MODEL, not to kaya's bookkeeping: delete
+/// the paint and this answers `""` while HIGHLIGHT_TEXT still remembers
+/// everything (the in-process peer publishes no Text pattern to read it
+/// from — docs/deferred.md). A run is "painted" when its background is not
+/// `AutoColor`, so a clear that wrote the WRONG colour reads as painted.
 #[cfg(feature = "harness")]
 fn painted_runs(field: &RichEditBox, units: i32) -> windows_core::Result<Vec<(i32, i32)>> {
     let doc = field.TextDocument()?;
@@ -9106,23 +7369,12 @@ fn utf16_offset(text: &str, byte: usize) -> Option<i32> {
     Some(text[..byte].encode_utf16().count() as i32)
 }
 
-/// WHERE A RANGE SITS IN THE DOCUMENT: its top and bottom edge, in the
-/// same units the control's ScrollViewer counts.
-///
-/// `ITextRange::GetRect` NAMES ITS OPTION `ClientCoordinates` AND MEANS
-/// DOCUMENT COORDINATES on this control, which is the fact the whole
-/// reveal arm turns on. Measured on the VM 2026-08-06: the last match of
-/// a 40-line document reported Y=689 with the viewport at offset 0 AND
-/// with it at 625 — the rectangle did not move, because the Rich Edit
-/// engine renders into a surface that the XAML ScrollViewer slides, and
-/// the engine's coordinates are the surface's. So a viewport question
-/// is answered by combining this with the ScrollViewer's offset, never
-/// by the rectangle alone.
-///
-/// `ITextRange::ScrollIntoView` — the call the reveal arm makes — does
-/// move the XAML ScrollViewer (measured: offset 0 -> 625 of 662 for the
-/// last match of a 40-line document), so the two coordinate systems have
-/// to be combined for the read even though the write needs only one.
+/// WHERE A RANGE SITS IN THE DOCUMENT: top and bottom edge, in the
+/// ScrollViewer's own units. `ITextRange::GetRect` names its option
+/// `ClientCoordinates` and means DOCUMENT coordinates (measured 2026-08-06:
+/// the rectangle does not move when the viewport scrolls), so a viewport
+/// question combines it with the ScrollViewer's offset, while
+/// `ITextRange::ScrollIntoView` does move the viewport.
 #[cfg(feature = "harness")]
 fn range_extent(field: &RichEditBox, start: i32, stop: i32) -> windows_core::Result<(f64, f64)> {
     let mut rect = bindings::Windows::Foundation::Rect::default();
@@ -9170,23 +7422,11 @@ fn template_scroll(field: &RichEditBox) -> windows_core::Result<ScrollViewer> {
 
 /// THE HARNESS'S COMPOSITION, THROUGH THE TEXT SERVICES FRAMEWORK.
 ///
-/// Windows has no "insert marked text" call — compositions belong to
-/// TSF, which owns the focused document and hands text services a write
-/// lock to work inside. So this does what a text service does, in the
-/// app's own process and on its own UI thread: take the focused context,
-/// run an edit session on it, start a composition over the caret, and
-/// write the marked text into the composition's range. Nothing is
-/// committed, which is the state D4's refusal exists for.
-///
-/// (Injecting keystrokes was never an option: an IME converts what it is
-/// given, so the marked string would not be the string the frozen scene
-/// expects, and the VM has no IME installed. Inserting ordinary content
-/// would prove nothing — that is the state the refusal must tell a
-/// composition apart from.)
-///
-/// THE COMPOSITION IS DELIBERATELY LEFT OPEN. `ITfComposition` is parked
-/// in a thread-local rather than dropped, so the marked text stays marked
-/// for the rest of the scene.
+/// Windows has no "insert marked text" call, so this does what a text
+/// service does: focused context, edit session, composition over the caret,
+/// marked text written into it. Nothing is committed — the state D4's
+/// refusal exists for — and `ITfComposition` is parked in a thread-local so
+/// the marked text stays marked.
 #[cfg(feature = "harness")]
 fn tsf_compose(text: &str) -> Result<(), String> {
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
@@ -9198,9 +7438,8 @@ fn tsf_compose(text: &str) -> Result<(), String> {
     };
     let named = |what: &str, e: windows_core::Error| format!("{what}: {}", e.message());
     unsafe {
-        // The thread manager is a per-thread singleton, so this is a
-        // handle to the one WinUI's input stack already activated rather
-        // than a second manager.
+        // The thread manager is a per-thread singleton, so this is a handle to
+        // the one WinUI's input stack already activated.
         let manager: ITfThreadMgr = CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER)
             .map_err(|e| named("no TSF thread manager on the UI thread", e))?;
         let client = manager
@@ -9224,24 +7463,19 @@ fn tsf_compose(text: &str) -> Result<(), String> {
             vtable: &KAYA_EDIT_SESSION_VTBL,
             body: RefCell::new(Some(Box::new(move |ec: u32| {
                 let sink = composition_sink();
-                // THE COMPOSITION RANGE COMES FROM `ITfInsertAtSelection`
-                // rather than from `GetSelection`, which is the pattern
-                // Microsoft's own TSF sample uses
-                // (Win7Samples/winui/tsf/tsfmark): a query-only insert
-                // asks the TEXT STORE where text would go, which is the
-                // range a composition may cover, where the selection is
-                // only where the caret is. Stated as the sample's
-                // authority and not as a measurement — what the VM
-                // measured is the SINK (see KayaCompositionSink), which
-                // is what E_INVALIDARG was actually about.
+                // THE COMPOSITION RANGE COMES FROM `ITfInsertAtSelection` rather
+                // than from `GetSelection`, the pattern Microsoft's own TSF
+                // sample uses (Win7Samples/winui/tsf/tsfmark): a query-only
+                // insert asks the TEXT STORE where text would go, which is the
+                // range a composition may cover, where the selection is only
+                // where the caret is.
                 let inserter: ITfInsertAtSelection = inside.cast()?;
                 let at = inserter.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
                 let composition = composer.StartComposition(ec, &at, &sink)?;
                 let range = composition.GetRange()?;
                 range.SetText(ec, 0, &marked)?;
-                // A COMPOSITION PARKS THE CARET AT THE END OF ITS MARKED
-                // TEXT — every platform's convention, and the number the
-                // frozen scene asserts.
+                // A COMPOSITION PARKS THE CARET AT THE END OF ITS MARKED TEXT —
+                // every platform's convention, and the number the scene asserts.
                 let end = range.Clone()?;
                 end.Collapse(ec, TF_ANCHOR_END)?;
                 let mut moved: [TF_SELECTION; 1] = [core::mem::zeroed()];
@@ -9260,16 +7494,12 @@ fn tsf_compose(text: &str) -> Result<(), String> {
         let handle =
             <windows::Win32::UI::TextServices::ITfEditSession as windows_core::Interface>::from_raw_borrowed(&raw)
                 .expect("the edit session object is not null");
-        // SYNCHRONOUS FIRST so the composition is live before this
-        // returns, ASYNC as the fallback — and the fallback is keyed on
-        // the GRANT, not on the call. `RequestEditSession` answers twice:
-        // the call's own HRESULT (did TSF understand the request) and
-        // `phrSession` (was the lock given), and a refused sync request
-        // comes back as a SUCCESSFUL call carrying a failed grant.
-        // Measured on the VM 2026-08-06: the sync request is answered
-        // E_INVALIDARG — a synchronous lock is the document owner's
-        // privilege and this client is not it — while the async request
-        // is granted and the composition appears.
+        // SYNCHRONOUS FIRST so the composition is live before this returns,
+        // ASYNC as the fallback, keyed on the GRANT and not on the call:
+        // `RequestEditSession` answers twice, so a refused sync request comes
+        // back as a SUCCESSFUL call carrying a failed grant. Measured on the VM
+        // 2026-08-06: the sync request is answered E_INVALIDARG (a synchronous
+        // lock is the document owner's privilege), the async one is granted.
         let sync = TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READWRITE.0);
         let mut granted = context
             .RequestEditSession(client, handle, sync)
@@ -9293,11 +7523,10 @@ fn tsf_compose(text: &str) -> Result<(), String> {
     }
 }
 
-/// TSF's edit session, hand-rolled — one method over `IUnknown`, and the
-/// same nominal-refcount shape as `KayaOuter` above (a process-lifetime
-/// object that is never released). The alternative is the `implement`
-/// macro, which would add a proc-macro dependency to every kaya build
-/// for one harness verb.
+/// TSF's edit session, hand-rolled — one method over `IUnknown`, and the same
+/// nominal-refcount shape as `KayaOuter` above. The alternative is the
+/// `implement` macro, which would add a proc-macro dependency to every kaya
+/// build for one harness verb.
 #[cfg(feature = "harness")]
 #[repr(C)]
 struct KayaEditSession {
@@ -9367,10 +7596,9 @@ unsafe extern "system" fn edit_session_do(
     let code = match &outcome {
         Ok(()) => windows_core::HRESULT(0),
         Err(e) => {
-            // SAID HERE AND NOT AT THE CALL SITE, because an
-            // ASYNCHRONOUS grant runs this body long after the caller
-            // returned: a failure the caller reported would be a
-            // failure nobody ever hears about.
+            // SAID HERE AND NOT AT THE CALL SITE: an ASYNCHRONOUS grant runs
+            // this body long after the caller returned, so a failure the caller
+            // reported would be a failure nobody ever hears about.
             eprintln!("kaya: the composition edit session failed: {}", e.message());
             e.code()
         }
@@ -9381,14 +7609,9 @@ unsafe extern "system" fn edit_session_do(
 
 /// TSF'S COMPOSITION SINK — the object a composition reports its own
 /// termination to. Documented as optional, and NOT optional in practice:
-/// `StartComposition` with a NULL sink answers E_INVALIDARG on this
-/// Windows build (measured on the VM 2026-08-06, twice, with the
-/// composition range obtained both ways). Microsoft's own TSF sample
-/// passes its text service here, so the sample is right and the
-/// reference page is optimistic.
-///
-/// One method beyond IUnknown, and nothing to do in it: the harness's
-/// composition is ended by the process exiting.
+/// `StartComposition` with a NULL sink answers E_INVALIDARG on this Windows
+/// build (measured on the VM 2026-08-06, twice). One method beyond IUnknown,
+/// and nothing to do in it.
 #[cfg(feature = "harness")]
 #[repr(C)]
 struct KayaCompositionSink {
@@ -9448,17 +7671,14 @@ unsafe extern "system" fn composition_sink_terminated(
     _cookie: u32,
     _composition: *mut core::ffi::c_void,
 ) -> windows_core::HRESULT {
-    // Nothing to unwind: the composition the harness starts lives until
-    // the scene's process does.
+    // Nothing to unwind: the harness's composition lives until the process does.
     windows_core::HRESULT(0)
 }
 
 #[cfg(feature = "harness")]
 thread_local! {
-    /// The open composition, parked so it outlives the edit session that
-    /// started it. Dropping it here would be the one thing that must not
-    /// happen: the marked text has to stay marked for the assertion that
-    /// follows.
+    /// The open composition, parked so it outlives the edit session that started
+    /// it: the marked text has to stay marked for the assertion that follows.
     static LIVE_COMPOSITION: RefCell<Option<windows::Win32::UI::TextServices::ITfComposition>> =
         const { RefCell::new(None) };
 }
@@ -9466,12 +7686,9 @@ thread_local! {
 /// A set of platform ranges in the harness's spelling:
 /// `<start>:<end>=<covered text>` per range, `|`-joined, ascending.
 ///
-/// THE COVERED TEXT IS NOT DECORATION. Offsets alone would make this
-/// read the exact inverse of the lowering's own conversion, so two
-/// symmetric mistakes would cancel and the leg would pass while the
-/// highlight covered the wrong characters. The covered text has no
-/// arithmetic in it — the string is sliced with the range the platform
-/// is actually holding — so the two halves cannot be wrong together.
+/// THE COVERED TEXT IS NOT DECORATION: offsets alone would read the exact
+/// inverse of the lowering's own conversion, so two symmetric mistakes would
+/// cancel and the leg would pass with the wrong characters highlighted.
 #[cfg(feature = "harness")]
 fn range_spelling(text: &str, ranges: &[(i32, i32)]) -> String {
     let mut ranges = ranges.to_vec();
@@ -9490,25 +7707,13 @@ fn range_spelling(text: &str, ranges: &[(i32, i32)]) -> String {
         .join("|")
 }
 
-/// EPISODE BANKING (docs/undo-plan.md §3), on the way past.
-///
-/// Every user edit of a text field is shown to the ledger before the
-/// occurrence goes to the app. The core owns the episode; the backend
-/// contributes the two facts only it can see — WHICH FIELD, and whether
-/// it is FOCUSED (an event on an unfocused field closes the episode as it
-/// stands).
-///
-/// FROM A USER EDIT, WHICHEVER WAY IT ARRIVED — the control's own
-/// TextChanged and the harness's `set_text`, which stands in for one. The
-/// APP's programmatic writes do not come through here: they bump the
-/// swallow counter and the core absorbs them from the apply ops
-/// (`Scene::absorb_text_writes`).
-///
-/// `with_borrow_mut` and not a deferred hop: a bank that landed a tick
-/// later could arrive AFTER the routing question that depends on it. The
-/// borrow is safe because this backend's TextChanged is raised
-/// ASYNCHRONOUSLY — re-measured for a routed `Undo()` by this arm's probe
-/// (`inside_undo_call=false` on every raise).
+/// EPISODE BANKING (docs/undo-plan.md §3), on the way past: every user edit of
+/// a text field is shown to the ledger before the occurrence goes to the app,
+/// whichever way it arrived (the control's TextChanged and the harness's
+/// `set_text`; the APP's writes go through `Scene::absorb_text_writes`). The
+/// backend contributes the two facts only it can see — WHICH FIELD, and
+/// whether it is FOCUSED. `with_borrow_mut` and not a deferred hop: a bank a
+/// tick later could arrive AFTER the routing question that depends on it.
 fn bank_text_changed(id: u64, text: &str) -> bool {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return false };
@@ -9516,58 +7721,33 @@ fn bank_text_changed(id: u64, text: &str) -> bool {
     })
 }
 
-/// The same banking with the core ALREADY BORROWED — the harness's
-/// `set_text` runs inside `on_ui_mut`, and taking `CORE` again there
-/// would panic on the live borrow rather than bank. ONE BODY, TWO DOORS:
-/// spelled twice, the two spellings drift and only one is the one a scene
-/// exercises.
+/// The same banking with the core ALREADY BORROWED — the harness's `set_text`
+/// runs inside `on_ui_mut`, where taking `CORE` again would panic on the live
+/// borrow rather than bank. ONE BODY, TWO DOORS: spelled twice, the two
+/// spellings drift and only one is the one a scene exercises.
 fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) -> bool {
-    // A RAISE THAT CARRIES NO TEXT CHANGE IS NOT A TEXT CHANGE, and on
-    // THIS control that is not a theoretical case: a RichEditBox raises
-    // TextChanged for a CHARACTER FORMAT write as readily as for a
-    // keystroke, so `highlight_ranges` — a background colour and not one
-    // character — comes back through the same event as an edit.
-    //
-    // MEASURED, and it is a FEEDBACK LOOP rather than a stray event
-    // (2026-08-10, the editor's first windows leg): the app folds
-    // text_changed and re-declares its find set from the fold, so
-    // kaya's paint raised TextChanged, the raise reached the app as an
-    // edit, the app re-declared, and the pair ran at ~260 round trips a
-    // second for the whole 180-second leg. Every one of that leg's six
-    // failures was downstream of it — the UI thread never went idle, so
-    // the find bar's own keystrokes sat on the queue for a minute, a
-    // ContentDialog never reached `IsLoaded`, and the app's match count
-    // was overwritten by the next spurious fold before anything could
-    // read it.
-    //
-    // The compare is against what THIS HANDLER LAST SAW on the control
-    // (`banked_text`), never against the core's model of the field: the
-    // core is told about kaya's own writes through `absorb_text_writes`,
-    // so comparing there would also silence the echo of a routed native
-    // undo — the one programmatic write whose report the app is
-    // REQUIRED to hear (§3a).
-    //
-    // Answers whether the guest should be told, so the one rule lives in
-    // the one place both handlers already call.
+    // A RAISE THAT CARRIES NO TEXT CHANGE IS NOT A TEXT CHANGE: a RichEditBox
+    // raises TextChanged for a CHARACTER FORMAT write as readily as for a
+    // keystroke, and with the app re-declaring its find set from the fold
+    // that is a feedback loop (docs/traps.md: A RichEditBox raises
+    // TextChanged for kaya's own paint). The compare is against what THIS
+    // HANDLER LAST SAW (`banked_text`), never the core's model (§3a).
     if core.banked_text.get(&id).map(String::as_str) == Some(text) {
         return false;
     }
-    // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next
-    // few lines go: a quiet echo was reported through
-    // `note_native_undo` and an ordinary edit is banked below, and
-    // the `type` verb's settle is asking "has kaya seen it", not
-    // "which path did it take".
+    // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next few lines go:
+    // the `type` verb's settle asks "has kaya seen it", not "which path did it
+    // take".
     core.banked_text.insert(id, text.to_owned());
-    // Q2's ledger-quiet bracket: this edit is the echo of a native
-    // undo THIS BACKEND ROUTED, and `note_native_undo` already
-    // reported it with the backend's own sample. Banking it again
-    // would restate the walk's position as a new high-water and
-    // erase the walk the redo side needs.
+    // Q2's ledger-quiet bracket: this edit is the echo of a native undo THIS
+    // BACKEND ROUTED, already reported by `note_native_undo`. Banking it again
+    // would restate the walk's position as a new high-water and erase the walk
+    // the redo side needs.
     if core.ledger_quiet.get(&id).map(String::as_str) == Some(text) {
         core.ledger_quiet.remove(&id);
-        // The APP still hears it: a routed native undo is an edit like
-        // any other from the guest's side (§3a), and only the ledger's
-        // second look is suppressed.
+        // The APP still hears it: a routed native undo is an edit like any other
+        // from the guest's side (§3a); only the ledger's second look is
+        // suppressed.
         return true;
     }
     let focused = focused_editable_id(core) == Some(id);
@@ -9577,12 +7757,10 @@ fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) -> bool {
     true
 }
 
-/// A4's ONE named query — "can the focused widget undo?" — answered in
-/// this platform's vocabulary and asked nowhere else in this file.
-///
-/// D6 already named four hard-coded role filters as silent-failure
-/// sites; a fifth expression of this same question is the shape A4
-/// exists to refuse. The core's `route_undo` consumes the answer.
+/// A4's ONE named query — "can the focused widget undo?" — answered in this
+/// platform's vocabulary and asked nowhere else in this file. D6 named four
+/// hard-coded role filters as silent-failure sites; a fifth expression of this
+/// question is the shape A4 exists to refuse.
 fn focused_can_undo(core: &CoreState) -> bool {
     focused_editable_id(core)
         .and_then(|id| editable_by_id(core, id))
@@ -9598,27 +7776,18 @@ fn focused_can_redo(core: &CoreState) -> bool {
         .unwrap_or(false)
 }
 
-/// THE LEDGER'S WINDOW, in one named place.
-///
-/// §3's ledger is per window and this backend cannot name a widget's
-/// window: it keeps no widget-to-window map, and every other
-/// window-scoped decision here already stands on the primary (the chord
-/// hook dispatches `MenuAttachment::Window(0)`, the harness resolves menu
-/// paths against `menu_windows[&0]`). So the assumption is stated ONCE:
-/// typing in an auxiliary window banks into the primary's ledger, and
-/// this function is the single site that changes when aux windows grow
-/// one.
+/// THE LEDGER'S WINDOW, in one named place: §3's ledger is per window and this
+/// backend keeps no widget-to-window map, so the assumption is stated ONCE —
+/// typing in an auxiliary window banks into the primary's ledger — and this
+/// is the single site that changes when aux windows grow one.
 fn ledger_window(_core: &CoreState) -> WindowId {
     WindowId(0)
 }
 
 /// Where an undo would go RIGHT NOW.
 ///
-/// ASKED ONCE AND USED TWICE — enablement and activation are the same
-/// question (docs/undo-plan.md D6), and `Nothing` IS what a disabled
-/// Edit>Undo means. The answer is the CORE's: the backend contributes the
-/// pair only it can see (what is focused, and whether that field's own
-/// stack has anything) and the ledger decides.
+/// ASKED ONCE AND USED TWICE — enablement and activation are the same question
+/// (docs/undo-plan.md D6), and `Nothing` IS what a disabled Edit>Undo means.
 fn undo_route(core: &CoreState) -> crate::scene::UndoRoute {
     core.scene.route_undo(
         ledger_window(core),
@@ -9627,10 +7796,9 @@ fn undo_route(core: &CoreState) -> crate::scene::UndoRoute {
     )
 }
 
-/// Redo's twin. On the frontier episode redo stays NATIVE while the
-/// episode is partly undone — the platform still holds those steps, and
-/// taking them back coarsely would throw away granularity the user can
-/// see. That judgement is the ledger's too; this asks with `CanRedo`.
+/// Redo's twin. On the frontier episode redo stays NATIVE while the episode is
+/// partly undone — the platform still holds those steps, and taking them back
+/// coarsely would throw away granularity the user can see.
 fn redo_route(core: &CoreState) -> crate::scene::UndoRoute {
     core.scene.route_redo(
         ledger_window(core),
@@ -9639,13 +7807,11 @@ fn redo_route(core: &CoreState) -> crate::scene::UndoRoute {
     )
 }
 
-/// Whether a role's command can act right now; a non-role item answers
-/// true and pays nothing. THE SAME RULE AS THE OTHER ARMS: paste is the
-/// INTERSECTION of what the clipboard offers and what the focused widget
-/// accepts — a widget that declared NOTHING still pastes, so an
-/// undeclared target enables on the text offer alone. Cut and copy need a
-/// focused editable. Undo and redo ask the ROUTE, which is the same call
-/// their activation makes, so the two cannot drift (A4).
+/// Whether a role's command can act right now; a non-role item answers true and
+/// pays nothing. Paste is the INTERSECTION of what the clipboard offers and what
+/// the focused widget accepts — a widget that declared NOTHING still pastes.
+/// Cut and copy need a focused editable. Undo and redo ask the ROUTE, which is
+/// the same call their activation makes, so the two cannot drift (A4).
 fn role_enabled(core: &CoreState, role: &str) -> bool {
     match role {
         "undo" => undo_route(core) != crate::scene::UndoRoute::Nothing,
@@ -9672,19 +7838,11 @@ fn role_enabled(core: &CoreState, role: &str) -> bool {
 }
 
 /// Recompute the role items' enablement onto the REAL chrome
-/// (docs/clipboard-plan.md §3): enablement is the intersection of what
-/// the clipboard offers and what the focused widget accepts, and both
-/// move long after the bar was built. So this runs wherever enablement
-/// can change hands — a role or accepts list lands, a copy goes out, the
-/// clipboard or the focus changes, the coalesced rebuild restamps
-/// structural enablement — and before a harness activation OR READ.
-///
-/// THE ROLE SET IS ONE OF D6's FOUR RECORDED SILENT-FAILURE SITES
-/// (docs/undo-plan.md; tools/check-roles.py's third clause holds it
-/// open): an item whose role is outside this `matches!` never has its
-/// enablement recomputed, and on this backend a disabled item is refused
-/// by BOTH the invoke pipeline and the chord hook. It must name every
-/// gesture role in MENU_ROLES.
+/// (docs/clipboard-plan.md §3): enablement is the intersection of what the
+/// clipboard offers and what the focused widget accepts, so this runs
+/// wherever it can change hands, and before a harness activation OR READ.
+/// The role set is one of D6's four recorded silent-failure sites
+/// (tools/check-roles.py): it must name every gesture role in MENU_ROLES.
 fn refresh_role_enablement(core: &CoreState) {
     for (&id, model) in &core.menu_models {
         if !matches!(model.role.as_str(), "cut" | "copy" | "paste" | "undo" | "redo") {
@@ -9696,13 +7854,10 @@ fn refresh_role_enablement(core: &CoreState) {
                 let _ = native.set_enabled(on);
             }
         }
-        // ONE ITEM, TWO CHROME VIEWS: a promoted role item has a toolbar
-        // button as well as a menu row, and the role factor moves with no
-        // catalog traffic at all (a clipboard offer changes, Undo's route
-        // changes), so a button left out of this loop would keep the
-        // enablement the last REBUILD stamped on it — the exact "the
-        // chrome kept its own copy" defect the scene's round trip exists
-        // to catch, arriving only for role items.
+        // ONE ITEM, TWO CHROME VIEWS: a promoted role item has a toolbar button
+        // as well as a menu row, and the role factor moves with no catalog
+        // traffic at all, so a button left out of this loop would keep the
+        // enablement the last REBUILD stamped on it.
         for ((_, button_id), button) in &core.toolbar_buttons {
             if *button_id == id {
                 let _ = button.SetIsEnabled(on);
@@ -9711,32 +7866,20 @@ fn refresh_role_enablement(core: &CoreState) {
     }
 }
 
-/// Perform an UNDO role. Answers whether it WAS one, so a clipboard
-/// role and then a plain action fall through behind it.
-///
-/// SPLIT FROM THE CLIPBOARD PERFORM ON PURPOSE, the way the mac arm
-/// splits it: an undo is not a clipboard command, it answers from two
-/// tiers rather than one, and tools/check-roles.py reads the UNION of
-/// this file's `perform_*_role` functions for exactly this reason.
-///
-/// THIS IS ALSO WHERE THE CHORD LANDS. §1.1's measured finding is that
-/// kaya's thread-scoped keyboard hook STEALS Ctrl+Z from a focused
-/// TextBox the moment `MenuRole::Undo` carries the chord — the menu
-/// fires and the field never sees the key, and a DISABLED item eats it
-/// just as dead. So the routing cannot sit beside the dispatch; it has
-/// to BE the dispatch. `key_hook` resolves the chord and calls
-/// `menu_user_activate`, which calls this, so the hook's own path
-/// answers the native tier — and the accelerator stays attached as
-/// dress, so the menu keeps drawing "Ctrl+Z" and agrees with the
-/// field's own context menu (P4).
+/// Perform an UNDO role. Answers whether it WAS one, so a clipboard role and
+/// then a plain action fall through behind it. Split from the clipboard
+/// perform on purpose, and tools/check-roles.py reads the UNION of this
+/// file's `perform_*_role` functions. THIS IS ALSO WHERE THE CHORD LANDS:
+/// kaya's thread-scoped keyboard hook STEALS Ctrl+Z from a focused TextBox
+/// once `MenuRole::Undo` carries the chord (§1.1), so the routing cannot sit
+/// beside the dispatch — it has to BE the dispatch.
 fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
     match role {
         "undo" => {
             match undo_route(core) {
                 crate::scene::UndoRoute::Native => native_walk(core, false),
                 crate::scene::UndoRoute::Core => core_walk(core, false),
-                // Inert, and it says so in the chrome: enablement IS
-                // this route (role_enabled), recomputed live.
+                // Inert: enablement IS this route (role_enabled), recomputed live.
                 crate::scene::UndoRoute::Nothing => {}
             }
             true
@@ -9753,46 +7896,20 @@ fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
     }
 }
 
-/// How many native records ONE Edit>Undo may spend looking for the text
-/// to move (`native_walk`). A BOUND AND NOT A `while`: the walk runs on
-/// the UI thread, so a stack that never satisfies the condition has to
-/// stop and SAY SO rather than spin the window into a hang.
+/// How many native records ONE Edit>Undo may spend looking for the text to move
+/// (`native_walk`). A BOUND AND NOT A `while`: the walk runs on the UI thread,
+/// so a stack that never satisfies the condition has to stop and SAY SO rather
+/// than spin the window into a hang.
 const NATIVE_WALK_LIMIT: usize = 64;
 
-/// THE NATIVE TIER, and THE RECONCILIATION SAMPLE with it (§3).
-///
-/// The core walks its frontier episode backwards from three facts — the
-/// field, the text the walk landed on, and whether the field can still
-/// undo — and the backend's job is to take that sample at the one moment
-/// it is true. MEASURED on this platform (the arm's probe, §1 of the
-/// arm record): the text and `CanUndo` read the instant `Undo()` returns
-/// are already final, so the sample is synchronous here. That is the
-/// opposite of macOS, where SwiftUI syncs the model a turn later — which
-/// is why the sample is taken from the CONTROL in both arms.
-///
-/// AND §3a's QUESTION IS ANSWERED "YES" HERE, so this function does NOT
-/// report the text change itself. `TextBox.Undo()` raises the control's
-/// ordinary TextChanged 7ms later (measured), which is the very event
-/// the entry's handler rides, so the app hears the edit through the
-/// channel it always hears edits through. Only the LEDGER would hear it
-/// twice, and `ledger_quiet` is the bracket that stops it.
-///
-/// The textarea's `TextDocument().Undo()` is the same shape asked of a
-/// different object, and the same bracket covers it: whether the
-/// RichEdit engine raises TextChanged one turn later or none at all,
-/// `ledger_quiet` is keyed on the TEXT the walk landed on, so an echo
-/// that arrives is absorbed and one that never comes costs nothing.
-///
-/// THE THIRD FACT IS `CanUndo` IN BOTH DIRECTIONS, deliberately. It is
-/// not "did this walk have more to give" — it is the core's test for the
-/// one case A1's clear is meant to make unreachable: a platform that
-/// coalesced ACROSS the episode's start and can no longer walk back to
-/// the before-image. A redo reporting `CanRedo` there would answer false
-/// at the end of a forward walk and send the core backwards.
+/// THE NATIVE TIER, and THE RECONCILIATION SAMPLE with it (docs/undo-plan.md
+/// §3). MEASURED here: the text and `CanUndo` read the instant `Undo()`
+/// returns are already final, so the sample is synchronous, unlike macOS.
+/// §3a's question is answered "yes", so this does NOT report the text change
+/// — `TextBox.Undo()` raises TextChanged 7ms later and `ledger_quiet` absorbs
+/// it. `CanUndo` IN BOTH DIRECTIONS: the core's test for a coalesced episode.
 fn native_walk(core: &mut CoreState, redo: bool) {
-    // NO FOCUSED EDITABLE, NO WALK. Routing only answers Native where a
-    // focused field reported CanUndo, so this cannot fire on the
-    // ratified path — and a missing field must not read as the empty
+    // NO FOCUSED EDITABLE, NO WALK: a missing field must not read as the empty
     // string, which would wipe the episode through the sample.
     let Some(id) = focused_editable_id(core) else {
         return;
@@ -9800,17 +7917,11 @@ fn native_walk(core: &mut CoreState, redo: bool) {
     let Some(field) = editable_by_id(core, id) else {
         return;
     };
-    // ONE Edit>Undo IS ONE TEXT STEP, and on this control the stack
-    // holds records that move no text at all. Rich Edit records a
-    // CharacterFormat write like any other change, so a `highlight_ranges`
-    // declaration — kaya's own paint, which no user asked for — sits on
-    // top of the user's typing. MEASURED (2026-08-10, the editor leg):
-    // `Undo()` returned with the text byte-identical, `CanUndo` still
-    // true, and the keystroke the user wanted back still in the document.
-    //
-    // kaya's undo means the user's last EDIT, so the walk spends records
-    // until the text moves. It cannot overshoot: the loop stops at the
-    // FIRST record that moves the text, which is exactly one text step.
+    // ONE Edit>Undo IS ONE TEXT STEP, and this control's stack holds records
+    // that move no text at all: Rich Edit records a CharacterFormat write like
+    // any other, so kaya's own paint sits on top of the user's typing —
+    // measured 2026-08-10, `Undo()` returned with the text byte-identical and
+    // `CanUndo` still true. So the walk spends records until the text moves.
     let start = lf(field.text().unwrap_or_default());
     let mut called: windows_core::Result<()>;
     let mut spent = 0usize;
@@ -9820,9 +7931,8 @@ fn native_walk(core: &mut CoreState, redo: bool) {
         if called.is_err() || lf(field.text().unwrap_or_default()) != start {
             break;
         }
-        // The text has not moved and the stack has nothing left to
-        // spend: the episode is exhausted, which the sample below
-        // reports and `note_native_undo` finishes coarsely.
+        // The text has not moved and the stack has nothing left to spend: the
+        // episode is exhausted, which `note_native_undo` finishes coarsely.
         let more = if redo { field.can_redo() } else { field.can_undo() };
         if !more.unwrap_or(false) {
             break;
@@ -9849,9 +7959,8 @@ fn native_walk(core: &mut CoreState, redo: bool) {
     core.ledger_quiet.insert(id, text.clone());
     let window = ledger_window(core);
     let fallback = core.scene.note_native_undo(window, WidgetId(id), &text, can_undo);
-    // Usually nothing comes back — the walk already happened in the
-    // widget. The exception is the exhausted-mid-episode case above,
-    // which finishes the job coarsely and reports like any core undo.
+    // Usually nothing comes back — the walk already happened in the widget. The
+    // exception is the exhausted-mid-episode case above.
     if let Some((ops, occurrence)) = fallback {
         deliver_undo(core, ops, occurrence);
     }
@@ -9873,14 +7982,12 @@ fn core_walk(core: &mut CoreState, redo: bool) {
 }
 
 /// The restore, then the report — IN THAT ORDER, the same rule capi.rs's
-/// `with_undo_scene` states: the app's reacting transaction must not
-/// overtake the restore. Here the ops are applied outright rather than
-/// queued, because this backend IS the pump and holds the scene.
+/// `with_undo_scene` states: the app's reacting transaction must not overtake
+/// the restore.
 fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence) {
-    // THE TWIN of drain_transactions' guard, and it needs its own: this
-    // is reached from a menu click and from an accelerator, both XAML
-    // callbacks that cannot unwind. A fix that moved only the drain
-    // would leave the abort reachable from undo (docs/deferred.md).
+    // THE TWIN of drain_transactions' guard, and it needs its own: this is
+    // reached from a menu click and from an accelerator, both XAML callbacks that
+    // cannot unwind (docs/deferred.md).
     let applied = crate::fault::guard("applying an undo op", || {
         for op in ops {
             let what = op_head(&op);
@@ -9890,9 +7997,9 @@ fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence)
                 return false;
             }
         }
-        // THE UNDO'S OWN BATCH BOUNDARY: an undo restores rows, and the
-        // restamp it marked (winui/order.rs) has to land before the
-        // occurrence below tells the app its model is back.
+        // THE UNDO'S OWN BATCH BOUNDARY: the restamp an undo marked
+        // (winui/order.rs) has to land before the occurrence below tells the app
+        // its model is back.
         if let Err(e) = flush_tracks(core) {
             crate::fault::report(format!("kaya: restamping an undo's container tracks failed: {e}"));
             return false;
@@ -9904,23 +8011,20 @@ fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence)
         // tell the app its model was put back, which is now untrue.
         return;
     }
-    // The chrome an undo restored may have changed what the roles can do
-    // (a restored row, a moved focus), and the item that fired is about
-    // to be asked again.
+    // The chrome an undo restored may have changed what the roles can do, and the
+    // item that fired is about to be asked again.
     if core.roles_armed {
         refresh_role_enablement(core);
     }
     core.occurrences.send(occurrence);
 }
 
-/// Perform a clipboard role on the focused widget. Answers whether it WAS
-/// one, so a plain action falls through to its own dispatch.
-///
-/// THE PASTE SPLIT (DESIGN.md): a widget that DECLARED what it accepts
-/// takes the content itself, while one that declared nothing gets the
-/// platform's own insertion and its ordinary change path reports the
-/// result. The swallow counter is NOT bumped for that insertion: a paste
-/// acts like the user.
+/// Perform a clipboard role on the focused widget. Answers whether it WAS one,
+/// so a plain action falls through to its own dispatch. THE PASTE SPLIT
+/// (DESIGN.md): a widget that DECLARED what it accepts takes the content
+/// itself, while one that declared nothing gets the platform's insertion and
+/// its ordinary change path reports it. The swallow counter is NOT bumped
+/// for that insertion: a paste acts like the user.
 fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
     match role {
         "cut" | "copy" => {
@@ -9947,8 +8051,7 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
             }
             let clip = match materialize_clipboard(&accepts) {
                 Ok(Some(clip)) => clip,
-                // A paste that delivered nothing is not an occurrence
-                // (the read owns the empty answer).
+                // A paste that delivered nothing is not an occurrence.
                 _ => return true,
             };
             let tag = core
@@ -9972,84 +8075,35 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
     }
 }
 
-/// THE BRAND ACCENT, AS A THEME DICTIONARY OF STOPS
-/// (docs/styling-plan.md D1).
-///
-/// WHAT THIS OVERRIDES AND WHY IT IS NOT `SystemAccentColor`. The Fluent
-/// control styles never read `SystemAccentColor` for a control fill. They
-/// read the DERIVED STOPS the XAML core injects beside it —
-/// `SystemAccentColorDark1..3` and `SystemAccentColorLight1..3` — and
-/// WHICH stop depends on the theme, CROSSED: the LIGHT theme reads the
-/// DARK stops and the DARK theme reads the LIGHT ones. Read out of
-/// `CommonStyles/Common_themeresources_any.xaml`:
-/// `AccentFillColorDefaultBrush` is `SystemAccentColorDark1` under
-/// `Light` and `SystemAccentColorLight2` under `Default`. So an app that
-/// writes `SystemAccentColor` alone changes the text-selection highlight
-/// and NOTHING ELSE — the confirmed silent near-no-op of
-/// microsoft-ui-xaml#6394, which the live theming docs still publish as
-/// the answer.
-///
-/// THE SECONDARY AND TERTIARY TIERS COME FOR FREE: Fluent expresses the
-/// pointer-over and pressed fills as the SAME stop at opacity 0.9 / 0.8.
-/// Overriding the derived brushes instead would reach them through
-/// `StaticResource` ALIASES, which resolve once at load; the stops are
-/// referenced with `{ThemeResource}`, which re-resolves.
-///
-/// LIGHT AND DARK ONLY, NEVER HighContrast: under a contrast theme the
-/// framework re-points every accent brush at `SystemColor*`, which is a
-/// documented accessibility contract, so the brand stops applying there.
-///
-/// MARKUP AND NOT THE OBJECT MODEL, mechanically: a stop's key holds a
-/// `Windows.UI.Color`, a WinRT STRUCT, and `windows-core` boxes no value
-/// types (`PropertyValue` has no `CreateColor`). The XAML parser is what
-/// boxes a `<Color>` element, so `XamlReader.Load` is the only route from
-/// Rust that can put a Color under a Color key.
+/// THE BRAND ACCENT, AS A THEME DICTIONARY OF STOPS (docs/styling-plan.md D1).
+/// NOT `SystemAccentColor`, which no control fill reads
+/// (microsoft-ui-xaml#6394): Fluent reads the DERIVED stops, CROSSED — the
+/// LIGHT theme reads the DARK ones (tools/check-accent.py holds the six).
+/// Never HighContrast, where the framework re-points every accent brush at
+/// `SystemColor*`. Markup, because `windows-core` boxes no value types.
 fn brand_dictionary(accent: &crate::brand::BrandAccent) -> String {
-    // THE MAPPING, stop by stop. kaya's core derives per appearance
-    // {fill, on_fill, standalone, hover, pressed}; Fluent's ramp is
-    // three stops per appearance with fixed consumers. The pairing is by
-    // CONSUMER, never by position in a ramp:
+    // THE MAPPING, stop by stop, paired by CONSUMER and never by position in a
+    // ramp:
     //
     //   Light dictionary (what the LIGHT theme reads — the Dark stops):
-    //     Dark1 <- light.fill       AccentFillColorDefault/Secondary/
-    //                               Tertiary (the filled button, plus
-    //                               its 0.9/0.8 states), and
-    //                               AccentTextFillColorTertiary.
-    //     Dark2 <- light.standalone AccentTextFillColorPrimary: accent
-    //                               COLOURED TEXT on a neutral surface,
-    //                               which is exactly the word the core
-    //                               derives separately because a fill's
-    //                               number is the wrong number for text.
-    //     Dark3 <- light.hover      AccentTextFillColorSecondary, whose
-    //                               consumer is HyperlinkButtonForeground
-    //                               PointerOver — an interaction tier,
-    //                               and DARKER, which is the direction
-    //                               kaya's light ramp already takes.
+    //     Dark1 <- light.fill       AccentFillColorDefault/Secondary/Tertiary
+    //                               plus AccentTextFillColorTertiary.
+    //     Dark2 <- light.standalone AccentTextFillColorPrimary.
+    //     Dark3 <- light.hover      AccentTextFillColorSecondary.
     //
     //   Dark dictionary (what the DARK theme reads — the Light stops):
     //     Light2 <- dark.fill       the same fill family, plus
     //                               SystemFillColorAttention.
-    //     Light3 <- dark.standalone AccentTextFillColorPrimary AND
-    //                               Secondary both read Light3 here.
-    //     Light1 <- dark.hover      NOTHING in the framework's dictionary
-    //                               reads Light1 — said plainly so the
-    //                               next reader does not go looking for
-    //                               its effect. It is written because a
-    //                               HALF-overridden ramp is the trap one
-    //                               level down: a stop left at the system
-    //                               value paints the USER's accent beside
-    //                               kaya's brand in any consumer this
+    //     Light3 <- dark.standalone AccentTextFillColorPrimary AND Secondary.
+    //     Light1 <- dark.hover      NOTHING in the framework's dictionary reads
+    //                               Light1; it is written because a HALF-
+    //                               overridden ramp paints the USER's accent
+    //                               beside kaya's brand in any consumer this
     //                               table has not enumerated.
     //
-    // `on_fill` is not written: Fluent hard-codes the accent foreground
-    // (`TextOnAccentFillColorPrimaryBrush` is #FFFFFF under Light and
-    // #000000 under Default) rather than deriving it, which is the very
-    // agreement D1's danger-band clamp exists to guarantee — the core
-    // already promises white below L* 60 and black at or above it, so
-    // kaya's word and Fluent's constant say the same thing and nothing
-    // needs writing. `pressed` reaches no stop either: this platform
-    // derives its pressed fill as the fill stop at opacity 0.8, so a
-    // separate pressed COLOUR has nowhere to land.
+    // `on_fill` reaches no stop: Fluent hard-codes the accent foreground
+    // (#FFFFFF under Light, #000000 under Default). Nor does `pressed`: this
+    // platform derives its pressed fill as the fill stop at 0.8.
     let hex = |rgb: u32| format!("#FF{rgb:06X}");
     format!(
         "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
@@ -10078,15 +8132,10 @@ fn brand_dictionary(accent: &crate::brand::BrandAccent) -> String {
 
 /// Merge the brand dictionary into the application's resources.
 ///
-/// APPENDED LAST, AND THAT IS THE WHOLE ORDERING RULE: merged
-/// dictionaries are searched in REVERSE order, so kaya's entry must go in
-/// after `XamlControlsResources`.
-///
-/// ONCE, BEFORE ANY WIDGET EXISTS. Changing a resource VALUE at runtime
-/// does NOT refresh a WinUI tree — Microsoft's own theme editor cycles
-/// `RequestedTheme` to force it — so a brand that arrived late would need
-/// a visible re-theme to take. The core's pre-mount, set-once refusals
-/// are what make that safe.
+/// APPENDED LAST: merged dictionaries are searched in REVERSE order, so
+/// kaya's entry must go in after `XamlControlsResources`. ONCE, BEFORE ANY
+/// WIDGET EXISTS: changing a resource VALUE at runtime does NOT refresh a
+/// WinUI tree, so a brand that arrived late would need a visible re-theme.
 fn apply_brand(accent: &crate::brand::BrandAccent) -> windows_core::Result<()> {
     let markup = brand_dictionary(accent);
     let loaded = match bindings::Microsoft::UI::Xaml::Markup::XamlReader::Load(&HSTRING::from(
@@ -10107,11 +8156,9 @@ fn apply_brand(accent: &crate::brand::BrandAccent) -> windows_core::Result<()> {
     };
     let dictionary: bindings::Microsoft::UI::Xaml::ResourceDictionary = loaded.cast()?;
     APP.with_borrow(|app| {
-        // No `if let Some` fallback here, deliberately: an absent
-        // Application would make this a silently unbranded app, which is
-        // the failure the whole arm is written against. Ops are applied
-        // on the UI thread, which is the thread `setup` puts the
-        // Application in, so None is not a state this can reach.
+        // No `if let Some` fallback here, deliberately: an absent Application
+        // would make this a silently unbranded app. Ops are applied on the UI
+        // thread, which is the thread `setup` puts the Application in.
         let app = app
             .as_ref()
             .expect("apply runs on the UI thread, where the Application lives");
@@ -10119,10 +8166,9 @@ fn apply_brand(accent: &crate::brand::BrandAccent) -> windows_core::Result<()> {
     })
 }
 
-/// One theme resource, by key. `Application.Current.Resources` is the
-/// lookup ROOT: the application dictionary, then the merged ones in
-/// reverse order, then their theme dictionaries — which is how a
-/// framework key is reached from code with no XAML scope of our own.
+/// One theme resource, by key. `Application.Current.Resources` is the lookup
+/// ROOT: the application dictionary, then the merged ones in reverse order, then
+/// their theme dictionaries.
 fn theme_resource<T: windows_core::Interface>(key: &str) -> windows_core::Result<T> {
     APP.with_borrow(|app| {
         let app = app
@@ -10136,21 +8182,15 @@ fn theme_resource<T: windows_core::Interface>(key: &str) -> windows_core::Result
 
 // ---------------------------------------------------------------------
 // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). Measured mechanics:
-// docs/styling/typeface-winui.md (the resource census) and
-// typeface-winui-arm.md (the lane measurements).
+// docs/styling/typeface-winui.md and typeface-winui-arm.md.
 // ---------------------------------------------------------------------
 
-// The brand typeface's `FontFamily` SOURCE for this process, or `None`
-// for a brandless app.
-//
-// A SOURCE STRING RATHER THAN A FAMILY NAME, because XAML's grammar here
-// is wider than a name: a comma-separated FALLBACK LIST is one spelling
-// and `<path>#<family>` names a face that is not installed at all —
-// which is how a font BLOB reaches this platform (`register_font_blob`).
-// Everything here writes the source verbatim and lets XAML parse it.
-//
-// THREAD-LOCAL AND NOT A `CoreState` FIELD: widgets are built on the UI
-// thread inside `apply`, where `CoreState` is already mutably borrowed.
+// The brand typeface's `FontFamily` SOURCE for this process, or `None` for a
+// brandless app. A SOURCE STRING RATHER THAN A FAMILY NAME, because XAML's
+// grammar here is wider than a name: a comma-separated FALLBACK LIST is one
+// spelling and `<path>#<family>` names a face that is not installed at all
+// (`register_font_blob`). Thread-local and not a `CoreState` field: widgets
+// are built on the UI thread inside `apply`, where `CoreState` is borrowed.
 thread_local! {
     static BRAND_TYPEFACE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
@@ -10160,37 +8200,18 @@ fn brand_typeface() -> Option<String> {
 }
 
 /// Every `TextBlock` this backend makes — and the only place one is made.
-///
-/// THE PAIR THAT CANNOT SPLIT. Two separate ways a TextBlock misses the
-/// brand, both invisible (the app renders; one piece of text is quietly
-/// in the system face):
-///
-///   * A plain kaya label is a bare TextBlock under Grids with no Control
-///     above it and — measured — no implicit style at all (0 keyless
-///     `TargetType="TextBlock"` Styles in the shipped Fluent dictionary),
-///     so the resource override that re-points 58 CONTROL styles cannot
-///     reach it. Only a local write can.
-///   * Every step of the Fluent type ramp is `BasedOn`
-///     `BaseTextBlockStyle`, which hard-codes the LITERAL string
-///     `XamlAutoFontFamily` as a Setter value — no key to redefine — so
-///     under a resource-only lowering every `heading` would keep the
-///     system font while everything around it moved.
-///
-/// So the write sits in the constructor, and the style arms cannot take
-/// it back: in XAML's dependency-property precedence a LOCAL value
-/// outranks a Style setter whatever order the two arrive in.
-///
-/// What is left unguarded is a fifth `TextBlock::new()` elsewhere; there
-/// are four callers today and all four are here.
+/// THE PAIR THAT CANNOT SPLIT (docs/styling/typeface-winui.md): a plain kaya
+/// label is a bare TextBlock with no implicit style at all (measured), and
+/// every step of the Fluent type ramp is `BasedOn` `BaseTextBlockStyle`,
+/// which hard-codes `XamlAutoFontFamily`. So the write sits in the
+/// constructor, where a LOCAL value outranks a Style setter.
 fn text_block() -> windows_core::Result<TextBlock> {
     let block = TextBlock::new()?;
-    // TEXT WRAPS (the 2026-08-29 ruling), which on this platform means
-    // saying so: a TextBlock's own default is `NoWrap`, where SwiftUI and
-    // Compose wrap by construction. Without it a long label forces its
-    // container wider than the window instead of taking a second line —
-    // the divergence this ruling exists to close. The enum needed the
-    // bindgen filter to name it before there was a setter to call at all
-    // (tools/winui-bindgen/src/main.rs).
+    // TEXT WRAPS (the 2026-08-29 ruling), which on this platform means saying so:
+    // a TextBlock's own default is `NoWrap`, where SwiftUI and Compose wrap by
+    // construction, so a long label would force its container wider than the
+    // window. The enum needed the bindgen filter to name it before there was a
+    // setter to call at all (tools/winui-bindgen/src/main.rs).
     block.SetTextWrapping(TextWrapping::Wrap)?;
     if let Some(source) = brand_typeface() {
         block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(source))?)?;
@@ -10198,33 +8219,16 @@ fn text_block() -> windows_core::Result<TextBlock> {
     Ok(block)
 }
 
-/// The app-level dictionary that re-points the CONTROL ramp.
-///
-/// FOUR KEYS, AND A FIFTH THAT MUST NEVER JOIN THEM. `XamlAutoFontFamily`
-/// reaches Fluent's controls through `ContentControlThemeFontFamily`,
-/// referenced as `{ThemeResource}` by 58 keyed Styles plus the implicit
-/// ones — every control kaya renders is in that list. A `{ThemeResource}`
-/// reference re-resolves against the lookup chain, so an app dictionary
-/// that redefines the key wins, with `apply_brand`'s ordering rule
-/// (appended LAST, because merged dictionaries are searched in REVERSE).
-/// `KeyTipFontFamily`, `PivotHeaderItemFontFamily` and
-/// `PivotTitleFontFamily` are the same value behind three more keys,
-/// written so no consumer this table missed keeps the platform's choice.
-///
-/// **`SymbolThemeFontFamily` is NOT here and may never be.** Its value is
-/// `'Segoe Fluent Icons,Segoe MDL2 Assets'` — the icon glyph family, read
-/// by 16 Styles and 80 template sites, deliberately left unset by the
-/// icons slice so glyphs resolve on Windows 10 as well as 11. A typeface
-/// lowering that swept "every FontFamily resource" would turn every icon
-/// in the app into a box, and the failure would look like an icons bug.
-///
-/// MARKUP RATHER THAN THE OBJECT MODEL: `ResourceDictionary` has no
-/// projected constructor in the generated bindings, and this is the exact
-/// markup form Microsoft's own `generic.xaml` uses for these four keys.
+/// The app-level dictionary that re-points the CONTROL ramp: four keys, and a
+/// fifth that must NEVER join them. `XamlAutoFontFamily` reaches Fluent's
+/// controls through `ContentControlThemeFontFamily`, a `{ThemeResource}` and
+/// so re-resolved against the lookup chain. **`SymbolThemeFontFamily` is NOT
+/// here and may never be** — it is the icon glyph family, and sweeping "every
+/// FontFamily resource" turns every icon in the app into a box
+/// (docs/styling/typeface-winui-arm.md §6).
 fn typeface_dictionary(source: &str) -> String {
-    // XML-escaped: a family name is app data, and `&` or `<` in one
-    // would otherwise be a parse failure in kaya's own markup rather
-    // than a bad request. `#` and spaces need nothing.
+    // XML-escaped: a family name is app data, and `&` or `<` in one would be a
+    // parse failure in kaya's own markup rather than a bad request.
     let escaped = source
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -10240,56 +8244,18 @@ fn typeface_dictionary(source: &str) -> String {
     )
 }
 
-/// A font BLOB, made nameable to XAML — and every part of this is
-/// measured, because three of the four obvious routes silently do
-/// nothing (typeface-winui-arm.md §3).
-///
-/// WHAT DOES NOT WORK, each tried on the lane and each failing by
-/// rendering the fallback with no error anywhere:
-///   * An ABSOLUTE filesystem path, `C:\dir\face.ttf#Family` — the
-///     spelling the probe report proposed. XAML ignores it.
-///   * A `file:///C:/dir/face.ttf#Family` URI. Same.
-///   * `AddFontResourceExW`, private OR session-wide. It RETURNS 1, the
-///     font really is in this process's GDI table, and XAML still
-///     resolves the family to the fallback — GDI's table is not the
-///     collection XAML asks. (The session-wide form would also be a GUI
-///     library writing to the user's machine, which kaya will not do.)
-///   * A custom DirectWrite collection
-///     (`CreateInMemoryFontFileLoader`) — not tried on the lane and not
-///     worth trying: `FontFamily` has no API that accepts a collection,
-///     so it would produce a font this process can measure and no
-///     control can render.
-///
-/// WHAT WORKS is a file under the APP ROOT, referenced by an
-/// app-relative or `ms-appx:///` path. Measured, all four spellings
-/// resolving to the same laid-out width: `ms-appx:///face.ttf#Family`,
-/// `/face.ttf#Family`, `face.ttf#Family`, `sub/face.ttf#Family`. For an
-/// unpackaged app — which every kaya guest is — that root is the
-/// directory holding the executable, so the bytes are written there and
-/// named with the URI form, which is the one that says out loud which
-/// namespace is being addressed.
-///
-/// The family name comes OUT OF THE BYTES, never from the request:
-/// DirectWrite opens the file and reports what the face declares
-/// (measured: `Chalkduster` for a face this machine does not have
-/// installed). That is register-then-resolve, the same shape as
-/// CTFontManager on Apple, and it is why a blob that is not a font fails
-/// HERE with the bytes in hand rather than three layers later as a
-/// silent fallback.
-///
-/// TWO LIMITS THIS ROUTE HAS, stated rather than discovered later:
-/// the app directory must be writable (an app installed under Program
-/// Files is not), and for a DLL-HOSTED guest — python, go, csharp, java
-/// — `current_exe` is the HOST interpreter's binary, so the app root is
-/// its directory and not kaya's. Neither is measured, because no guest
-/// in this tree ships font bytes yet; both are in docs/deferred.md.
+/// A font BLOB, made nameable to XAML, and every part of it measured: an
+/// absolute path, a `file:///` URI and `AddFontResourceExW` all render the
+/// fallback with no error anywhere. WHAT WORKS is a file under the APP ROOT
+/// by an app-relative or `ms-appx:///` path, with the family name read OUT OF
+/// THE BYTES by DirectWrite. Two limits in docs/deferred.md: a writable app
+/// directory, and a DLL-hosted guest's `current_exe`
+/// (docs/styling/typeface-winui-arm.md §3).
 #[allow(dead_code)] // reachable only through a guest that ships font bytes
 fn register_font_blob(bytes: &[u8]) -> Result<String, String> {
-    // NAMED BY CONTENT, not by process: two guests running side by side
-    // on one desktop (the lane runs four) that ship the same font write
-    // the same bytes to the same path, and two that ship different fonts
-    // cannot collide. It also means a rerun reuses the file instead of
-    // littering the app directory once per launch.
+    // NAMED BY CONTENT, not by process: two guests running side by side on one
+    // desktop (the lane runs four) that ship the same font write the same bytes
+    // to the same path, and two that ship different fonts cannot collide.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         hash ^= u64::from(*b);
@@ -10300,28 +8266,17 @@ fn register_font_blob(bytes: &[u8]) -> Result<String, String> {
         .map_err(|e| format!("{} could not be created: {e}", root.display()))?;
     let name = format!("brand-{hash:016x}.ttf");
     let path = root.join(&name);
-    // WRITTEN ONLY IF IT IS NOT ALREADY THERE, and that is a correctness
-    // rule rather than a saving. A font file that some process has open
-    // is MEMORY-MAPPED — DirectWrite maps it, and XAML keeps it mapped
-    // for as long as it can lay text out in it — and Windows refuses to
-    // overwrite a mapped file: `os error 1224`, "the requested operation
-    // cannot be performed on a file with a user-mapped section open".
-    // The name is this content's hash, so anything already at that path
-    // with these exact bytes IS the file this function would write, and
-    // rewriting it buys nothing while risking that refusal — which the
-    // caller turns into a panic, on a lane that runs four guests at once
-    // with two of them sharing one app directory. Measured 2026-08-16:
-    // a second registration in one process failed with 1224 against the
-    // file the first had just opened.
+    // Skipped when the bytes on disk are already the bytes asked for:
+    // Windows refuses to overwrite a MAPPED font file, os error 1224
+    // (docs/traps.md: A per-app font is never in the system font
+    // collection — "The second half: Windows will not overwrite a
+    // MAPPED file").
     if std::fs::read(&path).map(|there| there == bytes).unwrap_or(false) {
         // Nothing to do: the bytes on disk are the bytes asked for.
     } else {
         std::fs::write(&path, bytes)
             .map_err(|e| format!("{} could not be written: {e}", path.display()))?;
     }
-    // The family name comes out of the FILE, through the one reader this
-    // arm has — the same one the harness read runs backwards over the
-    // path below, so what is written and what is checked cannot drift.
     let family = font_file_family(&path).map_err(|why| {
         format!(
             "{}: {why} (from the {} bytes the guest shipped)",
@@ -10329,25 +8284,19 @@ fn register_font_blob(bytes: &[u8]) -> Result<String, String> {
             bytes.len()
         )
     })?;
-    // The APP-ROOT namespace, not the filesystem one: `ms-appx:///`
-    // is what XAML resolves, and the absolute path this function
-    // just wrote to is what it silently ignores.
+    // `ms-appx:///` is what XAML resolves; the absolute path this
+    // function just wrote to is what it silently ignores.
     Ok(format!("ms-appx:///{FONT_DIR}/{name}#{family}"))
 }
 
 /// The one directory `register_font_blob` writes into, and therefore the
-/// one segment the source it hands back names. Written once because the
-/// harness read resolves that source back to this file
-/// (`typeface_availability`): a second spelling of this name is a reader
-/// that quietly stops finding what the writer wrote.
+/// one segment the source it hands back names.
 const FONT_DIR: &str = "kaya-fonts";
 
 /// The directory an UNPACKAGED app's `ms-appx:///` namespace resolves
-/// to: the one holding this process's executable
-/// (`register_font_blob`'s header carries the measurement, and the
-/// dll-hosted caveat — for python, go, csharp and java this is the HOST
-/// interpreter's directory, which is exactly where XAML looks for that
-/// process too).
+/// to: the one holding this process's executable — for the dll-hosted
+/// guests (python, go, csharp, java) that is the HOST interpreter's
+/// directory, which is where XAML looks for that process too.
 fn app_root() -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("this process cannot name its own executable: {e}"))?;
@@ -10359,17 +8308,8 @@ fn app_root() -> Result<std::path::PathBuf, String> {
 
 /// The family a font FILE declares, read out of its own name table.
 ///
-/// DirectWrite opens the file and reports what the face says it is; the
-/// request never gets a vote (measured: `Chalkduster` for a face this
-/// machine does not have installed). Both directions of the blob route
-/// go through here — `register_font_blob` to NAME the file it just
-/// wrote, and the harness read to check that the file a source points at
-/// still declares that name — so a font this process cannot read is one
-/// failure with one spelling rather than two.
-///
-/// THE MESSAGES NAME NO PATH. Both callers already have the file in hand
-/// and both print it, and a sentence that names it twice reads as two
-/// files (measured, in the first sentence this printed on the VM).
+/// DirectWrite reports what the face says it is; the request never gets
+/// a vote (docs/styling/typeface-winui-arm.md §1).
 fn font_file_family(path: &std::path::Path) -> Result<String, String> {
     use windows::Win32::Graphics::DirectWrite::*;
     let wide: Vec<u16> = path
@@ -10433,24 +8373,15 @@ fn localized_string(
 /// Apply the brand typeface: the control ramp by resource, every
 /// TextBlock by construction.
 ///
-/// ONCE, BEFORE ANY WIDGET EXISTS — `apply_brand`'s wall for
-/// `apply_brand`'s measured reason: changing a resource VALUE at runtime
-/// does not re-theme a live WinUI tree.
+/// ONCE, BEFORE ANY WIDGET EXISTS: changing a resource VALUE at runtime
+/// does not re-theme a live WinUI tree (`apply_brand`).
 fn apply_typeface(req: &crate::protocol::TypefaceRequest) -> windows_core::Result<()> {
-    // WHICH ROW IS MINE, asked the way every Rust-native backend asks it:
-    // the request carries per-platform families and `this_platform()` is
-    // the compiler's own answer for the target this core was built for.
-    // A binding could not answer it (the JVM says "Linux" on Android); a
-    // lowering IS its platform.
     let family = req.family_for(crate::wire::this_platform());
     let source = match &req.font {
         Some(blob) => match register_font_blob(&blob.0) {
             Ok(source) => source,
-            // REFUSED LOUDLY, and this is the one place in the arm that
-            // panics: bytes that are not a usable font would otherwise
-            // fall through to the family NAME and render as the platform
-            // default — a silent fallback, which is the single failure
-            // this whole slice exists to make impossible.
+            // Panics rather than falling through to the family NAME,
+            // which would render as the platform default — silently.
             Err(why) => panic!(
                 "kaya: winui: the brand typeface's font bytes could not be registered: {why}"
             ),
@@ -10482,16 +8413,14 @@ fn apply_typeface(req: &crate::protocol::TypefaceRequest) -> windows_core::Resul
     })
 }
 
-/// A family name no machine can have, and the reference the whole
-/// typeface read turns on: whatever XAML lays this out in IS the
-/// fallback, measured rather than named.
+/// A family name no machine can have: whatever XAML lays this out in IS
+/// the fallback, measured rather than named.
 #[cfg(feature = "harness")]
 const TYPEFACE_ABSENT: &str = "KayaNoSuchFamily-9x";
 
-/// The pinned string every fingerprint lays out — ascenders, descenders,
+/// The pinned string every fingerprint lays out — ascenders, descenders
 /// and a wide/narrow pair, so a serif and a sans cannot collide by
-/// accident. Measured at 24pt because the discrimination scales with the
-/// size and nothing else depends on it.
+/// accident, at 24pt because the discrimination scales with the size.
 #[cfg(feature = "harness")]
 const TYPEFACE_PROBE_TEXT: &str = "Hxg Wi1lIm";
 
@@ -10515,33 +8444,14 @@ fn typeface_family_of(source: &str) -> &str {
     typeface_source_parts(source).1
 }
 
-/// What XAML's own text stack makes of one family source: the laid-out
-/// WIDTH of a pinned string and the BASELINE it put under it, in 1/64ths
-/// so a float never decides an equality.
-///
-/// OFF THE TREE, deliberately. The probe must carry the family under
-/// test and nothing else — a real widget's extent depends on its text,
-/// and no two of kaya's widgets share one — so this measures a
-/// throwaway block whose text, size and family are all pinned. It is
-/// still XAML doing the work: the same text stack, the same font
-/// resolution, the same DirectWrite underneath. (Measured: an
-/// unparented TextBlock measures for real; the numbers below are not
-/// zeroes.)
-///
-/// WIDTH AND BASELINE, NOT WIDTH AND HEIGHT, and the difference is a
-/// measurement rather than taste. `DesiredSize.Height` is the LINE BOX,
-/// which XAML computes differently for a family it resolved than for one
-/// it fell back on: the unknown family `KayaNoSuchFamily-9x` and
-/// `Segoe UI` lay the same string out to the same width, 7872/64ths, and
-/// to line boxes of 1856 and 2048 — same glyphs, two different boxes. A
-/// height-based fingerprint therefore reports that the fallback is not
-/// the face it plainly is. `BaselineOffset` is an ASCENT, which comes
-/// off the face, so it agrees with the width about which font ran.
+/// What XAML's own text stack makes of one family source: the laid-out WIDTH
+/// of a pinned string and the BASELINE it put under it, in 1/64ths so a float
+/// never decides an equality. NOT WIDTH AND HEIGHT: `DesiredSize.Height` is
+/// the LINE BOX, and a resolved family and a fallback lay the SAME glyphs out
+/// in two different boxes, so a height-based fingerprint reports the fallback
+/// as the face it is not (docs/styling/typeface-winui-arm.md §2).
 #[cfg(feature = "harness")]
 fn typeface_fingerprint(source: &str) -> windows_core::Result<(i64, i64)> {
-    // Through the factory, so this file keeps ONE TextBlock construction
-    // site; the probe then names its own family over the brand's, which
-    // is a local value replacing a local value.
     let block = text_block()?;
     block.SetText(&HSTRING::from(TYPEFACE_PROBE_TEXT))?;
     block.SetFontSize(24.0)?;
@@ -10565,11 +8475,10 @@ fn typeface_fingerprint(source: &str) -> windows_core::Result<(i64, i64)> {
     ))
 }
 
-/// The `FontFamily.Source` each TextBlock is asking for — the ECHO half,
-/// and not the answer: it is the QUESTION the fingerprint then settles.
-/// For a Control it reports what the implicit style resolved
-/// `ContentControlThemeFontFamily` to, which is a read of the resource
-/// lookup rather than of kaya's own variable.
+/// The `FontFamily.Source` each TextBlock is ASKING FOR — the question
+/// the fingerprint then settles, not the answer. For a Control it
+/// reports what the implicit style resolved
+/// `ContentControlThemeFontFamily` to.
 #[cfg(feature = "harness")]
 fn typeface_sources_of_blocks(blocks: &[TextBlock]) -> windows_core::Result<Vec<String>> {
     blocks
@@ -10591,41 +8500,12 @@ fn typeface_sources_of_controls<T: windows_core::Interface>(
         .collect()
 }
 
-/// What ONE view ended up with, said in the strongest terms its
-/// measurements support and no stronger.
-///
-/// Three answers, and the reason there are three is a MEASUREMENT rather
-/// than caution (typeface-winui-arm.md §2b): XAML's family lookup and
-/// DirectWrite's disagree. `Segoe UI Variable` — this SDK's default
-/// `Control.FontFamily` — is NOT in the system font collection, and XAML
-/// still lays it out differently from a family nobody has. So
-/// DirectWrite's presence answer is something this read REPORTS; it is
-/// never the verdict. The verdict is always the fingerprint, which is
-/// XAML's own text stack answering about XAML's own string.
-///
-///   * measured == the unknown-family fingerprint → the view fell back,
-///     and the name of what it fell back TO is the one thing DirectWrite
-///     can say honestly here.
-///   * measured differs, and the family is AVAILABLE by the route its
-///     source names → the name is a face this process really has and
-///     XAML laid it out as its own thing. This is the only answer that
-///     is a bare family name, and it is the one a passing scene compares
-///     against.
-///   * measured differs, and the family is NOT available by that route →
-///     XAML resolved a string this process cannot account for. Saying
-///     the bare name would claim more than was measured, so the sentence
-///     says exactly what happened.
-///
-/// WHICH ROUTE, and this is the part that shipped wrong. A per-app font
-/// file's family is NEVER in the system font collection — that is what
-/// "per-app" means — so asking the collection about the blob route's
-/// family answers "no" on a machine where everything worked, and the
-/// scene could never pass (measured 2026-08-16: all five windows
-/// typeface legs failed with "Sora (XAML lays it out, but it is not one
-/// of this machine's 81 font families)" while XAML was laying Sora out).
-/// The honest presence question follows the SOURCE: a bare name asks the
-/// system collection, a `path#family` source asks the FILE's own name
-/// table (`typeface_availability`).
+/// What ONE view ended up with, said in the strongest terms its measurements
+/// support and no stronger. XAML's family lookup and DirectWrite's disagree
+/// (`Segoe UI Variable` is not in the system collection and XAML still lays
+/// it out), so DirectWrite's presence answer is REPORTED and never the
+/// verdict; the presence question follows the SOURCE (docs/traps.md: A
+/// per-app font is never in the system font collection).
 #[cfg(feature = "harness")]
 fn typeface_resolved(
     claimed: &str,
@@ -10638,10 +8518,6 @@ fn typeface_resolved(
     let family = typeface_family_of(claimed);
     let availability = typeface_availability(claimed)?;
     Ok(if availability.available() {
-        // TWO INDEPENDENT MEASUREMENTS AGREE, which is what makes the
-        // bare name printable: the file's own name table (or the system
-        // collection) says this family is here, and XAML's own layout
-        // says it laid out something other than the fallback.
         family.to_owned()
     } else {
         format!(
@@ -10656,10 +8532,7 @@ fn typeface_resolved(
 /// route that happens to have a one-call answer.
 ///
 /// Each variant is a different thing this process went and looked at,
-/// and `measured` says which one, because a reader who cannot tell
-/// "nobody has this font" from "the file we wrote is gone" from "the
-/// file is somebody else's font" chases the wrong one (CLAUDE.md
-/// invariant 3).
+/// and `measured` says which one (CLAUDE.md invariant 3).
 #[cfg(feature = "harness")]
 enum TypefaceAvailability {
     /// A bare-name source, asked of the SYSTEM font collection, out of
@@ -10688,9 +8561,7 @@ impl TypefaceAvailability {
     }
 
     /// WHAT WAS MEASURED, as a clause whose subject is the family the
-    /// caller has just named — so both readers of this (the per-view
-    /// answer and the fallen-back note) print the same measurement in
-    /// their own sentence and cannot drift apart.
+    /// caller has just named, so both sentence sites cannot drift apart.
     fn measured(&self) -> String {
         match self {
             Self::System { installed: true, families } => {
@@ -10714,17 +8585,11 @@ impl TypefaceAvailability {
 }
 
 /// THE FALLEN-BACK NOTE: a brand was declared, the text system did not
-/// use it, and this says which half broke.
-///
-/// It takes the SAME `TypefaceAvailability` the per-view answer takes,
-/// and prints it with the same vocabulary, because the two sentences
-/// answer one question about one source — and the read shipped with them
-/// disagreeing: this one asked the system collection about a per-app
-/// font file's family, which is a question with a permanent "no" in it
-/// (see `typeface_resolved`).
-///
-/// `asks_for` is the family the first view is really asking for, which
-/// is the other half of "the lowering did not reach the view".
+/// use it, and this says which half broke. It takes the SAME
+/// `TypefaceAvailability` the per-view answer takes and prints it with
+/// the same vocabulary, so the two sentences cannot disagree
+/// (`typeface_resolved`). `asks_for` is the family the first view is
+/// really asking for.
 #[cfg(feature = "harness")]
 fn typeface_fallback_note(
     first: &str,
@@ -10734,10 +8599,6 @@ fn typeface_fallback_note(
 ) -> String {
     let wanted = typeface_family_of(source);
     if availability.available() {
-        // The brand's face is REALLY here — the system collection lists
-        // it, or the per-app file this process wrote still declares it —
-        // and the view still did not get it, so what broke is between
-        // the request and the view rather than the font itself.
         format!(
             "{first} ({wanted} {}, so the lowering did not reach the view — it asks for \
              {asks_for})",
@@ -10748,13 +8609,10 @@ fn typeface_fallback_note(
     }
 }
 
-/// The presence question, asked the way the source spells it.
-///
-/// For a `path#family` source this is the INVERSE of what
-/// `register_font_blob` wrote: the `ms-appx:///` path resolves back
-/// under the app root — the same directory that function wrote into —
-/// and the file there is opened with the same reader that named it
-/// (`font_file_family`). Nothing here consults the system collection,
+/// The presence question, asked the way the source spells it. For a
+/// `path#family` source this is the INVERSE of what `register_font_blob`
+/// wrote, read back with the same reader that named it
+/// (`font_file_family`); nothing here consults the system collection,
 /// because a per-app file is definitionally not in it.
 #[cfg(feature = "harness")]
 fn typeface_availability(source: &str) -> windows_core::Result<TypefaceAvailability> {
@@ -10765,9 +8623,8 @@ fn typeface_availability(source: &str) -> windows_core::Result<TypefaceAvailabil
     };
     let file = match app_font_file(path) {
         Ok(file) => file,
-        // The app root is unnameable (a process that cannot name its own
-        // executable). That is a measurement too, and it is not "the
-        // font is missing".
+        // An unnameable app root is a measurement too, and it is not
+        // "the font is missing".
         Err(why) => {
             return Ok(TypefaceAvailability::FileUnreadable {
                 file: path.to_owned(),
@@ -10776,10 +8633,9 @@ fn typeface_availability(source: &str) -> windows_core::Result<TypefaceAvailabil
         }
     };
     let shown = file.display().to_string();
-    // IS IT THERE AT ALL is asked separately, because DirectWrite cannot
-    // answer it: its open failure says the file "does not exist or is
-    // unavailable" — one sentence for two states a reader would chase
-    // differently. The filesystem answers the first half exactly.
+    // Asked separately because DirectWrite cannot: its open failure says
+    // the file "does not exist or is unavailable" — one sentence for two
+    // states a reader would chase differently.
     if let Err(e) = std::fs::metadata(&file) {
         return Ok(TypefaceAvailability::FileUnreadable {
             file: shown,
@@ -10797,15 +8653,10 @@ fn typeface_availability(source: &str) -> windows_core::Result<TypefaceAvailabil
 }
 
 /// The on-disk file an app-root path in a `FontFamily` source names —
-/// `register_font_blob`'s write, run backwards.
-///
-/// All four spellings XAML resolves are app-root-relative
-/// (`ms-appx:///face.ttf`, `/face.ttf`, `face.ttf`, `sub/face.ttf`;
-/// register_font_blob's header carries the measurement), so the inverse
-/// is: drop the `ms-appx://` scheme and any leading separator, then join
-/// the app root. An absolute path is left alone — XAML does not resolve
-/// one, but a reader that silently re-rooted it would print a sentence
-/// about a file nobody named.
+/// `register_font_blob`'s write, run backwards: drop the `ms-appx://` scheme
+/// and any leading separator, then join the app root, since all four
+/// spellings XAML resolves are app-root-relative. An absolute path is left
+/// alone (docs/styling/typeface-winui-arm.md §3).
 #[cfg(feature = "harness")]
 fn app_font_file(path: &str) -> Result<std::path::PathBuf, String> {
     let rest = match path.get(..10) {
@@ -10818,9 +8669,8 @@ fn app_font_file(path: &str) -> Result<std::path::PathBuf, String> {
         return Ok(as_given.to_path_buf());
     }
     // Segment by segment, because the URI's separator is `/` and this
-    // machine's is `\`: joining the whole string produces a path that
-    // WORKS and READS as two conventions in one line, and the reader of
-    // a failure sentence should see the path they would type.
+    // machine's is `\`: the reader of a failure sentence should see the
+    // path they would type.
     let mut file = app_root()?;
     for segment in rest.split(['/', '\\']).filter(|s| !s.is_empty()) {
         file.push(segment);
@@ -10830,16 +8680,10 @@ fn app_font_file(path: &str) -> Result<std::path::PathBuf, String> {
 
 /// Is this family on this machine at all, and out of how many?
 ///
-/// `IDWriteFontCollection::FindFamilyName` against the SYSTEM collection
-/// — the one binary question about fonts that has an honest single-call
-/// answer on Windows. It is what separates "the app asked for a family
-/// nobody has" from "the family is here and the lowering missed it", and
-/// those two failures look identical in every other observation.
-///
+/// `IDWriteFontCollection::FindFamilyName` against the SYSTEM collection.
 /// IT ANSWERS FOR BARE-NAME SOURCES ONLY (`typeface_availability`): a
-/// font this process registered from bytes is not in the system
-/// collection and never will be, so asking this about one measures
-/// nothing about it.
+/// font this process registered from bytes is not in that collection and
+/// never will be.
 #[cfg(feature = "harness")]
 fn typeface_presence(family: &str) -> windows_core::Result<(bool, u32)> {
     use windows::Win32::Graphics::DirectWrite::*;
@@ -10856,41 +8700,12 @@ fn typeface_presence(family: &str) -> windows_core::Result<(bool, u32)> {
     }
 }
 
-/// The name of the face an unresolvable family actually renders in —
-/// NAMED by DirectWrite and CONFIRMED by XAML's own measurement.
-///
-/// THIS NUMBER MAY NOT BE A CONSTANT IN THIS TREE. Microsoft has never
-/// documented WinUI 3's fallback family (microsoft-ui-xaml#10709, opened
-/// August 2025, still unanswered by maintainers); it differs between
-/// WinUI 2 and 3 (#9247); and it differs for UNPACKAGED apps by locale
-/// (#8360) — which is kaya's case. So it is a property of the lane image,
-/// and the arm measures it at run time instead of shipping a guess. The
-/// obvious guess would have been wrong twice over: `Segoe UI Variable` is
-/// not an installed family at all, only its Text and Display siblings
-/// are.
-///
-/// TWO INDEPENDENT MEASUREMENTS, and the second is what makes the first
-/// safe to print. `IDWriteFontFallback::MapCharacters` names the font it
-/// mapped the text to, off the FONT rather than off the request. But that
-/// is DirectWrite answering DirectWrite's question, and XAML resolves
-/// family names its own way — measured here: DirectWrite maps
-/// `Segoe UI Variable` to `Segoe UI` while XAML lays it out in something
-/// 3% narrower (its `Text` sibling). So DirectWrite PROPOSES the name and
-/// XAML's own layout confirms or refuses it; an unconfirmed name is
-/// exactly the confident-wrong sentence a reader would chase, so it is
-/// not printed as a name at all.
-///
-/// THE CONFIRMATION IS THE WIDTH ALONE, and that is a measurement rather
-/// than a weakening. An unresolved family does not get the fallback
-/// FACE's line metrics: measured on the lane, `KayaNoSuchFamily-9x` and
-/// `Segoe UI` lay the same string out to the same 7872/64ths of width —
-/// the same glyphs, from the same face — while their baselines are 1382
-/// and 1658. 1382/64 is 21.6pt at a 24pt size, exactly 0.9em, which is
-/// a synthetic ascent XAML uses when it never resolved a family, where
-/// Segoe UI's own ascent is 1.079em. So the ADVANCES say which face drew
-/// the glyphs and the BASELINE says whether the family resolved at all;
-/// asking the fallback to match on both would be asking it to be
-/// something it definitionally is not.
+/// The name of the face an unresolvable family actually renders in — NAMED by
+/// DirectWrite and CONFIRMED by XAML's own measurement. THIS NAME MAY NOT BE
+/// A CONSTANT IN THIS TREE: WinUI 3's fallback family is undocumented and
+/// image-dependent (microsoft-ui-xaml#10709, #9247, #8360). The confirmation
+/// is the WIDTH alone: an unresolved family draws the fallback's glyphs but
+/// gets a synthetic 0.9em baseline (docs/styling/typeface-winui-arm.md §2).
 #[cfg(feature = "harness")]
 fn typeface_fallback_family(absent: (i64, i64)) -> windows_core::Result<String> {
     let named = match typeface_directwrite_fallback() {
@@ -10960,8 +8775,7 @@ fn typeface_directwrite_fallback() -> windows_core::Result<String> {
 }
 
 /// The smallest `IDWriteTextAnalysisSource` that can carry one run of
-/// Latin text — what `MapCharacters` reads its input through. Nothing
-/// here is a policy decision; the interface simply has five members.
+/// Latin text — what `MapCharacters` reads its input through.
 #[cfg(feature = "harness")]
 #[windows_core::implement(windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource)]
 struct TypefaceRun {
@@ -11039,22 +8853,13 @@ impl windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource_Impl for T
     }
 }
 
-/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into
-/// a `WriteableBitmap`'s own pixel buffer, shown at the LOGICAL size the
-/// raster's scale names.
-///
-/// THIS IS THE ONE ARM THAT SWIZZLES. `WriteableBitmap.PixelBuffer` is
-/// premultiplied BGRA8 by Microsoft's documented contract, and the core
-/// hands over premultiplied RGBA8 (tiny-skia's `Pixmap` layout), so the
-/// two colour channels trade places here and nowhere else. That contract
-/// is DOCUMENTED and not measured, which is why `expect_ink` photographs
-/// the element through XAML's own renderer rather than reading this
-/// buffer back: a read-back would invert whatever order this loop chose
-/// and agree with itself either way (§11's measure-at-implementation #2).
-///
-/// A drawing that will not decode is PRESENT AND EMPTY, never absent: the
-/// Image control stays in the tree with no Source
-/// (tools/check-empty-child.py).
+/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into a
+/// `WriteableBitmap`'s own pixel buffer, shown at the LOGICAL size the
+/// raster's scale names. THIS IS THE ONE ARM THAT SWIZZLES
+/// (tools/check-canvas-blit.py): the buffer is premultiplied BGRA8 by
+/// contract, which is why `expect_ink` photographs the element through XAML's
+/// own renderer — a read-back here would agree with itself either way. A
+/// drawing that will not decode is PRESENT AND EMPTY (tools/check-empty-child.py).
 fn set_drawing(
     image: &Image,
     width: u32,
@@ -11096,8 +8901,7 @@ fn set_drawing(
     bitmap.Invalidate()?;
     image.SetSource(&bitmap)?;
     // A WriteableBitmap's pixels are DEVICE pixels and an Image measures
-    // in DIPs, so the logical size is stated here — the same division
-    // every backend does, in this platform's units (§5 rule 2).
+    // in DIPs, so the logical size is stated here (§5 rule 2).
     let element: FrameworkElement = windows_core::Interface::cast(image)?;
     element.SetWidth(f64::from(width) / scale)?;
     element.SetHeight(f64::from(height) / scale)?;
@@ -11106,10 +8910,9 @@ fn set_drawing(
 
 /// One grab of a canvas's own pixels, BGRA8 top-down.
 ///
-/// NOT A XAML PHOTOGRAPH. `RenderTargetBitmap` renders and hands back a
-/// NULL buffer under S_OK on the VM's display-only adapter — every dead
-/// end measured in docs/traps.md — so the ink read asks DWM to print the
-/// WINDOW instead.
+/// NOT A XAML PHOTOGRAPH: `RenderTargetBitmap` renders and hands back a
+/// NULL buffer under S_OK on the VM's display-only adapter
+/// (docs/traps.md), so the ink read asks DWM to print the WINDOW instead.
 #[cfg(feature = "harness")]
 struct Grab {
     width: i32,
@@ -11119,10 +8922,8 @@ struct Grab {
 
 /// A `w`x`h` 32-bit top-down DIB, whatever `draw` puts in it.
 ///
-/// Every failure says which call failed and what it returned: this runs
-/// on a machine whose GPU already answered one capture API with success
-/// and no pixels, and a camera that can fail silently is the defect
-/// docs/traps.md records.
+/// Every failure says which call failed and what it returned: a camera
+/// that can fail silently is the defect docs/traps.md records.
 #[cfg(feature = "harness")]
 fn capture(
     w: i32,
@@ -11181,15 +8982,11 @@ fn capture(
     }
 }
 
-/// The canvas's box, cut out of a print of the WHOLE WINDOW.
-///
-/// `PrintWindow` with `PW_RENDERFULLCONTENT` asks DWM for the window's
-/// composited content — the same pixels the user is looking at, but
-/// addressed by HWND rather than by screen position, so an occluded or
-/// PARTLY OFF-SCREEN window still answers. That is not a nicety here:
-/// the lane tiles six legs at KAYA_WIN_SLOT (see `setup`) and slots 4
-/// and 5 sit below the bottom of an 800-tall desktop, where a copy of
-/// the screen has nothing to copy (measured 2026-08-26, docs/traps.md).
+/// The canvas's box, cut out of a print of the WHOLE WINDOW: `PrintWindow`
+/// with `PW_RENDERFULLCONTENT` addresses the window by HWND rather than by
+/// screen position, so an occluded or PARTLY OFF-SCREEN window still answers
+/// — the lane tiles six legs and two slots sit below the bottom of the
+/// desktop (measured 2026-08-26, docs/traps.md).
 #[cfg(feature = "harness")]
 fn grab_canvas(at: &Placement) -> Result<Grab, String> {
     const PW_RENDERFULLCONTENT: u32 = 2;
@@ -11226,9 +9023,9 @@ fn crop(window: &Grab, at: &Placement) -> Result<Grab, String> {
 /// The declared probe points off a grab, as `RRGGBB/RRGGBB/...`.
 ///
 /// A GDI DIB is BGRA8 with an ignored alpha, and this platform hands
-/// back the CORE'S OWN BYTES — measured `FFFFFF/D2E3F7` against the
-/// scene's frozen `FFFFFF/D2E3F7`, no colour conversion anywhere on the
-/// path, unlike the mac's display-profile round trip (§7.2, traps).
+/// back the CORE'S OWN BYTES — no colour conversion anywhere on the
+/// path, unlike the mac's display-profile round trip (docs/traps.md: The
+/// windows ink read crosses no colour space).
 #[cfg(feature = "harness")]
 fn sample_grab(grab: &Grab, points: &[(f64, f64)]) -> String {
     let (w, h) = (grab.width, grab.height);
@@ -11271,9 +9068,8 @@ struct Placement {
 fn placement(core: &CoreState, image: &Image) -> windows_core::Result<Placement> {
     let root = core.window.Content()?;
     let element: FrameworkElement = windows_core::Interface::cast(image)?;
-    // THE SAME SCALE THE CORE RASTERED AT — `presentation_report` sends
-    // `RasterizationScale` and the drawing's pixels are laid out at
-    // ActualWidth * that, so any other reading of the DPI would sample
+    // THE SAME SCALE THE CORE RASTERED AT: `presentation_report` sends
+    // `RasterizationScale`, so any other reading of the DPI would sample
     // the right picture at the wrong place.
     let scale = root.XamlRoot()?.RasterizationScale()?;
     let origin = windows_core::Interface::cast::<UIElement>(image)?
@@ -11310,10 +9106,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Entry => {
-                    // Uncontrolled: the field owns its text; TextChanged
-                    // reports each edit (programmatic SetText included)
-                    // with the entry's identity tag.
-                    //
                     // Two prerequisites, both VM-proven (2026-07-15):
                     // MRT init needs an exe-adjacent resources.pri and
                     // the built-in template's deferred theme XAML needs
@@ -11331,9 +9123,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let handler_swallow = swallow.clone();
                     let handler = TextChangedEventHandler::new(move |_, _| {
                         // A programmatic write already emitted its
-                        // occurrence synchronously (or, for SetProp,
-                        // deliberately not at all) — this late raise
-                        // is its shadow. See entry_swallow.
+                        // occurrence synchronously; this late raise is
+                        // its shadow. See entry_swallow.
                         if handler_swallow
                             .fetch_update(
                                 std::sync::atomic::Ordering::Relaxed,
@@ -11345,10 +9136,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.Text()?.to_string());
-                        // The ledger sees it BEFORE the app does (§3) —
-                        // and it is also the party that decides whether
-                        // anything happened at all (see the no-change
-                        // guard there).
+                        // The ledger sees it BEFORE the app does (§3),
+                        // and it decides whether anything happened at
+                        // all (the no-change guard there).
                         if bank_text_changed(bank_id, &text) {
                             sink.send_text_tag(&handler_tag, &text);
                         }
@@ -11356,10 +9146,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     });
                     field.TextChanged(&handler)?;
                     // Paste's enablement is the offer/accepts
-                    // intersection AT THE FOCUSED WIDGET, so focus
-                    // moving hands it over — deferred a tick, because
-                    // a programmatic Focus() inside apply raises this
-                    // while CORE is borrowed.
+                    // intersection AT THE FOCUSED WIDGET; deferred a
+                    // tick, because a programmatic Focus() inside apply
+                    // raises this while CORE is borrowed.
                     let focus_handler = RoutedEventHandler::new(move |_, _| {
                         defer_role_refresh();
                         Ok(())
@@ -11379,15 +9168,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Column => {
                     // Grid and not StackPanel: a StackPanel has no
                     // per-child weight of any kind, so proportional grow
-                    // is unrepresentable there. Grid's star sizing IS the
-                    // contract, so the weights map across with no
-                    // arithmetic of our own — at the cost of placing by
+                    // is unrepresentable there. The cost is placing by
                     // attached index, which `reindex` restamps.
                     let grid = Grid::new()?;
-                    // Uniform layout default: 8-unit gap between adjacent
-                    // children, matching every other backend. Grid spells
-                    // it per axis; only the stacking one applies, since
-                    // the cross axis holds a single track.
+                    // 8-unit gap between adjacent children, matching
+                    // every other backend; only the stacking axis
+                    // applies, since the cross axis is a single track.
                     grid.SetRowSpacing(8.0)?;
                     core.columns.push(grid.clone());
                     #[cfg(feature = "harness")]
@@ -11401,12 +9187,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Row(grid)
                 }
                 WidgetKind::Checkbox => {
-                    // The box owns its checked bit; Checked/Unchecked
-                    // report each flip with the box's identity tag.
-                    // WinUI raises them for programmatic SetIsChecked
-                    // too — the USER/programmatic split rides
-                    // apply_quiet (see that field). The caption is the
-                    // CheckBox's content, the same shape as Button.
+                    // WinUI raises Checked/Unchecked for programmatic
+                    // SetIsChecked too — the USER/programmatic split
+                    // rides apply_quiet (see that field).
                     let check = CheckBox::new()?;
                     let caption = text_block()?;
                     check.SetContent(&caption)?;
@@ -11435,11 +9218,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Checkbox { check, caption }
                 }
                 WidgetKind::Slider => {
-                    // Uncontrolled, like the entry: the slider owns its
-                    // position; ValueChanged reports each move with its
-                    // identity tag. (WinUI raises it for programmatic
-                    // SetValue too, which is what lets the selftest
-                    // drag like a user.)
+                    // WinUI raises ValueChanged for programmatic
+                    // SetValue too, which is what lets the selftest drag
+                    // like a user.
                     let slider = Slider::new()?;
                     slider.SetMinimum(0.0)?;
                     slider.SetMaximum(1.0)?;
@@ -11468,8 +9249,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let caption = text_block()?;
                     button.SetContent(&caption)?;
                     let click_sink = core.occurrences.clone();
-                    // The tag is the click's identity, emitted verbatim;
-                    // this backend never learns what it means.
                     let tag = tag.expect("buttons carry a click tag");
                     core.buttons.push(tag.clone());
                     core.button_controls.push(button.clone());
@@ -11486,13 +9265,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Label(label)
                 }
                 WidgetKind::Scroll => {
-                    // The vertical scroll viewport over its ONE child
-                    // (the scene enforces the count): ScrollViewer,
-                    // the platform's own machinery — ScrollableHeight
-                    // and VerticalOffset are the observation sources
-                    // and ChangeView the API scroll_end drives.
                     let viewer = ScrollViewer::new()?;
-                    // Vertical-only v1: no horizontal scrolling, ever.
                     viewer.SetHorizontalScrollMode(ScrollMode::Disabled)?;
                     viewer.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
                     viewer.SetVerticalScrollMode(ScrollMode::Enabled)?;
@@ -11500,7 +9273,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Scroll(viewer)
                 }
                 WidgetKind::Progress => {
-                    // Display-only, like Label: no tag, no handler.
                     // RangeBase's default span is 0..100; kaya's
                     // fraction contract is 0..=1, set explicitly.
                     let bar = ProgressBar::new()?;
@@ -11510,36 +9282,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Progress(bar)
                 }
                 WidgetKind::Textarea => {
-                    // The multi-line editor: a RichEditBox with
-                    // AcceptsReturn, PINNED TO PLAIN TEXT — the entry's
-                    // exact contract, including the swallow counters
-                    // (entry_swallow / entry_tags are id-keyed and
-                    // kind-agnostic, so the plumbing is shared).
+                    // A RichEditBox with AcceptsReturn, PINNED TO PLAIN
+                    // TEXT, on the entry's exact contract (the swallow
+                    // counters are id-keyed and kind-agnostic).
                     // `pin_plain_text` READS ITS PINS BACK, so a deleted
                     // pin is a panic at the first textarea a scene builds.
                     let field = RichEditBox::new()?;
                     field.SetAcceptsReturn(true)?;
                     field.SetMinWidth(240.0)?;
-                    // A TEXTAREA IS A VIEWPORT ONTO A DOCUMENT, NOT A
-                    // DOCUMENT-SHAPED HOLE IN THE LAYOUT — 96 tall, and
-                    // the control's own ScrollViewer moves the text
-                    // inside it. A MINIMUM alone is not that: WinUI
-                    // measures a control in an Auto row against infinite
-                    // height and gives it whatever it asks for, so a
-                    // textarea with a 40-line document asked for 758
-                    // pixels and got them (measured on the VM
-                    // 2026-08-06). Nothing scrolled, because nothing
-                    // overflowed.
-                    //
-                    // THE OTHER TWO DESKTOP BACKENDS ALREADY SAY 240x96
-                    // — the SwiftUI arm's `.frame(width: 240, height: 96)`
-                    // and the GTK arm's `set_size_request(240, 96)` on the
-                    // scroller — so this is the third spelling of one
-                    // size, not a new opinion. The ranges scene is what
-                    // found the divergence: `reveal_range` has nothing to
-                    // do in a control that is as tall as its text, and
-                    // `expect_revealed ... offscreen` cannot be true
-                    // there, on any platform whose textarea grows.
+                    // A TEXTAREA IS A VIEWPORT ONTO A DOCUMENT: an explicit
+                    // height, never a MINIMUM (docs/traps.md: A WinUI
+                    // textarea sized by a MINIMUM is as tall as its
+                    // document). 240x96 is the third spelling of the
+                    // SwiftUI and GTK arms' size.
                     field.SetHeight(96.0)?;
                     pin_plain_text(&field)?;
                     let sink = core.occurrences.clone();
@@ -11553,22 +9308,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // A ROUTED HANDLER, not a TextChangedEventHandler:
                     // RichEditBox raises TextChanged as a plain routed
                     // event. Same event, same async raise, same swallow
-                    // discipline — only the delegate type differs, and
-                    // neither arm reads the args.
+                    // discipline.
                     let ranges_field = field.clone();
                     let handler = RoutedEventHandler::new(move |_, _| {
                         // D2 FIRST, AND ABOVE THE SWALLOW TEST
-                        // (docs/ranges-plan.md D2). A declared highlight
-                        // set dies with the text it was declared
-                        // against, whatever moved that text — a
-                        // keystroke, a paste, kaya's own write, a native
-                        // undo — and the swallow counter's whole job is
-                        // to hide the last of those from the app. A
-                        // clear-on-edit that stood below it would leave
-                        // a programmatic write painting a stale set,
-                        // which on this control means a set that DRIFTS
-                        // with the edit and GROWS when the user types at
-                        // its edge.
+                        // (docs/ranges-plan.md D2): a clear-on-edit
+                        // standing below it would leave a programmatic
+                        // write painting a stale set, which on this
+                        // control DRIFTS with the edit and GROWS when the
+                        // user types at its edge.
                         drop_stale_highlights(bank_id, &ranges_field);
                         if handler_swallow
                             .fetch_update(
@@ -11581,26 +9329,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.text()?);
-                        // The ledger sees it BEFORE the app does (§3) —
-                        // and it is also the party that decides whether
-                        // anything happened at all. THIS control is why
-                        // that guard exists: a CharacterFormat write
-                        // raises TextChanged here, so `highlight_ranges`
-                        // would otherwise report an edit the document
-                        // never had.
+                        // The ledger sees it BEFORE the app does (§3),
+                        // and THIS control is why its no-change guard
+                        // exists: a CharacterFormat write raises
+                        // TextChanged here, so `highlight_ranges` would
+                        // otherwise report an edit the document never had.
                         if bank_text_changed(bank_id, &text) {
                             sink.send_text_tag(&handler_tag, &text);
                         }
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
-                    // D4'S PREMISE, WIRED TO THE ONLY PARTY THAT KNOWS
-                    // IT. An input method's composition is live in this
-                    // control and on no kaya channel; these two events
-                    // are how the control says so, and the select_range
-                    // arm reads the answer. They fire for a real IME and
-                    // for the harness's `compose` alike, because both go
-                    // through the same text store.
+                    // D4'S PREMISE (docs/ranges-plan.md D4): an input
+                    // method's composition is live in this control and on
+                    // no kaya channel, these two events are how the
+                    // control says so, and the select_range arm reads the
+                    // answer. A real IME and the harness's `compose` both
+                    // go through the same text store.
                     let composing_id = id.0;
                     field.TextCompositionStarted(&TypedEventHandler::<
                         RichEditBox,
@@ -11635,9 +9380,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Textarea(field)
                 }
                 WidgetKind::Grid => {
-                    // The 2D layout contract on WinUI's own Grid with
-                    // Auto tracks: columns take their natural width,
-                    // aligned across rows by the toolkit itself.
                     let grid = Grid::new()?;
                     core.grid_children.insert(id.0, Vec::new());
                     core.grid_cols.insert(id.0, 1);
@@ -11645,11 +9387,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Grid2D(grid)
                 }
                 WidgetKind::Radio => {
-                    // The choice contract inline: RadioButtons — the
-                    // platform's own group control (string items
-                    // render as radio rows). Same quiet-guard stance
-                    // as the ComboBox: SelectionChanged cannot tell a
-                    // user pick from SetSelectedIndex.
+                    // RadioButtons, the platform's own group control
+                    // (string items render as radio rows). Same
+                    // quiet-guard stance as the ComboBox: SelectionChanged
+                    // cannot tell a user pick from SetSelectedIndex.
                     let group = RadioButtons::new()?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("radio groups carry a tag");
@@ -11675,12 +9416,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Radio(group)
                 }
                 WidgetKind::Select => {
-                    // The dressed floor: ComboBox — the select's
-                    // label children are its OPTIONS, ComboBoxItems
-                    // in the popup (see AddChild). Uncontrolled like
-                    // the slider for USER picks; programmatic writes
-                    // ride the quiet guard because SelectionChanged
-                    // cannot tell the two apart.
+                    // ComboBox — the select's label children are its
+                    // OPTIONS, ComboBoxItems in the popup (see AddChild).
+                    // Programmatic writes ride the quiet guard because
+                    // SelectionChanged cannot tell the two apart.
                     let combo = ComboBox::new()?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("selects carry a tag");
@@ -11705,38 +9444,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Select(combo)
                 }
                 WidgetKind::Image => {
-                    // Display-only, like Label: no tag, no handler. The
-                    // source arrives as a SetProp blob and decodes
-                    // there. Code-only construction, no XAML.
                     let image = Image::new()?;
                     core.images.push(image.clone());
                     NativeWidget::Image(image)
                 }
                 WidgetKind::Canvas => {
-                    // The raw-pixel sibling of the arm above: the same
-                    // Image control, filled by the SetDrawing arm from a
-                    // WriteableBitmap (docs/canvas-plan.md §8).
-                    //
-                    // FILL, AND STRICTLY 1:1 FOR IT (§3.2.1, ruling 2):
-                    // `set_drawing` gives this element an explicit
-                    // Width/Height taken from the BUFFER's own pixels
-                    // over the scale they were drawn at, so Fill fills
-                    // exactly those and a track bigger than the buffer
-                    // leaves MARGIN. Whether the buffer is the viewbox's
-                    // size or the track's is the CORE's decision and the
-                    // whole content of the size policy; this arm may not
-                    // have an opinion about it. Image's default is
-                    // Uniform, which would rescale a `fixed` canvas.
+                    // The raw-pixel sibling of the arm above, filled by the
+                    // SetDrawing arm from a WriteableBitmap
+                    // (docs/canvas-plan.md §8). FILL, AND STRICTLY 1:1 FOR IT
+                    // (§3.2.1, ruling 2): `set_drawing` gives the element an
+                    // explicit Width/Height from the BUFFER's pixels, so a
+                    // bigger track leaves MARGIN. Image's default Uniform
+                    // would rescale a `fixed` canvas.
                     let image = Image::new()?;
                     image.SetStretch(Stretch::Fill)?;
                     // THE REPORT, on this backend's own layout edge —
-                    // see `canvas_track_of` for what is read and
-                    // `schedule_canvas_tracks` for why it is deferred.
-                    // LayoutUpdated rather than SizeChanged for the
-                    // table's reason two thousand lines up: this
+                    // see `canvas_track_of` and `schedule_canvas_tracks`.
+                    // LayoutUpdated rather than SizeChanged: this
                     // backend's bindings project no SizeChanged, and a
-                    // grown canvas's own box does not move when the
-                    // window resizes — only its slot does.
+                    // grown canvas's own box does not move when the window
+                    // resizes — only its slot does.
                     let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                         schedule_canvas_tracks();
                         Ok(())
@@ -11822,27 +9549,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 None => children.Append(&child_elem)?,
             }
-            // The Children collection is now in the new order, but on a
-            // Grid that collection does not place anything — without the
-            // batch's restamp the move would be invisible, which is
-            // precisely what expect_order exists to catch.
+            // On a Grid the Children collection places nothing, so
+            // without the batch's restamp the move would be invisible.
             core.child_order.place(parent, child, before);
         }
         ApplyOp::Destroy { id } => {
-            // A destroyed anchor takes its context attachment with it
-            // (menu ITEMS are never destroyed; the anchor map entries
-            // are): a For-row removal must not leave the harness's
-            // open-menu pointer dangling. The Stage's activation keeps
-            // its own flyout handle through Closed (the staged
-            // ruling), so dropping these is safe mid-activation.
+            // A destroyed anchor takes its context attachment with it: a
+            // For-row removal must not leave the harness's open-menu
+            // pointer dangling. The Stage's activation keeps its own
+            // flyout handle through Closed, so this is safe mid-activation.
             if core.context_roots.remove(&id.0).is_some() {
                 core.context_nouns.remove(&id.0);
                 core.context_flyouts.remove(&id.0);
                 // The dead copy's native instances leave the map too: a
-                // For-row removal forces no rebuild, and a detached item
-                // still raises Click through its automation peer, so a
-                // surviving entry would stay invoke-capable with the dead
-                // row's noun until some unrelated mutation rebuilt it.
+                // detached item still raises Click through its automation
+                // peer, so a surviving entry would stay invoke-capable
+                // with the dead row's noun.
                 purge_context_natives(&mut core.menu_natives, id.0);
                 if core.open_context.as_ref().is_some_and(|(w, _)| *w == id.0) {
                     core.open_context = None;
@@ -11861,7 +9583,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 if children.IndexOf(&widget.element()?, &mut index)? {
                     children.RemoveAt(index)?;
                 }
-                // The surviving siblings all shift up a track.
                 core.child_order.detach(id);
             }
         }
@@ -11870,24 +9591,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
                     // The window's OWN title, stored EXACTLY as the app
-                    // wrote it; while a navigation entry covers it the
-                    // entry's title shows, and this one comes back at
-                    // pop. The dirty marker is not stored with it — the
-                    // composition happens on the way to the OS
-                    // (window_caption), so the declared string stays the
-                    // app's own bytes (docs/dirty-plan.md D1).
+                    // wrote it: the dirty marker is composed on the way
+                    // to the OS (window_caption), not stored with it
+                    // (docs/dirty-plan.md D1).
                     core.window_titles.insert(window.0, title.clone());
-                    // No `covered` test any more: the caption writer
-                    // derives which title shows from the stack itself,
-                    // so a covered window re-writes the entry's title
-                    // (the same bytes already there) instead of skipping.
                     refresh_caption(core, window.0)?;
                 }
                 (WindowProp::Inset, Value::F64(units)) => {
-                    // LAYOUT, not appearance (docs/styling-plan.md D3):
-                    // store it, restamp the mounted roots' padding if any
-                    // exist (a pre-mount write is the normal case and the
-                    // Mount arm reads the store).
+                    // LAYOUT, not appearance (docs/styling-plan.md D3).
+                    // A pre-mount write is the normal case and the Mount
+                    // arm reads the store.
                     core.inset = *units;
                     // Through container_padding and the roots the mount
                     // recorded, never straight onto the window's Content:
@@ -11901,13 +9614,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (WindowProp::Dirty, Value::Bool(on)) => {
                     // WINDOWS PUBLISHES NO MODIFIED AFFORDANCE — not in
-                    // WinUI, not in the Windows App SDK metadata (all 28
-                    // .winmd scanned), not in UIA's WindowPattern
-                    // (docs/dirty-plan.md). The caption is the entire
-                    // surface, and it is composed rather than stored (D2).
-                    // ShutdownBlockReasonCreate is the one Win32 API that
-                    // NAMES unsaved work and draws no chrome at all; it is
-                    // a different feature wearing this one's word.
+                    // WinUI, not in the Windows App SDK metadata, not in
+                    // UIA's WindowPattern (docs/dirty-plan.md), so the
+                    // caption is the entire surface, composed rather than
+                    // stored (D2).
                     core.window_dirty.insert(window.0, *on);
                     refresh_caption(core, window.0)?;
                 }
@@ -11942,28 +9652,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             subclass(&aux, window.0)?;
             core.aux_windows.insert(window.0, aux);
             // A WINDOW BORN AFTER THE DECLARATION still belongs to the
-            // same app (docs/app-identity-plan.md): identity is
-            // per-APP, so the second window wears the same mark as the
-            // first, and this is one of the three orders these objects
-            // can arrive in. A no-op when nothing was declared.
+            // same app (docs/app-identity-plan.md): identity is per-APP,
+            // and this is one of the three orders these objects can
+            // arrive in. A no-op when nothing was declared.
             apply_identity_to_window(core, window.0)?;
         }
         ApplyOp::DestroyWindow { window } => {
             core.window_veto.remove(&window.0);
             core.tearing_down.insert(window.0);
             if let Some(aux) = core.aux_windows.remove(&window.0) {
-                // Close() on an already-chrome-closed window errors;
-                // the grammar makes destroy the reconciliation, so
-                // tolerate it.
+                // Close() on an already-chrome-closed window errors, and
+                // the grammar makes destroy the reconciliation.
                 let _ = aux.Close();
             }
             core.tearing_down.remove(&window.0);
-            // A destroyed window takes its navigation stack with it.
             for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
                 core.nav_entries.remove(&entry);
             }
-            // ... and its sections, each with ITS stack (the one way
-            // a section dies).
+            // Its sections go too, each with ITS stack — the one way a
+            // section dies.
             for sid in core.sections.remove(&window.0).unwrap_or_default() {
                 core.section_panes.remove(&sid);
                 core.section_items.remove(&sid);
@@ -11979,8 +9686,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
             core.window_dirty.remove(&window.0);
-            // ... and its menu shell/catalog registration (the item
-            // MODELS stay — items are never destroyed).
+            // Its menu shell/catalog registration goes too; the item
+            // MODELS stay, since items are never destroyed.
             core.menu_windows.remove(&window.0);
             core.menubars.remove(&window.0);
             core.menu_slots.remove(&window.0);
@@ -11988,18 +9695,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.toolbars.remove(&window.0);
             core.window_titlebars.remove(&window.0);
             core.window_caption_texts.remove(&window.0);
-            // The centring's post-condition state goes with the caption it
-            // was about (`CaptionTitleAim`). It lives outside CoreState
-            // because a layout callback writes it, so it is dropped here
-            // by hand rather than by the same line as the maps above.
+            // The centring's post-condition state (`CaptionTitleAim`)
+            // lives outside CoreState because a layout callback writes
+            // it, so it is dropped here by hand.
             CAPTION_TITLE_AIM.with_borrow_mut(|aims| {
                 aims.remove(&window.0);
             });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
-            // Materializes covered/incoming: on the stack now, the
-            // mount fills and presents it.
             core.nav_entries.insert(
                 entry.0,
                 WinNavEntry {
@@ -12042,9 +9746,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         ApplyOp::AddSection { window, section } => {
-            // Append-only: a pane joins the window's NavigationView;
-            // the mount fills it. First added is selected (mirrored
-            // from the core).
+            // Append-only: a pane joins the window's NavigationView and
+            // the mount fills it. First added is selected.
             let pane = Grid::new()?;
             core.section_panes.insert(
                 section.0,
@@ -12061,9 +9764,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             refresh_sections(core, window.0)?;
         }
         ApplyOp::SelectSection { window, section } => {
-            // Programmatic and QUIET: the switcher moves under the
-            // swallow counter (SelectionChanged raises ASYNC — the
-            // echo doctrine, the entry_swallow spelling).
+            // Programmatic and QUIET: SelectionChanged raises ASYNC, so
+            // the switcher moves under the swallow counter.
             core.selected_sections.insert(window.0, section.0);
             nav_set_selected(core, window.0, section.0)?;
             show_section_pane(core, window.0, section.0)?;
@@ -12089,9 +9791,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // harness observable.
                 (SectionProp::Icon, Value::Blob(_)) => {}
                 // THE SEMANTIC ICON (docs/styling-plan.md D6):
-                // NavigationView's own Icon slot, the platform's idiom
-                // for a switcher entry. Stamped onto the live item when
-                // there is one; `refresh_sections` stamps it on the
+                // NavigationView's own Icon slot. Stamped onto the live
+                // item when there is one; `refresh_sections` stamps the
                 // ones it mints later.
                 (SectionProp::Symbol, Value::I64(symbol)) => {
                     record.symbol = *symbol;
@@ -12103,9 +9804,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         // Menus: every arm mutates the retained model and defers the
-        // chrome to ONE coalesced rebuild per drain (menus_touched) —
-        // the rebuild starts from the post-user mirror by
-        // construction (docs/traps.md).
+        // chrome to ONE coalesced rebuild per drain (menus_touched), which
+        // starts from the post-user mirror by construction (docs/traps.md).
         ApplyOp::MenuItemCreate { item, kind } => {
             core.menu_models.insert(
                 item.0,
@@ -12167,9 +9867,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 MenuProp::Label => model.label = crate::protocol::prop_str(&value).to_owned(),
                 MenuProp::Enabled => model.enabled = crate::protocol::prop_bool(&value),
                 // Programmatic checked/value writes are configuration
-                // and stay QUIET (the echo doctrine): the rebuild
-                // restamps the native state and no Click fires on a
-                // programmatic set (the MENU PROBE's first canary).
+                // and stay QUIET: the rebuild restamps the native state
+                // and no Click fires on a programmatic set.
                 MenuProp::Checked => model.checked = crate::protocol::prop_bool(&value),
                 MenuProp::Value => model.value = crate::protocol::prop_f64(&value),
                 // The phone-promotion hint, INERT on desktop by the
@@ -12178,19 +9877,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 MenuProp::Shortcut => {
                     model.shortcut = crate::protocol::prop_str(&value).to_owned();
                 }
-                // Icons dress phone promotion; native Windows menu
-                // rows carry no icon in this lowering (the section
-                // Icon precedent: accepted, day-one slot).
+                // Native Windows menu rows carry no icon in this
+                // lowering (the section Icon precedent: a day-one slot).
                 MenuProp::Icon => {}
-                // PLACEMENT is a request this host has nowhere to honor —
-                // no dress-owned application menu — so the item stays
-                // where the app declared it (DESIGN.md, Menus). BEHAVIOR
-                // is not: a clipboard role's activation performs the
+                // PLACEMENT is a request this host has nowhere to honor, so
+                // the item stays where the app declared it (DESIGN.md, Menus).
+                // BEHAVIOR is not: a clipboard role's activation performs the
                 // standard command on the focused widget, so the role is
-                // recorded and the role items resync now.
-                // THE SEMANTIC ICON (docs/styling-plan.md D6), drawn by
-                // the coalesced rebuild like the label and the chord;
-                // `menu_symbol` still reads the materialized item.
+                // recorded and the role items resync now. The semantic icon
+                // (docs/styling-plan.md D6) is drawn by the coalesced rebuild.
                 MenuProp::Symbol => {
                     model.symbol = match &value {
                         Value::I64(v) => *v,
@@ -12199,10 +9894,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 MenuProp::Role => {
                     model.role = crate::protocol::prop_str(&value).to_owned();
-                    // AN AUTHORED ROLE IS ITSELF THE ARMING. Undo's
+                    // AN AUTHORED ROLE IS ITSELF THE ARMING: undo's
                     // enablement moves in a scene that never touches the
-                    // clipboard, so the flag cannot be clipboard traffic
-                    // any more (see `roles_armed`).
+                    // clipboard (see `roles_armed`).
                     core.roles_armed = true;
                     refresh_role_enablement(core);
                 }
@@ -12212,13 +9906,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
 
         ApplyOp::Copy(clip) => {
             core.roles_armed = true;
-            // Five formats in ONE open, descending clip value —
-            // custom, files, image, html, text — the canonical order
-            // (§1), which is preference (first-set) order on this
-            // host. EmptyClipboard makes this process the owner;
-            // classic SetClipboardData is immediate rendering, so the
-            // content outlives the process with no Flush of any kind
-            // (measured, tools/win/clipprobe).
+            // Five formats in ONE open, descending clip value — custom,
+            // files, image, html, text — the canonical order (§1), which
+            // is preference (first-set) order on this host. EmptyClipboard
+            // makes this process the owner; classic SetClipboardData is
+            // immediate rendering, so the content outlives the process
+            // with no Flush of any kind (measured, tools/win/clipprobe).
             clip_open_retry()?;
             unsafe { windows::Win32::System::DataExchange::EmptyClipboard()? };
             let result: windows_core::Result<()> = (|| {
@@ -12229,11 +9922,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     clip_set_bytes(CF_HDROP, &build_dropfiles(&clip.files))?;
                 }
                 if let Some(png) = &clip.image {
-                    // Raw bytes under the "PNG" registered format —
-                    // the Firefox/clip convention, byte-exact both
-                    // ways (measured). CF_DIB is a deliberate cut: it
-                    // would mean decoding the PNG here, and the
-                    // closed set's image is ENCODED BYTES everywhere.
+                    // Raw bytes under the "PNG" registered format — the
+                    // Firefox/clip convention, byte-exact both ways
+                    // (measured). CF_DIB is a deliberate cut: it would
+                    // mean decoding the PNG here.
                     clip_set_bytes(clip_register("PNG"), &png.0)?;
                 }
                 if let Some(html) = &clip.html {
@@ -12250,30 +9942,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         }
         ApplyOp::ReadClipboard { request, accepting } => {
             core.roles_armed = true;
-            // Answered exactly once; None IS an answer — the
-            // universal no (denied, absent, unfocused and
-            // nothing-accepted alike). Win32 reads are synchronous
-            // pulls, so no async bridge lives here.
+            // Answered exactly once; None IS an answer — the universal
+            // no (denied, absent, unfocused and nothing-accepted alike).
             let clip = materialize_clipboard(&accepting)?;
             core.occurrences.send(Occurrence::ClipboardResult { request, clip });
         }
-        // A1: a core undo group committed, so the focused editable's
-        // native history goes with it (the episode was banked before the
-        // clear, so nothing is lost but granularity).
-        //
-        // THIS IS THE KEYSTONE (§3): every episode begins with an EMPTY
-        // native stack, so the native stack can never reach past the
-        // current episode's start, "ask the focused text first" IS "ask
-        // the most recent first", and the interleave the literature
-        // calls selective undo becomes unconstructible rather than
-        // merely unlikely. It is load-bearing on THIS lane in a way the
-        // plan did not anticipate: WinUI coalesces a whole typing run
-        // into ONE native step (measured), so without the clear a single
-        // Ctrl+Z would walk back past the group.
-        //
-        // TARGETLESS BY DESIGN — the record carries a window and no
-        // widget, because the core does not know what is focused and
-        // this backend does.
+        // A1: a core undo group committed, so the focused editable's native
+        // history goes with it. THE KEYSTONE (docs/undo-plan.md §3): every
+        // episode begins with an EMPTY native stack, and WinUI coalesces a
+        // whole typing run into ONE native step (measured), so without the
+        // clear a single Ctrl+Z would walk back past the group. Targetless
+        // by design: the core does not know what is focused and this does.
         ApplyOp::ClearUndo { window } => {
             let _ = window;
             if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id)) {
@@ -12288,29 +9967,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let Some(field) = textarea_by_id(core, id.0) else {
                 return Ok(());
             };
-            // A DECLARATION THAT CHANGES NOTHING WRITES NOTHING, and
-            // on this control that is not a micro-optimization: every
-            // paint goes through `clear_highlights`, which is a
-            // CharacterFormat write over the whole story, and a
-            // CharacterFormat write RAISES TextChanged and lands on the
-            // control's own undo stack. An app that re-declares from its
-            // text_changed fold — which is what a find bar is — therefore
-            // paid a spurious edit report and a spurious undo record for
-            // every keystroke, with an empty set and nothing painted.
+            // A DECLARATION THAT CHANGES NOTHING WRITES NOTHING, and not as a
+            // micro-optimization: every paint goes through `clear_highlights`,
+            // a CharacterFormat write over the whole story, which RAISES
+            // TextChanged and lands on the control's own undo stack — so an
+            // app re-declaring from its text_changed fold paid a spurious
+            // edit report and undo record per keystroke.
             let painted = HIGHLIGHT_TEXT.with_borrow(|map| map.contains_key(&id.0));
             if ranges.is_empty() && !painted {
                 return Ok(());
             }
             paint_highlights(&field, &ranges)?;
-            // D2's compare needs the text these offsets were validated
-            // against, and the control is holding it RIGHT NOW: the ops
-            // are applied in order, so a text write earlier in this batch
-            // has already landed.
-            //
-            // AN EMPTY DECLARATION LEAVES NO ENTRY: nothing is painted, so
-            // there is no stale set for a later edit to drop — and an entry
-            // kept here would send `drop_stale_highlights` into
-            // `clear_highlights` on the next keystroke.
+            // D2's compare needs the text these offsets were validated against,
+            // and the control is holding it RIGHT NOW. AN EMPTY DECLARATION
+            // LEAVES NO ENTRY: one kept here would send
+            // `drop_stale_highlights` into `clear_highlights` on the next
+            // keystroke.
             HIGHLIGHT_TEXT.with_borrow_mut(|map| {
                 if ranges.is_empty() {
                     map.remove(&id.0);
@@ -12327,12 +9999,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 return Ok(());
             };
             // D4, AND THIS BACKEND IS THE ONLY PARTY THAT CAN ENFORCE IT
-            // (docs/ranges-plan.md D4). A composition is live in the
-            // control and on no kaya channel, so the core cannot know and
-            // the app cannot avoid the race. Moving the selection now
-            // would end the composition and commit the user's half-typed
-            // word. Refused as a no-op under a named reason, never a
-            // panic: the app wrote correct code and lost a race.
+            // (docs/ranges-plan.md D4): moving the selection while a
+            // composition is live would end it and commit the user's
+            // half-typed word. Refused as a no-op under a named reason,
+            // never a panic — the app wrote correct code and lost a race.
             if COMPOSING.with_borrow(|live| live.contains(&id.0)) {
                 eprintln!("kaya: select_range refused: ime_composition (widget {})", id.0);
                 return Ok(());
@@ -12357,13 +10027,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         ApplyOp::SetAppIdentity(identity) => {
-            // TWO SINKS FROM ONE DECLARATION, which is this platform's
-            // whole shape (docs/app-identity-plan.md I3): the WINDOW's
-            // icon, which the system caption draws unprompted and which
-            // the taskbar and alt-tab both read, and the XAML
-            // `TitleBar`'s `IconSource`, which repairs what a custom
-            // caption takes away from the first. See `apply_app_identity`
-            // for the byte chain into each.
+            // TWO SINKS FROM ONE DECLARATION (docs/app-identity-plan.md
+            // I3): the WINDOW's icon, which the taskbar and alt-tab read,
+            // and the XAML `TitleBar`'s `IconSource`, which repairs what a
+            // custom caption takes away from the first.
             apply_app_identity(core, &identity)?;
         }
         ApplyOp::SetTypeface(req) => {
@@ -12371,16 +10038,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // no single write reaches both: the CONTROLS take the family
             // from `ContentControlThemeFontFamily`, which an app-level
             // dictionary can redefine, while a TextBlock takes it from a
-            // local value only. See `typeface_dictionary` and
-            // `text_block` for which failure each one is against.
+            // local value only (`typeface_dictionary`, `text_block`).
             apply_typeface(&req)?;
         }
         ApplyOp::SetBrand { accent } => {
             // VALUES IN, VALUES OUT: the core derived the eleven words
             // (crates/kaya/src/brand.rs) and this arm re-derives none of
-            // them — no opacity ladder, no foreground rule, no second
-            // opinion about what "lighter" means. See `brand_dictionary`
-            // for which word lands in which stop and why.
+            // them — no opacity ladder, no foreground rule.
             apply_brand(&accent)?;
         }
         ApplyOp::RevealRange { id, range } => {
@@ -12389,8 +10053,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             };
             // `PointOptions::None` is the MINIMUM scroll that brings the
             // range into view, which is every other backend's semantics.
-            // The enum's other placements are opinions about where on
-            // screen a revealed range should sit, and kaya has none.
             // A scroll disturbs neither the selection nor a composition,
             // so reveal has no refusal arm.
             field
@@ -12399,13 +10061,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .ScrollIntoView(PointOptions::None)?;
         }
         ApplyOp::PresentSaveDialog(spec) => {
-            // The Shell's SAVE dialog — the picker's presentation with the
-            // multiplicity flag replaced by a name, on the SAME apartment,
-            // queue and doorbell. See `file_save_show`.
+            // The Shell's SAVE dialog — the picker's presentation with
+            // the multiplicity flag replaced by a name (`file_save_show`).
             // THE WINDOW IS AN APPLY-SIDE CERTAINTY: same-batch ordering
             // means the create reached this backend first, so a miss here
-            // is a core bug and dies naming it. Only the WinRT casts below
-            // are tolerated (hwnd 0 = an unowned dialog).
+            // is a core bug and dies naming it (hwnd 0 = unowned dialog).
             let target = winui_window(core, spec.window.0)
                 .expect("kaya: a save dialog was presented over a window this process does not hold");
             let hwnd = windows_core::Interface::cast::<IWindowNative>(&target)
@@ -12418,10 +10078,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     suggested_name: spec.suggested_name.clone(),
                 },
                 filters: spec.filters.clone(),
-                // The SAME armed directory the picker reads, taken the
-                // same way: `file_dialog_goto` arms one slot and whichever
-                // dialog presents next consumes it, because a dialog reads
-                // its folder only at presentation.
+                // The SAME armed directory the picker reads:
+                // `file_dialog_goto` arms one slot and whichever dialog
+                // presents next consumes it, because a dialog reads its
+                // folder only at presentation.
                 folder: core.pending_dialog_dir.borrow_mut().take(),
                 dialog: spec.dialog.0,
                 sink: core.occurrences.clone(),
@@ -12433,20 +10093,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             unsafe { SetEvent(dialog_doorbell()) };
         }
         ApplyOp::PresentFileDialog(spec) => {
-            // The Shell's common item dialog, which is what Windows means
-            // by a file picker.
-            //
-            // NOT FileOpenPicker: its SuggestedStartLocation is a
+            // The Shell's common item dialog, which is what Windows means by a
+            // file picker. NOT FileOpenPicker: its SuggestedStartLocation is a
             // PickerLocationId ENUM of well-known folders, so it cannot be
-            // pointed at <temp>/kaya-picked-<pid> at all, where
-            // IFileOpenDialog::SetFolder takes any shell item.
-            //
-            // ON THE DIALOG APARTMENT'S THREAD, because Show() is modal
-            // and runs a nested message loop; blocking the UI thread
-            // inside apply would stall the dispatcher for as long as the
-            // picker is up. The owner HWND still makes it modal to the
-            // user. ONE apartment serves every dialog and outlives them
-            // all — see `dialog_apartment`.
+            // pointed at <temp>/kaya-picked-<pid> at all. ON THE DIALOG
+            // APARTMENT'S THREAD, because Show() is modal and runs a nested
+            // message loop that would stall the dispatcher (`dialog_apartment`).
             let target = winui_window(core, spec.window.0)
                 .expect("kaya: a file picker was presented over a window this process does not hold");
             let hwnd = windows_core::Interface::cast::<IWindowNative>(&target)
@@ -12472,18 +10124,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
             // slots ARE the vocabulary (two actions + close). The
-            // ShowAsync completion is the ONE emit site — everything that
-            // is not Primary/Secondary completes as None = the cancel slot
-            // — routed through capi::alert_resolved.
+            // ShowAsync completion is the ONE emit site — anything that is
+            // not Primary/Secondary completes as None, the cancel slot.
             let host = winui_window(core, spec.window.0)?;
-            // A dialog needs the host's LIVE XamlRoot, and a guest
-            // can request one within milliseconds of launch — before
-            // the content island exists (caught live 2026-07-22 the
-            // moment the settles stopped hiding it: the expect
-            // aborted the UI thread). Not ready yet: re-enqueue this
-            // whole present on the dispatcher and let the queue load
-            // the content first; the harness's expect_alert retries
-            // until the dialog is really up.
+            // A dialog needs the host's LIVE XamlRoot, and a guest can
+            // request one within milliseconds of launch — before the
+            // content island exists (caught live 2026-07-22: the expect
+            // aborted the UI thread). Not ready yet: re-enqueue this whole
+            // present on the dispatcher and let the queue load the content
+            // first; expect_alert retries until the dialog is really up.
             let root_live = host
                 .Content()
                 .and_then(|c| {
@@ -12492,12 +10141,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 })
                 .is_ok();
             if !root_live {
-                // Re-present when the root actually loads — its
-                // Loaded event is the platform's own "the island is
-                // up" signal. (A dispatcher self-re-enqueue loop
-                // STARVES the queue that would do the loading; a
-                // timer is a guess. This is backend-internal — the
-                // harness's uniform mechanism stays bounded polling.)
+                // Re-present when the root actually loads — its Loaded
+                // event is the platform's own "the island is up" signal.
+                // A dispatcher self-re-enqueue loop STARVES the queue that
+                // would do the loading, and a timer is a guess.
                 let root: FrameworkElement = windows_core::Interface::cast(&host.Content()?)?;
                 let cell = std::sync::Mutex::new(Some(spec));
                 let handler = RoutedEventHandler::new(move |_, _| {
@@ -12561,9 +10208,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         ContentDialogResult::Secondary => crate::protocol::AlertChoice::Action(1),
                         _ => crate::protocol::AlertChoice::Cancel,
                     };
-                    // The result must ride THIS backend's sink (the
-                    // guest listens there); capi::alert_retire is
-                    // only the liveness gate.
+                    // The result must ride THIS backend's sink (the guest
+                    // listens there); capi::alert_retire is only the
+                    // liveness gate.
                     let sink = CORE.with(|core| {
                         let mut core = core.borrow_mut();
                         let core = core.as_mut().expect("core lives while a dialog shows");
@@ -12599,9 +10246,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.SetText(&HSTRING::from(&s))?;
-                    // An option label's text lands on its ComboBox
-                    // row too, as string content (see select_options
-                    // for why never a TextBlock) — or its radio row.
+                    // An option label's text lands on its ComboBox row
+                    // too, as string content (see select_options for why
+                    // never a TextBlock) — or its radio row.
                     if let Some((_, item)) = core.select_options.get(&id.0) {
                         item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
@@ -12613,13 +10260,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Entry(_), Prop::Text, Value::Str(s))
                 | (NativeWidget::Textarea(_), Prop::Text, Value::Str(s)) => {
-                    // ONE ARM FOR BOTH, still: entry and textarea sit on
-                    // different native types now, and `Editable` is what
-                    // keeps that from becoming two spellings of one rule.
                     let field = widget.editable().expect("the arm matched a text widget");
                     // Quiet: a property write is configuration, not a
-                    // user edit — and TextChanged is raised async, so
-                    // the flag is a counter (see entry_swallow).
+                    // user edit — and TextChanged is raised async, so the
+                    // flag is a counter (see entry_swallow).
                     if lf(field.text()?) != s {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -12649,8 +10293,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     write?;
                 }
                 (NativeWidget::Select(combo), Prop::Value, Value::F64(v)) => {
-                    // A programmatic write is quiet (uniform
-                    // semantics: only the user path emits).
+                    // A programmatic write is quiet: only the user path
+                    // emits.
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     let write = combo.SetSelectedIndex(v as i32);
@@ -12661,8 +10305,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // THE UNIVERSAL PROPS: every other arm keys on a (kind,
                 // prop) pair; these name something every element has, so
                 // they match the prop alone. WinUI publishes a settable
-                // AutomationId, so the harness read matches by identity
-                // rather than by ordinal.
+                // AutomationId, so the harness read matches by identity.
                 (w, Prop::A11yId, Value::Str(id)) => {
                     let element = w.element()?;
                     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAutomationId(
@@ -12670,22 +10313,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         &windows_core::HSTRING::from(id.as_str()),
                     )?;
                 }
-                // Empty means unset, and unset stays untouched: UIA
-                // derives a control's name from its content, and writing
-                // "" would SILENCE it.
-                //
-                // THE EMPTINESS TEST IS INSIDE THE ARM, never a pattern
-                // guard, and gtk.rs:A11yLabel has the same shape for the
-                // same reason: a guard makes an empty label match NO arm,
-                // so it falls through to this match's catch-all panic and
-                // aborts the drain. That is exactly what shipped — the
-                // guest declaration three backends no-opped on killed the
-                // windows lane (docs/deferred.md a11y-empty-label).
-                // A DECLARED empty is refused at the tx now, but a label
-                // bound to a ROW FIELD is not: scene.rs's
-                // PropValue::Element arm has no value to check at declare
-                // time, so an empty row datum still arrives here and must
-                // land as the same no-op the other three make of it.
+                // Empty means unset, and unset stays untouched: UIA derives a
+                // control's name from its content, and writing "" would
+                // SILENCE it. THE EMPTINESS TEST IS INSIDE THE ARM, never a
+                // pattern guard (gtk.rs:A11yLabel has the same shape): a
+                // guard makes an empty label match NO arm and fall through
+                // to the catch-all panic (docs/deferred.md a11y-empty-label).
                 (w, Prop::A11yLabel, Value::Str(label)) => {
                     if !label.is_empty() {
                         let element = w.element()?;
@@ -12695,9 +10328,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         )?;
                     }
                 }
-                // The HINT: UIA's HelpText, the slot for what acting on
-                // the control does. Empty means unset, like the name —
-                // and inside the arm for the name's reason.
+                // The HINT: UIA's HelpText. Empty means unset, like the
+                // name, and inside the arm for the name's reason.
                 (w, Prop::A11yHint, Value::Str(hint)) => {
                     if !hint.is_empty() {
                         let element = w.element()?;
@@ -12707,12 +10339,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         )?;
                     }
                 }
-                // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard):
-                // the list drives the paste split and Paste's
-                // enablement. Kind-agnostic like the universal props
-                // — the root already restricted it to editables and
-                // validated the string. Empty means unset, the
-                // universal prop rule.
+                // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the
+                // list drives the paste split and Paste's enablement.
+                // Kind-agnostic like the universal props; empty means
+                // unset, the universal prop rule.
                 (_, Prop::Accepts, Value::Str(list)) => {
                     if list.is_empty() {
                         core.accepts.remove(&id.0);
@@ -12747,8 +10377,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
                     // The gap rides the STACKING axis, which the fold
                     // decides, not the variant. The DECLARED value is
-                    // stored beside the write — expect_fills sums with
-                    // the declaration, never the toolkit's read-back.
+                    // stored beside the write — expect_fills sums with the
+                    // declaration, never the toolkit's read-back.
                     core.spacings.insert(id, gap);
                     if effective_vertical(core, id) {
                         grid.SetRowSpacing(gap)?;
@@ -12766,9 +10396,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // A container's own padding, one level down from the
                     // window inset (docs/styling-plan.md D3). One arm for
                     // all three container kinds because all three ARE
-                    // Grids here. Stamped through container_padding: on a
-                    // mounted root this Padding carries the window inset
-                    // too.
+                    // Grids here; on a mounted root this Padding carries
+                    // the window inset too.
                     core.container_insets.insert(id, pad);
                     stamp_container_padding(core, id)?;
                 }
@@ -12799,12 +10428,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     slider.SetMaximum(v)?;
                 }
                 (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
-                    // Encoded bytes in, native decode: through an
-                    // InMemoryRandomAccessStream into a BitmapImage.
-                    // SetSource is the synchronously-callable path on the
-                    // UI thread; the one async hop is DataWriter.StoreAsync,
-                    // blocked on .join(). Any failure (decode included)
-                    // leaves the placeholder — never a panic.
+                    // Encoded bytes in, native decode. SetSource is the
+                    // synchronously-callable path on the UI thread; the
+                    // one async hop is DataWriter.StoreAsync, blocked on
+                    // .join(). Any failure (decode included) leaves the
+                    // placeholder — never a panic.
                     let result: windows_core::Result<()> = (|| {
                         let stream = InMemoryRandomAccessStream::new()?;
                         let writer = DataWriter::CreateDataWriter(&stream)?;
@@ -12825,80 +10453,52 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                 }
                 // THE ROLE TIER (docs/styling-plan.md D4): three semantic
-                // roles, each lowered to the platform's OWN emphasis and
-                // never to a colour or a size kaya picked. The legal
-                // (kind, role) pairs sit in the PATTERNS, so a role on a
-                // kind it does not fit falls to this match's catch-all and
-                // dies naming the prop and the value.
+                // roles, each lowered to the platform's OWN emphasis. The
+                // legal (kind, role) pairs sit in the PATTERNS, so a role
+                // on a kind it does not fit falls to this match's
+                // catch-all and dies naming the prop and the value.
                 (NativeWidget::Button { button, .. }, Prop::Role, Value::I64(2)) => {
-                    // PROMINENT — first class here: a single keyed Style
-                    // whose background is `AccentFillColorDefaultBrush`,
-                    // which is to say it is painted by the accent stops
-                    // the brand lowering wrote. Nothing here picks a
-                    // colour, and a brandless app gets the user's Windows
-                    // accent.
+                    // PROMINENT: a single keyed Style whose background is
+                    // `AccentFillColorDefaultBrush`, painted by the accent
+                    // stops the brand lowering wrote. A brandless app gets
+                    // the user's Windows accent.
                     button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
                 }
                 (NativeWidget::Button { caption, .. }, Prop::Role, Value::I64(1)) => {
-                    // DESTRUCTIVE, AND FLUENT SHIPS NO DESTRUCTIVE
-                    // BUTTON. The complete set of keyed Button styles is
-                    // DefaultButtonStyle, AccentButtonStyle and the two
-                    // navigation-back ones. Fluent expresses
-                    // destructiveness through DIALOG STRUCTURE rather than
-                    // through a red button. What the platform DOES have is
-                    // a severity palette (`SystemFillColorCritical*`, what
-                    // InfoBar paints an error with), so kaya's lowering is
-                    // that critical colour on the button's TEXT with the
-                    // chrome left standard (docs/styling-plan.md D4).
-                    //
-                    // ON THE CAPTION, NOT ON THE BUTTON: the framework's
-                    // Button template re-points the content presenter's
-                    // Foreground in its PointerOver and Pressed states, so
-                    // a value set on the control would show in the resting
-                    // state alone.
+                    // DESTRUCTIVE, AND FLUENT SHIPS NO DESTRUCTIVE BUTTON, so
+                    // kaya lowers the platform's severity palette onto the
+                    // TEXT and leaves the chrome standard
+                    // (docs/styling-plan.md D4). ON THE CAPTION, NOT ON THE
+                    // BUTTON: the Button template re-points the presenter's
+                    // Foreground in PointerOver and Pressed.
                     caption.SetForeground(&theme_resource::<Brush>(
                         "SystemFillColorCriticalBrush",
                     )?)?;
                 }
                 (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
-                    // THE HEADING ROLE IS TWO FACTS AT ONCE, the same two
-                    // every backend lowers it to: the platform's heading
-                    // TEXT TIER and the platform's heading ACCESSIBLE
-                    // fact. Neither implies the other here — a style
-                    // changes no UIA property, and HeadingLevel changes no
-                    // pixel — so both are written.
-                    //
-                    // THE ACCESSIBLE FACT IS UIA's OWN HeadingLevel, the
-                    // property that gives real heading NAVIGATION.
-                    // `SetLevel` is a different UIA property (depth in a
-                    // hierarchy), and `SetLocalizedControlType` would only
-                    // make Narrator SAY "heading" while navigation still
-                    // skipped it.
-                    //
-                    // `Level2` and not `HeadingLevel2`: the enum's members
-                    // are `None`, `Level1`..`Level9` (the docs' spelling is
-                    // the UWP one). Level 2 because the window itself is
-                    // the document's level 1.
+                    // THE HEADING ROLE IS TWO FACTS AT ONCE: a style changes no
+                    // UIA property, and HeadingLevel changes no pixel. The
+                    // accessible fact is UIA's own HeadingLevel, which gives
+                    // real heading NAVIGATION — `SetLevel` is depth in a
+                    // hierarchy and `SetLocalizedControlType` would only make
+                    // Narrator SAY "heading".
                     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHeadingLevel(
                         label,
                         bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationHeadingLevel::Level2,
                     )?;
                     // THE TEXT TIER IS A STYLE KEY, NEVER A FONT SIZE.
                     // `SubtitleTextBlockStyle` is Fluent's own
-                    // section-heading step of the XAML type ramp
-                    // (BasedOn BaseTextBlockStyle like every other step),
-                    // so the size, weight and line height are the
-                    // platform's scale — picking numbers out of that
-                    // ramp is exactly what D4's ceiling refuses.
+                    // section-heading step of the XAML type ramp, so the
+                    // size, weight and line height are the platform's
+                    // scale — picking numbers out of it is what D4 refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
                 }
                 (NativeWidget::Label(label), Prop::Role, Value::I64(4)) => {
-                    // The caption role, the heading's counterpart:
-                    // Fluent's own caption step of the type ramp, on the
-                    // secondary text fill. STYLE ONLY — UIA has no caption
-                    // fact to publish (SetHeadingLevel is headings alone),
-                    // the same carve-out Apple's stack has and
-                    // a11yrows.steps records.
+                    // The caption role: Fluent's own caption step of the
+                    // type ramp, on the secondary text fill. STYLE ONLY —
+                    // UIA has no caption fact to publish (SetHeadingLevel
+                    // is headings alone), the same carve-out Apple's stack
+                    // has and a11yrows.steps records.
                     label.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
                     label.SetForeground(&theme_resource::<Brush>(
                         "TextFillColorSecondaryBrush",
@@ -12939,10 +10539,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 core.child_order.mark(parent);
                 return Ok(());
             }
-            // A radio's label children are its OPTIONS: string rows
-            // of the group's Items vector (strings render as radio
-            // rows; the label's SetProp text lands with SetAt), and
-            // the label leaves the harness's label registry.
+            // A radio's label children are its OPTIONS: string rows of
+            // the group's Items vector, and the label leaves the harness's
+            // label registry.
             if let NativeWidget::Radio(group) =
                 core.widgets.get(&parent).expect("scene validated the id")
             {
@@ -12961,13 +10560,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 core.radio_options.insert(child.0, (group, row));
                 return Ok(());
             }
-            // A select's label children are its OPTIONS: ComboBoxItems
-            // in the popup, never children of a panel. The row gets
-            // its own TextBlock (the label's SetProp text lands on
-            // both), the label's native TextBlock stays unparented,
-            // and the label leaves the harness's label registry —
-            // options are the select's data, so they must not shift
-            // every later label's index.
+            // A select's label children are its OPTIONS: ComboBoxItems in
+            // the popup, never children of a panel. The label's native
+            // TextBlock stays unparented and the label leaves the harness's
+            // label registry — options are the select's data, so they must
+            // not shift every later label's index.
             if let NativeWidget::Select(combo) =
                 core.widgets.get(&parent).expect("scene validated the id")
             {
@@ -12976,10 +10573,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 if let NativeWidget::Label(label) =
                     core.widgets.get(&child).expect("scene validated the id")
                 {
-                    // The row initializes from the label's CURRENT
-                    // text: children-first sugars (OCaml, Haskell)
-                    // set the text BEFORE this AddChild (the GTK
-                    // empty-row lesson); SetProp covers later writes.
+                    // The row initializes from the label's CURRENT text:
+                    // children-first sugars (OCaml, Haskell) set the text
+                    // BEFORE this AddChild (the GTK empty-row lesson).
                     item.SetContent(&PropertyValue::CreateString(&label.Text()?)?)?;
                     let label = label.clone();
                     core.labels.retain(|x| x != &label);
@@ -13011,19 +10607,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             core.parents.insert(child, panel);
             // A new child means a new track and a shifted set of indices —
-            // stamped once for the whole batch (winui/order.rs), never
-            // once per append.
+            // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
         }
         ApplyOp::Fold { child, table } => {
             // The stacked fold (D7): the element moves into the table's
-            // wrap — the scrolling side, above the band — and scrolls
-            // away with the rows under this backend's pinned header.
-            // Identity does not move: the child keeps its id, its order
-            // entry and its registries; reindex filters it out of the
-            // structural parent's tracks, and a panel's Children order
-            // never places anything (the attached indices do), so the
-            // move is an Append each way plus a re-stamp.
+            // wrap and scrolls away with the rows under the pinned header.
+            // Identity does not move — the child keeps its id, its order
+            // entry and its registries — so the move is an Append each way
+            // plus a re-stamp.
             let element = core
                 .widgets
                 .get(&child)
@@ -13072,8 +10664,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let widget = core.widgets.get(&root).expect("scene validated the id");
             // Both handles are taken here, under the widget borrow: a
             // WinRT handle is refcounted and outlives the map it came
-            // from, which is what lets the stamp below take the core
-            // state mutably.
+            // from, which is what lets the stamp below take the core state
+            // mutably.
             let element = widget.element()?;
             let panel = match widget {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => Some(panel.clone()),
@@ -13083,20 +10675,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let Some(panel) = panel {
                 // The normalized root inset — the window's OWN (wprop 8,
                 // docs/styling-plan.md D3), INSIDE the root (Grid.Padding
-                // is inside ActualSize, so the root still fills its island
-                // and expect_root_fills holds). Recorded as a mounted root
-                // FIRST, because container_padding adds this container's
-                // own inset to it.
+                // is inside ActualSize, so expect_root_fills holds).
+                // Recorded as a mounted root FIRST, because
+                // container_padding adds this container's own inset to it.
                 core.mounted_roots.insert(window.0, root);
                 stamp_container_padding(core, root)?;
-                // Baseline compensation needs REAL text metrics,
-                // and at apply time the grid has never had a true
-                // layout pass (a detached or just-attached measure
-                // reads zeros — margins came out ~0 and the row
-                // classified start on the first two Windows runs).
-                // Loaded fires after the first real layout; the
-                // one-shot re-runs reindex for every
-                // baseline-aligned container with live metrics.
+                // Baseline compensation needs REAL text metrics, and at
+                // apply time the grid has never had a true layout pass: a
+                // detached or just-attached measure reads zeros (margins
+                // came out ~0 and the row classified start on the first two
+                // Windows runs). Loaded fires after the first real layout.
                 let loaded = RoutedEventHandler::new(move |_, _| {
                     CORE.with_borrow(|core| {
                         let Some(core) = core.as_ref() else {
@@ -13116,8 +10704,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 });
                 panel.Loaded(&loaded)?;
                 // The width report's trigger: this backend projects no
-                // SizeChanged, so the mounted root's LayoutUpdated is
-                // where a resize is seen — coalesced, same-width silent.
+                // SizeChanged, so the mounted root's LayoutUpdated is where
+                // a resize is seen — coalesced, same-width silent.
                 let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                     schedule_window_metrics();
                     Ok(())
@@ -13125,14 +10713,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 panel.LayoutUpdated(&laid)?;
                 schedule_window_metrics();
             }
-            // A SCROLL-ROOTED WINDOW gets the panel path's three duties
-            // through a minted HOST grid, because the viewer can carry
-            // none of them itself: the window inset (its template
-            // ignores Padding — scroll_root_hosts), the mounted-root
-            // record the inset restamp iterates, and the LayoutUpdated
-            // metrics trigger, without which a resize is never seen and
-            // every breakpoint on the screen is dead — the pushed-entry
-            // class one root shape over (docs/adaptive-layout-plan.md).
+            // A SCROLL-ROOTED WINDOW gets the panel path's three duties through
+            // a minted HOST grid, because the viewer can carry none of them:
+            // the window inset (its template ignores Padding —
+            // scroll_root_hosts), the mounted-root record, and the
+            // LayoutUpdated metrics trigger, without which every breakpoint on
+            // the screen is dead (docs/adaptive-layout-plan.md).
             let element = if scroll_root {
                 core.mounted_roots.insert(window.0, root);
                 let host = Grid::new()?;
@@ -13150,21 +10736,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 element
             };
             // The target is a SURFACE: a navigation entry presents
-            // in-window (the push already stacked it; the mount fills
-            // it), the primary is the window's own root, an auxiliary
+            // in-window, the primary is the window's own root, an auxiliary
             // presents its window.
             if core.section_panes.contains_key(&window.0) {
-                // A section presents in-window: added to the set
-                // already; the mount fills its pane. BUT THE WINDOW IT
-                // SITS IN MAY BE AN AUXILIARY NOTHING HAS PRESENTED: a
-                // sections window mounts into its SECTIONS and never
-                // into a root, so the "Mounting presents" Activate
-                // below could not fire for it and CreateWindow's
-                // materializes-hidden became permanent — a window the
-                // app opened and the user never saw, with every
-                // observation still passing. The section's mount is
-                // that window's presentation moment (the same hole the
-                // mac depth found, 2026-08-15).
+                // A section presents in-window, BUT THE WINDOW IT SITS IN MAY BE
+                // AN AUXILIARY NOTHING HAS PRESENTED: a sections window mounts
+                // into its SECTIONS and never into a root, so the "Mounting
+                // presents" Activate below cannot fire for it and
+                // CreateWindow's materializes-hidden would become permanent —
+                // a window the user never saw, every observation still green.
                 let owner = core.section_panes[&window.0].window;
                 core.section_panes.get_mut(&window.0).unwrap().root =
                     Some(element);
@@ -13192,11 +10772,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let field = widget
                         .editable()
                         .expect("kaya: clear on a non-text widget (scene validates kinds)");
-                    // A command ACTS LIKE THE USER, and its echo must
-                    // stay ORDERED with what follows — TextChanged is
-                    // raised async, so the echo is emitted here
-                    // synchronously and the late raise is swallowed
-                    // (see entry_swallow).
+                    // A command ACTS LIKE THE USER, and its echo must stay
+                    // ORDERED with what follows — TextChanged is raised
+                    // async, so the echo is emitted here synchronously and
+                    // the late raise is swallowed (see entry_swallow).
                     if !field.text()?.is_empty() {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -13209,20 +10788,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                 }
                 CommandKind::Focus => {
-                    // The materialization class (see traps.md): an
-                    // element not yet in the live tree cannot take
-                    // focus, and the call's bool would be discarded —
-                    // a mount-tx focus would silently drop. Not
-                    // loaded yet: one-shot re-run from the element's
-                    // own Loaded, the alert/baseline pattern.
+                    // The materialization class (docs/traps.md): an
+                    // element not yet in the live tree cannot take focus
+                    // and the call's bool would be discarded, so a
+                    // mount-tx focus would silently drop. Not loaded yet:
+                    // one-shot re-run from the element's own Loaded.
                     let element = widget.element()?;
                     let fe: FrameworkElement = windows_core::Interface::cast(&element)?;
                     if fe.IsLoaded()? {
                         let _ = element.Focus(FocusState::Programmatic)?;
                     } else {
-                        // One-shot (the alert pattern): Loaded
-                        // re-fires on every re-attach, and a stale
-                        // handler must not steal focus later.
+                        // One-shot: Loaded re-fires on every re-attach,
+                        // and a stale handler must not steal focus later.
                         let armed = std::sync::Mutex::new(true);
                         let deferred = RoutedEventHandler::new(
                             move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
@@ -13248,9 +10825,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
 
 // --- Windows App Runtime bootstrap (unpackaged apps) ---------------------
 //
-// The bootstrap DLL ships next to the executable; it locates the installed
-// Windows App Runtime and wires it into the process. Loaded dynamically so
-// kaya needs no import lib from the NuGet package.
+// Loaded dynamically so kaya needs no import lib from the NuGet package.
 
 const WASDK_MAJOR_MINOR: u32 = 0x0002_0002; // 2.2
 const MDD_ON_NO_MATCH_SHOW_UI: i32 = 0x8;
@@ -13275,10 +10850,9 @@ unsafe extern "system" {
 #[link(name = "ole32")]
 unsafe extern "system" {
     fn CoInitializeEx(reserved: *const c_void, coinit: u32) -> i32;
-    // NO CoUninitialize IS DECLARED HERE, and that is the fix rather
-    // than an omission: the one apartment this process opens for
-    // pickers is meant to end with the process. `dialog_apartment`
-    // carries the measurement.
+    // NO CoUninitialize IS DECLARED HERE, deliberately: the one apartment
+    // this process opens for pickers is meant to end with the process.
+    // `dialog_apartment` carries the measurement.
 }
 
 type MddBootstrapInitialize2 =
@@ -13336,17 +10910,16 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED) };
 
     // Application::Start creates the XAML UI thread machinery and calls
-    // back once it is ready; the callback runs on the UI thread. Building
-    // the core is deferred through the dispatcher so it runs after the
-    // launch sequence completes.
+    // back once it is ready, on the UI thread. Building the core is
+    // deferred through the dispatcher so it runs after the launch
+    // sequence completes.
     let callback = ApplicationInitializationCallback::new(move |_params| {
         // XAML forwards render-loop errors to CoreApplication; with no
         // handler there, RoReportUnhandledError fail-fasts the process
         // (0xC000027B) — a channel Application.UnhandledException never
-        // sees. This app has one known, survivable error on it: deferred
-        // theme XAML cannot instantiate without an IXamlMetadataProvider.
-        // Propagate() rethrows the stowed HRESULT here, marking it
-        // observed; the control proceeds with its local style.
+        // sees. Propagate() rethrows the stowed HRESULT here, marking it
+        // observed; the one known survivable error is deferred theme XAML
+        // that cannot instantiate without an IXamlMetadataProvider.
         let on_core_error = bindings::Windows::Foundation::EventHandler::new(
             |_,
              args: windows_core::Ref<
@@ -13379,11 +10952,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         unhandled.UnhandledErrorDetected(&on_core_error)?;
         let app = compose_application()?;
         APP.with_borrow_mut(|slot| *slot = Some(app));
-        // The aggregation contract, asserted where it can fail loudly:
-        // Application.Current() is an identity QI for IApplication through
-        // the OUTER, and an outer that stops delegating unknown IIDs
-        // stow-crashes every control that consults Current at runtime,
-        // minutes later, with a bare E_NOINTERFACE (docs/traps.md).
+        // The aggregation contract, asserted where it can fail loudly: an
+        // outer that stops delegating unknown IIDs stow-crashes every
+        // control that consults Current at runtime, minutes later, with a
+        // bare E_NOINTERFACE (docs/traps.md: The aggregation outer MUST delegate QI).
         bindings::Microsoft::UI::Xaml::Application::Current().expect(
             "kaya: Application.Current() failed — the aggregation outer \
              is not delegating QI to the inner (see KayaOuter)",
@@ -13397,10 +10969,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     "kaya: winui unhandled exception (continuing): {}",
                     args.Message().unwrap_or_default()
                 );
-                // Keep the process alive: backends are appliers, and
-                // the exceptions seen here in practice are resource
-                // lookups for control chrome (flyouts) that unpackaged
-                // apps resolve imperfectly. Logged, never silent.
+                // Keep the process alive: backends are appliers, and the
+                // exceptions seen here in practice are resource lookups
+                // for control chrome that unpackaged apps resolve
+                // imperfectly. Logged, never silent.
                 args.SetHandled(true)?;
             }
             Ok(())
@@ -13435,37 +11007,29 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     Application::Start(&callback).expect("Application::Start failed");
 
     // Start has returned; XAML has torn down its apartment. Rust TLS
-    // destructors still run during process::exit on Windows (TLS
-    // callbacks), and releasing XAML COM objects into the dead apartment
-    // is an access violation. Announce shutdown, then leak the COM
-    // references; the process reclaims everything anyway.
+    // destructors still run during process::exit on Windows, and releasing
+    // XAML COM objects into the dead apartment is an access violation.
+    // Announce shutdown, then leak the COM references.
     CORE.with_borrow_mut(|core| {
         if let Some(core) = core.take() {
             core.occurrences.send(Occurrence::Shutdown);
             std::mem::forget(core);
         }
     });
-    // THE IDENTITY'S DECODED PICTURE IS UNDER THE SAME RULE, and it is
-    // here because it cost a session's worth of bisecting to find where
-    // it belonged. `APP_ICON_BITMAP` is a `BitmapImage` — a XAML object —
-    // in a thread-local, and its TLS destructor runs after the line above
-    // has already declared the apartment dead. Releasing it there aborts
-    // the process: MEASURED as `ucrtbase.dll` `0xc0000409` subcode 7
-    // (`FAST_FAIL_FATAL_APP_EXIT`, the CRT's own `abort`) in the Windows
-    // event log, on every identity leg, AFTER the scene had printed
-    // `KAYA_SELFTEST: OK` — so the scene passed, the leg failed on the
-    // exit code alone, and nothing anywhere printed a reason. The picture
-    // is leaked exactly like the core above; the process reclaims it.
+    // EVERY THREAD-LOCAL THAT CAN HOLD A XAML HANDLE IS DRAINED AND
+    // FORGOTTEN HERE (docs/traps.md: A thread_local holding a XAML object
+    // aborts the process at exit, AFTER the scene has passed).
+    // `APP_ICON_BITMAP`'s TLS destructor runs after the line above has
+    // declared the apartment dead, and the abort lands with the scene
+    // already green and nothing printing a reason.
     APP_ICON_BITMAP.with_borrow_mut(|slot| {
         if let Some(bitmap) = slot.take() {
             std::mem::forget(bitmap);
         }
     });
-    // THE THIRD THREAD-LOCAL UNDER THAT RULE, and it walked into the trap
-    // above verbatim: a declared table's header Grid, rule and cell
-    // Buttons live in `TABLES`, and the first windows table leg printed
-    // `KAYA_SELFTEST: OK` and then died `0xc0000409` on the exit code
-    // alone (2026-08-21). Same remedy, same reason.
+    // The third thread-local under that rule, and the same traps entry's
+    // second bite: a declared table's header Grid, rule and cell Buttons
+    // live in `TABLES`.
     TABLES.with_borrow_mut(|tables| {
         for (_, table) in tables.drain() {
             std::mem::forget(table);
@@ -13478,8 +11042,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     EXIT_CODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-// Receiver<Transaction> is !Sync, and the WinRT callback signature forces
-// the closure to be Fn + Send. The receiver crosses into the UI thread
+// Receiver<Transaction> is !Sync and the WinRT callback signature forces
+// the closure to be Fn + Send, so the receiver crosses into the UI thread
 // through this slot instead of the closure environment.
 static TX_RX_SLOT: std::sync::Mutex<Option<Receiver<Transaction>>> = std::sync::Mutex::new(None);
 
@@ -13496,9 +11060,8 @@ fn tx_rx_take() -> Receiver<Transaction> {
 }
 
 // WinUI 3's interop interface for reaching a Window's HWND
-// (IWindowNative, one method past IUnknown). The generated bindings
-// do not project AppWindow, and Win32 placement via the HWND is all
-// recording mode needs.
+// (IWindowNative, one method past IUnknown): the generated bindings do
+// not project AppWindow.
 windows_core::imp::define_interface!(
     IWindowNative,
     IWindowNative_Vtbl,
@@ -13528,48 +11091,25 @@ impl IWindowNative {
 
 // ---- The app's identity (docs/app-identity-plan.md I3) -------------
 //
-// ONE DECLARATION, TWO SINKS, and the second is not a duplicate of the
-// first — it repairs what the first loses on this platform's own custom
-// captions:
-//
-//   the WINDOW's icon (`AppWindow.SetIcon(IconId)`) — every window has
-//     one whether or not kaya minted a custom caption, and the taskbar
-//     and alt-tab read the same thing. This is the sink that matters most
-//     here, because kaya is a LIBRARY inside python.exe, java.exe and
-//     dotnet.exe for six of its eight languages, and Windows' documented
-//     fallback for a window with no icon ends at the HOST PROCESS's icon.
-//
-//   `TitleBar.IconSource` — needed precisely BECAUSE a custom caption
-//     replaces the system one and takes the system-drawn icon with it. A
-//     window that promotes nothing never mints a TitleBar and is served
-//     by the first sink alone.
-//
-// THE BYTES GO IN UNMODIFIED, BOTH WAYS. A Vista-or-later icon resource
-// may itself be a PNG, so `CreateIconFromResourceEx` takes the wire's
-// blob straight through; the XAML side is the `Image` widget's blob arm.
-// kaya inspects the bytes nowhere, which is what makes the scene's read a
-// proof of the CONVERSION rather than an echo of the request.
+// TWO SINKS. The WINDOW's icon (`AppWindow.SetIcon`) serves every window,
+// the taskbar and alt-tab, and matters most here because kaya is a LIBRARY
+// inside python.exe, java.exe and dotnet.exe for six of its eight languages
+// — Windows' fallback for a window with no icon ends at the HOST PROCESS's
+// icon. `TitleBar.IconSource` is needed BECAUSE a custom caption takes the
+// system-drawn icon with it.
 
 thread_local! {
-    /// The declared identity, kept because its sinks are not all
-    /// available when it arrives: identity is declared BEFORE the first
-    /// mount (the core's wall), while an auxiliary window is created
-    /// later and a `TitleBar` is minted later still, by the first
-    /// promotion. Every one of those sites reads this slot rather than
-    /// receiving a copy, so "what is this app called and what does it
-    /// look like" has one answer in this backend.
+    /// The declared identity, kept because its sinks are not all available
+    /// when it arrives: identity is declared BEFORE the first mount (the
+    /// core's wall), while an auxiliary window is created later and a
+    /// `TitleBar` later still. Every one of those sites reads this slot.
     static APP_IDENTITY: RefCell<Option<crate::protocol::AppIdentity>> =
         const { RefCell::new(None) };
-    /// The caption sink's ready-made picture, built ONCE from the bytes.
-    /// A XAML object in a thread-local, on the UI thread only, exactly
-    /// like CORE — one object shared by every caption rather than a decode
-    /// per window.
-    ///
-    /// A `BitmapImage` RATHER THAN AN `ImageIconSource`: the mark is
-    /// composed into `LeftHeader` as an `Image` of kaya's own, so what has
-    /// to be shared is the SOURCE. An `ImageSource` has no parent, so one
-    /// can hang off every promoted window's mark at once — an element
-    /// could not.
+    /// The caption sink's ready-made picture, built ONCE from the bytes; a XAML
+    /// object in a thread-local, on the UI thread only, exactly like CORE. A
+    /// `BitmapImage` RATHER THAN AN `ImageIconSource`: an `ImageSource` has no
+    /// parent, so one can hang off every promoted window's mark at once — an
+    /// element could not.
     static APP_ICON_BITMAP: RefCell<Option<BitmapImage>> = const { RefCell::new(None) };
     /// The window sink's `IconId`, as its raw handle value. 0 = none,
     /// which is also what `IconId::default()` carries, so the absence
@@ -13577,18 +11117,16 @@ thread_local! {
     static APP_ICON_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// `CreateIconFromResourceEx`'s version word: "generally set to
-/// 0x00030000" (the Win32 documentation's own words) — the icon-resource
-/// format version, not a Windows version.
+/// `CreateIconFromResourceEx`'s version word: "generally set to 0x00030000"
+/// (the Win32 documentation's own words) — the icon-resource format
+/// version, not a Windows version.
 const ICON_RESOURCE_VERSION: u32 = 0x0003_0000;
 
 #[link(name = "user32")]
 unsafe extern "system" {
-    /// PNG bytes to an HICON with nothing on disk. `presbits` is a
-    /// pointer to MEMORY holding one icon IMAGE (an RT_ICON entry, not a
-    /// whole .ico file's directory), and since Vista that image may
-    /// itself be a PNG — which is why the wire's blob needs no
-    /// conversion of kaya's own.
+    /// PNG bytes to an HICON with nothing on disk. `presbits` points at
+    /// MEMORY holding one icon IMAGE (an RT_ICON entry, not a whole .ico
+    /// file's directory), which since Vista may itself be a PNG.
     fn CreateIconFromResourceEx(
         presbits: *const u8,
         size: u32,
@@ -13601,16 +11139,13 @@ unsafe extern "system" {
     /// The documented counterpart: "You should call DestroyIcon for
     /// icons created with CreateIconFromResourceEx."
     fn DestroyIcon(icon: isize) -> i32;
-    /// The harness's read side. `WM_GETICON` is answered by USER32's own
-    /// per-window state, not by any cache of kaya's, which is what makes
-    /// it a real read rather than an echo — the same class of channel as
-    /// the caption read `window_dirty` already trusts.
+    /// The harness's read side: `WM_GETICON` is answered by USER32's own
+    /// per-window state, not by any cache of kaya's.
     #[cfg(feature = "harness")]
     fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
-    /// The fallback the documentation names when `WM_GETICON` answers 0,
-    /// and the reason the read's absence sentence can DISCRIMINATE
-    /// rather than guess: "If sending a WM_GETICON message to a window
-    /// returns 0, next try calling the GetClassLongPtr function."
+    /// The fallback the documentation names when `WM_GETICON` answers 0:
+    /// "If sending a WM_GETICON message to a window returns 0, next try
+    /// calling the GetClassLongPtr function."
     #[cfg(feature = "harness")]
     fn GetClassLongPtrW(hwnd: isize, index: i32) -> usize;
     /// An HICON's two bitmaps, for the pixel read.
@@ -13697,15 +11232,12 @@ struct BitmapInfo {
     colors: [u32; 1],
 }
 
-/// `Windowing_GetIconIdFromIcon`, the flat export that turns an HICON
-/// into the `IconId` the windowing API takes.
-///
-/// NOT WinRT, which is why it needs a shim: it is a plain C function
-/// exported from `Microsoft.Internal.FrameworkUdk.dll`, and the pinned
-/// header resolves it exactly this way because "third-party apps cannot
-/// link to the FrameworkUdk directly". The same header states the
-/// ordering precondition — it works in unpackaged apps only after
-/// `MddBootstrapInitialize`, which this backend already calls.
+/// `Windowing_GetIconIdFromIcon`, the flat export that turns an HICON into the
+/// `IconId` the windowing API takes. NOT WinRT, which is why it needs a shim:
+/// a plain C function exported from `Microsoft.Internal.FrameworkUdk.dll`,
+/// since "third-party apps cannot link to the FrameworkUdk directly". It
+/// works in unpackaged apps only after `MddBootstrapInitialize`, which this
+/// backend already calls.
 type PfnGetIconIdFromIcon = unsafe extern "system" fn(
     isize,
     *mut bindings::Microsoft::UI::IconId,
@@ -13741,13 +11273,12 @@ fn get_icon_id_from_icon(icon: isize) -> Result<bindings::Microsoft::UI::IconId,
     Ok(id)
 }
 
-/// The wire's blob as an HICON, at the size the system draws a large
-/// window icon.
+/// The wire's blob as an HICON, at the size the system draws a large window
+/// icon.
 ///
-/// THE BUFFER IS COPIED INTO AN ALIGNED ONE, deliberately: the
-/// documentation calls `presbits` "the DWORD-aligned buffer pointer
-/// containing the icon resource bits", and a wire blob's bytes carry an
-/// alignment of one. The copy is a few kilobytes, once, at startup.
+/// THE BUFFER IS COPIED INTO AN ALIGNED ONE: the documentation calls
+/// `presbits` "the DWORD-aligned buffer pointer containing the icon
+/// resource bits", and a wire blob's bytes carry an alignment of one.
 fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
     if bytes.is_empty() {
         return Err("the icon blob is empty".to_owned());
@@ -13762,9 +11293,8 @@ fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
             bytes.len(),
         );
     }
-    // cx/cy 0 = the system's own large-icon metric, which is the size
-    // this platform draws a window icon at and therefore the size to
-    // rasterize once rather than let the shell resample.
+    // cx/cy 0 = the system's own large-icon metric, the size this platform
+    // draws a window icon at.
     let icon = unsafe {
         CreateIconFromResourceEx(
             aligned.as_ptr().cast::<u8>(),
@@ -13787,11 +11317,8 @@ fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
 }
 
 /// The XAML caption sink's picture: the `Image` widget's blob arm,
-/// unchanged, because that is exactly what the caption's mark is.
-/// NOTHING IS DECODED BY KAYA HERE EITHER — the bytes go to
-/// `BitmapImage.SetSource`, the platform's second decoder on the same
-/// blob, which is what makes the two sinks independent readings of one
-/// declaration.
+/// unchanged. Nothing is decoded by kaya here either — the bytes go to
+/// `BitmapImage.SetSource`, the platform's second decoder on the same blob.
 fn caption_mark_bitmap(bytes: &[u8]) -> windows_core::Result<BitmapImage> {
     let stream = InMemoryRandomAccessStream::new()?;
     let writer = DataWriter::CreateDataWriter(&stream)?;
@@ -13804,43 +11331,34 @@ fn caption_mark_bitmap(bytes: &[u8]) -> windows_core::Result<BitmapImage> {
     Ok(bitmap)
 }
 
-/// The identity's arrival: decode once, then reach every sink that
-/// already exists. The sinks that do not exist yet read the slots this
-/// fills — see `apply_identity_to_window`.
+/// The identity's arrival: decode once, then reach every sink that already
+/// exists. The sinks that do not exist yet read the slots this fills.
 fn apply_app_identity(
     core: &mut CoreState,
     identity: &crate::protocol::AppIdentity,
 ) -> windows_core::Result<()> {
     APP_IDENTITY.with_borrow_mut(|slot| *slot = Some(identity.clone()));
     if let Some(blob) = &identity.icon {
-        // THE WINDOW SINK. A failure here is LOUD, and it is the same
-        // ruling the typeface's font blob got for the same reason: bytes
-        // that are not a picture would otherwise leave the platform's
-        // own icon in place, which every observation reports exactly as
-        // a working identity would. The silent fallback is the single
-        // failure this slice exists to make impossible.
+        // THE WINDOW SINK. A failure here is LOUD: bytes that are not a
+        // picture would otherwise leave the platform's own icon in place,
+        // which every observation reports exactly as a working identity would.
         let icon = hicon_from_bytes(&blob.0)
             .unwrap_or_else(|why| panic!("kaya: winui: the app identity's icon bytes: {why}"));
         let id = get_icon_id_from_icon(icon).unwrap_or_else(|why| {
-            // The one path that DOES destroy: a decode that produced an
-            // icon the interop layer then refused. Freeing it before the
-            // panic keeps the failure clean for a host process that
-            // catches it.
+            // The one path that DOES destroy: a decode that produced an icon
+            // the interop layer then refused.
             unsafe { DestroyIcon(icon) };
             panic!("kaya: winui: the app identity's icon bytes: {why}")
         });
-        // THE HICON IS NOT DESTROYED ON THE SUCCESS PATH and that is
-        // deliberate: the IconId above is a handle ONTO it, the
-        // windowing layer draws from it for the process's whole life,
-        // and the identity is declared once by construction (the core's
-        // set-once wall), so there is exactly one of these per process.
+        // THE HICON IS NOT DESTROYED ON THE SUCCESS PATH: the IconId is a
+        // handle ONTO it, the windowing layer draws from it for the process's
+        // whole life, and the identity is declared once (the core's set-once
+        // wall), so there is exactly one of these per process.
         APP_ICON_ID.set(id.Value);
 
-        // THE CAPTION SINK. A failure here is NOT loud, deliberately: the
-        // bytes were already proven decodable by the window sink above, so
-        // a failure here is a XAML-side condition and not a bad
-        // declaration — and the scene's read is of the WINDOW's icon, so a
-        // caption that silently missed cannot pass it.
+        // THE CAPTION SINK. A failure here is NOT loud: the bytes were already
+        // proven decodable by the window sink above, so a failure here is a
+        // XAML-side condition and not a bad declaration.
         match caption_mark_bitmap(&blob.0) {
             Ok(bitmap) => APP_ICON_BITMAP.with_borrow_mut(|slot| *slot = Some(bitmap)),
             Err(e) => eprintln!(
@@ -13849,11 +11367,6 @@ fn apply_app_identity(
             ),
         }
     }
-    // EVERY WINDOW ALREADY STANDING. At declaration time that is the
-    // primary alone (identity is declared before the first mount), but
-    // this arm is written total rather than written for the timing it
-    // happens to see — the walls are the core's, and a backend that
-    // depended on them for CORRECTNESS would break the day they moved.
     let windows: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
     for window in windows {
         apply_identity_to_window(core, window)?;
@@ -13861,11 +11374,10 @@ fn apply_app_identity(
     Ok(())
 }
 
-/// One window's share of the declared identity: the window icon, the
-/// caption icon if that window has a custom caption, and the caption TEXT.
-/// Called from three places — the declaration, a window's creation, and a
-/// caption's minting — because those are the three orders these objects
-/// can arrive in.
+/// One window's share of the declared identity: the window icon, the caption
+/// icon if that window has a custom caption, and the caption TEXT. Called
+/// from the declaration, a window's creation and a caption's minting —
+/// the three orders these objects can arrive in.
 fn apply_identity_to_window(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let has_identity = APP_IDENTITY.with_borrow(|slot| slot.is_some());
     if !has_identity {
@@ -13876,45 +11388,24 @@ fn apply_identity_to_window(core: &CoreState, window: u64) -> windows_core::Resu
         && let Ok(target) = winui_window(core, window)
         && let Ok(app_window) = target.AppWindow()
     {
-        // SetIcon, not SetTaskbarIcon: the 1.7 split lets an app give
-        // the taskbar a different picture from the caption's, and kaya
-        // has exactly one picture by ruling — one mark, every surface.
+        // SetIcon, not SetTaskbarIcon: the 1.7 split lets an app give the
+        // taskbar a different picture, and kaya has one mark by ruling.
         app_window.SetIconWithIconId(bindings::Microsoft::UI::IconId { Value: icon })?;
     }
     refresh_caption_mark(core, window)?;
     // THE NAME REACHES THE CAPTION THROUGH THE ONE CAPTION WRITER, never
     // through `TitleBar.Title`: that property makes the control a rival
     // author of the window's title and the first casualty is the dirty
-    // marker (see `refresh_caption`'s doc comment). A rival caption
-    // author is a bug this tree has already paid for once.
+    // marker (see `refresh_caption`'s doc comment).
     refresh_caption(core, window)
 }
 
-/// The app's mark at the FAR LEFT of a promoted caption, ahead of the
-/// menu — the maintainer's ruling of 2026-08-18.
-///
-/// WHY NOT `TitleBar.IconSource`, WHICH EXISTS FOR EXACTLY THIS. The
-/// control lays its own icon out in **column 5** and `LeftHeader` in
-/// **column 3**, and kaya's `LeftHeader` is the window's MENU (the
-/// one-band revision). Measured on the guest before this arm: the mark sat
-/// at x=97 in a band whose menu ended at 83 — `File`, then the mark, then
-/// the title (docs/deferred.md). No property can move it.
-///
-/// AND `IconSource` IS NOT KEPT FOR THE OTHER WINDOWS EITHER: a
-/// `TitleBar` is minted by the first promotion and by nothing else, so
-/// `IconSource` is reachable ONLY on the windows where it lands after the
-/// menu. An unpromoted window has the SYSTEM caption, which draws the
-/// mark at the far left from the window icon the other sink sets.
-///
-/// THE METRICS ARE THE CONTROL'S OWN: the box is
-/// `TitleBarIconMaxWidth`/`Height` (16), the gap is `TitleBarIconMargin`
-/// (0,0,16,0), and the vertical centring is
-/// `TitleBarLeftHeaderVerticalAlignment`.
-///
-/// IDEMPOTENT, AND IT HAS TO BE: this runs on the declaration, on every
-/// window creation and on every caption mint, and XAML ABORTS THE PROCESS
-/// when an element that still has a parent is appended somewhere else. So
-/// the question "is the mark already in this band" is asked of the TREE.
+/// The app's mark at the FAR LEFT of a promoted caption, ahead of the menu.
+/// NOT `TitleBar.IconSource`: the control lays its own icon out in column 5
+/// and `LeftHeader` — kaya's MENU — in column 3, so the mark sat at x=97 in
+/// a band whose menu ended at 83 (measured, docs/deferred.md). IDEMPOTENT,
+/// AND IT HAS TO BE: XAML ABORTS THE PROCESS when a parented element is
+/// appended elsewhere, so the question is asked of the TREE.
 fn refresh_caption_mark(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let Some(titlebar) = core.window_titlebars.get(&window) else {
         // No custom caption: the system draws this window's mark from the
@@ -13943,11 +11434,9 @@ fn refresh_caption_mark(core: &CoreState, window: u64) -> windows_core::Result<(
         Right: CAPTION_MARK_GAP,
         Bottom: 0.0,
     })?;
-    // THE MARK SAYS THE APP'S NAME TO AN ASSISTIVE CLIENT, for the same
-    // reason `symbol_icon` names its glyphs. The name is the DECLARED one
-    // — the same string the caption, the taskbar tooltip and alt-tab read
-    // — so a screen reader and the glass agree by construction, and the
-    // mark is findable from outside the process.
+    // THE MARK SAYS THE APP'S NAME TO AN ASSISTIVE CLIENT: the DECLARED
+    // name, the same string the caption, the taskbar tooltip and alt-tab
+    // read, so the mark is findable from outside the process.
     let name = APP_IDENTITY.with_borrow(|slot| slot.as_ref().map(|id| id.name.clone()));
     if let Some(name) = name {
         bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
@@ -13974,36 +11463,22 @@ const ICON_SMALL2: usize = 2;
 #[cfg(feature = "harness")]
 const GCLP_HICON: i32 = -14;
 
-/// The four quadrant samples of the icon the window is HOLDING, or a
-/// sentence saying what was measured instead.
-///
-/// THE ABSENCE SENTENCE DISCRIMINATES, which is the diagnostic rule
-/// (CLAUDE.md invariant 3) applied to a read rather than to a why-not.
-/// The documentation names a fallback chain — "a window that has no
-/// icon explicitly set (with WM_SETICON) uses the icon for the
-/// registered window class, and in this case DefWindowProc will return 0
-/// for a WM_GETICON message. If sending a WM_GETICON message to a window
-/// returns 0, next try calling the GetClassLongPtr function" — so a read
-/// that stopped at the first step would report "no icon" for a window
-/// the shell is drawing a perfectly good class icon for, and blame kaya
-/// for it. Both steps are taken and both answers are printed.
+/// The four quadrant samples of the icon the window is HOLDING, or a sentence
+/// saying what was measured instead. THE ABSENCE SENTENCE DISCRIMINATES
+/// (CLAUDE.md invariant 3): a window with no icon of its own uses its
+/// registered class's and DefWindowProc answers 0 to `WM_GETICON`, so both
+/// steps are taken and both answers are printed.
 #[cfg(feature = "harness")]
 fn window_icon_samples(hwnd: isize) -> String {
     let big = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0) };
     let small = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) };
     let small2 = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_SMALL2, 0) };
     if trace_enabled() {
-        // WHICH SLOT ANSWERED, which is the measurement that closed this
-        // slice's one open question (docs/app-identity-plan.md I8): no
-        // documentation says whether `AppWindow.SetIcon` routes through
-        // `WM_SETICON`, and kaya sends no `WM_SETICON` of its own, so a
-        // non-zero answer here can only have come from the windowing
-        // API. MEASURED 2026-08-18 on the VM, and the answer is yes:
-        // after `SetIconWithIconId` all THREE types answer the same
-        // non-zero handle (`big=small=small2=0xbe50405`), so
-        // `AppWindow.SetIcon` writes the window's icon state and
-        // `WM_GETICON` is an honest read of what the shell will draw.
-        // A gate against it is not the false RED the plan warned of.
+        // WHICH SLOT ANSWERED: `AppWindow.SetIcon` routes through the
+        // window's USER32 icon state, so all three types answer the same
+        // non-zero handle and `WM_GETICON` is an honest read of what the
+        // shell will draw (measured 2026-08-18 on the VM;
+        // docs/app-identity-plan.md I8).
         eprintln!(
             "kaya: winui app icon: WM_GETICON big={big:#x} small={small:#x} small2={small2:#x}"
         );
@@ -14022,23 +11497,19 @@ fn window_icon_samples(hwnd: isize) -> String {
     }
 }
 
-/// An HICON's four quadrant centres as `RRGGBB/RRGGBB/RRGGBB/RRGGBB`,
-/// in reading order: top-left, top-right, bottom-left, bottom-right.
+/// An HICON's four quadrant centres as `RRGGBB/RRGGBB/RRGGBB/RRGGBB`, in
+/// reading order: top-left, top-right, bottom-left, bottom-right.
 ///
-/// CENTRES AND NOT CORNERS, deliberately: any rescale between the
-/// declared PNG and the size this platform rasterizes an icon at blurs
-/// a quadrant BOUNDARY, and a corner sample sits on one. The centre of
-/// a large flat region survives every resampling filter exactly, which
-/// is what lets four colours be a frozen expectation where a hash of
-/// the converted bytes could never be.
+/// CENTRES AND NOT CORNERS: any rescale between the declared PNG and the
+/// size this platform rasterizes an icon at blurs a quadrant BOUNDARY, and
+/// a corner sample sits on one.
 #[cfg(feature = "harness")]
 fn icon_quadrants(icon: isize) -> Result<String, String> {
     let mut info = IconInfo::default();
     if unsafe { GetIconInfo(icon, &mut info) } == 0 {
         return Err("GetIconInfo refused the handle".to_owned());
     }
-    // Both bitmaps are OURS to free once GetIconInfo has handed them
-    // over — the documentation is explicit that the caller owns them,
+    // Both bitmaps are OURS to free once GetIconInfo has handed them over,
     // and a leak here would run once per read on a polling verb.
     let colour = info.color;
     let mask = info.mask;
@@ -14070,11 +11541,9 @@ fn icon_quadrants_of_bitmap(bitmap: isize) -> Result<String, String> {
     if w <= 1 || h <= 1 {
         return Err(format!("the icon's colour bitmap is {w}x{h}, too small to sample"));
     }
-    // A TOP-DOWN 32-BIT BI_RGB REQUEST, so the rows arrive in the order
-    // the picture is drawn in and every pixel is one BGRA word: the
-    // negative height is Win32's own spelling of top-down, and asking
-    // for a format converts whatever the icon really is rather than
-    // making this read carry a decoder per bit depth.
+    // A TOP-DOWN 32-BIT BI_RGB REQUEST, so the rows arrive in the order the
+    // picture is drawn in and every pixel is one BGRA word: the negative
+    // height is Win32's own spelling of top-down.
     let mut info = BitmapInfo {
         size: 40,
         width: w,
@@ -14197,11 +11666,9 @@ fn subclass(window: &Window, id: u64) -> windows_core::Result<()> {
         KAYA_WNDPROCS.with_borrow_mut(|m| {
             m.insert(hwnd, (id, original));
         });
-        // Paste's enablement moves when the clipboard does, and the
-        // system's own change signal is WM_CLIPBOARDUPDATE — a
-        // format listener, not the ancient viewer chain. Registered
-        // on every kaya window; the deferred refresh no-ops in
-        // scenes that never armed the clipboard.
+        // Paste's enablement moves when the clipboard does, and the system's
+        // own change signal is WM_CLIPBOARDUPDATE — a format listener, not the
+        // ancient viewer chain. Registered on every kaya window.
         AddClipboardFormatListener(hwnd);
     }
     Ok(())
@@ -14223,9 +11690,9 @@ unsafe extern "system" {
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
 
     /// `canvas_ink`'s camera and the numbers that aim it (see `capture`,
-    /// `grab_canvas`, `placement`): a reference DC for the DIB, where
-    /// this window's client area sits inside its frame, and DWM's print
-    /// of the window's composited content.
+    /// `grab_canvas`, `placement`): a reference DC for the DIB, where this
+    /// window's client area sits inside its frame, and DWM's print of the
+    /// window's composited content.
     #[cfg(feature = "harness")]
     fn GetDC(hwnd: isize) -> isize;
     #[cfg(feature = "harness")]
@@ -14235,10 +11702,9 @@ unsafe extern "system" {
     #[cfg(feature = "harness")]
     fn PrintWindow(hwnd: isize, hdc: isize, flags: u32) -> i32;
 
-    /// The gone-check's three entries, declared here beside the rest
-    /// rather than by enabling Win32_UI_WindowsAndMessaging: this file
-    /// already names the handful of user32 calls it needs, and the
-    /// feature would pull a very large surface for three.
+    /// The gone-check's three entries, declared here rather than by enabling
+    /// Win32_UI_WindowsAndMessaging, which would pull a very large surface
+    /// for three.
     fn EnumWindows(
         callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
         param: isize,
@@ -14252,25 +11718,21 @@ unsafe extern "system" {
     fn GetWindowTextW(hwnd: isize, buf: *mut u16, len: i32) -> i32;
     fn GetDpiForWindow(hwnd: isize) -> u32;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
-    // The shortcut verb's REAL dispatch: foreground the guest and put
-    // the chord on the system input queue, so XAML's own
-    // KeyboardAccelerator machinery routes it (docs/traps.md: the
-    // injection is OS-global; menu legs run serially for exactly this
-    // reason).
+    // The shortcut verb's REAL dispatch: foreground the guest and put the
+    // chord on the system input queue, so XAML's own KeyboardAccelerator
+    // machinery routes it (docs/traps.md: WinUI shortcut injection is OS-global,
+    // so menu legs run serially).
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn GetForegroundWindow() -> isize;
     /// The clipboard-change signal Paste's enablement follows
-    /// (WM_CLIPBOARDUPDATE to every registered listener). Raw beside
-    /// its WNDPROC consumers, matching this block's convention.
+    /// (WM_CLIPBOARDUPDATE to every registered listener).
     fn AddClipboardFormatListener(hwnd: isize) -> i32;
     fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
-    /// The `type` verb's character-to-keystroke mapping, asked of the
-    /// ACTIVE KEYBOARD LAYOUT rather than hard-coded: the low byte is
-    /// the virtual key, the high byte the shift state (bit 0 shift,
-    /// bit 1 control, bit 2 alt). A table of our own would be a US
-    /// layout wearing a platform's name — `!` and `"` do not live on
-    /// the same keys everywhere — and the verb's contract is printable
-    /// ASCII, not a keycap set.
+    /// The `type` verb's character-to-keystroke mapping, asked of the ACTIVE
+    /// KEYBOARD LAYOUT rather than hard-coded: the low byte is the virtual
+    /// key, the high byte the shift state (bit 0 shift, bit 1 control, bit 2
+    /// alt). A table of our own would be a US layout wearing a platform's
+    /// name — `!` and `"` do not live on the same keys everywhere.
     #[cfg(feature = "harness")]
     fn VkKeyScanW(ch: u16) -> i16;
     fn CallWindowProcW(
@@ -14295,11 +11757,11 @@ unsafe extern "system" {
         flags: u32,
     ) -> u32;
 
-    /// The harness's own calls: the sampler window that lets it ask an
-    /// STA object a question from another thread, and the posts that
-    /// drive the dialog. EVERY ONE IS GATED, because WndClassW is, and
-    /// a shipped app carries none of this — check-targets builds both
-    /// feature configurations for exactly this reason.
+    /// The harness's own calls: the sampler window that lets it ask an STA
+    /// object a question from another thread, and the posts that drive the
+    /// dialog. EVERY ONE IS GATED, because WndClassW is, and a shipped app
+    /// carries none of this (tools/check-targets.py builds both feature
+    /// configurations).
     #[cfg(feature = "harness")]
     fn RegisterClassW(class: *const WndClassW) -> u16;
     #[cfg(feature = "harness")]
@@ -14365,12 +11827,11 @@ struct Point32 {
     y: i32,
 }
 
-/// Every window this process is really holding, for the sentence
-/// below: `#0, #1`. A resolver miss prints WHAT IT SAW — the two
-/// causes it cannot tell apart are "the id is wrong" and "the apply
-/// has not run yet", and the live list is the evidence that separates
-/// them for the reader (an id that never appears is a typo; one that
-/// appears a moment later was a race).
+/// Every window this process is really holding, for the sentence below:
+/// `#0, #1`. A resolver miss prints WHAT IT SAW, because the two causes it
+/// cannot tell apart are "the id is wrong" and "the apply has not run yet"
+/// — an id that never appears is a typo; one that appears a moment later
+/// was a race.
 fn live_windows(core: &CoreState) -> String {
     let mut ids: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
     ids.sort_unstable();
@@ -14381,15 +11842,11 @@ fn live_windows(core: &CoreState) -> String {
 }
 
 /// A window by kaya id — TOTAL, because window materialization is
-/// asynchronous and a harness read racing the apply is the normal state
-/// of affairs, not a bug. Measured 2026-08-16: two windows legs died on
-/// an `expect` here (five on linux) when a scene asserted on an aux
-/// window without a count barrier.
-///
-/// The error is what makes the read RETRYABLE: `on_ui_read` hands it back
-/// to the harness, which turns it into a non-match and polls again.
-/// Actions and applies go through `on_ui`/`on_ui_mut`, which panic on an
-/// error — from the HARNESS thread, where a panic can unwind.
+/// asynchronous and a harness read racing the apply is the normal state of
+/// affairs (measured 2026-08-16: two windows legs died on an `expect` here,
+/// five on linux, when a scene asserted on an aux window without a count
+/// barrier). The error is what makes the read RETRYABLE: `on_ui_read` turns
+/// it into a non-match and the harness polls again.
 fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
     if id == 0 {
         return Ok(core.window.clone());
@@ -14405,11 +11862,10 @@ fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
     })
 }
 
-/// The advisory size request's Win32 materialization: DIP -> physical
-/// via the window's DPI, applied to the CLIENT area (the request is a
-/// content size) by carrying the current chrome delta onto the outer
-/// frame. A request, never a guarantee — the shell keeps the last
-/// word (DESIGN.md, Presentation contexts).
+/// The advisory size request's Win32 materialization: DIP -> physical via
+/// the window's DPI, applied to the CLIENT area (the request is a content
+/// size) by carrying the current chrome delta onto the outer frame. A
+/// request, never a guarantee (DESIGN.md, Presentation contexts).
 fn resize_request(
     window: &Window,
     width: Option<f64>,
@@ -14458,12 +11914,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         Some(n) => format!("kaya milestone 2 [{n}]"),
         None => "kaya milestone 2".to_owned(),
     };
-    // THE ONE CAPTION WRITE THAT DOES NOT GO THROUGH refresh_caption,
-    // and it cannot: CORE does not exist yet — this is the placeholder
-    // the window wears between materializing and the app's first
-    // transaction. Nothing is declared at this point, so there is no
-    // dirty flag to compose and no title to preserve; the app's own
-    // title replaces this through the writer a moment later.
+    // THE ONE CAPTION WRITE THAT DOES NOT GO THROUGH refresh_caption, and it
+    // cannot: CORE does not exist yet — this is the placeholder the window
+    // wears between materializing and the app's first transaction, replaced
+    // through the writer a moment later.
     window.SetTitle(&HSTRING::from(&*title))?;
     if let Some(n) = slot {
         let native: IWindowNative = windows_core::Interface::cast(&window)?;
@@ -14487,8 +11941,6 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     // non-veto primary falls through into the Closed handler below.
     subclass(&window, 0)?;
 
-    // Closing the window exits the app, matching the AppKit backend's
-    // terminate-after-last-window-closed behavior.
     let closed = bindings::Windows::Foundation::TypedEventHandler::new(|_, _| {
         request_exit(0);
         Ok(())
@@ -14503,12 +11955,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         crate::harness::spawn(&scene, WinUiStage, |line| println!("{line}"));
     }
     // A build WITHOUT the harness feature must not silently ignore
-    // KAYA_SELFTEST. The feature is off by default so users do not
-    // ship the scene interpreter, which means a runner that forgets
-    // `--features harness` would otherwise start the app, run no
-    // steps, print no verdict, and hang until its timeout — the
-    // silent-no-op shape this repo keeps paying for. Fail loudly
-    // instead, naming the fix.
+    // KAYA_SELFTEST: a runner that forgets `--features harness` would
+    // otherwise start the app, run no steps, print no verdict, and hang
+    // until its timeout. Fail loudly instead, naming the fix.
     #[cfg(not(feature = "harness"))]
     if std::env::var("KAYA_SELFTEST").is_ok() {
         panic!(
@@ -14527,8 +11976,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             transactions: tx_rx,
             // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the
             // declares-windowing entry): every declared table gets the
-            // spacer+band tier, so a table's band starts at a screenful
-            // instead of at the whole collection.
+            // spacer+band tier.
             scene: {
                 let mut scene = Scene::new();
                 scene.declare_windowing();
@@ -14623,23 +12071,18 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     Ok(())
 }
 
-/// The harness stage: WinUI's native calls, each hopping to the
-/// dispatcher. Programmatic SetIsChecked/SetText/SetValue raise the
-/// real event paths; clicks emit the button's stored tag, the same
-/// bytes the pointer path would.
 /// PowerShell single-quoted literal: the only escape is '' for '.
 #[cfg(feature = "harness")]
 fn ps_quote(s: &str) -> String {
     s.replace('\'', "''")
 }
 
-/// The foreign clipboard tool's one entry: powershell.exe, PINNED —
-/// pwsh silently lacks the entire clipboard cmdlet surface this lane
-/// uses (-AsHtml, -LiteralPath, -Format, -TextFormatType), so the
-/// edition is asserted INSIDE the script; a future shell swap fails
-/// loudly here instead of reading empty (the guard, not a memory).
-/// Runs on the harness thread — a child process on the app thread
-/// would trip the stall watchdog.
+/// The foreign clipboard tool's one entry: powershell.exe, PINNED — pwsh
+/// silently lacks the entire clipboard cmdlet surface this lane uses
+/// (-AsHtml, -LiteralPath, -Format, -TextFormatType), so the edition is
+/// asserted INSIDE the script and a shell swap fails loudly here instead
+/// of reading empty. Runs on the harness thread — a child process on the
+/// app thread would trip the stall watchdog.
 #[cfg(feature = "harness")]
 fn run_powershell(script: &str) -> String {
     let guarded = format!(
@@ -14668,14 +12111,10 @@ fn run_powershell(script: &str) -> String {
 #[cfg(feature = "harness")]
 struct WinUiStage;
 
-/// Take the batch's outstanding track re-stamp before this hop touches
-/// the tree. A structural change only MARKS its container
-/// (winui/order.rs) and both op runners flush at their end, so this is
-/// normally a no-op — it is here so that no future op path can put an
-/// observation in front of the restamp it owed. Its own borrow, taken
-/// and dropped before the caller's: the hops below hand their closure a
-/// borrow that lives for the whole dispatched call, and a nested one
-/// aborts the process.
+/// Take the batch's outstanding track re-stamp before this hop touches the
+/// tree (winui/order.rs). Its own borrow, taken and dropped before the
+/// caller's: the hops below hand their closure a borrow that lives for the
+/// whole dispatched call, and a nested one aborts the process.
 #[cfg(feature = "harness")]
 fn flush_before_hop() {
     CORE.with_borrow_mut(|core| {
@@ -14733,24 +12172,10 @@ impl WinUiStage {
             .expect("the step's WinRT calls succeeded")
     }
 
-    /// The observation flavor: a read that errors mid-materialization
-    /// (a null Content cast before the first layout, a not-yet-live
-    /// XamlRoot) is a RETRYABLE miss for the harness's bounded polls,
-    /// never a panic — a panic here either kills the harness thread
-    /// or, worse, aborts the process when it crosses a dispatcher
-    /// callback (caught live 2026-07-22: window/grow/panels legs
-    /// fail-fasted or hung the moment the settles stopped hiding the
-    /// materialization window). Actions keep on_ui: their targets are
-    /// proven by a preceding expect, so an error there IS a bug.
-    /// Foreground the guest and CONFIRM it before injecting anything.
-    ///
-    /// SHARED BY THE TWO VERBS THAT PUT REAL KEYS ON THE SYSTEM INPUT
-    /// QUEUE — `shortcut` and `type` — because the queue is OS-GLOBAL
-    /// and the failure it protects against is the same for both:
-    /// keystrokes landing in whatever window happens to be frontmost.
-    /// Failing to take the foreground fails the leg LOUDLY rather than
-    /// spraying input at a bystander. (A bounded confirmation poll, not
-    /// a lifecycle sleep.)
+    /// Foreground the guest and CONFIRM it before injecting anything, for the
+    /// two verbs that put real keys on the SYSTEM INPUT QUEUE (`shortcut` and
+    /// `type`): the queue is OS-GLOBAL, so keystrokes would otherwise land in
+    /// whatever window is frontmost. A bounded confirmation poll, not a sleep.
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -14764,15 +12189,12 @@ impl WinUiStage {
             }
             unsafe { SetForegroundWindow(hwnd) };
             if attempt == 10 {
-                // An ACTIVE MENU categorically blocks SetForegroundWindow
-                // — "no menus are active" is one of the documented
-                // preconditions, so retrying and the ALT tap below can
-                // never win against an open Start menu. ESC dismisses it.
-                // This is not hypothetical: an unattended run on
-                // 2026-07-25 lost two legs to a Start menu left open by
-                // an earlier wedged run, which held the foreground until
-                // something else happened to dismiss it. Nothing about
-                // that required a human at the VM.
+                // An ACTIVE MENU categorically blocks SetForegroundWindow —
+                // "no menus are active" is one of the documented
+                // preconditions, so retrying and the ALT tap below can never
+                // win against an open Start menu; ESC dismisses it
+                // (docs/traps.md: Whether the desktop will hand over the
+                // foreground is invisible from ssh).
                 unsafe {
                     keybd_event(0x1B, 0, 0, 0);
                     keybd_event(0x1B, 0, 2, 0);
@@ -14798,24 +12220,12 @@ impl WinUiStage {
         );
     }
 
-    /// THE UI THREAD WITHOUT THE CORE — for a call that must not be
-    /// running inside a `CORE` borrow when it completes.
-    ///
-    /// `on_ui`, `on_ui_mut` and `on_ui_read` all hand their closure a
-    /// borrow that lives for the whole dispatched call. A WinRT call
-    /// that completes SYNCHRONOUSLY inside one then re-enters `CORE`
-    /// from its completion handler and aborts the process, because a
-    /// panic crossing a dispatcher callback cannot unwind:
-    ///
-    ///   panicked at winui/mod.rs: RefCell already borrowed
-    ///   panic in a function that cannot unwind
-    ///
-    /// MEASURED on the VM 2026-08-10 (the editor leg): `ContentDialog::
-    /// Hide()` on a dialog that never finished loading completes
-    /// `ShowAsync` right there, and `ShowAsync`'s completion takes the
-    /// mutable borrow. WinRT handles are refcounted, so the shape that
-    /// works is: read what you need under a borrow, drop it, drive the
-    /// control here.
+    /// THE UI THREAD WITHOUT THE CORE — for a call that must not be running
+    /// inside a `CORE` borrow when it completes. The other three hops hold
+    /// that borrow for the whole dispatched call, so a WinRT call completing
+    /// SYNCHRONOUSLY inside one re-enters `CORE` from its completion handler
+    /// and aborts (measured 2026-08-10: `ContentDialog::Hide()` on a dialog
+    /// that never loaded completes `ShowAsync` right there).
     fn on_ui_bare<T: Send + 'static>(
         f: impl FnOnce() -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -14835,11 +12245,9 @@ impl WinUiStage {
         rx.recv().expect("the dispatcher applied the step")
     }
 
-    /// on_ui_read's mutable twin, for the window verbs: they DRIVE the
-    /// tier's report to a fixpoint before answering (`table_settle`),
-    /// which applies core ops and therefore needs the core mutably —
-    /// and, like every observation, a mid-materialization error is a
-    /// retryable miss rather than a panic.
+    /// on_ui_read's mutable twin, for the window verbs: they DRIVE the tier's
+    /// report to a fixpoint before answering (`table_settle`), which applies
+    /// core ops and therefore needs the core mutably.
     fn on_ui_settled<T: Send + 'static>(
         f: impl FnOnce(&mut CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -14915,11 +12323,10 @@ fn container_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
     })
 }
 
-/// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND:
-/// a `scroll` target's vertical one, a TABLE target's horizontal one. A
-/// table's rows already answer expect_window and scroll_to_row, so the
-/// kind is unambiguous and no verb needs an axis word (docs/tables-plan.md,
-/// the 2026-08-29 overflow ruling). The flag says which axis to read.
+/// THE AXIS THE THREE SCROLL VERBS DRIVE, decided by the target's KIND: a
+/// `scroll` target's vertical one, a TABLE target's horizontal one, so no
+/// verb needs an axis word (docs/tables-plan.md, the 2026-08-29 overflow
+/// ruling).
 #[cfg(feature = "harness")]
 fn scroll_axis(
     core: &CoreState,
@@ -14934,8 +12341,7 @@ fn scroll_axis(
 
 /// A table's stamped rows in the order the TOOLKIT places them — by
 /// attached track, never by the registry, because a sort is a MOVE and a
-/// creation-order registry cannot see one (expect_order's whole reason,
-/// one level up).
+/// creation-order registry cannot see one.
 #[cfg(feature = "harness")]
 fn table_rows_in_track_order(
     core: &CoreState,
@@ -14943,8 +12349,7 @@ fn table_rows_in_track_order(
 ) -> windows_core::Result<Option<Vec<Grid>>> {
     // THE BAND PANEL, not the container: a windowed table's rows are the
     // scroll host's children (docs/virtualization-plan.md §4), so a walk
-    // over the container would find the header and the rule and no row
-    // at all.
+    // over the container would find the header and the rule and no row.
     let Some(grid) = table_of(core, t, |table| table.band.clone()) else {
         return Ok(None);
     };
@@ -14995,22 +12400,13 @@ fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
     grid.ActualWidth()
 }
 
-/// The extent a child DRAWS along one axis of its parent — `vertical`
-/// reads height — given the `slot` that parent arranged it in.
-///
-/// `ActualWidth`/`ActualHeight` is the USED size, which for a Control is
-/// its arrange rect and therefore its box. For a content-sized element it
-/// is not: a TextBlock stamped Stretch in a 457dip cell answers 12.5, its
-/// text (docs/traps.md, "A stretched WinUI TextBlock arranges
-/// text-sized"). So under a RESOLVED Stretch the box is the slot — the
-/// same read `cross_mode` makes one axis over, inline there because it
-/// needs the child's origin too.
-///
-/// THE DECLARED SIZE IS WHAT KEEPS THAT LOUD rather than vacuous: an
-/// explicit Width/Height outranks Stretch and IS the box, which is
-/// `expect_fills textarea#0`'s whole subject — 96dip inside a correct
-/// 126dip track — and a Max caps the slot the same way. Only a cap can
-/// leave a Stretch child short, so no Min is read; the test is one-sided.
+/// The extent a child DRAWS along one axis of its parent — `vertical` reads
+/// height — given the `slot` that parent arranged it in. `ActualWidth` is the
+/// USED size, which for a content-sized element is its text and not its box
+/// (docs/traps.md: A stretched WinUI TextBlock arranges text-sized), so under
+/// a RESOLVED Stretch the box is the slot. An explicit Width/Height outranks
+/// Stretch and IS the box, and a Max caps the slot the same way; only a cap
+/// can leave a Stretch child short, so no Min is read.
 #[cfg(feature = "harness")]
 fn drawn_extent(
     element: &FrameworkElement,
@@ -15055,10 +12451,9 @@ fn drawn_extent(
 /// What a flex parent gave one of its children, along the PARENT's main
 /// axis: the track it assigned and the extent the child drew in it.
 ///
-/// `expect_fills` reads it for a WIDGET target, and — since the
-/// 2026-08-22 geometry ruling — for a grown CONTAINER before its own
-/// children are asked anything (tools/scenes/align.steps; the ledger's
-/// "a nested SwiftUI container cannot fill its track").
+/// `expect_fills` reads it for a WIDGET target and for a grown CONTAINER
+/// before its own children are asked anything (tools/scenes/align.steps;
+/// the ledger's "a nested SwiftUI container cannot fill its track").
 #[cfg(feature = "harness")]
 enum FlexTrack {
     In { track: f64, drawn: f64 },
@@ -15082,13 +12477,10 @@ fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Res
     // Measure/arrange are lazy; force them or the first read after
     // mount sees zeros (the child_shares precedent).
     grid.UpdateLayout()?;
-    // The track is the definition's RESOLVED extent — measured pixels,
-    // never the star weight — and the drawn size is the child's box
+    // The track is the definition's RESOLVED extent — measured pixels, never
+    // the star weight — and the drawn size is the child's box
     // (`drawn_extent`, which is NOT ActualWidth for a content-sized
-    // element). Same distinction child_shares makes when it reads
-    // definitions rather than children, and the gap between them is
-    // exactly where a control with an explicit Height sat: 96dip inside
-    // a correct 126dip star row, every share passing.
+    // element).
     if vertical {
         let at = Grid::GetRow(element)? as u32;
         let defs = grid.RowDefinitions()?;
@@ -15114,15 +12506,11 @@ fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Res
     }
 }
 
-/// The element a `kind#index` target names, from the per-kind registry
-/// every WinUI verb resolves through — creation order, which is what
-/// `kind#index` means. `None` is "no such target", never a panic.
-///
-/// It was `ax`'s inline match until `widget_fills` needed the same
-/// answer. Two copies of a fourteen-arm registry table is exactly the
-/// shape that ships one kind wired to the wrong Vec (the row-versus-
-/// column misresolution child_shares shipped is the same class), so
-/// there is one.
+/// The element a `kind#index` target names, from the per-kind registry every
+/// WinUI verb resolves through — creation order, which is what `kind#index`
+/// means. `None` is "no such target", never a panic. ONE copy of the
+/// registry table: two is the shape that ships one kind wired to the wrong
+/// Vec.
 #[cfg(feature = "harness")]
 fn target_element(
     core: &CoreState,
@@ -15152,14 +12540,12 @@ fn target_element(
         K::Grid => nth!(core.grids),
         K::Scroll => nth!(core.scrolls),
         K::Canvas => nth!(core.canvases),
-        // Buttons live in the registry as CLICK TAGS, not widgets, and
-        // the tag is captured in the click closure rather than stored
-        // on the Button — so there is no tag->widget link to follow.
-        // Both orderings are CREATION order though: core.buttons is a
-        // push-order Vec and WidgetId is assigned in sequence, so the
-        // Nth button widget by ascending id is the Nth entry. The ids
-        // must be sorted explicitly: core.widgets is a HashMap and its
-        // iteration order is arbitrary.
+        // Buttons live in the registry as CLICK TAGS, not widgets, and the tag
+        // is captured in the click closure rather than stored on the Button,
+        // so there is no tag->widget link to follow. Both orderings are
+        // CREATION order, so the Nth button widget by ascending id is the Nth
+        // entry — and the ids must be sorted explicitly, because core.widgets
+        // is a HashMap.
         K::Button => {
             if try_resolve(target.index, core.buttons.len()).is_none() {
                 return Ok(None);
@@ -15184,23 +12570,17 @@ fn target_element(
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
         let spec = path.to_owned();
-        // Resolve SEMANTICALLY against the model tree — the OPEN
-        // context menu exclusively while one is presented, the
-        // primary window's catalog otherwise — then drive the REAL
-        // invoke pipeline on the materialized item. For a context
-        // activation the staged ruling applies: register Closed
-        // BEFORE invoking, keep the flyout handle through Closed, and
-        // await it before another open may start. No sleeps.
+        // Resolve SEMANTICALLY against the model tree — the OPEN context menu
+        // exclusively while one is presented, the primary window's catalog
+        // otherwise — then drive the REAL invoke pipeline. For a context
+        // activation: register Closed BEFORE invoking, keep the flyout handle
+        // through Closed, and await it before another open may start.
         let wait = Self::on_ui_mut(move |core| {
-            // THE HARNESS-ACTIVATION REFRESH (the mac finding, §3),
-            // and here it is load-bearing beyond a grayed row: the
-            // invoke pipeline goes through the item's automation
-            // peer, and Invoke() on a still-disabled item THROWS
-            // inside a dispatcher callback — a stowed exception,
-            // 0xC000027B, process gone. Focus changes refresh
-            // enablement on a DEFERRED tick, so without this a
-            // focus-then-activate script races that tick (measured:
-            // the clipboard scene's first Edit>Paste, rust leg).
+            // THE HARNESS-ACTIVATION REFRESH, load-bearing beyond a grayed row:
+            // Invoke() on a still-disabled item THROWS inside a dispatcher
+            // callback — a stowed exception, 0xC000027B, process gone — and
+            // focus changes refresh enablement on a DEFERRED tick, so without
+            // this a focus-then-activate script races that tick.
             if core.roles_armed {
                 refresh_role_enablement(core);
             }
@@ -15332,21 +12712,17 @@ impl crate::harness::Stage for WinUiStage {
     fn ax(&self, target: crate::harness::Target) -> String {
         //
         // Read UIA's own peer, not kaya's model: FrameworkElementAutomationPeer
-        // is what an assistive client (Narrator, an automation harness)
-        // sees. Correspondence is by IDENTITY — WinUI publishes a
-        // settable AutomationId, unlike GTK where none exists below 4.22
-        // and the read has to match by ordinal.
+        // is what an assistive client sees. Correspondence is by IDENTITY,
+        // through WinUI's settable AutomationId.
         Self::on_ui_read(move |core| {
             use bindings::Microsoft::UI::Xaml::Automation::Peers::{
                 AutomationHeadingLevel, FrameworkElementAutomationPeer,
             };
-            // Resolve the ELEMENT from the per-kind registry, the way
-            // every other WinUI verb does (read_label/read_text), with
-            // try_resolve so an out-of-range index reports "no such
-            // target" instead of panicking. The earlier version reused
-            // widget_id_for_target, which serves context_open and
-            // handles Label ONLY — every other kind hit its panic!,
-            // inside the UI closure, surfacing as an opaque RecvError.
+            // Resolve the ELEMENT from the per-kind registry, the way every
+            // other WinUI verb does (read_label/read_text), with try_resolve
+            // so an out-of-range index reports "no such target" instead of
+            // panicking inside the UI closure, where it surfaces as an opaque
+            // RecvError.
             use crate::harness::{try_resolve, TargetKind as K};
             let element: bindings::Microsoft::UI::Xaml::UIElement =
                 match target_element(core, target)? {
@@ -15354,13 +12730,11 @@ impl crate::harness::Stage for WinUiStage {
                     None => return Ok("<no such target>".to_owned()),
                 };
             let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
-            // FromElement returns an EXISTING peer; a plain container
-            // (Row/Column are Grids) has none until one is made, so it
-            // reported "<not in the accessibility tree>" for a group
-            // that UIA is perfectly willing to describe. CreatePeerForElement
-            // makes one on demand — the same thing UIA does when a
-            // client walks the tree — and falls back to FromElement for
-            // controls that already carry theirs.
+            // FromElement returns an EXISTING peer; a plain container (Row and
+            // Column are Grids) has none until one is made, so it reported
+            // "<not in the accessibility tree>" for a group UIA is perfectly
+            // willing to describe. CreatePeerForElement makes one on demand,
+            // and falls back to FromElement for controls that carry theirs.
             let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(&fe) {
                 Ok(p) => p,
                 Err(_) => match FrameworkElementAutomationPeer::FromElement(&fe) {
@@ -15369,43 +12743,30 @@ impl crate::harness::Stage for WinUiStage {
                 },
             };
             let kind = peer.GetAutomationControlType()?;
-            // THE HEADING ROLE IS A PROPERTY READ, NOT A TYPE READ. A
-            // heading is not a control TYPE in UIA — a TextBlock carrying
-            // HeadingLevel still reports `Text` — so `ax_role`'s ladder
-            // could never see it. `?` rather than a swallowed default: a
-            // failed property read must surface as
-            // `<accessibility read failed>`, never as the confident wrong
-            // answer "this is an ordinary label".
-            //
-            // AND THIS READ IS WEAKER THAN ITS SIBLINGS. It asks the PEER,
-            // which is the provider side, and does not leave this process,
-            // where GTK's read crosses the AT-SPI bus and Compose's
-            // crosses into a published AccessibilityNodeInfo. An
-            // out-of-process UIA client is barred at the Cargo.toml, so
-            // this is the strongest read available here.
+            // THE HEADING ROLE IS A PROPERTY READ, NOT A TYPE READ: a heading
+            // is not a control TYPE in UIA — a TextBlock carrying HeadingLevel
+            // still reports `Text` — so `ax_role`'s ladder could never see it.
+            // `?` rather than a swallowed default, so a failed property read
+            // surfaces as `<accessibility read failed>`. The read asks the
+            // PEER and never leaves this process: an out-of-process UIA client
+            // is barred at the Cargo.toml.
             let role = ax_role(
                 peer.GetHeadingLevel()? != AutomationHeadingLevel::None,
                 kind,
             );
             if role == UNMAPPED_ROLE {
-                // The role the platform published is one kaya has no
-                // name for — the finding this verb exists to surface,
-                // and the next question is always WHICH one, so it goes
-                // to the log rather than costing a VM round-trip.
+                // The role the platform published is one kaya has no name for
+                // — the finding this verb exists to surface, and the next
+                // question is always WHICH one.
                 eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} for {target:?}");
             }
             let name = peer.GetName()?.to_string();
-            // A text field with no authored label publishes an EMPTY UIA
-            // Name — its content lives on the ValuePattern, and that value
-            // is what a screen reader speaks for it. The same fallback
-            // chain the other platforms take, so `field/<its text>` reads
-            // the same everywhere.
-            //
-            // THE TWO KINDS ANSWER THROUGH DIFFERENT PATTERNS NOW, and
-            // this read is why it does not matter: a TextBox peer
-            // publishes ValuePattern and a RichEditBox peer publishes
-            // TextPattern instead (measured), but kaya asks the CONTROL,
-            // not the pattern. The control TYPE is `Edit` for both.
+            // A text field with no authored label publishes an EMPTY UIA Name;
+            // its content lives on the ValuePattern, the same fallback chain
+            // the other platforms take. The two kinds answer through DIFFERENT
+            // patterns (TextBox ValuePattern, RichEditBox TextPattern,
+            // measured), which does not matter: kaya asks the CONTROL, whose
+            // TYPE is `Edit` for both.
             let name = if name.is_empty()
                 && matches!(target.kind, K::Entry | K::Textarea)
             {
@@ -15429,17 +12790,13 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
-    /// THE DECORATED RANGES, out of the control's own document model.
-    ///
-    /// NOT THE ACCESSIBILITY TREE, and that is a measured limit: WinUI's
-    /// in-process automation peer for a text control publishes no Text
-    /// pattern at all, so `GetAttributeValue(BackgroundColor)` has no
-    /// provider to answer it in this process (`GetPattern(Text)` returns
-    /// NULL on both text controls). The only route that does publish it is
-    /// an out-of-process UIA CLIENT, which is barred at the Cargo.toml
-    /// because attaching one makes the Shell's file dialog fatal to the
-    /// java leg. So this reads the layer beneath the peer, which is still
-    /// the platform answering and still fails when the lowering is gone.
+    /// THE DECORATED RANGES, out of the control's own document model and NOT
+    /// the accessibility tree: WinUI's in-process peer for a text control
+    /// publishes no Text pattern at all (`GetPattern(Text)` is NULL on both),
+    /// so `GetAttributeValue(BackgroundColor)` has no provider here, and the
+    /// only route that publishes it is an out-of-process UIA client, barred at
+    /// the Cargo.toml (docs/traps.md: UI Automation cannot read the Shell's
+    /// file dialog from a guest).
     fn highlights(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
@@ -15469,15 +12826,12 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// WHETHER A RANGE IS IN THE VIEWPORT — containment, never the
-    /// viewport itself.
-    ///
-    /// FROM THE VIEWPORT AND NOT FROM A MODEL: `ITextRange::GetRect` in
-    /// CLIENT coordinates is where the range sits relative to what is on
-    /// screen RIGHT NOW, so it moves when the control scrolls and stays
-    /// put when the text does not. `AllowOffClient` is what makes the
-    /// negative answer real — without it an off-screen range has no
-    /// rectangle to report and the verb could only ever say "visible".
+    /// WHETHER A RANGE IS IN THE VIEWPORT — containment, never the viewport
+    /// itself, and FROM THE VIEWPORT rather than from a model:
+    /// `ITextRange::GetRect` in CLIENT coordinates is where the range sits
+    /// relative to what is on screen RIGHT NOW. `AllowOffClient` is what makes
+    /// the negative answer real — without it an off-screen range has no
+    /// rectangle and the verb could only ever say "visible".
     fn revealed(
         &self, t: crate::harness::Target, range: crate::harness::TextRange,
     ) -> String {
@@ -15498,24 +12852,20 @@ impl crate::harness::Stage for WinUiStage {
             let (top, bottom) = range_extent(&field, start, stop)?;
             let viewer = template_scroll(&field)?;
             let (at, viewport) = (viewer.VerticalOffset()?, viewer.ViewportHeight()?);
-            // Containment in the viewport the control is actually
-            // showing — the ScrollViewer's window onto the document,
-            // which is this platform's spelling of mac's
-            // AXVisibleCharacterRange.
+            // Containment in the viewport the control is actually showing —
+            // this platform's spelling of mac's AXVisibleCharacterRange.
             let inside = top >= at - 0.5 && bottom <= at + viewport + 0.5;
             Ok(if inside { "visible" } else { "offscreen" }.to_string())
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// AN INPUT METHOD'S COMPOSITION, STARTED THROUGH THE INPUT METHOD'S
-    /// OWN MACHINERY (docs/ranges-plan.md D4).
-    ///
-    /// Windows has no "insert marked text" call: a composition belongs to
-    /// the Text Services Framework, so the only honest way to reach the
-    /// state is to do what a text service does — see `tsf_compose`.
-    /// Inserting the text and calling it a composition would prove nothing
-    /// about D4: it is the very state the refusal must distinguish from.
+    /// AN INPUT METHOD'S COMPOSITION, STARTED THROUGH THE INPUT METHOD'S OWN
+    /// MACHINERY (docs/ranges-plan.md D4). Windows has no "insert marked text"
+    /// call — a composition belongs to the Text Services Framework — so this
+    /// does what a text service does (`tsf_compose`). Inserting the text and
+    /// calling it a composition is the very state D4's refusal must
+    /// distinguish it from.
     fn compose(&self, t: crate::harness::Target, text: &str) {
         let marked = text.to_owned();
         // The control must have the keyboard focus, or TSF's focused
@@ -15526,10 +12876,10 @@ impl crate::harness::Stage for WinUiStage {
             };
             let field = core.textareas[i].clone();
             let end = Editable::Textarea(field.clone()).text()?.encode_utf16().count() as i32;
-            // The composition goes in where the caret is, and a
-            // composition parks the caret at the END of its marked text
-            // — so the end of the document is where the scene's
-            // arithmetic starts (813 bytes + " z" + "nihon" = 820).
+            // The composition goes in where the caret is, and a composition
+            // parks the caret at the END of its marked text — so the end of
+            // the document is where the scene's arithmetic starts
+            // (813 bytes + " z" + "nihon" = 820).
             field.Focus(FocusState::Programmatic)?;
             field.TextDocument()?.Selection()?.SetRange(end, end)?;
             Ok(core.textarea_ids[i])
@@ -15616,18 +12966,15 @@ impl crate::harness::Stage for WinUiStage {
 
     fn resize_window(&self, window: u64, width: f64, height: f64) {
         Self::on_ui_mut(move |core| {
-            // The REAL resize, through the same DPI-aware path the
-            // width/height props drive — and then RE-RUN the arm, which
-            // is the point: changing the size without letting the
-            // platform re-decide gates nothing.
+            // The REAL resize, through the same DPI-aware path the width and
+            // height props drive — and then RE-RUN the arm: changing the size
+            // without letting the platform re-decide gates nothing.
             let target = winui_window(core, window)?;
             resize_request(&target, Some(width), Some(height))?;
             // FORCE A LAYOUT PASS before re-running the arm. SetWindowPos
-            // returns before XAML has re-measured, so the arm asked for
-            // a width that was still the OLD one — it stamped `stacked`
-            // while the read, running a beat later, said `regular`. The
-            // two disagreeing about the same instant is the signature of
-            // reading a tree mid-update.
+            // returns before XAML has re-measured, so the arm asked for a
+            // width that was still the OLD one — it stamped `stacked` while
+            // the read, a beat later, said `regular`.
             if let Ok(content) = target.Content() {
                 if let Ok(root) = content.cast::<FrameworkElement>() {
                     let _ = root.UpdateLayout();
@@ -15639,30 +12986,23 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn split_presentation(&self) -> String {
-        // on_ui_read, like menu_presentation: a pure read of the UI
-        // thread's own state, with no mutation to sequence.
         Self::on_ui_read(|core| {
-            // The class comes from XamlRoot's real size, the same 600
-            // boundary menu_presentation draws; the presentation from the
-            // arm that actually ran.
-            //
-            // UNREADABLE until the element is in a live visual tree, and
-            // this verb is asked within milliseconds of launch. `unknown`
-            // is a legal class in the grammar for exactly that state, and
-            // the harness POLLS. The SAME source the arm used: an
-            // assertion measuring differently from the lowering can
-            // disagree with it about one instant.
+            // The class comes from XamlRoot's real size, the same 600 boundary
+            // menu_presentation draws; the presentation from the arm that
+            // actually ran. UNREADABLE until the element is in a live visual
+            // tree, and this verb is asked within milliseconds of launch:
+            // `unknown` is a legal class in the grammar for exactly that
+            // state, and the harness POLLS. The SAME source the arm used.
             let class = match window_client_width(core, 0) {
                 Some(w) if w >= 600.0 => "regular",
                 Some(_) => "compact",
                 None => "unknown",
             };
-            // THE CONTROLS' OWN ANSWER, not a value the arm stamped
-            // about itself. Windows decides where one pane becomes two,
-            // so the only honest reading of which presentation happened
-            // is to ask the control — at a ceiling of three, BOTH
-            // controls, folded. A window that never asked for panes has
-            // no control, and falls back to the serial arm's stamp.
+            // THE CONTROLS' OWN ANSWER, not a value the arm stamped about
+            // itself: Windows decides where one pane becomes two, so at a
+            // ceiling of three BOTH controls are folded. A window that never
+            // asked for panes has no control, and falls back to the serial
+            // arm's stamp.
             let presentation = match (
                 core.split_views.get(&0).map(|v| v.Mode()),
                 core.inner_splits.get(&0).map(|v| v.Mode()),
@@ -15681,16 +13021,14 @@ impl crate::harness::Stage for WinUiStage {
             };
             Ok(format!("{class}/{presentation}"))
         })
-        // The same fallback menu_presentation uses: a read that cannot
-        // reach the UI thread reports `unknown`, and the harness's
-        // bounded retry asks again.
+        // The same fallback menu_presentation uses: a read that cannot reach
+        // the UI thread reports `unknown`, and the harness retries.
         .unwrap_or_else(|_| "unknown/stacked".to_owned())
     }
 
     fn panes_reading(&self) -> String {
-        // The nested TwoPaneViews' own Modes when a nest is up; the
-        // two-pane worlds keep the derivation, which is exact there
-        // (root + top, or the top alone).
+        // The nested TwoPaneViews' own Modes when a nest is up; the two-pane
+        // worlds keep the derivation, which is exact there.
         Self::on_ui_read(|core| {
             let class = match window_client_width(core, 0) {
                 Some(w) if w >= 600.0 => "regular",
@@ -15724,14 +13062,10 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn menu_presentation(&self) -> String {
-        // XAML has no size-class type; its own adaptive triggers are
-        // width thresholds (`MinWindowWidth`), so a width rule IS the
-        // platform idiom here. Same 600 boundary as the others, read
-        // off the real root's ActualWidth in effective pixels.
+        // XAML has no size-class type; its own adaptive triggers are width
+        // thresholds (`MinWindowWidth`), so a width rule IS the platform
+        // idiom here. Same 600 boundary as the others.
         Self::on_ui_read(|core| {
-            // The XamlRoot's size is the client area in DIP — the same
-            // notion window_content_size and root_fills read, so the
-            // 600 boundary means the same thing here as elsewhere.
             let target = winui_window(core, 0)?;
             let root: FrameworkElement = target.Content()?.cast()?;
             let width = f64::from(root.XamlRoot()?.Size()?.Width);
@@ -15753,15 +13087,12 @@ impl crate::harness::Stage for WinUiStage {
         use crate::harness::MenuAspect;
         let path = path.to_owned();
         Self::on_ui_read(move |core| {
-            // THE HARNESS *READ* NEEDS THE SAME FRESHNESS THE
-            // ACTIVATION HAS. menu_activate and shortcut both refresh
-            // before they act; this read did not, so it answered with
-            // whatever enablement the item last had stamped on it — and
-            // no scene caught it, because none until undo.steps asserts
-            // an enablement that MOVES with no menu traffic in between
-            // (typing changes what Edit>Undo can do). The mac arm hit
-            // exactly this from the other side, where NSMenu.update()
-            // validated nothing (§3a's second finding).
+            // THE HARNESS *READ* NEEDS THE SAME FRESHNESS THE ACTIVATION HAS.
+            // menu_activate and shortcut both refresh before they act; a read
+            // that did not answered with whatever enablement the item last
+            // had stamped on it, and no scene caught it, because none until
+            // undo.steps asserts an enablement that MOVES with no menu
+            // traffic in between (typing changes what Edit>Undo can do).
             if core.roles_armed {
                 refresh_role_enablement(core);
             }
@@ -15843,20 +13174,15 @@ impl crate::harness::Stage for WinUiStage {
 
     fn menu_symbol(&self, path: &str) -> String {
         let path = path.to_owned();
-        // FROM UIA, NEVER FROM THE MODEL. The answer is the name the
-        // icon in the REAL item's Icon slot publishes to its automation
-        // peer — what an assistive client hears — so a backend that
-        // decoded the symbol prop and drew nothing fails this read, and
-        // so does one that drew an icon and named it wrong.
+        // FROM UIA, NEVER FROM THE MODEL: the answer is the name the icon in
+        // the REAL item's Icon slot publishes to its automation peer, so a
+        // backend that decoded the symbol prop and drew nothing fails this
+        // read, and so does one that drew an icon and named it wrong.
         Self::on_ui_read(move |core| {
-            // NO REFRESH STEP HERE, unlike menu_state: that read
-            // re-derives role enablement because a clipboard role's
-            // enablement MOVES with no menu traffic at all. A symbol
-            // changes only through a prop write, which forces the
-            // coalesced rebuild before this read can run.
-            //
-            // Open-context EXCLUSIVITY, exactly as menu_state has it:
-            // while a context menu is presented it owns resolution.
+            // NO REFRESH STEP HERE, unlike menu_state: a symbol changes only
+            // through a prop write, which forces the coalesced rebuild before
+            // this read can run. Open-context EXCLUSIVITY, as menu_state has
+            // it: while a context menu is presented it owns resolution.
             let (roots, attachment) = match &core.open_context {
                 Some((widget, _)) => (
                     core.context_roots.get(widget).cloned().unwrap_or_default(),
@@ -15877,17 +13203,15 @@ impl crate::harness::Stage for WinUiStage {
             };
             Ok(match native.icon() {
                 MenuIcon::Present(icon) => icon_uia_name(&icon),
-                // WHAT THIS MEASURED: the item is in the real menu and
-                // its icon slot is empty. It deliberately does NOT say
-                // whether the app asked for one — this reader cannot
-                // tell "no symbol declared" from "declared and never
-                // lowered", and a diagnostic may only print what it
-                // measured (CLAUDE.md invariant 3).
+                // WHAT THIS MEASURED: the item is in the real menu and its
+                // icon slot is empty. It deliberately does NOT say whether the
+                // app asked for one — this reader cannot tell "no symbol
+                // declared" from "declared and never lowered" (CLAUDE.md
+                // invariant 3).
                 MenuIcon::Empty => "no icon on the menu item".to_owned(),
-                // The one honest answer for a top-level bar grouping:
-                // WinUI's MenuBarItem has no icon slot at all, so this
-                // is a statement about the PLATFORM, and saying "no
-                // icon" here would point the reader at the app instead.
+                // The one honest answer for a top-level bar grouping: WinUI's
+                // MenuBarItem has no icon slot at all, so "no icon" here would
+                // point the reader at the app instead of the platform.
                 MenuIcon::NoSlot => {
                     "a WinUI MenuBarItem has no icon slot (top-level menu)".to_owned()
                 }
@@ -15897,23 +13221,13 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// THE expect_toolbar READ ON WINUI, from three different sides so no
-    /// single mistake can make all of it agree: the CATALOG says how many
-    /// actions this window promotes, the REAL CommandBar says how many
-    /// items it holds and which of them publish the promoted names, and
-    /// the REAL MenuBar says whether the remainder has a home.
-    ///
-    /// ADDRESSED BY WHAT UIA PUBLISHES. An `AppBarButton`'s published name
-    /// comes from its `Label` — MEASURED on the VM 2026-08-17 with
-    /// `KAYA_WINUI_TOOLBAR_TRACE`, because `AppBarButton` lives in the
-    /// closed dxaml half of the framework. So a lowering that promoted the
-    /// right items and never labelled them fails here.
-    ///
-    /// THE REMAINDER'S HOME IS THE MENU BAR, a repo fact rather than a
-    /// preference: `rebuild_menus` renders the WHOLE catalog into a real
-    /// `MenuBar` one row above, so every unpromoted action is already
-    /// reachable and one home is all there is. If this backend's menu
-    /// lowering ever stops being a bar, the read says `none`.
+    /// THE expect_toolbar READ ON WINUI, from three sides so no single mistake
+    /// can make all of it agree: the CATALOG's promotion count, the REAL
+    /// CommandBar's items and published names, and the REAL MenuBar's
+    /// remainder home. ADDRESSED BY WHAT UIA PUBLISHES: an `AppBarButton`'s
+    /// name comes from its `Label` (measured on the VM 2026-08-17), so a
+    /// lowering that promoted the right items and never labelled them fails
+    /// here. The remainder's home is the menu bar, or the read says `none`.
     fn toolbar_chrome(&self) -> String {
         Self::on_ui_read(|core| {
             toolbar_trace(core, 0);
@@ -15924,8 +13238,8 @@ impl crate::harness::Stage for WinUiStage {
             let (held, buttons) = toolbar_read(core, 0)?;
             let home = toolbar_remainder_home(core, 0)?;
             // IN CATALOG PREORDER, matched greedily against the bar's own
-            // order: `found` counts how far the promotion list can be
-            // walked through the names the chrome really publishes.
+            // order: `found` counts how far the promotion list can be walked
+            // through the names the chrome really publishes.
             let mut found = 0;
             for (name, _) in &buttons {
                 if found < promoted.len() && name.as_bytes() == promoted[found].as_bytes() {
@@ -15937,21 +13251,13 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// THE expect_toolbar_item READ: one aspect of the real
-    /// `AppBarButton`, addressed by the name it publishes to UIA.
-    ///
-    /// ENABLEMENT IS `IsEnabled` ON THE BUTTON: an ordinary `Control`
-    /// property, what the promotion writes, and the SAME object carries it
-    /// whether the bar is showing the command or the "…" menu is (measured
-    /// freebie, docs/chrome-plan.md C2) — unlike macOS, where
-    /// `NSToolbarItem.isEnabled` does not move at all.
-    ///
-    /// THE SYMBOL IS THE ICON THE BUTTON REALLY CARRIES — the automation
-    /// name of the `IconElement` in its `Icon` slot, never
-    /// `MenuModel::symbol` beside it.
-    ///
-    /// TOTAL, like `menu_state`: every miss is a short sentence naming
-    /// what was measured and a retryable non-match, never a panic.
+    /// THE expect_toolbar_item READ: one aspect of the real `AppBarButton`,
+    /// addressed by the name it publishes to UIA. Enablement is `IsEnabled` on
+    /// the button, carried by the SAME object whether the bar is showing the
+    /// command or the "…" menu is (measured, docs/chrome-plan.md C2); the
+    /// symbol is the automation name of the `IconElement` in its `Icon` slot,
+    /// never `MenuModel::symbol`. TOTAL, like `menu_state`: every miss is a
+    /// sentence naming what was measured, never a panic.
     fn toolbar_item(&self, label: &str, aspect: &str) -> String {
         let label = label.to_owned();
         let aspect = aspect.to_owned();
@@ -15987,14 +13293,12 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(match button.Icon() {
                 Ok(icon) => icon_uia_name(&icon),
-                // The empty slot arrives as a success-coded error, the
-                // same rule `MenuIcon::Empty` records: the property
-                // returns a null pointer and windows-core turns that
-                // into E_POINTER. What this measured is that the button
-                // is in the bar and carries no icon at all — it says
-                // nothing about whether the app declared a symbol,
-                // because this reader cannot tell that from a symbol
-                // that was never lowered (CLAUDE.md invariant 3).
+                // The empty slot arrives as a success-coded error, the same
+                // rule `MenuIcon::Empty` records: the property returns a null
+                // pointer and windows-core turns that into E_POINTER. What
+                // this measured is that the button is in the bar and carries
+                // no icon — never whether the app declared a symbol
+                // (CLAUDE.md invariant 3).
                 Err(e) if e.code().is_ok() => {
                     format!("the toolbar button {label} carries no icon")
                 }
@@ -16009,13 +13313,12 @@ impl crate::harness::Stage for WinUiStage {
         // A chord no catalog action owns is a silent no-op on every
         // platform — gated BEFORE any injection, because keybd_event
         // is OS-GLOBAL and a stray chord could land anywhere
-        // (docs/traps.md: menu legs run serially for this verb).
+        // (docs/traps.md: WinUI shortcut injection is OS-global).
         let owned = Self::on_ui_read({
             let spec = spec.clone();
             move |core| {
-                // Same freshness rule as menu_activate: the chord may
-                // land on a role item whose enablement is a deferred
-                // tick stale.
+                // Same freshness rule as menu_activate: the chord may land on a
+                // role item whose enablement is a deferred tick stale.
                 if core.roles_armed {
                     refresh_role_enablement(core);
                 }
@@ -16023,13 +13326,12 @@ impl crate::harness::Stage for WinUiStage {
             }
         })
         .unwrap_or(false);
-        // A chord no catalog item owns is a SCRIPT error, said out
-        // loud. The gate itself is load-bearing (injection is
-        // OS-global — docs/traps.md), but a silent return makes a
-        // never-pressed key look exactly like a platform that ignored
-        // it: that mistake cost eight platform experiments on
-        // 2026-07-24, every one of them measuring a keystroke this
-        // gate had swallowed.
+        // A chord no catalog item owns is a SCRIPT error, said out loud. The
+        // gate itself is load-bearing (injection is OS-global —
+        // docs/traps.md), but a silent return makes a never-pressed key look
+        // exactly like a platform that ignored it: that mistake cost eight
+        // platform experiments on 2026-07-24, every one of them measuring a
+        // keystroke this gate had swallowed.
         assert!(
             owned,
             "kaya: shortcut {spec:?}: no catalog item owns this chord \
@@ -16038,10 +13340,9 @@ impl crate::harness::Stage for WinUiStage {
         );
         Self::foreground_guest("shortcut");
 
-        // The REAL KeyboardAccelerator path: the chord goes onto the
-        // system input queue; XAML routes it to the accelerator whose
-        // default invocation raises the item's own Click — the SAME
-        // menu_activated the direct activation emits.
+        // The REAL KeyboardAccelerator path: the chord goes onto the system
+        // input queue; XAML routes it to the accelerator whose default
+        // invocation raises the item's own Click.
         let mut mods: Vec<u8> = Vec::new();
         let mut key: Option<u8> = None;
         for part in spec.split('+') {
@@ -16067,12 +13368,11 @@ impl crate::harness::Stage for WinUiStage {
     }
     fn click(&self, t: crate::harness::Target) {
         Self::on_ui(move |core| {
-            // A click on a TEXT KIND focuses it — what a native click
-            // does to a field, and the only way a scene can put focus
-            // on a STAMPED copy (no instance-addressed focus command
-            // exists for a guest to call). Programmatic FocusState, the
-            // same one the wire's focus command uses (:8606), so
-            // is_focused's per-element read sees it.
+                // A click on a TEXT KIND focuses it — what a native click does
+                // to a field, and the only way a scene can put focus on a
+                // STAMPED copy. Programmatic FocusState, the same one the
+                // wire's focus command uses, so is_focused's per-element
+                // read sees it.
             match t.kind {
                 crate::harness::TargetKind::Entry => {
                     let i = crate::harness::resolve(t.index, core.entries.len());
@@ -16108,50 +13408,24 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
-    /// The real-keystroke typing verb (docs/undo-plan.md A8). This
-    /// backend has not reached the undo slice, and a keystroke is
-    /// exactly where a stand-in would lie: a text write here would look
-    /// like typing and would CLEAR the native history the scene came to
-    /// observe, turning a missing arm into a passing leg.
-    /// The real-keystroke typing verb (docs/undo-plan.md A8), to the
-    /// contract's six points (crates/kaya/src/harness.rs).
-    ///
-    /// 1. THE PLATFORM'S OWN INPUT PATH: `keybd_event` puts each
-    ///    character on the SYSTEM INPUT QUEUE, the same call the
-    ///    `shortcut` verb uses and the same queue kaya's own chord hook
-    ///    watches — so the field's native undo stack fills exactly as a
-    ///    user's typing fills it. A `SetText` here would look like typing
-    ///    and would CLEAR the very history a native-tier scene exists to
-    ///    observe (§1.1's harness consequence).
-    /// 2. WHATEVER HOLDS FOCUS RECEIVES IT: nothing is addressed. The
-    ///    keys go on the queue and Windows routes them; kaya looks the
-    ///    focused field up only to place the caret and to know when the
-    ///    text has landed.
-    /// 3. IT APPENDS: the caret goes to the END with nothing selected
-    ///    before the first keystroke. MEASURED FREE ON THIS LANE (a
-    ///    programmatic Focus() leaves the caret where it was and selects
-    ///    nothing, and the selection move spends no undo step and raises
-    ///    no TextChanged) — and done anyway, because macOS selects a
-    ///    field's whole contents on focus and ONE script is compared
-    ///    byte-for-byte on all five lanes.
-    /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED: the settle below polls
-    ///    the CONTROL until it shows the full string. An action is not
-    ///    retried, and the action that follows this one in the scene is
-    ///    `menu_activate "Edit>Undo"` — a race there reads as a broken
-    ///    undo rather than a missed keystroke.
-    /// 5. NO SYNTHETIC COALESCING: one key-down/key-up pair per
-    ///    character, in order. Whether the platform merges them into one
-    ///    native step is the platform's business — and on this one it
-    ///    merges the WHOLE RUN (measured), which is why A1's clear at
-    ///    the episode boundary is load-bearing here.
-    /// 6. PRINTABLE ASCII ONLY: `parse` refuses anything else, and the
-    ///    per-character mapping is asked of the ACTIVE LAYOUT
-    ///    (VkKeyScanW) rather than hard-coded.
+    /// The real-keystroke typing verb (docs/undo-plan.md A8), to the contract's
+    /// six points (crates/kaya/src/harness.rs). What is platform here:
+    /// `keybd_event` puts each character on the SYSTEM INPUT QUEUE, so the
+    /// field's native undo stack fills as a user's does and a `SetText` would
+    /// CLEAR the very history a native-tier scene came to observe; nothing is
+    /// addressed, so whatever holds focus receives it; the caret goes to the
+    /// END before the first keystroke, because macOS selects a field's whole
+    /// contents on focus and ONE script runs on all five lanes; the settle
+    /// below blocks until the text has landed, since the next action is
+    /// `menu_activate "Edit>Undo"`; this platform merges the WHOLE RUN into
+    /// one native step (measured), which is what makes A1's clear at the
+    /// episode boundary load-bearing; printable ASCII only, mapped through the
+    /// ACTIVE LAYOUT (VkKeyScanW).
     fn type_text(&self, text: &str) {
         let text = text.to_owned();
-        // The caret first, and the field's text before the run — both
-        // read from the FOCUSED editable, which is the platform's answer
-        // to "who receives this", not kaya's.
+        // The caret first, and the field's text before the run — both read
+        // from the FOCUSED editable, the platform's answer to "who receives
+        // this", not kaya's.
         let before = Self::on_ui(|core| {
             let Some(id) = focused_editable_id(core) else {
                 return Ok(None);
@@ -16196,21 +13470,11 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
         }
-        // Point 4, and on this backend "processed" means MORE THAN THE
-        // CONTROL SHOWING IT. TextChanged is raised asynchronously, so
-        // the widget holds the typed text a beat before kaya has been
-        // told — and the action this verb exists to precede is
-        // `menu_activate "Edit>Undo"`, whose routing asks the LEDGER.
-        // Settling on the control alone is how the first windows leg of
-        // this scene undid the star group instead of the typing.
-        //
-        // So the condition is the ledger's own view of the field
-        // (`banked_text`, written beside every `note_text_changed`),
-        // which is exactly "every character delivered AND processed"
-        // spelled in the vocabulary of a backend whose change events
-        // are async. Nothing focused is legitimate under the contract
-        // ("the keys go where the platform sends them"), so there is
-        // nothing to wait for and a following assertion reports it.
+        // Point 4, and "processed" here means MORE THAN THE CONTROL SHOWING
+        // IT: TextChanged is raised asynchronously and the action this verb
+        // precedes is `menu_activate "Edit>Undo"`, whose routing asks the
+        // LEDGER, so the condition is `banked_text`. Nothing focused is
+        // legitimate under the contract, so a following assertion reports it.
         let Some((id, before)) = before else { return };
         let want = format!("{before}{text}");
         for _ in 0..400 {
@@ -16221,10 +13485,10 @@ impl crate::harness::Stage for WinUiStage {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        // NOT A PANIC, and not silence either: the keys were injected,
-        // so what follows is a real observation of a real state, and the
-        // scene's own `expect` is the verdict. This line is what tells
-        // whoever reads the transcript that the verb knew.
+        // NOT A PANIC, and not silence either: the keys were injected, so what
+        // follows is a real observation of a real state and the scene's own
+        // `expect` is the verdict. This line tells the transcript's reader
+        // that the verb knew.
         let shown = Self::on_ui_read(move |core| {
             Ok(editable_by_id(core, id)
                 .and_then(|field| field.text().ok())
@@ -16248,15 +13512,11 @@ impl crate::harness::Stage for WinUiStage {
         // on_ui_MUT, because this verb reaches the undo ledger: it
         // stands in for a user edit and the ledger is core state.
         Self::on_ui_mut(move |core| {
-            // The user path, ordered: TextChanged is raised async, so
-            // the occurrence is emitted here synchronously and the
-            // late raise swallowed — a following click can never
-            // overtake the edit (see entry_swallow).
-            //
-            // The handles are CLONED out of the core (WinRT objects are
-            // refcounted, so this is a refcount bump): the banking below
-            // borrows the core mutably, and a reference into `entries`
-            // held across it would not compile.
+            // The user path, ordered: TextChanged is raised async, so the
+            // occurrence is emitted here synchronously and the late raise
+            // swallowed (see entry_swallow). The handles are CLONED out of the
+            // core — a refcount bump — because the banking below borrows the
+            // core mutably.
             let (field, id) = if t.kind == crate::harness::TargetKind::Textarea {
                 let i = crate::harness::resolve(t.index, core.textareas.len());
                 (
@@ -16272,35 +13532,12 @@ impl crate::harness::Stage for WinUiStage {
                     swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 field.set_text(&text)?;
-                // AND THE LEDGER SEES IT FIRST, exactly as it does for a
-                // keystroke (§3's banking, and the same order the
-                // TextChanged handler uses: bank, then tell the app).
-                //
-                // THIS VERB IS A USER EDIT, not an app write. It writes
-                // the node's own text and emits the ordinary occurrence
-                // with the widget's identity tag, so the ledger must see
-                // what typing produces — undo.steps' stamped-row block
-                // stands on exactly that, a stamped copy having no way
-                // to be focused and therefore no way to be typed into.
-                // The swallow above is what makes the call NECESSARY
-                // here rather than duplicated: it silences the async
-                // raise that would otherwise carry this edit into
-                // `bank_text_changed` a tick later.
-                //
-                // MEASURED ON THE VM (2026-08-05) before it was
-                // written: with the bank absent, the occurrence still
-                // reached the guest carrying the copy's (node, path)
-                // identity — the scene's notes label read `notes 3=ha`
-                // — while the ledger's frontier stayed the enclosing
-                // group, so Edit>Undo took back the ADD and a row's
-                // typing was outside the history entirely. The tag, the
-                // core's resolution of it and the focus flag were all
-                // identical to mac's; only the banking call was
-                // missing. This backend was the only one with the
-                // split, because it is the only one whose set_text
-                // silences the control's own change event: mac banks
-                // inside `kaya_emit_text_changed` and GTK from the
-                // widget's `changed`.
+                // AND THE LEDGER SEES IT FIRST: this verb is a USER EDIT, not
+                // an app write, and undo.steps' stamped-row block stands on
+                // that. Measured on the VM 2026-08-05 with the bank absent:
+                // Edit>Undo took back the ADD and a row's typing was outside
+                // the history entirely, this backend being the only one
+                // whose set_text silences the control's own change event.
                 let _ = bank_text_changed_on(core, id, &text);
                 if let Some(tag) = core.entry_tags.get(&id) {
                     core.occurrences.send_text_tag(tag, &text);
@@ -16342,9 +13579,8 @@ impl crate::harness::Stage for WinUiStage {
             let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
                 return Ok("<no such target>".to_string());
             };
-            // The stored BitmapImage's decoded pixel size; no source
-            // (or a source that never decoded) is the placeholder
-            // class, "0x0".
+            // The stored BitmapImage's decoded pixel size; no source (or a
+            // source that never decoded) is the placeholder class, "0x0".
             let size = core.images[i]
                 .Source()
                 .ok()
@@ -16385,17 +13621,15 @@ impl crate::harness::Stage for WinUiStage {
     }
 
 
-    // The table verbs (docs/tables-plan.md): the details-view lowering
-    // is `declare_table` and the pass around it; everything below reads
-    // what those actually built.
+    // The table verbs (docs/tables-plan.md): everything below reads what
+    // `declare_table` and the pass around it actually built.
 
     fn columns_presented(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            // THE HEADER'S OWN TEXT, never the declaration: the titles
-            // come back off the real controls and the indicator is
-            // recovered from the GLYPH one of them is carrying, so a
-            // header that never rendered reads empty rather than
-            // agreeing with the record that arrived.
+            // THE HEADER'S OWN TEXT, never the declaration: the titles come
+            // back off the real controls and the indicator is recovered from
+            // the GLYPH one of them is carrying, so a header that never
+            // rendered reads empty rather than agreeing with the record.
             let Some(cells) = table_of(core, t, |table| table.cells.clone()) else {
                 return Ok(String::new());
             };
@@ -16421,9 +13655,8 @@ impl crate::harness::Stage for WinUiStage {
 
     fn row_cells(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            // The TOOLKIT's order on both levels — the tracks the rows
-            // and cells are actually placed in — because a sort is a
-            // MOVE and a creation-order registry cannot see one.
+            // The TOOLKIT's order on both levels — the tracks the rows and
+            // cells are actually placed in — because a sort is a MOVE.
             let Some(rows) = table_rows_in_track_order(core, t)? else {
                 return Ok("<no such target>".to_string());
             };
@@ -16464,14 +13697,12 @@ impl crate::harness::Stage for WinUiStage {
             // Measure/arrange are lazy; force them or the first read
             // after mount sees zeros (the child_shares precedent).
             grid.UpdateLayout()?;
-            // CLUSTERS, from REAL placement: every cell's leading edge in
-            // the table's own space — kaya's header cells included, since
-            // this backend composes the header — through the transform,
-            // never through the tracks that were asked for.
-            //
-            // BY LINE, because the header and a row can end in different
-            // places and one global maximum cannot see it (the
-            // `table_horizontal_issue` note).
+            // CLUSTERS, from REAL placement: every cell's leading edge in the
+            // table's own space (kaya's header cells included, since this
+            // backend composes the header) through the transform, never
+            // through the tracks that were asked for. BY LINE, because the
+            // header and a row can end in different places and one global
+            // maximum cannot see it.
             let surface: UIElement = grid.cast()?;
             let Some(rows) = table_rows_in_track_order(core, t)? else {
                 return Ok("<no such target>".to_string());
@@ -16516,10 +13747,10 @@ impl crate::harness::Stage for WinUiStage {
                     edges.push(ink_start);
                     min_start = min_start.min(ink_start);
                     max_end = max_end.max(ink_end);
-                    // Out of range is `table_floors`' own defensive skip,
-                    // one read over: the cell contributes no track edge
-                    // rather than a wrong one, and a placement the tracks
-                    // disagree with shows up in the cluster count.
+                    // Out of range is `table_floors`' own defensive skip: the
+                    // cell contributes no track edge rather than a wrong one,
+                    // and a placement the tracks disagree with shows up in
+                    // the cluster count.
                     let column = Grid::GetColumn(&element)? as usize;
                     if let Some(&(track_start, track_end)) = tracks.get(column) {
                         boxes.push(TableCellBox {
@@ -16556,27 +13787,22 @@ impl crate::harness::Stage for WinUiStage {
                 ));
             }
             // THE SPAN HALF, which alignment alone cannot see: a
-            // content-hugging table keeps every cluster exactly right
-            // while drawing in a corner of its assigned track. The
-            // resolved columns are also allowed to exceed neither the
-            // table surface's own horizontal viewport nor its padding.
-            //
-            // IN THE GRID'S CONTENT BOX: the cell edges above came out of
-            // TransformToVisual, whose origin is the grid's PADDING box,
-            // so the pads come off both the frame and the ink here (the
-            // `TableHorizontalIssue` note).
+            // content-hugging table keeps every cluster right while drawing in
+            // a corner of its track, so the resolved columns may exceed
+            // neither the surface's horizontal viewport nor its padding. The
+            // cell edges came out of TransformToVisual, whose origin is the
+            // grid's PADDING box, so the pads come off frame and ink both.
             let defs = header.ColumnDefinitions()?;
             let mut drawn = header.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1));
             for at in 0..defs.Size()? {
                 drawn += defs.GetAt(at)?.ActualWidth()?;
             }
-            // HOW FAR THE SURFACE CAN GO, off the toolkit's own metric:
-            // columns past the viewport are the ruling's normal state and
-            // convict nothing while the table can scroll to them. `at` is
-            // where it stands, added back below so the ink is read in the
-            // CONTENT's space — a table measured after a scroll is not
-            // convicted of the displacement the reader asked for. At rest
-            // it is 0 and every number is the table's own, as before.
+            // HOW FAR THE SURFACE CAN GO, off the toolkit's own metric: columns
+            // past the viewport are the ruling's normal state and convict
+            // nothing while the table can scroll to them. `at` is where it
+            // stands, added back below so the ink is read in the CONTENT's
+            // space — a table measured after a scroll is not convicted of the
+            // displacement the reader asked for.
             let (reach, at) = (host.ScrollableWidth()?, host.HorizontalOffset()?);
             let (track, viewport, min_start, min_end, max_end) = table_content_frame(
                 pad,
@@ -16636,34 +13862,30 @@ impl crate::harness::Stage for WinUiStage {
                            (docs/virtualization-plan.md §4 windows declared tables here)"
                     .to_owned());
             };
-            // The core maps the KEY to an index in the collection's
-            // CURRENT order and this tier scrolls that row to the
-            // viewport's TOP. A key the collection does not hold is the
-            // caller's bug and the core's fault sentence says so; this
-            // one names the verb.
+            // The core maps the KEY to an index in the collection's CURRENT
+            // order and this tier scrolls that row to the viewport's TOP. A key
+            // the collection does not hold is the caller's bug; this sentence
+            // names the verb.
             let scene = &mut core.scene;
             let Some(index) =
                 crate::fault::guard("scroll_to_row", || scene.scroll_to_row(id, &Value::Str(key.clone())))
             else {
                 return Ok(format!("no row carries the key {key:?}"));
             };
-            // SETTLE BEFORE MOVING. The viewport count this hands the
-            // core has to be a real one: a table whose first layout has
-            // not run yet reports no viewport at all, and the band it
-            // would ask for is the whole collection (measured on the lane
-            // 2026-08-25 — `scroll_to_row r200` carried a count of 300 on
-            // a 300-row scene, so the band never narrowed and the scroll
-            // had nothing to land on).
+            // SETTLE BEFORE MOVING: the viewport count this hands the core has
+            // to be a real one. A table whose first layout has not run reports
+            // no viewport at all, and the band it asks for is the whole
+            // collection (measured on the lane 2026-08-25 — `scroll_to_row
+            // r200` carried a count of 300 on a 300-row scene).
             table_settle(core, id);
             let count = TABLES
                 .with_borrow(|t| t.get(&id).and_then(|w| w.reported).map(|(_, c)| c))
                 .unwrap_or(1)
                 .max(1);
-            // THE BAND FOLLOWS THE ROW NEXT: the target is unrealized
-            // until it does, so there is nothing to scroll to yet — and
-            // the visible range may NOT be re-read in between, because
-            // the viewport is still where it was and would band straight
-            // back.
+            // THE BAND FOLLOWS THE ROW NEXT: the target is unrealized until it
+            // does, and the visible range may NOT be re-read in between,
+            // because the viewport is still where it was and would band
+            // straight back.
             TABLES.with_borrow_mut(|t| {
                 if let Some(w) = t.get_mut(&id) {
                     w.reported = Some((index, count));
@@ -16701,10 +13923,9 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn header_click(&self, t: crate::harness::Target, column: u32) {
-        // THE HEADER BUTTON'S OWN INVOKE, so the emission comes out of
-        // the Click handler a user would have run — the flyout and
-        // alert presses' route. The handle is read out and the borrow
-        // dropped before the invoke, because the handler it runs reads
+        // THE HEADER BUTTON'S OWN INVOKE, so the emission comes out of the
+        // Click handler a user would have run. The handle is read out and the
+        // borrow dropped before the invoke, because the handler it runs reads
         // the same table (the on_ui_bare lesson, one RefCell over).
         let cell = Self::on_ui_read(move |core| {
             Ok(table_of(core, t, |table| {
@@ -16833,12 +14054,10 @@ impl crate::harness::Stage for WinUiStage {
                     .map(|i| i as isize));
             }
             Ok(match kind {
-                // The buttons registry stores click TAGS by design (the
-                // stage's click path emits them directly), so there is
-                // no control to read an AutomationId off: button@id
-                // resolves None HERE ALONE, the dirty read-table's
-                // documented-divergence shape, until a scene needs it
-                // and the registry grows a controls vec.
+                // The buttons registry stores click TAGS by design (the stage's
+                // click path emits them directly), so there is no control to
+                // read an AutomationId off: button@id resolves None HERE
+                // ALONE, the dirty read-table's documented-divergence shape.
                 K::Button => find(&core.button_controls, &id),
                 K::Checkbox => find(&core.checkboxes, &id),
                 K::Slider => find(&core.sliders, &id),
@@ -16888,13 +14107,11 @@ impl crate::harness::Stage for WinUiStage {
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            // Kind picks the registry and the definition axis (the
-            // runner rejects any other kind before it gets here). The
-            // first Windows run of the row assertion caught this method
-            // still hard-wired to columns: row#0 resolved against the
-            // COLUMNS registry and reported the column's own splits —
-            // the registry-misresolution class, one backend short of a
-            // clean sweep.
+            // Kind picks the registry and the definition axis (the runner
+            // rejects any other kind before it gets here). The first Windows
+            // run of the row assertion caught this method still hard-wired to
+            // columns: row#0 resolved against the COLUMNS registry and
+            // reported the column's own splits.
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
@@ -16904,13 +14121,11 @@ impl crate::harness::Stage for WinUiStage {
             // Measure/arrange are lazy; force them or the first read
             // after mount sees zeros.
             grid.UpdateLayout()?;
-            // The TRACK's resolved extent, not the child's: on a Grid
-            // the track is the layout rect, and a child only fills it
-            // if it stretches. A TextBlock never does — it reports its
-            // text height however tall its row is — so reading children
-            // turned an exactly correct 25/75 split into 37/63. Same
-            // trap as AppKit's alignment rect and GTK's CSS box, in its
-            // third dialect.
+            // The TRACK's resolved extent, not the child's: on a Grid the track
+            // is the layout rect, and a child only fills it if it stretches. A
+            // TextBlock never does — it reports its text height however tall
+            // its row is — so reading children turned an exactly correct 25/75
+            // split into 37/63.
             let mut extents = Vec::new();
             if vertical {
                 let defs = grid.RowDefinitions()?;
@@ -16937,11 +14152,10 @@ impl crate::harness::Stage for WinUiStage {
             };
             let grid = &registry[i];
             let table = vertical && table_of(core, t, |_| ()).is_some();
-            // The DECLARED gap, recovered by COM identity the way
-            // cross_mode recovers the id: summing with the Grid's own
-            // RowSpacing/ColumnSpacing mirrored the lowering's write and
-            // could never catch it dropped (the GTK spacing GAP's
-            // sibling, 2026-08-22).
+            // The DECLARED gap, recovered by COM identity the way cross_mode
+            // recovers the id: summing with the Grid's own
+            // RowSpacing/ColumnSpacing would mirror the lowering's write and
+            // could never catch it dropped.
             let declared = core
                 .widgets
                 .iter()
@@ -16952,13 +14166,12 @@ impl crate::harness::Stage for WinUiStage {
                 .and_then(|wid| core.spacings.get(&wid).copied())
                 .unwrap_or(8.0);
             grid.UpdateLayout()?;
-            // A GROWN CONTAINER IS A FLEX CHILD TOO, and this clause
-            // comes first: its own box must span the track its weight
-            // earned before its children can span anything (the
-            // 2026-08-22 ruling; tools/scenes/align.steps, and the
-            // ledger entry "a nested SwiftUI container cannot fill its
-            // track"). One-sided like the widget read, and silent where
-            // no flex parent holds a track.
+            // A GROWN CONTAINER IS A FLEX CHILD TOO, and this clause comes
+            // first: its own box must span the track its weight earned before
+            // its children can span anything (tools/scenes/align.steps, and
+            // the ledger entry "a nested SwiftUI container cannot fill its
+            // track"). One-sided like the widget read, and silent where no
+            // flex parent holds a track.
             let element: FrameworkElement = grid.cast()?;
             if let FlexTrack::In { track, drawn } = flex_track(core, &element)? {
                 if track > 0.0 && drawn < track - 2.0 {
@@ -16969,15 +14182,11 @@ impl crate::harness::Stage for WinUiStage {
                     ));
                 }
             }
-            // THE BREADTH CLAUSE (the 2026-08-22 ruling): a CROSSING
-            // container — a row in a column, a column in a row — spans its
-            // parent's inner breadth under every align mode. `reindex`'s
-            // crossing stamp is what makes that true here, and this is what
-            // keeps it so: unstamp it and the child hugs, its Grid arranges
-            // at its natural breadth, and this fires. Skipped where no
-            // crossing flex parent holds it (the root, a same-axis parent)
-            // or where that parent has no layout yet — the Grid's own
-            // ActualWidth is honest, a Panel filling its arrange rect.
+            // THE BREADTH CLAUSE: a CROSSING container — a row in a column, a
+            // column in a row — spans its parent's inner breadth under every
+            // align mode, which `reindex`'s crossing stamp is what makes true.
+            // Skipped where no crossing flex parent holds it or where that
+            // parent has no layout yet.
             if let Ok(parent) = element.Parent()?.cast::<Grid>() {
                 let crossing = if vertical { &core.rows } else { &core.columns };
                 if crossing.iter().any(|g| g == &parent) {
@@ -17034,13 +14243,11 @@ impl crate::harness::Stage for WinUiStage {
                     defs.Size()?,
                 )
             };
-            // NO VERDICT OUT OF ZEROS (the ruling's second clause): a
-            // container the toolkit has not laid out yet would answer
-            // "fills" from 0 against 0, and tracks nobody defined would
-            // read as a leftover the size of the box. Both are failures
-            // here, so the poll retries a transient zero and only a
-            // lasting one is reported — and neither sentence claims
-            // more than it counted.
+            // NO VERDICT OUT OF ZEROS: a container the toolkit has not laid out
+            // yet would answer "fills" from 0 against 0, and tracks nobody
+            // defined would read as a leftover the size of the box. Both are
+            // failures here, so the poll retries a transient zero and only a
+            // lasting one is reported.
             if inner <= 0.0 {
                 return Ok("no container layout recorded".to_owned());
             }
@@ -17163,12 +14370,11 @@ impl crate::harness::Stage for WinUiStage {
 
     fn fold_state(&self, child: crate::harness::Target, table: Option<crate::harness::Target>) -> String {
         Self::on_ui_read(move |core| {
-            // Measured off the TREE, both halves (D7): the child's element
-            // is (or is not) inside the table's wrap — the scrolling side
-            // — never the model map alone, which would echo the Fold op.
-            // Column children only: the id registry this read rides is
-            // the columns', and every fold this rule can produce folds a
-            // container (a leaf would ride inside one).
+            // Measured off the TREE, both halves (D7): the child's element is
+            // (or is not) inside the table's wrap — the scrolling side — never
+            // the model map alone, which would echo the Fold op. Column
+            // children only: the id registry this read rides is the columns',
+            // and every fold this rule can produce folds a container.
             if !matches!(child.kind, crate::harness::TargetKind::Column) {
                 return Ok("<the fold read speaks column children only>".to_owned());
             }
@@ -17250,16 +14456,11 @@ impl crate::harness::Stage for WinUiStage {
                 let at = element
                     .TransformToVisual(&grid)?
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-                // A content-sized element ARRANGES TEXT-SIZED UNDER STRETCH:
-                // measured 2026-08-22, a TextBlock stamped Stretch in a 457dip
-                // cell reported ActualWidth 12.5 (its text) while the Button
-                // beside it reported 457 — TextBlock has no box to fill, so
-                // its RenderSize is the text whatever the arrange slot was.
-                // The child's BOX under resolved Stretch is therefore the
-                // slot, read here from the RESOLVED alignment — which is the
-                // lowering's own output, and loud on regression: an
-                // un-stamped tree keeps WinUI's Stretch default, which
-                // reddens every center/start scene rather than passing one.
+                // A content-sized element ARRANGES TEXT-SIZED UNDER STRETCH
+                // (docs/traps.md: A stretched WinUI TextBlock arranges
+                // text-sized), so the child's BOX under resolved Stretch is
+                // the slot, read from the RESOLVED alignment — the lowering's
+                // own output, and loud on regression.
                 let (start, extent) = if vertical {
                     if element.HorizontalAlignment()?
                         == bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
@@ -17301,21 +14502,18 @@ impl crate::harness::Stage for WinUiStage {
             if rects.is_empty() {
                 return Ok("no children".to_owned());
             }
-            // STRETCH FIRST, and alone: spanning geometry is DEGENERATE
-            // — a child at (0, inner) satisfies start, center AND end —
-            // so a stretched container could never classify by
-            // elimination (SwiftUI measured "ambiguous(4)" for every
-            // true stretch). All children spanning IS stretch; the
-            // positional modes classify only a container with a
-            // non-spanning child, and the separability burden stays the
-            // scene's (the 2026-08-22 ruling; tools/scenes/align.steps).
+            // STRETCH FIRST, and alone: spanning geometry is DEGENERATE — a
+            // child at (0, inner) satisfies start, center AND end — so a
+            // stretched container could never classify by elimination. All
+            // children spanning IS stretch; the positional modes classify
+            // only a container with a non-spanning child, and the
+            // separability burden stays the scene's (tools/scenes/align.steps).
             if rects.iter().all(|r| r.0.abs() <= 2.0 && (r.1 - inner).abs() <= 2.0) {
                 return Ok("stretch".to_owned());
             }
-            // Multi-match is ambiguity, and ambiguity fails loudly
-            // — a first-match answer lets an unseparated scene pass
-            // while proving nothing (the separability lesson, made
-            // structural).
+            // Multi-match is ambiguity, and ambiguity fails loudly: a
+            // first-match answer lets an unseparated scene pass while proving
+            // nothing.
             let mut matches = Vec::new();
             if rects.iter().all(|r| r.0.abs() <= 2.0) {
                 matches.push("start");
@@ -17368,25 +14566,12 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn window_dirty(&self, window: u64) -> bool {
-        // THE REAL OS CAPTION, not core.window_dirty (D5). The failure
-        // under test is a lowering that never reached the window, and a
-        // read of the flag this backend just stored would agree with
-        // itself and prove nothing.
-        //
-        // Window::Title() is the honest channel here, MEASURED rather
-        // than assumed: the probe held a window open, rewrote its HWND
-        // caption with SetWindowTextW from a SECOND PROCESS, and the
-        // in-guest harness read the rewritten string back — so this
-        // getter follows the OS caption and is not a XAML-side cache of
-        // what kaya last set (docs/probes/dirty-probe-windows.md §5).
-        //
-        // UNREADABLE IS NOT CLEAN. window_title answers an error with
-        // "<unreadable: ...>", which does not start with the marker and
-        // would therefore pass every `expect_dirty false` in the scene
-        // — a clean-window assertion satisfied because the read broke.
-        // This returns bool and has no third answer, so it refuses out
-        // loud instead, the way the macOS arm refuses on an unreadable
-        // AXEdited.
+        // THE REAL OS CAPTION, not core.window_dirty (D5): a read of the flag
+        // this backend just stored would agree with itself. `Window::Title()`
+        // follows the OS caption rather than caching what kaya set, measured
+        // by rewriting the HWND caption from a SECOND PROCESS
+        // (docs/probes/dirty-probe-windows.md §5). UNREADABLE IS NOT CLEAN, so
+        // this returns bool with no third answer and refuses out loud.
         let caption = <Self as crate::harness::Stage>::window_title(self, window);
         assert!(
             !caption.starts_with("<unreadable"),
@@ -17425,13 +14610,11 @@ impl crate::harness::Stage for WinUiStage {
             if live.window != window {
                 return Ok(None);
             }
-            // Present-gated: the stored handle answers before the
-            // popup is actually open, and an expect_alert that
-            // passed then let alert_choose press a not-yet-
-            // interactive dialog — the press dropped silently and
-            // the alert never retired (caught live 2026-07-22).
-            // IsLoaded flips when the dialog enters the tree, i.e.
-            // when the popup is really up and pressable.
+            // Present-gated: the stored handle answers before the popup is
+            // actually open, and an expect_alert that passed then let
+            // alert_choose press a not-yet-interactive dialog (docs/traps.md:
+            // Scripted settles were hiding four real WinUI bugs, (4)).
+            // IsLoaded flips when the dialog enters the tree.
             if !live.dialog.IsLoaded()? {
                 return Ok(None);
             }
@@ -17499,36 +14682,12 @@ impl crate::harness::Stage for WinUiStage {
         if !asked {
             return;
         }
-        // AND WAIT FOR IT TO ACTUALLY GO, which is what makes this verb
-        // mean the same thing here as it does on every other backend
-        // (CLAUDE.md invariant 1 — the idiom decides the spelling, never
-        // the semantics; gtk.rs's choose_alert waits for the same thing
-        // in GTK's vocabulary).
-        //
-        // `Hide()` and `Invoke()` only ASK. `ShowAsync`'s completion is
-        // what runs capi::alert_retire, and until it lands the one live
-        // slot is still taken — so an app that shows its NEXT alert from
-        // any other path walks into "alert N is already live" and that
-        // alert is never shown. MEASURED 2026-08-10, the editor leg:
-        // File>New's alert is cancelled and the window's close_requested
-        // shows the second one one millisecond later; the scene before
-        // it had already passed `expect_alert` against the FIRST dialog,
-        // still up. The guard ABORTED then, taking the run's verdict
-        // with it; it reddens the leg now (crates/kaya/src/fault.rs).
-        //
-        // THE OBSERVABLE IS capi's SLOT, not this backend's `live_alert`,
-        // and the difference is what makes the wait possible at all: the
-        // slot is a plain Mutex the harness thread reads directly, while
-        // every route into `CoreState` here holds a RefCell borrow that
-        // the completion itself needs (`capi::alert_is_live` says this in
-        // full). It is also the STRONGER condition — this backend clears
-        // `live_alert` first and retires second.
-        //
-        // A stuck alert dies LOUDLY: a silent give-up would leave the
-        // next expect_alert reading the wrong dialog and passing. The
-        // same two numbers every other observation gets, because this is
-        // a wait for an observable to settle and has no business
-        // inventing a second deadline.
+        // AND WAIT FOR IT TO ACTUALLY GO (CLAUDE.md invariant 1). `Hide()` and
+        // `Invoke()` only ASK; `ShowAsync`'s completion runs capi::alert_retire,
+        // and until it lands the one live slot is still taken, so the app's
+        // NEXT alert walks into "alert N is already live" (measured 2026-08-10,
+        // the editor leg). The observable is capi's SLOT, a plain Mutex the
+        // harness thread reads directly, and the stronger condition.
         let deadline = std::time::Instant::now() + crate::harness::POLL_DEADLINE;
         loop {
             if !crate::capi::alert_is_live() {
@@ -17800,14 +14959,11 @@ impl crate::harness::Stage for WinUiStage {
 
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
         // The REAL dialog, read through the shell's own view — never this
-        // backend's record of what it asked for. A picker aimed at the
-        // wrong place, or filtered down to nothing, presents perfectly and
-        // is useless.
-        //
-        // NOT over UI Automation, which cannot be used against this dialog
-        // at all — see sample_folder_view for the measured stack. NOT
-        // through on_ui_read either: the picker is a #32770 the shell
-        // owns, not a XAML object, and it runs on its own thread.
+        // backend's record of what it asked for. NOT over UI Automation,
+        // which cannot be used against this dialog at all (see
+        // sample_folder_view for the measured stack), and NOT through
+        // on_ui_read either: the picker is a #32770 the shell owns, not a
+        // XAML object, and it runs on its own thread.
         match sample_dialog() {
             Some(sampler::Sampled::Open(directory, rows)) => Some((directory, rows)),
             // A SAVE dialog is live, or none is. Either way no PICKER is,
@@ -17827,44 +14983,12 @@ impl crate::harness::Stage for WinUiStage {
 
     /// Type a name into the live save dialog's file-name box.
     ///
-    /// THE SAME POSTED KEYSTROKES `choose_file` USES, and posted for the
-    /// same measured reason: a `SendMessage` puts the dialog's thread into
-    /// an input-synchronous call, and everything in this dialog calls out
-    /// over COM while handling messages — the file-name box is backed by
-    /// shell autocomplete. Windows refuses those callouts with a
-    /// NONCONTINUABLE `RPC_E_CANTCALLOUT_ININPUTSYNCCALL`, which is fatal
-    /// under a JVM.
-    ///
-    /// EM_SETSEL(0, -1) FIRST, so the first character REPLACES the
-    /// suggested name instead of joining it. Without it the field would
-    /// read `copyfinal` and the read-back below would say so.
-    ///
-    /// POSTED AND THEN VERIFIED, IN A LOOP, and that loop is not caution —
-    /// it is the whole difference between this working and this silently
-    /// not. MEASURED 2026-08-09 on the lane VM: the FIRST burst of
-    /// characters a process posts into a freshly created save dialog's
-    /// name box is DISCARDED. Same window, same control (the log carried
-    /// one `dialog=0xd50584 edit=Some(1967526)` for both attempts), the
-    /// field still reading `"copy"` 50ms later; the identical burst on the
-    /// second attempt landed at once. It is not a readiness race that
-    /// waiting fixes — a 3000ms `settle` before a single post failed
-    /// exactly the same way. Only repeating works.
-    ///
-    /// THE SHARED SCENE CANNOT SEE THIS, which is why it was found with a
-    /// scratch script and is written down here. `save.steps` shows a save
-    /// dialog, CANCELS it, and types into the second one — so the single
-    /// post that this loop replaces passed the leg while a guest that put
-    /// up ONE save dialog and typed into it would have saved under the
-    /// SUGGESTED name, every byte assertion still green and pointing at
-    /// the wrong file. That is precisely the failure
-    /// `expect_save_dialog`'s name half exists to catch, hiding one dialog
-    /// upstream of where the scene looks.
-    ///
-    /// The other two dialog actions were already shaped this way —
-    /// `choose_file` and `confirm_save` both post-and-check until the
-    /// dialog goes — so this was the one single-shot action in the
-    /// backend. Silent to the scene either way: `expect_save_dialog` is
-    /// still what asserts the name.
+    /// POSTED KEYSTROKES, never `SendMessage`, whose input-synchronous call
+    /// gets its COM callouts refused with a NONCONTINUABLE
+    /// `RPC_E_CANTCALLOUT_ININPUTSYNCCALL`, fatal under a JVM. EM_SETSEL(0, -1)
+    /// first, so the first character REPLACES the suggested name. VERIFIED IN
+    /// A LOOP: the FIRST burst into a fresh save dialog's name box is
+    /// DISCARDED and only repeating fixes it (docs/probes/save-winui.md).
     fn set_save_name(&self, name: &str) {
         for _ in 0..40 {
             let Some(dialog) = live_dialog() else { return };
@@ -17884,32 +15008,12 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     /// Press the live save dialog's own Save or Cancel, and see the press
-    /// through — including the confirmation Windows may put in front of
-    /// it.
-    ///
-    /// THE OVERWRITE PROMPT IS THE REASON THIS IS NOT `choose_file` WITH
-    /// TWO IDS. `FOS_OVERWRITEPROMPT` is in the save dialog's DEFAULT
-    /// options (measured `0x880a`), and this backend keeps it, because
-    /// clearing it would make Windows the only platform that replaces a
-    /// file without asking. When it fires, the answer is a SECOND
-    /// top-level `#32770` titled "Confirm Save As" — and it is not a
-    /// classic dialog: its 17 descendants are a `DirectUIHWND` plus
-    /// `CtrlNotifySink`-wrapped Buttons WITH ID 0, so no id lookup finds
-    /// anything (measured, docs/probes/save-probe-windows.md §B.3). Class
-    /// plus caption does, and `BM_CLICK` on the "&Yes" button dismisses
-    /// it.
-    ///
-    /// LEAVING IT UNANSWERED DOES NOT FAIL, IT WEDGES: `Show()` never
-    /// returns, the apartment thread stays inside its nested modal loop
-    /// for the rest of the process's life, and the leg dies on a timeout
-    /// with a modal window still on the desktop. That is the one failure
-    /// shape a windows lane must not have.
-    ///
-    /// The shared scene never overwrites — it saves to a name in a
-    /// per-pid directory that nobody has made — so this arm is not covered
-    /// by the leg and cannot be, the script being byte-frozen across five
-    /// platforms. It was driven by hand on the VM instead
-    /// (docs/probes/save-winui.md §5).
+    /// through — including the confirmation Windows may put in front of it.
+    /// `FOS_OVERWRITEPROMPT` is in the DEFAULT options (measured `0x880a`) and
+    /// this backend keeps it, so a second `#32770` titled "Confirm Save As"
+    /// can appear, whose Buttons carry ID 0 and are found by class plus
+    /// caption (docs/probes/save-probe-windows.md §B.3). LEAVING IT UNANSWERED
+    /// DOES NOT FAIL, IT WEDGES: `Show()` never returns.
     fn confirm_save(&self, save: bool) {
         // The picker's loop, verbatim in shape: press, then wait for the
         // dialog to GO, because a press that lands before the dialog is
@@ -17933,23 +15037,20 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn choose_file(&self, name: Option<&str>) {
-        // POSTED, NEVER SENT. A SendMessage puts the receiving thread into
-        // an input-synchronous call, and everything in this dialog calls
-        // out over COM while handling messages; Windows refuses those
-        // callouts and raises RPC_E_CANTCALLOUT_ININPUTSYNCCALL, which is
-        // fatal under a JVM (sample_folder_view).
-        //
-        // The observable is the dialog GOING AWAY, so that is what this
-        // waits for rather than a return code: a press that lands before
-        // the list is interactive is swallowed with no error anywhere.
+        // POSTED, NEVER SENT: a SendMessage would put the receiving thread
+        // into an input-synchronous call, whose COM callouts Windows refuses
+        // with RPC_E_CANTCALLOUT_ININPUTSYNCCALL, fatal under a JVM
+        // (sample_folder_view). The observable is the dialog GOING AWAY: a
+        // press that lands before the list is interactive is swallowed with no
+        // error anywhere.
         for _ in 0..40 {
             let Some(dialog) = live_dialog() else { return };
             match name {
                 // Named in the dialog's own file-name box rather than by
-                // hit-testing a row: the rows are DirectUI items, not
-                // windows, so there is nothing to click. Typed a
-                // character at a time because WM_SETTEXT carries a
-                // pointer, and only SendMessage marshals one.
+                // hit-testing a row: the rows are DirectUI items, not windows,
+                // so there is nothing to click. Typed a character at a time
+                // because WM_SETTEXT carries a pointer, and only SendMessage
+                // marshals one.
                 Some(file) => {
                     if let Some(edit) = dialog_control(dialog, ID_FILENAME, "Edit") {
                         unsafe { PostMessageW(edit, EM_SETSEL, 0, -1) };
@@ -17978,17 +15079,12 @@ impl crate::harness::Stage for WinUiStage {
         }
     }
 
-    /// The foreign WRITER: Windows PowerShell 5.1 as a child of this
-    /// process — the guest runs in the interactive session, so its
-    /// children share the ONE real clipboard; an ssh-spawned tool would
-    /// get a per-connection window station with a clipboard of its own
-    /// (measured, docs/clipboard-plan.md §6). 5.1 and never pwsh:
-    /// -AsHtml, -LiteralPath, -Format and -TextFormatType all vanish
-    /// silently there, so the script asserts the edition.
-    ///
-    /// AND IT WAITS UNTIL THE CONTENT IS REALLY THERE: the script polls
-    /// the pasteboard's own Contains* after writing and prints
-    /// KAYA_SEEDED only when the seed is visible.
+    /// The foreign WRITER: Windows PowerShell 5.1 as a child of this process,
+    /// because its children share the ONE real clipboard where an ssh-spawned
+    /// tool would get a per-connection window station (measured,
+    /// docs/clipboard-plan.md §6). 5.1 and never pwsh, where the whole
+    /// clipboard cmdlet surface vanishes silently, so the script asserts the
+    /// edition and polls Contains* before printing KAYA_SEEDED.
     fn clipboard_seed(&self, kind: &str, argument: &str) {
         let script = match kind {
             "text" => format!(
@@ -18003,12 +15099,11 @@ impl crate::harness::Stage for WinUiStage {
                 a = ps_quote(argument)
             ),
             "image" => format!(
-                // Raw PNG bytes under the \"PNG\" registered format —
-                // the same shape wl-copy -t image/png seeds on linux:
-                // the seed writes the type the arm reads, and the
-                // MemoryStream form writes EXACT bytes (a plain
-                // string or object would ride WPF's serialized-object
-                // path that only PowerShell can read back).
+                // Raw PNG bytes under the "PNG" registered format, the same
+                // shape wl-copy -t image/png seeds on linux. The MemoryStream
+                // form writes EXACT bytes; a plain string or object would
+                // ride WPF's serialized-object path that only PowerShell can
+                // read back.
                 "Add-Type -AssemblyName PresentationCore; \
                  $b = [IO.File]::ReadAllBytes('{a}'); \
                  $ms = New-Object IO.MemoryStream (,$b); \
@@ -18035,17 +15130,12 @@ impl crate::harness::Stage for WinUiStage {
         );
     }
 
-    /// The foreign READER, per kind: text via Get-Clipboard -Raw;
-    /// html via PresentationCore's GetText(Html) — NEVER Get-Clipboard
-    /// -TextFormatType, which decodes the UTF-8 payload with the ANSI
-    /// code page and corrupts non-ASCII irreversibly — with the
-    /// CF_HTML fragment sliced out host-side by the same parser the
-    /// arm uses; an image as its DECODED size through GDI+ (a real
-    /// foreign decode of the PNG bytes, though a lenient one: both
-    /// stock decoders accept a bad IDAT CRC, so the strict-decoder
-    /// property lives on the linux lane alone — measured); files as
-    /// the first entry's basename (pbpaste parity); custom as the
-    /// exact bytes via GetData's MemoryStream.
+    /// The foreign READER, per kind: text via Get-Clipboard -Raw; html via
+    /// PresentationCore's GetText(Html) — NEVER Get-Clipboard -TextFormatType,
+    /// which decodes the UTF-8 payload with the ANSI code page and corrupts
+    /// non-ASCII irreversibly; an image as its DECODED size through GDI+ (both
+    /// stock decoders accept a bad IDAT CRC, so the strict-decoder property
+    /// lives on the linux lane alone); files as the first basename.
     fn clipboard_read(&self, kind: &str) -> String {
         match kind {
             "text" => lf(run_powershell(
@@ -18101,59 +15191,24 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn typeface(&self) -> String {
-        // THE RESOLVED FAMILY, ON A PLATFORM THAT CANNOT NAME IT.
-        //
-        // Four routes to the name were costed and three are dead here
-        // (docs/styling/typeface-winui.md §2, measured):
-        //   * `FontFamily.Source` is the request handed back. It answers
-        //     "did my write land on the object", never "did the text
-        //     system find that font" — the read Slice 2b forbids.
-        //   * UIA's `FontNameAttribute` needs the Text pattern, and
-        //     WinUI's in-process automation peer for a text control
-        //     publishes none (`GetPattern(Text)` is NULL on both text
-        //     controls — this backend measured that for the a11y read
-        //     and wrote it down at the background-colour arm).
-        //   * An out-of-process UIA client is barred at
-        //     crates/kaya/Cargo.toml, deliberately: it kills the java
-        //     leg through the Shell's file dialog.
-        // So the name is not readable. What IS readable is what the text
-        // system DID, and that is the read this uses: lay a pinned
-        // string out in XAML's own text stack and take its measured
-        // extent. Two numbers for one string are a fingerprint of the
-        // face that really rendered, and — unlike every name route — a
-        // fallback cannot fake them.
-        //
-        // THE ROUTES IT COVERS, and they are different mechanisms rather
-        // than three views of one: a Label is a bare TextBlock carrying
-        // a LOCAL family (`text_block`), while an Entry and a Textarea
-        // are Controls whose family arrives through the implicit style's
-        // `ContentControlThemeFontFamily` — the app-dictionary override.
-        // A lowering that lost either would show up here as a
-        // disagreement rather than as a pass, which is the shape that
-        // caught a deleted root font on the mac arm.
+        // THE RESOLVED FAMILY, ON A PLATFORM THAT CANNOT NAME IT: three routes
+        // to the name are dead (docs/styling/typeface-winui.md §2) —
+        // `FontFamily.Source` is the request handed back, `FontNameAttribute`
+        // needs a Text pattern the in-process peer does not publish, and an
+        // out-of-process UIA client is barred at crates/kaya/Cargo.toml. So
+        // the read is what the text system DID with a pinned string.
         Self::on_ui_read(move |core| {
             let brand = brand_typeface();
-            // Pending layout is forced before anything is measured, for
-            // the reason every extent read in this file does it: a
-            // measurement taken with layout outstanding is the previous
-            // pass's answer.
-            //
-            // IT IS NOT A SETTLE, AND THAT WAS MEASURED RATHER THAN
-            // ASSUMED. A Control carries its FontFamily DP DEFAULT until
-            // the implicit style is applied, and that happens on a later
-            // turn of the message pump than this: with `UpdateLayout` in
-            // place the first poll still saw the entry asking for
-            // `Segoe UI Variable` (this SDK's default) and the second saw
-            // Georgia. What covers the window is the verb's own bounded
-            // retry — and the RACE ONLY RUNS ONE WAY, which is what makes
-            // that safe: the transient is the UNBRANDED default and the
-            // settled state is the brand, so a read that says Georgia
-            // cannot be a lucky early sample.
+            // Pending layout is forced first: a measurement taken with layout
+            // outstanding is the previous pass's answer. IT IS NOT A SETTLE — a
+            // Control carries its FontFamily DP DEFAULT until the implicit
+            // style is applied a later turn of the pump (the first poll saw
+            // `Segoe UI Variable`, the second Georgia) — and the race runs ONE
+            // WAY, so a read that says Georgia is not a lucky early sample.
             let root: FrameworkElement = core.window.Content()?.cast()?;
             root.UpdateLayout()?;
-            // The reference the whole read turns on: what a family this
-            // machine cannot have looks like after XAML has laid it out.
-            // Every route that measures the same as this one fell back.
+            // The reference the whole read turns on: what a family this machine
+            // cannot have looks like after XAML has laid it out.
             let absent = typeface_fingerprint(TYPEFACE_ABSENT)?;
             let mut views: Vec<(String, String)> = Vec::new();
             let mut any_fell_back = false;
@@ -18197,13 +15252,11 @@ impl crate::harness::Stage for WinUiStage {
                         .join(", ")
                 ));
             }
-            // THE NOTE IS ONLY EVER FAILURE TEXT, and it is attached
-            // under one condition: a brand was DECLARED and the text
-            // system did not use it. A brandless app resolving to the
-            // platform's own face is the right answer and gets the bare
-            // name; a branded app that fell back gets the name plus the
-            // one measurement that says which half broke. Both branches
-            // print numbers this process went and got.
+            // THE NOTE IS ONLY EVER FAILURE TEXT, attached under one
+            // condition: a brand was DECLARED and the text system did not use
+            // it. A brandless app resolving to the platform's own face gets
+            // the bare name; a branded app that fell back gets the name plus
+            // the measurement that says which half broke.
             match brand {
                 Some(source) if any_fell_back => Ok(typeface_fallback_note(
                     &first,
@@ -18217,16 +15270,11 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// THE PICTURE THE SHELL WILL DRAW, in pixels, off the HWND — not off
-    /// `TitleBar.IconSource` and not off anything kaya stored
-    /// (docs/app-identity-plan.md I8).
-    ///
-    /// Reading kaya's own model is worthless. Reading `TitleBar.IconSource`
-    /// back is an ECHO: it hands over the same object kaya just stored, so
-    /// sixteen zero bytes would read identically to a real PNG.
-    /// `WM_GETICON` is answered out of USER32's own per-window state — the
-    /// very thing the taskbar and alt-tab read — and the bitmap behind it
-    /// is what `CreateIconFromResourceEx` actually produced, so these four
+    /// THE PICTURE THE SHELL WILL DRAW, in pixels, off the HWND
+    /// (docs/app-identity-plan.md I8). Reading `TitleBar.IconSource` back is
+    /// an ECHO — it hands over the same object kaya just stored, so sixteen
+    /// zero bytes would read identically to a real PNG — while `WM_GETICON`
+    /// is answered out of USER32's own per-window state, so these four
     /// samples prove the CONVERSION.
     fn app_icon(&self) -> String {
         Self::on_ui_read(move |core| {
@@ -18294,20 +15342,12 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     /// THE BLIT, out of DWM's print of this window's composited content
-    /// (§7.2) — the mac's window read in this platform's spelling, and
-    /// the only canvas read that fails when the buffer never reached the
-    /// platform's image object OR reached it swizzled.
-    ///
-    /// NOT `RenderTargetBitmap`, which is what this used to be:
-    /// `RenderAsync` completes with the right size and `GetPixelsAsync`
-    /// then hands back a NULL buffer under S_OK on a display-only
-    /// adapter, for every element tried (docs/traps.md). `PrintWindow`
-    /// asks the compositor for what the user can see instead, and it is
-    /// SYNCHRONOUS — no request, no completion handler, no generation to
-    /// key a stale photograph by, and nothing left outstanding when the
-    /// harness's own retry comes round again.
-    ///
-    /// Every angle-bracketed answer says what it MEASURED (invariant 3).
+    /// (docs/canvas-plan.md §7.2) — the only canvas read that fails when the
+    /// buffer never reached the platform's image object OR reached it
+    /// swizzled. NOT `RenderTargetBitmap`, whose `GetPixelsAsync` hands back
+    /// a NULL buffer under S_OK on a display-only adapter (docs/traps.md);
+    /// `PrintWindow` is synchronous and leaves nothing outstanding. Every
+    /// angle-bracketed answer says what it MEASURED (invariant 3).
     fn canvas_ink(&self, target: crate::harness::Target, points: &str) -> String {
         let points = points.to_owned();
         Self::on_ui_read(move |core| {
@@ -18360,9 +15400,8 @@ impl crate::harness::Stage for WinUiStage {
             root.UpdateLayout()?;
             // The mounted root is a Grid for the container kinds and a
             // ScrollViewer for a scroll-rooted scene (the portfolio
-            // dashboard) — the read broke on the cast alone before the
-            // scroll arm existed, the same hole as the padding stamp's
-            // (2026-08-30).
+            // dashboard): the read broke on the cast alone before the scroll
+            // arm existed, the same hole as the padding stamp's.
             let child: UIElement = if let Ok(grid) = root.cast::<Grid>() {
                 grid.Children()?.GetAt(0)?
             } else if let Ok(viewer) = root.cast::<ScrollViewer>() {
@@ -18373,13 +15412,10 @@ impl crate::harness::Stage for WinUiStage {
             let transform = child.TransformToVisual(&root)?;
             let origin = transform
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-            // The root's one Padding carries the root CONTAINER's own
-            // inset too, when it declares one (container_padding — WinUI
-            // has a single Padding where SwiftUI and Compose nest two
-            // boxes), and that number belongs to the other read. The
-            // primary window's root is the one Content holds; zero
-            // unless a scene puts an inset on it, which leaves this
-            // exactly what it measured.
+            // The root's one Padding carries the root CONTAINER's own inset too
+            // when it declares one (container_padding — WinUI has a single
+            // Padding where SwiftUI and Compose nest two boxes), and that
+            // number belongs to the other read.
             let own = core
                 .mounted_roots
                 .get(&0)
@@ -18399,15 +15435,12 @@ impl crate::harness::Stage for WinUiStage {
 
     fn container_inset(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            // The walk `inset` does, one level down: a Grid's Padding
-            // offsets its first track, so the first child's arranged
-            // origin inside its container IS the container's inset.
-            // MEASURED, never Padding read back out of the property the
-            // apply arm wrote — a read-back would pass with no lowering.
-            //
-            // Through target_element because that is the one registry
-            // table, and a target that is not a container is refused
-            // rather than measured.
+            // The walk `inset` does, one level down: a Grid's Padding offsets
+            // its first track, so the first child's arranged origin inside its
+            // container IS the container's inset. MEASURED, never Padding
+            // read back out of the property the apply arm wrote — a read-back
+            // would pass with no lowering. Through target_element, so a
+            // target that is not a container is refused rather than measured.
             let Some(element) = target_element(core, target)? else {
                 return Ok("<no such target>".to_owned());
             };
@@ -18509,15 +15542,11 @@ impl crate::harness::Stage for WinUiStage {
 
     fn sections_presentation(&self, window: u64) -> String {
             // THE CONTROL'S OWN ANSWER, the way split_presentation asks
-            // TwoPaneView for its Mode: the pane position IS a property of
-            // the live NavigationView. A mirror written beside the
+            // TwoPaneView for its Mode: a mirror written beside the
             // SetPaneDisplayMode call would agree with that call by
-            // construction and could never fail.
-            //
-            // WHAT IT MEASURES: where the pane is PUT, not where it landed
-            // — enough to tell the two arms apart, and it catches a window
-            // whose nav was never built and a hint change that never
-            // re-ran the arm.
+            // construction and could never fail. It measures where the pane
+            // is PUT, not where it landed — enough to tell the two arms
+            // apart, and it catches a window whose nav was never built.
         Self::on_ui_read(move |core| {
             let Some(nav) = core.section_navs.get(&window) else {
                 // Never a default arm: this window has no sections
@@ -18526,19 +15555,16 @@ impl crate::harness::Stage for WinUiStage {
             };
             Ok(match nav.PaneDisplayMode()? {
                 NavigationViewPaneDisplayMode::Top => "bar".to_owned(),
-                // Every LEFT spelling is the design's `sidebar`: the
-                // compact rail and the minimal hamburger are the same
-                // leading-edge pane in less width. The arm asks for
-                // plain Left today, so those two are unreached; they
-                // are here so a later adaptive arm reads correctly
-                // rather than falling into the unnamed branch.
+                // Every LEFT spelling is the design's `sidebar`: the compact
+                // rail and the minimal hamburger are the same leading-edge
+                // pane in less width. The arm asks for plain Left today, so
+                // those two are here for a later adaptive arm.
                 NavigationViewPaneDisplayMode::Left
                 | NavigationViewPaneDisplayMode::LeftCompact
                 | NavigationViewPaneDisplayMode::LeftMinimal => "sidebar".to_owned(),
-                // Auto is the control's construction default and
-                // neither arm sets it, so a nav still wearing one never
-                // reached SetPaneDisplayMode. Only the mode itself is
-                // printed — that is what was read.
+                // Auto is the control's construction default and neither arm
+                // sets it, so a nav still wearing one never reached
+                // SetPaneDisplayMode.
                 NavigationViewPaneDisplayMode::Auto => "pane display mode auto".to_owned(),
                 other => format!("pane display mode {}", other.0),
             })
@@ -18587,14 +15613,11 @@ impl crate::harness::Stage for WinUiStage {
     fn section_symbol(&self, title: &str) -> String {
         let title = title.to_owned();
         // THE ICON THE REAL ITEM CARRIES — the automation name of the
-        // IconElement in the NavigationViewItem's own Icon slot, which is
-        // `toolbar_item`'s read one control over, and never
+        // IconElement in the NavigationViewItem's own Icon slot, never
         // `WinSection::symbol` beside it. The item's OWN uia name is its
-        // Content, i.e. the title, so the two halves come off two
-        // different properties of the same real element.
-        //
-        // EVERY WINDOW, in id order: the sections scene's sidebar rows
-        // live in an aux window.
+        // Content, i.e. the title, so the two halves come off two different
+        // properties of the same real element. EVERY WINDOW, in id order:
+        // the sections scene's sidebar rows live in an aux window.
         Self::on_ui_read(move |core| {
             use windows_core::Interface;
             let mut windows: Vec<u64> = core.section_navs.keys().copied().collect();
@@ -18620,14 +15643,11 @@ impl crate::harness::Stage for WinUiStage {
                     }
                     return Ok(match item.Icon() {
                         Ok(icon) => icon_uia_name(&icon),
-                        // The empty slot arrives as a success-coded
-                        // error (the `MenuIcon::Empty` rule): the
-                        // property returns a null pointer and
-                        // windows-core turns that into E_POINTER. What
-                        // this measured is that the row is in the real
-                        // switcher and carries no icon at all — it says
-                        // nothing about whether the app declared a
-                        // symbol, which this reader cannot tell it from.
+                        // The empty slot arrives as a success-coded error (the
+                        // `MenuIcon::Empty` rule). What this measured is that
+                        // the row is in the real switcher and carries no icon
+                        // — never whether the app declared a symbol, which
+                        // this reader cannot tell it from.
                         Err(e) if e.code().is_ok() => {
                             format!("the section row {title} carries no icon")
                         }
@@ -18668,13 +15688,11 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn finish(&self, code: i32, verdict: &str) {
-        // THE APARTMENT GUARD, on the path every scene in every
-        // language leaves by. A first-chance RPC_E_DISCONNECTED means
-        // some apartment in this process closed while the Shell still
-        // held proxies into it — the defect `dialog_apartment`
-        // describes — and four of the five guest runtimes swallow it
-        // without a mark, so the scene has to be the one that looks.
-        // A green scene that raised one is not a green scene.
+        // THE APARTMENT GUARD, on the path every scene in every language
+        // leaves by. A first-chance RPC_E_DISCONNECTED means some apartment
+        // in this process closed while the Shell still held proxies into it —
+        // the defect `dialog_apartment` describes — and four of the five
+        // guest runtimes swallow it without a mark, so the scene has to look.
         let disconnects = COM_DISCONNECTS.load(std::sync::atomic::Ordering::Relaxed);
         let synthesized;
         let (code, verdict) = if code == 0 && disconnects > 0 {
@@ -18692,13 +15710,11 @@ impl crate::harness::Stage for WinUiStage {
         } else {
             eprintln!("{verdict}");
         }
-        // THE HOP IS THE EXIT (docs/traps.md "exit() is not final on
-        // Windows"): the orderly path is ExitProcess, which TERMINATES
-        // the grace's own threads before the loader shutdown it then
-        // wedges in — seven dialog legs held ~60s past their verdict
-        // with no grace sentence, the watchdog dead by the exit it
-        // guarded (2026-08-27). The verdict is out; nothing orderly is
-        // owed. request_exit stays the non-harness close path.
+        // THE HOP IS THE EXIT (docs/traps.md: exit() is not final on Windows):
+        // the orderly path is ExitProcess, which TERMINATES the grace's own
+        // threads before the loader shutdown it then wedges in — seven dialog
+        // legs held ~60s past their verdict with no grace sentence. The
+        // verdict is out; request_exit stays the non-harness close path.
         Self::on_ui(move |_| -> windows_core::Result<()> {
             crate::harness::harness_exit(code)
         });
@@ -18706,11 +15722,9 @@ impl crate::harness::Stage for WinUiStage {
 }
 
 
-/// The widget id behind a harness target, recovered by COM identity
-/// from the creation-ordered registry (the cross_mode precedent).
-/// Context anchors in the scenes are labels; other kinds join as
-/// scenes demand them — an unwired kind fails loudly, never silently
-/// (the is_focused stance).
+/// The widget id behind a harness target, recovered by COM identity from the
+/// creation-ordered registry. Context anchors in the scenes are labels;
+/// other kinds join as scenes demand them — an unwired kind fails loudly.
 // Harness-only, like GTK's context_anchor_id: its sole caller is the
 // Stage impl and it speaks harness types.
 #[cfg(feature = "harness")]
@@ -18727,19 +15741,12 @@ fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
                 })
                 .expect("registry labels live in the widget table")
         }
-        // ACCESSIBILITY needs every kind, not just the Label this function
-        // was written for. a11y_id/a11y_label are universal props, so
-        // Stage::ax can target anything.
-        //
-        // The arm below used to be `panic!` for every non-Label kind,
-        // which is how the WinUI accessibility read died on its first live
-        // run (2026-07-25) — inside the UI closure, so the dispatcher
-        // surfaced it as an opaque `RecvError`. Returning 0 makes the
-        // caller report "no such target", a legible failure.
-        //
-        // NOT YET RESOLVED: the remaining kinds need real lookups. Button
-        // and Checkbox are STRUCT variants and core.buttons holds tags
-        // rather than widgets.
+        // ACCESSIBILITY needs every kind, not just the Label this function was
+        // written for, so returning 0 makes the caller report "no such
+        // target" — a panic here is raised inside the UI closure and surfaces
+        // as an opaque `RecvError`. NOT YET RESOLVED: the remaining kinds need
+        // real lookups; Button and Checkbox are STRUCT variants and
+        // core.buttons holds tags rather than widgets.
         _ => 0,
     }
 }
@@ -18777,22 +15784,18 @@ fn find_template_button(
 #[cfg(feature = "harness")]
 const UNMAPPED_ROLE: &str = "unknown";
 
-/// THE ROLE HALF OF THE `ax` VERB, as a pure function of the two things
-/// UIA answered with — nothing else in `ax` can be reached off Windows,
-/// and this part is where the ordering bug lives.
-///
-/// `heading` comes FIRST, which is the whole reason this is a function
-/// rather than an inline ladder: UIA has no heading control type, so a
-/// heading TextBlock reports `Text`, and a ladder that consulted the type
-/// first would answer `label` for every heading kaya declares. The
-/// compiler cannot see that ordering, so `mod tests` below does.
+/// THE ROLE HALF OF THE `ax` VERB, as a pure function of the two things UIA
+/// answered with. `heading` comes FIRST, which is the whole reason this is a
+/// function rather than an inline ladder: UIA has no heading control type,
+/// so a heading TextBlock reports `Text` and a type-first ladder would
+/// answer `label` for every heading kaya declares. The compiler cannot see
+/// that ordering, so `mod tests` below does.
 #[cfg(feature = "harness")]
 fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
     if heading {
         // Spelled the way every other backend spells it,
         // `heading/<the label's text>` — ONE word for all nine levels,
-        // because the closed set names the ROLE and a shared scene
-        // cannot freeze a per-platform level ladder
+        // because a shared scene cannot freeze a per-platform level ladder
         // (docs/styling-plan.md D4).
         "heading"
     } else if kind == AutomationControlType::Button {
@@ -18818,11 +15821,10 @@ fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
         || kind == AutomationControlType::Pane
         || kind == AutomationControlType::List
     {
-        // NORMALIZED to the coarsest container role every platform
-        // publishes. UIA distinguishes Group, Pane and List (a
-        // RadioButtons group is a List here); the closed set has one
-        // name for "a container an assistive client steps into",
-        // because that is all a shared scene can assert.
+        // NORMALIZED to the coarsest container role every platform publishes:
+        // UIA distinguishes Group, Pane and List (a RadioButtons group is a
+        // List here), and the closed set has one name for "a container an
+        // assistive client steps into".
         "group"
     } else {
         UNMAPPED_ROLE
@@ -18833,36 +15835,12 @@ fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
 mod tests {
     use super::*;
 
-    /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE
-    /// DID, and does it ONCE PER CONTAINER PER BATCH.
-    ///
-    /// `reindex` used to run at the end of every AddChild: it clears the
-    /// container's RowDefinitions, rebuilds one per child and writes
-    /// `Grid::SetRow` on every sibling, so N appends were N^2/2 WinRT
-    /// round trips — 4.7s for 2,500 rows, 77.6s for 10,000, and this
-    /// platform's choke at 12,000
-    /// (docs/measurements/choke-windows-2026-08-24.txt). It runs once per
-    /// container at the batch boundary now, and THE LAYOUT MAY NOT MOVE
-    /// BY ONE TRACK for that.
-    ///
-    /// Six batches over the real `ChildOrder`, each isolating one of its
-    /// methods so that method's mark is load-bearing, and the last one
-    /// mixed the way a For's update is (a row appended, one removed, one
-    /// re-ordered). Each batch runs twice: EAGER re-stamps the container
-    /// each edit named, right after the edit — the pre-fix arm — while
-    /// DEFERRED runs the whole batch and then re-stamps only what
-    /// `next_due` hands back, which is `flush_tracks`' loop with
-    /// `reindex`'s COM half replaced by the placement it writes. The two
-    /// are compared AFTER EVERY BATCH, because a mark dropped in one
-    /// method is repaired by the next batch that marks for another
-    /// reason: only the per-batch comparison can see it.
-    ///
-    /// The frozen rows beside them are what makes this more than the two
-    /// runs agreeing: they pin the table's head track (a declared table's
-    /// rows are placed in its BAND PANEL, one track down past the top
-    /// spacer — docs/virtualization-plan.md §4; the header and the rule
-    /// are the CONTAINER's own two tracks, in front of the scroll host
-    /// the band lives in) and the order every edit leaves.
+    /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE DID,
+    /// once per container per batch. `reindex` rebuilds every track and
+    /// re-writes every sibling's index, so running it per AddChild made N
+    /// appends N^2/2 WinRT round trips — 4.7s for 2,500 rows, 77.6s for
+    /// 10,000, choking at 12,000
+    /// (docs/measurements/choke-windows-2026-08-24.txt).
     #[test]
     fn the_deferred_rebuild_places_every_child_where_the_eager_one_did() {
         use std::collections::BTreeMap;
@@ -19046,19 +16024,12 @@ mod tests {
         assert_eq!(band_spacers(100.0, 200.0, 150.0), (100.0, 0.0));
     }
 
-    /// WHAT `expect_window` COMPARES is the FIRST VISIBLE row, read off
-    /// the band's own tracks — not the band's first, which carries a
-    /// viewport of overscan above it.
-    ///
-    /// The fallback is the half that had to be written down: a viewport
-    /// parked in a SPACER has no row to read, and the only thing this
-    /// tier can measure there is the collection's mean row out of the
-    /// core's extent. It is an estimate, it says so, and the next cycle
-    /// reads real tracks.
-    ///
-    /// And a cycle with NEITHER — no viewport and no extent — measured
-    /// nothing and answers `None`; `a_report_may_not_be_the_band_it_was_given`
-    /// below is why that is not merely tidy.
+    /// WHAT `expect_window` COMPARES is the FIRST VISIBLE row, read off the
+    /// band's own tracks — not the band's first, which carries a viewport of
+    /// overscan above it. A viewport parked in a SPACER has no row to read,
+    /// so the tier answers with the collection's mean row, says it is an
+    /// estimate, and reads real tracks next cycle; with NEITHER viewport nor
+    /// extent it measured nothing and answers `None`.
     #[test]
     fn the_first_visible_row_is_read_off_the_band_then_estimated() {
         let geometry = |first: usize, count: usize| crate::scene::WindowGeometry {
@@ -19133,27 +16104,13 @@ mod tests {
         assert_eq!(table_visible_rows(&empty, 0.0, &[], 0.0, 400.0), Some((0, 0)));
     }
 
-    /// THE FIXPOINT THE REPORT LOOP RESTS ON, driven against the CORE's
-    /// own band arithmetic rather than asserted about one function.
-    ///
-    /// What this tier reports is what `RowWindow::band` bands, and that
-    /// adds an overscan to every report — so a cycle that answers with
-    /// the realized band's own count hands the core a band twice the
-    /// size, and the next cycle reads the bigger one and does it again.
-    /// Measured on the lane 2026-08-25 with the trace on: `band 0+128`,
-    /// `0+256`, `0+512`, `0+1024`, `0+2048`, `0+4096`, every line
-    /// carrying `vh 0.0` — the whole 15,000-row collection realized
-    /// before the ScrollViewer had ever been laid out, which took
-    /// the transactions view's `expect_column_edges` from 6ms to 5.8 SECONDS
-    /// standalone and past the retry window under the matrix
-    /// (docs/traps.md, "The band that fed itself").
-    ///
-    /// NO SCENE CAN FAIL THIS. The band's width is a viewport metric and
-    /// left `expect_window` deliberately (docs/virtualization-plan.md
-    /// §5), so a tier that realizes every row answers every windowing
-    /// observable correctly — it just does it slowly enough to lose the
-    /// leg on a loaded machine. That is check-native-undo's shape: the
-    /// wall is static or it is nothing.
+    /// THE FIXPOINT THE REPORT LOOP RESTS ON, driven against the CORE's own
+    /// band arithmetic. `RowWindow::band` adds an overscan to every report, so
+    /// a cycle answering with the realized band's own count hands the core a
+    /// band twice the size and the next cycle doubles again (docs/traps.md:
+    /// The band that fed itself). NO SCENE CAN FAIL THIS: a tier that
+    /// realizes every row answers every windowing observable correctly and
+    /// just does it slowly (docs/virtualization-plan.md §5).
     #[test]
     fn a_report_may_not_be_the_band_it_was_given() {
         let total = 15_000;
@@ -19200,23 +16157,12 @@ mod tests {
         assert_eq!(fed.band(total), 0..512);
     }
 
-    /// THE FOUR LINKS OF THE REPORT LOOP, HELD STATICALLY — because no
-    /// scene can fail one of them.
-    ///
-    /// MEASURED HERE 2026-08-25, with the perturbation watched: delete
-    /// the range report from `table_report_once` and windowed.steps,
-    /// portfolio.steps and varied.steps ALL STAY GREEN. Every scroll in
-    /// every scene is `scroll_to_row`, which bands explicitly at its own
-    /// call site, and `expect_window` on a tier that realized every row
-    /// answers `0 <n> <n>` — truthfully (docs/virtualization-plan.md §5).
-    /// So the link whose absence costs the whole milestone — the band
-    /// never narrows at first layout, never follows a resize and never
-    /// follows the reader — is invisible to the harness. That is
-    /// check-native-undo's shape: a pair no scene can fail is held
-    /// statically or not at all.
-    ///
-    /// The other three are red on a scene today and held here anyway, so
-    /// that a scene rewritten tomorrow cannot quietly take the wall away.
+    /// THE FOUR LINKS OF THE REPORT LOOP, HELD STATICALLY — because no scene
+    /// can fail one of them. Measured 2026-08-25 with the perturbation
+    /// watched: delete the range report from `table_report_once` and
+    /// windowed.steps, portfolio.steps and varied.steps ALL STAY GREEN, since
+    /// every scroll is `scroll_to_row`, which bands at its own call site
+    /// (docs/virtualization-plan.md §5).
     #[test]
     fn every_link_of_the_report_loop_is_still_wired() {
         const SRC: &str = include_str!("mod.rs");
@@ -19281,21 +16227,13 @@ mod tests {
         assert!(!table_content_fits(102.1, 100.0));
     }
 
-    /// SIX CAUSES, SIX SENTENCES, and the precedence between them — the
-    /// half a refactor loses. Both sides of every 2.0 boundary are
-    /// pinned, because that slack is what keeps a subpixel arrange from
-    /// reddening a correct table.
-    ///
-    /// The ColumnsUnreachable case is the measured one this exists for:
-    /// before the split, a table whose resolved columns overflowed a
-    /// 300dip viewport while its ink stayed inside printed "cells span
-    /// 290dip inside a 300dip viewport" — two numbers asserting the
-    /// opposite of the failure, on a red leg.
-    ///
-    /// The two UNDERFILL directions joined 2026-08-25 (docs/deferred.md):
-    /// this backend convicted the overflow directions alone, so a table
-    /// whose cells started 40dip inside their own viewport was RED on
-    /// Linux and GREEN here off the same byte-shared expect_column_edges.
+    /// SIX CAUSES, SIX SENTENCES, and the precedence between them; both sides
+    /// of every 2.0 boundary are pinned, because that slack is what keeps a
+    /// subpixel arrange from reddening a correct table. ColumnsUnreachable is
+    /// the measured case this exists for: a table overflowing a 300dip
+    /// viewport printed "cells span 290dip inside a 300dip viewport". The two
+    /// UNDERFILL directions are held too (docs/deferred.md), after a table
+    /// starting 40dip inside its viewport read RED on Linux and GREEN here.
     #[test]
     fn table_horizontal_issue_convicts_one_cause() {
         use TableHorizontalIssue as Issue;
@@ -19377,10 +16315,9 @@ mod tests {
             "cells end at 140dip past a 100dip viewport that scrolls 0dip"
         );
 
-        // THE RULING'S OWN CASE (2026-08-29, docs/tables-plan.md):
-        // columns wider than the track are what a scrolling table looks
-        // like, and they convict only where the surface cannot reach
-        // them. Same numbers, three different scroll ranges.
+        // THE RULING'S OWN CASE (docs/tables-plan.md): columns wider than the
+        // track are what a scrolling table looks like, and they convict only
+        // where the surface cannot reach them.
         let reach = table_horizontal_issue;
         assert_eq!(
             reach(160.0, 100.0, 100.0, 0.0, 160.0, 160.0, 60.0),
@@ -19455,14 +16392,11 @@ mod tests {
         );
     }
 
-    /// THE FIELD'S OWN GEOMETRY, from the windows lane that convicted
-    /// every table-bearing leg on 2026-08-25 (docs/deferred.md): a
-    /// 508dip viewport, two 250dip tracks 8dip apart, and a row whose
-    /// text stops at 289. The line ENDS at 508 and its INK ends at 289,
-    /// and the whole failure was reading the second number for the first.
-    ///
-    /// Both numbers are pinned, and so is what the classifier does with
-    /// each, so the two bases can never quietly swap back.
+    /// THE FIELD'S OWN GEOMETRY, from the windows lane that convicted every
+    /// table-bearing leg on 2026-08-25 (docs/deferred.md): a 508dip viewport,
+    /// two 250dip tracks 8dip apart, and a row whose text stops at 289. The
+    /// line ENDS at 508 and its INK ends at 289, and the whole failure was
+    /// reading the second number for the first, so both are pinned here.
     #[test]
     fn table_line_end_reads_the_track_not_the_ink() {
         use TableHorizontalIssue as Issue;
@@ -19520,15 +16454,12 @@ mod tests {
         );
     }
 
-    /// A PADDED CARD CONVICTS NOTHING (docs/deferred.md's table-card
-    /// entry). The card's interior rides the CONTAINER's Padding, so it
-    /// is `pad` — the number `column_edges` already takes off the frame
-    /// AND the ink — and a cell edge cannot move because both sides of
-    /// every comparison move together.
-    ///
-    /// The second half is the one that would ship silently: a frame that
-    /// FORGETS the subtraction convicts every padded table, which is the
-    /// windows lane's 2026-08-25 failure one basis over.
+    /// A PADDED CARD CONVICTS NOTHING (docs/deferred.md's table-card entry):
+    /// the card's interior rides the CONTAINER's Padding, so it is `pad` —
+    /// the number `column_edges` already takes off the frame AND the ink —
+    /// and a cell edge cannot move because both sides of every comparison
+    /// move together. The second half is the one that would ship silently: a
+    /// frame that FORGETS the subtraction convicts every padded table.
     #[test]
     fn a_padded_card_convicts_nothing() {
         use TableHorizontalIssue as Issue;
@@ -19572,18 +16503,12 @@ mod tests {
         rest[..close].to_owned()
     }
 
-    /// THE CROSS-READ, WHICH IS THIS ARM'S ONE LANDMINE. Fluent's stop
-    /// names say how light the SHADE is, not which theme owns it: the
-    /// LIGHT theme reads `SystemAccentColorDark1` and the DARK theme
-    /// reads `SystemAccentColorLight2`. Getting it backwards produces an
-    /// app that is branded in one appearance and the user's system
-    /// accent in the other — a bug nobody sees until they flip the OS
-    /// setting, and one no read-back in this process can catch, because
-    /// the dictionary reads back exactly what was written either way.
-    ///
-    /// Each stop is also pinned to the WORD the core derived for it, so
-    /// the consumer-by-consumer pairing in `brand_dictionary` cannot
-    /// drift into "some accent-ish colour in some accent-ish slot".
+    /// THE CROSS-READ, WHICH IS THIS ARM'S ONE LANDMINE: Fluent's stop names
+    /// say how light the SHADE is, not which theme owns it, so the LIGHT
+    /// theme reads `SystemAccentColorDark1` and the DARK theme
+    /// `SystemAccentColorLight2`. Backwards brands one appearance and leaves
+    /// the user's accent in the other, and no read-back in this process can
+    /// catch it. Each stop is pinned to the WORD the core derived for it.
     #[test]
     fn the_stops_are_crossed_and_carry_the_word_their_consumer_wants() {
         let accent = crate::brand::derive(0x3584E4, None, None);
@@ -19628,21 +16553,13 @@ mod tests {
         }
     }
 
-    /// THE ORDERING NO COMPILER CAN SEE, and the one this arm is most
-    /// likely to lose.
-    ///
-    /// UIA publishes no heading control type. The styling pass's heading
-    /// is a TextBlock, and its peer answers
-    /// `AutomationControlType::Text` whether or not the role was applied
-    /// — so the ONLY evidence a heading exists is the HeadingLevel
-    /// property, and the ladder has to consult it before the type. Get
-    /// that backwards and every heading reads `label/Sections` where
-    /// tools/scenes/styling.steps froze `heading/Sections`: a wrong
-    /// answer shaped exactly like a right one, from a verb whose whole
-    /// job is to be believed.
-    ///
-    /// (`AutomationControlType::Header` is NOT the heading and is not a
-    /// route out of this — it is the header of a table, list or tree.)
+    /// THE ORDERING NO COMPILER CAN SEE. UIA publishes no heading control
+    /// type: the styling pass's heading is a TextBlock whose peer answers
+    /// `AutomationControlType::Text` either way, so the ONLY evidence is the
+    /// HeadingLevel property and the ladder must consult it first — get that
+    /// backwards and every heading reads `label/Sections` where
+    /// tools/scenes/styling.steps froze `heading/Sections`.
+    /// (`AutomationControlType::Header` is a table's header, not this.)
     #[test]
     #[cfg(feature = "harness")]
     fn a_heading_outranks_the_control_type_its_peer_reports() {
@@ -19652,13 +16569,12 @@ mod tests {
         assert_eq!(ax_role(false, AutomationControlType::Text), "label");
     }
 
-    /// THE REST OF THE LADDER, PINNED BECAUSE THE HEADING BRANCH WAS
-    /// INSERTED AT THE TOP OF IT. Every word here is bytes in a shared
-    /// scene's expected string (tools/scenes/*.steps, compared
-    /// byte-for-byte across all eight languages), so a dropped or
-    /// re-spelled arm is a matrix failure on a lane this machine cannot
-    /// run. The three container types collapsing to one word is
-    /// deliberate, not an oversight.
+    /// THE REST OF THE LADDER, PINNED BECAUSE THE HEADING BRANCH WAS INSERTED
+    /// AT THE TOP OF IT. Every word here is bytes in a shared scene's
+    /// expected string (tools/scenes/*.steps, compared byte-for-byte across
+    /// all eight languages), so a dropped or re-spelled arm is a matrix
+    /// failure on a lane this machine cannot run. The three container types
+    /// collapsing to one word is deliberate.
     #[test]
     #[cfg(feature = "harness")]
     fn the_closed_role_set_is_what_each_uia_type_answers() {
@@ -19676,10 +16592,9 @@ mod tests {
             (AutomationControlType::List, "group"),
         ] {
             assert_eq!(ax_role(false, kind), want, "{kind:?} answered the wrong role");
-            // And the heading property outranks every one of them —
-            // stated across the whole table rather than at `Text` alone,
-            // because "consult the property first" is a claim about the
-            // ladder and not about one arm of it.
+            // And the heading property outranks every one of them — stated
+            // across the whole table, because "consult the property first" is
+            // a claim about the ladder and not about one arm of it.
             assert_eq!(ax_role(true, kind), "heading", "{kind:?} swallowed the heading");
         }
         // A type kaya has no word for reports as such, so the trace in
@@ -19694,17 +16609,12 @@ mod tests {
     #[cfg(feature = "harness")]
     const VENDORED_FONT: &[u8] = include_bytes!("../../../../guests/assets/fonts/sora-wght.ttf");
 
-    /// THE ROUND TRIP, which is the whole defect in one assertion: what
-    /// `register_font_blob` WRITES, the harness read must be able to
-    /// resolve BACK to that file. It shipped unable to — the read asked
-    /// the system font collection about a per-app font file's family, a
-    /// question whose answer is "no" on a machine where everything
-    /// worked, so all five windows typeface legs failed with the font
-    /// rendering correctly on screen (2026-08-16).
-    ///
-    /// Both directions run here for real: the file is written, DirectWrite
-    /// names it, the `ms-appx:///` source is parsed, the path is resolved
-    /// back under the app root, and the file's own name table is read.
+    /// THE ROUND TRIP: what `register_font_blob` WRITES, the harness read must
+    /// be able to resolve BACK to that file. It shipped unable to — the read
+    /// asked the system font collection about a per-app font file's family,
+    /// whose answer is "no" on a machine where everything worked, so all five
+    /// windows typeface legs failed with the font rendering correctly on
+    /// screen (2026-08-16). Both directions run here for real.
     #[test]
     #[cfg(feature = "harness")]
     fn the_blob_route_can_be_read_back_off_its_own_file() {
@@ -19805,10 +16715,9 @@ mod tests {
         );
     }
 
-    /// AND THE BARE-NAME ARM IS UNCHANGED: a source with no `#` is still
-    /// the system font collection's question, both ways round. This is
-    /// the arm the fix must not have weakened — an installed family
-    /// still prints its bare name, and a family nobody has still gets
+    /// AND THE BARE-NAME ARM IS UNCHANGED: a source with no `#` is still the
+    /// system font collection's question, both ways round — an installed
+    /// family still prints its bare name, and a family nobody has still gets
     /// the sentence that says so.
     #[test]
     #[cfg(feature = "harness")]
@@ -19842,14 +16751,12 @@ mod tests {
         );
     }
 
-    /// The two keys this lowering must NEVER write, each for its own
-    /// reason. `SystemAccentColor` is the documented-but-broken route of
-    /// microsoft-ui-xaml#6394: no control fill reads it, so an app that
-    /// writes it changes the text-selection highlight and nothing else.
-    /// A `HighContrast` (or fallback `Default`) dictionary would override
-    /// the framework's own contrast arm, which re-points every accent
-    /// brush at `SystemColor*` — a documented accessibility contract
-    /// ("Do not hard-code colors in HighContrast").
+    /// The two keys this lowering must NEVER write (tools/check-accent.py holds
+    /// the same rule): `SystemAccentColor`, the documented-but-broken route of
+    /// microsoft-ui-xaml#6394 that no control fill reads, and a `HighContrast`
+    /// (or fallback `Default`) dictionary, which would override the
+    /// framework's own contrast arm re-pointing every accent brush at
+    /// `SystemColor*`.
     #[test]
     fn the_brand_writes_neither_the_bare_accent_nor_a_contrast_theme() {
         let xaml = brand_dictionary(&crate::brand::derive(0x3584E4, None, None));

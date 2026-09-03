@@ -3,7 +3,7 @@
 Repo HEAD 6a616d6. Probed 2026-08-06 on this machine. Nothing shipped;
 no repo file touched; no commit. Every window ran under the GUI lock,
 `.accessory` activation (kaya's own `KAYA_SELFTEST` policy,
-`swift/KayaSwiftUIEntry.swift:39-43`), so nothing stole focus.
+`swift/KayaSwiftUIEntry.swift:36-41`), so nothing stole focus.
 
 Verdict up front: **all three primitives are cheap and observable on
 macOS — but only if kaya stops using the stock SwiftUI `TextEditor` for
@@ -20,17 +20,17 @@ selection to the end of the document. Measured, H2 and G6 below.
 
 ### What kaya's text widgets sit on TODAY
 
-- `swift/KayaSwiftUI.swift:8619-8648` — `struct KayaTextarea: View` is a
+- `swift/KayaSwiftUI.swift:7830-7844` — `struct KayaTextarea: View` is a
   bare SwiftUI **`TextEditor`**: uncontrolled binding into `node.text`,
   `.frame(width: 240, height: 96)`, `.border(...)`, `@FocusState`
   mirroring `kayaScene.focusedId`. No `NSViewRepresentable`, no
   NSTextView reference.
-- `swift/KayaSwiftUI.swift:8578-8615` — `struct KayaEntry: View` is a
+- `swift/KayaSwiftUI.swift:7789-7826` — `struct KayaEntry: View` is a
   SwiftUI **`TextField`** with `.textFieldStyle(.roundedBorder)`.
-- Dispatch at `swift/KayaSwiftUI.swift:5704-5707`.
+- Dispatch at `swift/KayaSwiftUI.swift:5117-5118`.
 - kaya already reaches the AppKit text object, but ONLY for what is
   focused: `kayaFocusedTextResponder(in:)`,
-  `swift/KayaSwiftUI.swift:6226-6234` (`window.firstResponder as? NSText`).
+  `swift/KayaSwiftUI.swift:5609-5617` (`window.firstResponder as? NSText`).
   `kayaTypeAtFocus` at `:6295` already writes a selection today
   (`responder.selectedRange = NSRange(location: end, length: 0)`,
   `:6312`) — so "kaya sets a range on macOS" is existing behaviour, just
@@ -55,13 +55,13 @@ What the stock `TextEditor` resolves to, measured (E1):
 | --- | --- |
 | machine | macOS 26.5.2 (25F84), arm64 |
 | compiler | `/Applications/Xcode-26.6.0.app/.../swiftc`, Swift 6.3.3 |
-| SDK | `MacOSX26.5.sdk` (resolved by `tools/lib/swift-toolchain.sh:22-50`) |
+| SDK | `MacOSX26.5.sdk` (resolved by `tools/lib/swift-toolchain.sh:16-44`) |
 | default target | `arm64-apple-macosx26.0` — no `-target`, no deployment-target flag in `tools/swiftui/build-dylib.sh` |
 
 So macOS 15 and macOS 26 text APIs are available with **no `@available`
 guard**. The nix `apple-sdk-14.4` in the dev shell is a red herring:
 `kaya_swiftc` steers `SDKROOT`/`DEVELOPER_DIR` back at Xcode
-(`tools/lib/swift-toolchain.sh:55-63 (gone)`).
+(`tools/lib/swift-toolchain.sh:49-57 (gone)`).
 
 ---
 
@@ -237,7 +237,7 @@ with `sel={0,0}` unchanged throughout.
 
 All three read out of the platform's accessibility tree, same-process,
 on the main thread — the exact discipline kaya's `kayaAxRead` already
-uses (`swift/KayaSwiftUI.swift:3101-3148`), including the
+uses (`swift/KayaSwiftUI.swift:2759-2806`), including the
 `AXManualAccessibility`/`AXEnhancedUserInterface` announcement made once
 per process and the `AXUIElementSetMessagingTimeout(app, 2.0)` bound. The
 existing `expect_ax` verb (`:4823`) is the shape to copy.
@@ -363,7 +363,7 @@ SwiftUI scope), which changes the text prop in all 8 bindings; and
 | | HIGHLIGHT (set of ranges) | SELECT (one range) | REVEAL (scroll into view) |
 | --- | --- | --- | --- |
 | **API** | `NSTextStorage.addAttribute(.backgroundColor,…)` for an AX-readable highlight; `NSTextLayoutManager.addRenderingAttribute` for a non-document one; `NSTextHighlightStyleAttributeName` for the system look (macOS 15+, TextKit 2) | `NSTextView.setSelectedRange(_:)`; `selectedRanges` for many; SwiftUI `TextSelection` (macOS 15) | `NSTextView.scrollRangeToVisible(_:)`; centred via `enumerateTextSegments` + `scrollToVisible` |
-| **kaya sits on today** | SwiftUI `TextEditor` → `PlatformTextView` (TextKit 2, in `AppKitScrollView`), `swift/KayaSwiftUI.swift:8619` — no handle to it | same view; kaya already sets a selection at `:6312` but only on the FOCUSED responder (`:6226`) | same view; no reveal anywhere today |
+| **kaya sits on today** | SwiftUI `TextEditor` → `PlatformTextView` (TextKit 2, in `AppKitScrollView`), `swift/KayaSwiftUI.swift:7830` — no handle to it | same view; kaya already sets a selection at `:6312` but only on the FOCUSED responder (`:6226`) | same view; no reveal anywhere today |
 | **survives edits?** | user edit: **yes**, ranges shift and split correctly, no bleed. app text write: **no** — wiped one turn (~11ms) later, and a same-turn re-declare is destroyed too | user edit: yes. app text write: **no** — caret reset to end of document | n/a (scroll position, not a range) |
 | **cost** | 0.44–0.92ms for 60 ranges; 1.01ms for 500 ranges over 66k chars; flat in n | 0.56ms | 2.45ms |
 | **flicker** | one frame per app text write with the stock view; **none** with an owned view (re-declared in the same pass) | same | none |
@@ -387,7 +387,7 @@ SwiftUI scope), which changes the text prop in all 8 bindings; and
 - The iOS arm shares this file. `TextEditor` on iOS is `UITextView`, and
   the same push-order argument applies to `UIViewRepresentable`; the AX
   read differs (UIKit has no role vocabulary — see the existing arm at
-  `swift/KayaSwiftUI.swift:3270+`), and `UITextRange`/
+  `swift/KayaSwiftUI.swift:2916+`), and `UITextRange`/
   `UIAccessibilityTextRange` would need its own measurement. Not probed
   here.
 

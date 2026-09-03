@@ -1,13 +1,10 @@
-# Fetch a zip BY VERSION AND BY BYTES and expand it under Dest: the
-# sha256 recorded beside the version in tools/deploy-win.py is compared
-# BEFORE anything is expanded, and a mismatch is this script's own
-# refusal (tools/check-pins.py holds the shape).
+# Fetch a zip BY VERSION AND BY BYTES: the sha256 pinned beside the
+# version in tools/deploy-win.py is compared BEFORE anything is expanded
+# (tools/check-pins.py holds the shape).
 #
-# A FILE, NOT AN INLINE -Command: a script passed through ssh and cmd
-# as `powershell -Command \"...\"` arrives as ONE quoted string, and
-# PowerShell evaluates a bare string expression by PRINTING it — the
-# Go 1.27 pin was echoed and never installed for weeks while the go
-# legs ran the VM's system Go (measured 2026-09-01, docs/traps.md).
+# A FILE, NOT AN INLINE -Command: through ssh and cmd a
+# `powershell -Command "..."` arrives as one quoted string that
+# PowerShell PRINTS (docs/traps.md, measured 2026-09-01).
 param(
     [Parameter(Mandatory = $true)][string]$Url,
     [Parameter(Mandatory = $true)][string]$Sha256,

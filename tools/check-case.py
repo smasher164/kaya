@@ -7,11 +7,8 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# EVERY TRACKED PATH MUST MATCH THE FILESYSTEM'S CASE EXACTLY
-# (CLAUDE.md's gate list for the defect it exists for). macOS is
-# case-insensitive and Linux is not, and every build manifest here names
-# files as strings — cabal `main-is`, dune `modules`, Cargo `path`,
-# csproj globs, gradle sources, the Makefile's SCENES.
+# Every tracked path matches the filesystem's case exactly: macOS is
+# case-insensitive, Linux is not (CLAUDE.md's gate list).
 
 import os
 import subprocess
@@ -20,8 +17,7 @@ import subprocess
 def lint(paths, cwd):
     """Offender lines — a name present only under a different case."""
     bad = []
-    # One listing per directory, reused: a repo-wide walk otherwise costs
-    # a stat per path per component.
+    # One listing per directory: a walk costs a stat per path component.
     listings = {}
     for path in paths:
         if not path:
@@ -37,7 +33,7 @@ def lint(paths, cwd):
         if name in entries:
             continue
         # Present only under a different case is THE defect; absent
-        # entirely is someone else's problem.
+        # entirely is not this gate's business.
         lower = {e.lower(): e for e in entries}
         actual = lower.get(name.lower())
         if actual is not None:
@@ -58,9 +54,8 @@ def bad_census(r):
             f"with everything")
 
 
-# Self-test, both directions: a case-only mismatch caught, an exact
-# match not. A REAL fixture on the real filesystem — the case behavior
-# under test is the filesystem's, not python's.
+# Self-test, both directions. The fixture must stay on the REAL
+# filesystem: the case behavior under test is its, not python's.
 with scratch_dir("check-case-") as tmp:
     (tmp / "case").mkdir()
     (tmp / "case/background.hs").touch()
@@ -101,8 +96,6 @@ if len(paths) < 500:
 print(f"check-case: {len(paths)} tracked paths in the census "
       f"(floor 500)", file=sys.stderr)
 bad = lint(paths, str(ROOT))
-# The old body printed lint's joined output unconditionally, blank line
-# included on a clean run; kept for byte parity with the shell gate.
 print("\n".join(bad))
 if bad:
     print("check-case: a tracked path disagrees with the filesystem in CASE.",

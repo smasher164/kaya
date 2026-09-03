@@ -46,24 +46,11 @@ const GROW_KEY: &str = "kaya-grow";
 const TRACK_KEY: &str = "kaya-track";
 
 // --- The semantic icon vocabulary onto Adwaita (docs/styling-plan.md D6) ---
-//
-// EVERY NAME BELOW IS COPIED FROM THE CATALOG REPORT, NOT RECALLED.
-// `dialog-information-symbolic` is a LIGHTBULB and not the circled "i",
-// `edit-delete-symbolic` is an X in a circle and not a trash can,
-// `preferences-system-symbolic` is a wrench and screwdriver and not a gear,
-// and `emblem-favorite-symbolic` — the obvious spelling of `star` — was a
-// HEART and was deleted from the theme in the 48 cycle. Each of those reads
-// right and draws wrong, and an unresolvable name falls back SILENTLY, the
-// only notice behind `GTK_DEBUG=iconfallback`. Every name here is present
-// in adwaita-icon-theme 43, 45, 48 AND 50.
-//
-// Full names including the `-symbolic` suffix: GTK decides symbolic-ness by
-// string-matching it, and the bare name takes the fullcolor legacy path.
-// And NO `-rtl` suffix is ever appended — `choose_icon` tries the
-// direction-suffixed name first, so `go-previous-symbolic` is RTL-aware for
-// free while hard-coding the suffix would break LTR.
-//
-// Column order is the wire order (crate::wire::SYMBOLS).
+// EVERY NAME BELOW IS COPIED FROM THE CATALOG REPORT, NOT RECALLED: the
+// obvious spellings read right and draw wrong and an unresolvable name falls
+// back SILENTLY (docs/traps.md: "GTK's Adwaita icon names read right and
+// draw wrong"). Full `-symbolic` names, never an `-rtl` suffix; column order
+// is crate::wire::SYMBOLS.
 const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_ADD, "list-add-symbolic"),
     (crate::wire::SYMBOL_REMOVE, "list-remove-symbolic"),
@@ -124,13 +111,11 @@ fn symbol_name_of_icon(icon: &str) -> Option<&'static str> {
 }
 
 /// THE SILENT-BLANK WALL, run once per process the first time any app
-/// declares any symbol.
-///
-/// GTK's icon lookup does not fail: it ends at `icon_paintable_new
-/// ("image-missing", ...)` and the only notice is behind
-/// `GTK_DEBUG=iconfallback`. MEASURED on this image (GTK 4.18.6,
-/// adwaita-icon-theme 48.1), what a GtkStackSwitcher then paints is not even
-/// that broken-image glyph: the button is BLANK, zero ink in its whole box.
+/// declares any symbol. GTK's icon lookup does not fail — it ends at
+/// `icon_paintable_new("image-missing", ...)`, noticed only behind
+/// `GTK_DEBUG=iconfallback` — and a GtkStackSwitcher then paints NOTHING,
+/// zero ink in its whole box (docs/traps.md: "GTK's Adwaita icon names read
+/// right and draw wrong").
 fn assert_symbol_icons_resolve(display: &gdk::Display) {
     use std::cell::Cell;
     thread_local! {
@@ -368,14 +353,11 @@ const HIGHLIGHT_TAG: &str = "kaya-highlight";
 const REVEAL_MARK: &str = "kaya-reveal";
 
 /// The buffer's highlight tag, created on first use. ONE TAG FOR THE WHOLE
-/// SET: re-declaring is `remove_all_tags` plus one `apply_tag` per range —
-/// measured at 570us for 400 ranges over a 19k character buffer, with no
-/// `changed` emission.
-///
-/// The COLOUR is not assertable on this widget: a GtkTextView truncates each
-/// channel before scaling, so `#ffe066` and `#ff0000` both read back
-/// `65535,0,0` and `#808080` reads as black — a GTK defect, measured twice,
-/// and the reason `highlights` keys on the attribute's PRESENCE.
+/// SET: re-declaring is `remove_all_tags` plus one `apply_tag` per range,
+/// measured at 570us for 400 ranges over a 19k buffer with no `changed`
+/// emission. The COLOUR is not assertable on this widget — it truncates each
+/// channel before scaling (docs/probes/range-probe-linux.md) — which is why
+/// `highlights` keys on the attribute's PRESENCE.
 fn highlight_tag(buffer: &gtk4::TextBuffer) -> gtk4::TextTag {
     use gtk4::prelude::{TextBufferExt, TextTagExt};
     let table = buffer.tag_table();
@@ -953,20 +935,12 @@ mod flex {
             );
         }
 
-        /// A PADDED CARD CONVICTS NOTHING, and the basis is the whole
-        /// reason (docs/deferred.md's table-card entry). The card's
-        /// interior padding is a CONTENT-BOX inset on the table
-        /// container: GTK4 puts the widget's coordinate origin there, so
-        /// the cells do NOT move off zero and `column.width()` shrinks
-        /// with them — measured, a 12/8 card reads cells at 0.0 and a
-        /// viewport of 776 inside an 800px parent.
-        ///
-        /// The only number left in the OUTER box is the assigned track,
-        /// and `table_horizontal_track` brings it into the viewport's
-        /// basis by subtracting the card's own span. This pins both: the
-        /// corrected basis is silent, and the basis that FORGETS to
-        /// subtract convicts a correct table — which is the shape this
-        /// test exists to keep from shipping.
+        /// A PADDED CARD CONVICTS NOTHING, and the basis is the whole reason
+        /// (docs/deferred.md's table-card entry): the card's padding is a
+        /// CONTENT-BOX inset, so cells stay at 0 and only the assigned TRACK
+        /// needs the card's span subtracted. This pins both directions — the
+        /// corrected basis is silent, and the basis that FORGETS to subtract
+        /// convicts a correct table.
         #[test]
         fn gtk_table_padded_card_convicts_nothing() {
             use super::super::{table_horizontal_issue, TableHorizontalIssue as Issue};
@@ -1211,13 +1185,10 @@ impl NativeWidget {
 
     /// The widget the USER sees: the control that takes focus, holds the
     /// text, and publishes the accessible role a scene names it by — the
-    /// textarea's `GtkTextView` inside its viewport, and the layout widget
-    /// itself for every other kind.
-    ///
-    /// THE TWO ANSWERS DIVERGED silently in four places: the accessible
-    /// label, hint and id (a name on the viewport leaves the `text` node
-    /// unnamed, so `expect_ax textarea#0` reads `field/`), focus, and
-    /// `set_text`'s reverse lookup from widget to id.
+    /// textarea's `GtkTextView` inside its viewport, the layout widget itself
+    /// for every other kind. THE TWO ANSWERS DIVERGED silently in four
+    /// places: the accessible label, hint and id (`expect_ax textarea#0` read
+    /// `field/`), focus, and `set_text`'s reverse lookup from widget to id.
     fn control(&self) -> gtk4::Widget {
         match self {
             NativeWidget::Textarea(_, view) => view.clone().upcast(),
@@ -1252,53 +1223,25 @@ const KAYA_FOLDED_CLASS: &str = "kaya-folded";
 /// four backends.
 const KAYA_FOLD_SEAM_GAP: i32 = 16;
 
-/// How much of an UNGROWN table this tier shows before the rest scrolls
-/// — GTK's spelling of tools/scenes/table.steps' "a table is a
-/// viewport". It is also the wall that puts X11's 16-bit window geometry
-/// out of reach: with no declared window size a For's natural height IS
-/// the toplevel's, and the un-windowed one crossed 32,767px at 1,361
-/// rows (docs/measurements/choke-linux-2026-08-24.txt). Capped here the
-/// toplevel is bounded whatever the collection holds — including under
-/// the unbounded band every For starts life with, which is the phase no
-/// report has narrowed yet. A GROWN table never reaches this number: its
-/// parent's track decides.
+/// How much of an UNGROWN table this tier shows before the rest scrolls —
+/// GTK's spelling of "a table is a viewport". It is also what puts X11's
+/// 16-bit window geometry out of reach: with no declared window size a For's
+/// natural height IS the toplevel's, and the un-windowed one crossed
+/// 32,767px at 1,361 rows (docs/measurements/choke-linux-2026-08-24.txt).
+/// A GROWN table never reaches this number; its parent's track decides.
 const TABLE_MAX_CONTENT: i32 = 600;
 
 /// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry;
 /// ruled 2026-08-25). GTK's spelling is Adwaita's boxed-list reading.
 const TABLE_CARD_CLASS: &str = "kaya-table-card";
 
-/// A header cell's title sits FLUSH with the cells under it, so the
-/// theme's button padding and border come off: Adwaita's 10px inset
-/// would draw every title one place right of its column. Bold is the
-/// header's own weight, GTK's node name reaching the button's label.
-///
-/// THE CARD'S STROKE IS PAINT, NEVER BOX (measured 2026-08-25,
-/// docs/traps.md "A GTK table card is paint, never box"): `outline`
-/// rather than `border` because a container inset is ALREADY a border on
-/// this very widget (set_container_inset) and the two do not add — one
-/// silently wins. Flat by the ruling: no shadow, no blur.
-///
-/// THE PADDING IS THE CARD'S INTERIOR, and it is `padding` on this same
-/// widget deliberately: GTK4 puts a widget's coordinate origin at its
-/// CONTENT box, so the cells stay at 0 and `column.width()` shrinks with
-/// them (measured: a padded card reads cells at 0.0 and 776 of an 800px
-/// parent). The one number that then needs the card's own span added
-/// back is the assigned TRACK — `table_horizontal_track` does that and
-/// nothing else does.
-///
-/// 12 HORIZONTAL IS ADWAITA'S OWN, measured off a real AdwActionRow in a
-/// `.boxed-list` (its content starts at x=12). 8 vertical is kaya's
-/// container unit and not Adwaita's, because Adwaita gives a row its
-/// vertical breathing room through `min-height: 50px` — a ROW DENSITY
-/// change, which this ruling forbids. The numbers live HERE and nowhere
-/// else: nothing in this backend computes with them, because the track
-/// basis MEASURES the inset off the widget instead.
-///
-/// A header cell's title sits FLUSH with the cells under it, so the
-/// theme's button padding and border come off: Adwaita's 10px inset
-/// would draw every title one place right of its column. Bold is the
-/// header's own weight, GTK's node name reaching the button's label.
+/// The table card and its header cells. THE CARD'S STROKE IS PAINT, NEVER
+/// BOX — `outline`, since a container inset is already a border on this very
+/// widget — and flat by the ruling. THE PADDING IS THE CARD'S INTERIOR: GTK4
+/// puts the origin at the CONTENT box, so cells stay at 0 and only the
+/// assigned TRACK needs the span added back (`table_horizontal_track`).
+/// 12 horizontal is Adwaita's own (docs/traps.md: "A GTK table card is paint,
+/// never box").
 const TABLE_CSS: &str = "\
 .kaya-table-header-cell { padding: 0px; border: 0px; min-width: 0px; min-height: 0px; }
 .kaya-table-header-cell label { font-weight: bold; }
@@ -1306,17 +1249,13 @@ const TABLE_CSS: &str = "\
 outline: 1px solid @borders; outline-offset: -1px; padding: 8px 12px; }
 ";
 
-/// One declared table (docs/tables-plan.md): the header row this
-/// backend composed, the size groups that make a column's cells one
-/// width, and the sort tag a header click hands back verbatim.
-///
-/// GtkColumnView IS NOT USABLE HERE, measured rather than assumed
-/// (2026-08-21, this milestone's probe): a `GtkListItem` OWNS its
-/// child, so handing it a widget the stamp already parented fails
-/// `gtk_widget_set_parent`'s `parent == NULL` assertion and renders
-/// nothing, and the factory is driven by the model and the recycler
-/// rather than by kaya's stamp. The synthesized header is the landing
-/// docs/tables-plan.md decision 6 predicted.
+/// One declared table (docs/tables-plan.md decision 6): the header row this
+/// backend composed, the size groups that make a column's cells one width,
+/// and the sort tag a header click hands back verbatim. GtkColumnView IS NOT
+/// USABLE HERE, measured rather than assumed: a `GtkListItem` OWNS its child,
+/// so a widget the stamp already parented fails `parent == NULL` and renders
+/// nothing (docs/traps.md: "GtkColumnView cannot host kaya's stamped
+/// children").
 struct GtkTable {
     /// The header's own scroller, sharing `body`'s horizontal adjustment so
     /// the titles translate with the cells under them (the overflow
@@ -1403,25 +1342,11 @@ fn table_content_fits(content: f64, viewport: f64) -> bool {
 }
 
 /// ONE CAUSE PER SENTENCE for `column_edges`' horizontal half, and the
-/// REFERENCE SET the winui and Compose siblings of this name carry
-/// (docs/deferred.md, the leading-edge UNDERFILL entry).
-///
-/// THE ORDER IS THE ROOT-BEFORE-SYMPTOM ONE, and it is the same in all
-/// four backends: track, then the LEADING edge, then the trailing one. A
-/// table displaced at its leading edge also ends in the wrong place, so
-/// conviction on the end would name the symptom.
-///
-/// The two UNDERFILL directions need cells that FILL their column —
-/// `build_table` and `reattach_table` give every cell hexpand + halign
-/// Fill, so a line's end here IS the last column's trailing edge. The two
-/// synthesized tiers place cells at their NATURAL size and cannot spell
-/// `ContentUnderfill` at all (docs/deferred.md).
-///
-/// CELLS PAST THE VIEWPORT ARE NOT THE DEFECT ANY MORE (the 2026-08-29
-/// overflow ruling): a table whose columns need more width than its track
-/// scrolls to them, so what is left to convict is columns the surface
-/// CANNOT REACH — hence `reach`, which is the toolkit's own scroll range
-/// and not a claim about the policy that was asked for.
+/// REFERENCE SET the winui and Compose siblings carry (docs/deferred.md, the
+/// leading-edge UNDERFILL entry). THE ORDER IS ROOT-BEFORE-SYMPTOM in all
+/// four backends: track, the LEADING edge, then the trailing one. CELLS PAST
+/// THE VIEWPORT CONVICT NOTHING since the 2026-08-29 overflow ruling — hence
+/// `reach`, which is the toolkit's own scroll range.
 #[cfg(any(feature = "harness", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableHorizontalIssue {
@@ -1547,15 +1472,11 @@ fn header_cell_label(cell: &gtk4::Widget) -> Option<gtk4::Label> {
         .ok()
 }
 
-/// The box `column_edges` measures for ONE cell, header or body: the
-/// widget that draws, unwrapping the button kaya's own header cell wraps
-/// its title in (the measurement above is why the button will not do).
-///
-/// ONE RULE FOR BOTH LINES. The header read the label and the body read
-/// the cell widget, which coincide to the pixel only while every body
-/// cell draws its own content — a table whose cells are buttons would
-/// have compared a button's edge against a header title's, off by the
-/// theme's padding, and the reader would have believed it.
+/// The box `column_edges` measures for ONE cell, header or body: the widget
+/// that draws, unwrapping the button kaya's own header cell wraps its title
+/// in. ONE RULE FOR BOTH LINES — a header label and a body cell coincide to
+/// the pixel only while every body cell draws its own content, and a table
+/// of buttons would have compared edges off by the theme's padding.
 fn cell_ink(cell: &gtk4::Widget) -> gtk4::Widget {
     header_cell_label(cell).map_or_else(|| cell.clone(), |l| l.upcast())
 }
@@ -1639,14 +1560,11 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     body.set_halign(gtk4::Align::Fill);
     body.set_valign(gtk4::Align::Fill);
     body.set_child(Some(&content));
-    // THE HEADER TRACKS THE BODY THROUGH ONE ADJUSTMENT, which is
-    // GtkColumnView's own mechanism read out of its source
-    // (docs/probes/table-overflow-2026.md §5.3: one hadjustment translating
-    // header and listview together, the vertical one forwarded to the list
-    // alone so the header stays put). EXTERNAL is GTK's policy for a
-    // scroller that shares another's bar — it draws none, and unlike NEVER
-    // it does not force its size to follow the header's content, so the
-    // header shrinks with the body instead of holding the window open.
+    // THE HEADER TRACKS THE BODY THROUGH ONE ADJUSTMENT, GtkColumnView's own
+    // mechanism (docs/probes/table-overflow-2026.md §5.3). EXTERNAL is GTK's
+    // policy for a scroller that shares another's bar: it draws none and,
+    // unlike NEVER, does not force its size to follow the header's content,
+    // so the header shrinks with the body instead of holding the window open.
     let head = gtk4::ScrolledWindow::new();
     head.set_policy(gtk4::PolicyType::External, gtk4::PolicyType::Never);
     head.set_propagate_natural_width(true);
@@ -1722,10 +1640,10 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
 
 /// A kind's registry as plain widgets, in creation order — the harness's
 /// `kind#index` space and the candidate list a `kind@id[key.path]`
-/// target resolves over. HARNESS ONLY, like its two callers: shipped
-/// 2026-09-01 ungated, so the backend's non-harness build did not
-/// compile for a day and only tools/check-gtk.py, which the sweep
-/// excludes, could see it (found 2026-09-02).
+/// target resolves over. HARNESS ONLY, like its two callers: the
+/// non-harness build of this backend is compiled by tools/check-gtk.py
+/// alone, which the gate sweep excludes, so an ungated item here is
+/// invisible until someone runs it.
 #[cfg(feature = "harness")]
 fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4::Widget> {
     use crate::harness::TargetKind as K;
@@ -1839,19 +1757,12 @@ fn run_scheduled_report(pending: Rc<std::cell::Cell<bool>>, id: u64) {
     });
 }
 
-/// THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
-/// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
-/// these two numbers cross: no platform colour reaches a drawing.
-///
-/// THE DOUBLE, NEVER THE INTEGER (§5 rule 1). GTK is the one backend
-/// that can hand back a genuine fraction, and
-/// `gtk_widget_get_scale_factor` "returns the next higher integer value"
-/// under fractional scaling — so a 125% display would raster at 2 and
-/// blit a buffer the wrong size. `gdk_surface_get_scale` is the reading.
-///
-/// The appearance is `AdwStyleManager:dark`, which is the SAME reading
-/// the brand accent and `canvas_ink`'s answer take, so the report and
-/// the observation cannot disagree.
+/// THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which re-rasters
+/// every canvas at them (docs/canvas-plan.md §5, §6). Only these two numbers
+/// cross. THE DOUBLE, NEVER THE INTEGER (§5 rule 1): GTK is the one backend
+/// that hands back a fraction and `gtk_widget_get_scale_factor` rounds UP, so
+/// `gdk_surface_get_scale` is the reading. The appearance is
+/// `AdwStyleManager:dark`, the same reading the accent and `canvas_ink` take.
 fn presentation_report(core: &mut CoreState) {
     use gtk4::prelude::{NativeExt, WidgetExt};
     let scale = core
@@ -1873,19 +1784,6 @@ fn presentation_report(core: &mut CoreState) {
     }
 }
 
-/// WHAT LAYOUT ASSIGNED EACH CANVAS, reported to the core — and what the
-/// core does with it IS the size policy (docs/canvas-plan.md §3.2.1):
-/// `scale` re-rasters the display list it already holds at this track,
-/// `redraw` and `tick` are asked for a drawing at it, `fixed` records the
-/// number and changes nothing.
-///
-/// THE REPORT IS WHAT THE STRETCH DEFECT WAS MISSING (docs/deferred.md):
-/// without it the core can only ever raster at the viewbox, and the
-/// backend is left to stretch that buffer into whatever it was given.
-///
-/// A canvas GTK has not laid out yet is SKIPPED rather than reported as
-/// zero: the core would refuse the number anyway, and sending it would be
-/// this backend saying something it has not measured.
 /// The window's content size into the scene's breakpoint evaluation
 /// (docs/adaptive-layout-plan.md D3) — canvas_track_report's shape: the
 /// scene answers with the setter/revert ops and they apply right here.
@@ -1940,6 +1838,10 @@ fn schedule_window_metrics() {
     });
 }
 
+/// WHAT LAYOUT ASSIGNED EACH CANVAS, reported to the core — and what the core
+/// does with it IS the size policy (docs/canvas-plan.md §3.2.1). A canvas GTK
+/// has not laid out yet is SKIPPED rather than reported as zero: sending it
+/// would be this backend saying something it has not measured.
 fn canvas_track_report(core: &mut CoreState) {
     let canvases: Vec<(KayaCanvas, WidgetId)> =
         core.canvases.iter().cloned().zip(core.canvas_ids.iter().copied()).collect();
@@ -1983,21 +1885,12 @@ fn harness_drives_frames() -> bool {
     std::env::var_os("KAYA_SELFTEST").is_some()
 }
 
-/// THE WINDOW'S FRAME CLOCK: the one reader of every canvas's track, and
-/// the platform's frame drive outside the harness.
-///
-/// ONE PER WINDOW, never one per canvas: GTK has a frame clock per
-/// surface, so a second callback would hand the same frame's timestamp in
-/// twice and measure every canvas as many times as there are canvases.
-/// (`kaya_frame`'s monotone guard exists because the mac attaches a
-/// driver per canvas; nothing here needs it.)
-///
-/// THE TRACK HALF RUNS IN BOTH MODES AND THE FRAME HALF DOES NOT. A
-/// scene's frame count is what its `frame` verbs advanced, so a wall
-/// clock ticking beside them would make every animation leg a question
-/// about the machine's load. The size policy is not a harness feature,
-/// though, so the reader a scene reads through has to be the one a real
-/// app runs — the mac arm's "one reader, both jobs".
+/// THE WINDOW'S FRAME CLOCK: the one reader of every canvas's track, and the
+/// platform's frame drive outside the harness. ONE PER WINDOW, never one per
+/// canvas — GTK has a frame clock per surface, so a second callback would
+/// measure every canvas as many times as there are canvases. THE TRACK HALF
+/// RUNS IN BOTH MODES AND THE FRAME HALF DOES NOT: a scene's frame count is
+/// what its `frame` verbs advanced, never a fact about the machine's load.
 fn attach_canvas_clock(core: &mut CoreState) {
     if core.canvas_clock {
         return;
@@ -2162,14 +2055,11 @@ fn set_spacer(spacer: &gtk4::Box, visible: bool, height: f64) {
     }
 }
 
-/// One row's top in the collection's own coordinates, summed from the
-/// CORE's per-row extents off the band's own offset — never from this
-/// tier's allocations, which would be a second estimator (§2).
-///
-/// It carries its own guard rather than leaning on its callers': every
-/// one of them is a scroll signal or a harness step, and a helper whose
-/// safety lives at the callsite is the shape fault::tests'
-/// window-entry census cannot read.
+/// One row's top in the collection's own coordinates, summed from the CORE's
+/// per-row extents off the band's own offset — never from this tier's
+/// allocations, which would be a second estimator (§2). It carries its own
+/// guard rather than leaning on its callers', because a helper whose safety
+/// lives at the callsite is the shape fault::tests' census cannot read.
 fn row_position(
     scene: &mut Scene,
     id: u64,
@@ -2191,15 +2081,12 @@ fn row_position(
     })
 }
 
-/// THE DRIVE LOOP, this tier's half (docs/virtualization-plan.md §3):
-/// what the reader can SEE goes to the core, the extents this tier laid
-/// out follow it, and the two spacers come back from the core's own
-/// arithmetic. Answers the pair `expect_window` compares — the first
-/// VISIBLE row and the collection's declared total.
-///
-/// NEVER FROM INSIDE A LAYOUT PASS: the applies it makes create and
-/// destroy widgets. Every caller is an idle, a harness step, or the
-/// end of a drained batch.
+/// THE DRIVE LOOP, this tier's half (docs/virtualization-plan.md §3): what
+/// the reader can SEE goes to the core, the extents this tier laid out follow
+/// it, and the two spacers come back from the core's arithmetic. Answers the
+/// pair `expect_window` compares. NEVER FROM INSIDE A LAYOUT PASS — the
+/// applies it makes create and destroy widgets, so every caller is an idle, a
+/// harness step, or the end of a drained batch.
 fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     use gtk4::prelude::{AdjustmentExt, Cast, WidgetExt};
     // Read before the scene borrow below: a GROWN table's height is its
@@ -2402,21 +2289,11 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
 }
 
 /// A TABLE HUGS WHAT IT HOLDS (docs/deferred.md's viewport-floor entry).
-///
-/// A VERTICAL SCROLLBAR'S OWN MINIMUM IS THE FLOOR, measured 2026-08-25
-/// and 58px on the lane's GTK: `GtkScrolledWindow` folds it into its own
-/// MINIMUM wherever the policy may show a bar — AUTOMATIC and ALWAYS both
-/// do, overlay scrolling does not exempt it — and a minimum outranks the
-/// natural height `propagate_natural_height` asks for. So a one-row table
-/// was allocated 58px with 42px of nothing under its row (docs/traps.md).
-/// The policy IS the toolkit's way to say "this does not scroll", so a
-/// table that cannot need a bar stops claiming one.
-///
-/// BOTH DECIDING NUMBERS ARE ALREADY OWNED: the collection's extent is the
-/// CORE's (never re-derived here, §2), and the grow weight is the flex
-/// contract's. A GROWN table keeps AUTOMATIC whatever its extent, because
-/// its parent's track decides its height and it must be able to scroll
-/// inside it; an ungrown one scrolls only past its own cap.
+/// A VERTICAL SCROLLBAR'S OWN MINIMUM IS THE FLOOR — 58px on the lane's GTK,
+/// folded into `GtkScrolledWindow`'s own minimum wherever the policy may show
+/// a bar, so a one-row table was allocated 58px (measured 2026-08-25,
+/// docs/traps.md). The policy IS the toolkit's way to say "this does not
+/// scroll"; a GROWN table keeps AUTOMATIC, since its parent's track decides.
 fn set_table_scrolling(body: &gtk4::ScrolledWindow, scrolls: bool) {
     let want = if scrolls {
         gtk4::PolicyType::Automatic
@@ -2528,13 +2405,11 @@ struct CoreState {
     /// SYNCHRONOUSLY inside the undo activation (measured).
     ledger_quiet: std::rc::Rc<std::cell::Cell<bool>>,
     /// A4's answer for the ENTRY, which GTK gives no getter for: the text
-    /// widgets whose NATIVE undo stack has something in it.
-    ///
-    /// A GtkTextBuffer publishes `can-undo`; the GtkText behind a GtkEntry
-    /// publishes nothing at all, and its action muxer is private (measured —
-    /// `activate_action("text.undo")` answers TRUE on an empty history). Only
-    /// two events move that stack: input through the platform's own path, and
-    /// any programmatic write (the chokepoint is `clear_native_undo`).
+    /// widgets whose NATIVE undo stack has something in it. A GtkTextBuffer
+    /// publishes `can-undo`; the GtkText behind a GtkEntry publishes nothing
+    /// and its muxer is private (measured: `activate_action("text.undo")`
+    /// answers TRUE on an empty history), so the model is kept here — only
+    /// input and a programmatic write move that stack.
     native_dirty: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     /// D2 SPELLED GTK: per textarea, the text its declared highlight set was
     /// validated against (docs/ranges-plan.md D2); membership IS the
@@ -2707,14 +2582,10 @@ struct CoreState {
     /// popover's closed handler clears it without borrowing CORE.
     open_context: Rc<RefCell<Option<u64>>>,
     /// EVERY TOUCH OF THE CLAIM ABOVE, so that a failure can say what cleared
-    /// it and when.
-    ///
-    /// menus-java-wayland flaked once with `no such menu item Remove` — the
-    /// BAR route reporting the claim was None at the moment the harness
-    /// activated a CONTEXT item. Eighty-six attempts to reproduce it failed,
-    /// and two mechanisms were proposed and DISPROVED, so the next occurrence
-    /// has to answer the question itself: five places touch the claim, the
-    /// trail names which and when, and the panic prints it.
+    /// it and when: menus-java-wayland flaked once with `no such menu item
+    /// Remove`, eighty-six attempts to reproduce it failed and two mechanisms
+    /// were DISPROVED, so the next occurrence has to answer the question
+    /// itself — five places touch the claim and the panic prints the trail.
     #[cfg(feature = "harness")]
     context_trail: Rc<RefCell<Vec<(std::time::Instant, &'static str, Option<u64>)>>>,
     /// The clipboard hub (see ClipboardHub). Rc'd to reach it without
@@ -2880,14 +2751,11 @@ fn not_materialized(core: &CoreState, window: u64) -> String {
 }
 
 /// The OBSERVATION flavor, and the one every Stage read must use: a window
-/// that is not in the map yet is a MISS, never a panic.
-///
-/// Window materialization is asynchronous and the harness polls every
-/// observation to a deadline. Panicking here killed five language legs on
-/// linux and two on windows the one time a scene asserted on an aux window
-/// without a count barrier (measured 2026-08-16), and it is worse than an
-/// ordinary panic on GTK: a panic inside a main-context closure cannot
-/// unwind, so the process ABORTS and the harness reports `RecvError`.
+/// that is not in the map yet is a MISS, never a panic. Materialization is
+/// asynchronous and the harness polls to a deadline; panicking here killed
+/// five language legs on linux and two on windows (measured 2026-08-16), and
+/// on GTK a panic inside a main-context closure cannot unwind, so the process
+/// ABORTS and the harness reports `RecvError`.
 fn gtk_window_read(core: &CoreState, id: u64) -> Option<gtk4::Window> {
     if id == 0 {
         Some(core.window.clone())
@@ -2981,21 +2849,11 @@ impl IdentityIcon {
 }
 
 /// Hand the declared mark to one window's `GdkToplevel`
-/// (docs/app-identity-plan.md I4a, the ratified route).
-///
-/// STRAIGHT TO `gdk_toplevel_set_icon_list`, never through a NAME: the
-/// name-based calls carry two measured traps (docs/app-identity-plan.md —
-/// `add_search_path` scans at ADD time; `has_icon()==TRUE` over an empty
-/// `get_icon_sizes` makes GTK DELETE `_NET_WM_ICON` silently).
-/// `gtk_window_set_icon` does not exist in GTK4.
-///
-/// PROTOCOL-AGNOSTIC BY CONSTRUCTION, which is why this arm has no `#[cfg]`:
-/// GTK 4.20 implements `xdg-toplevel-icon-v1` by feeding THIS IDENTICAL
-/// icon-list into `xdg_toplevel_icon_v1.add_buffer`. What is version-shaped
-/// is the EXPECTATION OF VISIBILITY, not the code.
-///
-/// A WINDOW WITH NO SURFACE IS NOT AN ERROR: GTK realizes a toplevel lazily,
-/// so this runs a second time from the present path.
+/// (docs/app-identity-plan.md I4a). STRAIGHT TO `gdk_toplevel_set_icon_list`,
+/// never through a NAME: the name-based calls carry two measured traps
+/// (docs/app-identity-plan.md), and `gtk_window_set_icon` is gone in GTK4.
+/// NO `#[cfg]`: GTK 4.20 feeds this identical list into xdg-toplevel-icon-v1.
+/// A window with no surface is not an error — GTK realizes lazily.
 fn apply_identity_icon(core: &mut CoreState, window: u64) {
     use gtk4::prelude::{Cast, NativeExt};
     let IdentityIcon::Texture(texture) = &core.identity_icon else {
@@ -3036,26 +2894,10 @@ enum ClassMove {
 
 /// Move EXISTING toplevels' class to the app's declared name
 /// (docs/app-identity-plan.md I9; docs/deferred.md's `g_set_prgname` entry
-/// carries the measurements).
-///
-/// WHY `g_set_prgname` IS NOT ENOUGH: a toplevel's class — `WM_CLASS` on
-/// X11, `app_id` on Wayland — is written when the surface is CREATED, and
-/// this backend builds and presents its primary inside `run_core`'s activate
-/// handler, before the first transaction drains. The program name reaches
-/// every LATER surface; the primary needs its class moved where it stands.
-/// And the class it wears is not always the program name: measured on this
-/// lane, with no session bus the primary advertised `identity` and with one
-/// `dev.kaya.Milestone2`.
-///
-/// TWO PROTOCOLS, TWO ROUTES, AND ONLY ONE IS A GDK CALL. Wayland has
-/// `gdk_wayland_toplevel_set_application_id`, permitted after map. X11 does
-/// NOT, and `set_utf8_property` is not the route: `WM_CLASS` is ICCCM
-/// `STRING`, two NUL-separated latin-1 words, and no window manager reads a
-/// `UTF8_STRING` of that name — so the X11 arm goes to Xlib through the
-/// display's own connection, which is what GDK does itself.
-///
-/// BOTH FIELDS GET THE DECLARED NAME, because that is what GDK writes: its
-/// `res_class` falls back to `g_get_prgname()`.
+/// carries the measurements). `g_set_prgname` reaches only surfaces NOT YET
+/// CREATED, and this backend presents its primary before the first
+/// transaction drains. TWO PROTOCOLS, TWO ROUTES: Wayland has a GDK call,
+/// X11 does not and `WM_CLASS` is ICCCM `STRING`, so that arm goes to Xlib.
 fn reclass_toplevels(core: &CoreState, name: &str) -> Vec<(u64, ClassMove)> {
     let live: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
     live.into_iter()
@@ -3387,14 +3229,10 @@ fn x11_icon_quadrants(values: &[u32]) -> Result<String, String> {
 }
 
 /// THE PICTURE THE PLATFORM ENDED UP HOLDING, in pixels
-/// (docs/app-identity-plan.md I8).
-///
-/// Reading GTK back — `gtk_window_get_icon_name()` — is an ECHO, and GDK
-/// offers no read-back for an icon LIST at all. `xprop -id <xid>
-/// _NET_WM_ICON` asks the X SERVER what it is holding, so these four samples
-/// prove the CONVERSION. Every failure path says what it MEASURED
-/// (invariant 3): which toplevels exist, what each answered, and what this
-/// process did with the declared bytes are three separate measurements.
+/// (docs/app-identity-plan.md I8). Reading GTK back is an ECHO and GDK offers
+/// no read-back for an icon LIST at all, so `xprop -id <xid> _NET_WM_ICON`
+/// asks the X SERVER and these four samples prove the CONVERSION. Every
+/// failure path says what it MEASURED (invariant 3).
 #[cfg(feature = "harness")]
 fn read_app_icon(probe: &IdentityProbe) -> String {
     let IdentityProbe { backend, gtk, lowering, applied } = probe;
@@ -3479,41 +3317,11 @@ fn read_app_icon(probe: &IdentityProbe) -> String {
 }
 
 /// Install the window's chrome: an AdwHeaderBar carrying GTK's back
-/// affordance (hidden until the window's stack has entries; the click runs
-/// the SAME user-pop path a real press does) and the unsaved-work marker
-/// beside the title.
-///
-/// THE MARKER IS THE `dirty` PROP'S WHOLE LOWERING ON THIS PLATFORM
-/// (docs/dirty-plan.md D2). GTK4 has no window-level edited/modified
-/// affordance at any layer — not GtkWindow's 25 properties, not libadwaita,
-/// not xdg-shell — so kaya draws it. The shape is GNOME Text Editor's own,
-/// read from its `editor-window.ui`: a GtkLabel holding U+2022,
-/// `visible=false`, in the header bar's title widget BESIDE the title, with
-/// the window's title string left completely alone (composing a marker into
-/// the title is D1's named rejection). Setting a title widget means kaya
-/// renders the title, so the box carries a `.title` label BOUND to the
-/// window's own `title` property rather than a fifth `set_title` call site.
-///
-/// AND THE MARKER CARRIES AN ACCESSIBLE LABEL, which is what makes it
-/// observable at all: measured on the bus, an unlabelled bullet publishes as
-/// `label name='• '` — a glyph is not a name. With the label the node is
-/// `label name='Unsaved changes'`, and `Stage::window_dirty` reads that.
-///
-/// THE HEADER IS AN AdwHeaderBar INSIDE AN AdwToolbarView, AND THE TOOLBAR
-/// VIEW IS THE WINDOW'S CHILD (docs/chrome-plan.md C2's GTK row): that buys
-/// the platform's DEFAULT look, `top-bar-style` = `ADW_TOOLBAR_FLAT`, where
-/// `set_titlebar(GtkHeaderBar)` renders GNOME's RAISED treatment (measured
-/// side by side in the lane image: 255-on-250 with a hairline vs 250-on-250
-/// with none).
-///
-/// THE TITLEBAR SLOT KEEPS AN EMPTY, INVISIBLE WIDGET, and that is the
-/// client-side-decoration switch: GTK 4 decides CSD from
-/// `priv->titlebar != NULL`, so a window that sets NO titlebar is
-/// server-decorated on X11 and the window manager draws a SECOND title bar
-/// above this header. AdwApplicationWindow solves it with an internal empty
-/// titlebar — MEASURED (2026-08-17): `get_titlebar()` on one answers with an
-/// `AdwGizmo`. Doing it explicitly keeps the window a plain
-/// `gtk4::ApplicationWindow`.
+/// affordance and the unsaved-work marker beside the title. THE MARKER IS THE
+/// `dirty` PROP'S WHOLE LOWERING HERE (docs/dirty-plan.md D2) — GTK4 has no
+/// window-level modified affordance, so kaya draws GNOME Text Editor's shape,
+/// with an accessible label because a bare bullet publishes as `name='• '`.
+/// The empty invisible titlebar is GTK 4's CSD switch (docs/chrome-plan.md C2).
 fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
     use gtk4::prelude::{ButtonExt, GtkWindowExt, ObjectExt, WidgetExt};
     let header = adw::HeaderBar::new();
@@ -3678,11 +3486,9 @@ fn three_pane_back_visible(core: &CoreState, window: u64) -> bool {
 /// The ceiling-3 arm: pane 0 the base root, pane 1 the first entry, the
 /// trailing pane the REST of the stack's top — two nested
 /// AdwNavigationSplitViews, the inner in the OUTER'S CONTENT slot. The
-/// nesting IS the priority: collapsing the outer puts the root and the
-/// inner pair into an AdwNavigationView, so the SHALLOWEST pane sheds
-/// first and back reaches the root — the collapsed prefix-stack, probed
-/// live before this was written (docs/multicolumn-plan.md D3). Returns
-/// false when the window has no root yet.
+/// nesting IS the priority: collapsing the outer sheds the SHALLOWEST pane
+/// first, which is the collapsed prefix-stack (docs/multicolumn-plan.md D3).
+/// Returns false when the window has no root yet.
 fn refresh_three_panes(core: &mut CoreState, window: u64, target: &gtk4::Window) -> bool {
     use adw::prelude::*;
     use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
@@ -4101,26 +3907,11 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
 }
 
 /// The sections half of the semantic icon (docs/styling-plan.md D6): each
-/// page's `icon-name`, then the switcher's accessible description.
-///
-/// TWO MEASURED PLATFORM FACTS, both from the container (GTK 4.18.6,
-/// adwaita-icon-theme 48.1):
-///
-/// 1. `GtkStackSwitcher` renders icon OR title, never both — `rebuild_child`
-///    builds a GtkImage when the page has an icon-name and a GtkLabel
-///    otherwise, and moves the title to the button's TOOLTIP. The probe read
-///    `GtkToggleButton label=(null)` over `GtkImage visible=1 mapped=1
-///    icon-name=go-home-symbolic`. So a section's symbol REPLACES its tab
-///    title here, where the SwiftUI arm shows both.
-/// 2. `GtkStackSidebar` ignores icon-name entirely: it binds only the page's
-///    title into a GtkLabel (probe: `GtkListBoxRow > GtkLabel`), so the
-///    SIDEBAR arm draws no symbol at all.
-///
-/// THE ACCESSIBLE DESCRIPTION goes on the switcher button and only there. The
-/// button's NAME is GTK's own and already carries the title (measured:
-/// `role='page tab' name='Feed'`), so kaya must not overwrite it; the
-/// DESCRIPTION was empty and is free for the semantic name, read back live as
-/// `role='page tab' name='Archive' DESC='star'`.
+/// page's `icon-name`, then the switcher's accessible description. TWO
+/// MEASURED PLATFORM FACTS — GtkStackSwitcher renders icon OR title, never
+/// both, and GtkStackSidebar ignores icon-name entirely (docs/traps.md: "GTK
+/// switchers draw a section's symbol or its title"). The DESCRIPTION carries
+/// the semantic name; the button's NAME is GTK's own and already the title.
 fn refresh_section_symbols(core: &CoreState, window: u64) {
     use gtk4::prelude::{AccessibleExtManual, Cast, WidgetExt};
     let Some(stack) = core.section_stacks.get(&window) else {
@@ -4229,19 +4020,11 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
 }
 
 // --- Menus: the command vocabulary (DESIGN.md, Menus) -----------------
-//
-// One GMenu model per window, rendered by a PopoverMenuBar in a strip above
-// the mounted root. Every actionable item is a real window-scoped
-// GSimpleAction (`win.kmi-<id>`), and a context catalog is
-// GtkPopoverMenu::from_model on a right-click gesture with its actions in a
-// per-anchor group ("kayactx") so a stamped copy's occurrence carries THAT
-// copy's key path.
-//
-// One dispatch path: bar chrome, the context popover, accelerators and the
-// harness verbs all activate the same GSimpleAction, whose handler mirrors
-// user state FIRST and then emits (docs/traps.md's post-user-mirror rule).
-// The handlers capture the Rc'd registry and the sink, never CORE, so a
-// stage verb may activate them while it holds the CORE borrow.
+// One GMenu model per window in a PopoverMenuBar strip, every actionable item
+// a window-scoped GSimpleAction (`win.kmi-<id>`), a context catalog a
+// GtkPopoverMenu whose actions sit in a per-anchor group ("kayactx") so a
+// stamped copy's occurrence carries THAT copy's key path. ONE DISPATCH PATH,
+// mirroring user state FIRST (docs/traps.md's post-user-mirror rule).
 
 /// One menu item's retained state: the props mirror, the semantic tree, and
 /// every live GSimpleAction instance materialized for the item.
@@ -4628,16 +4411,10 @@ fn flush_menu_section(into: &gio::Menu, section: &mut gio::Menu) {
 
 /// Put the item's semantic icon on a GMenu row. `G_MENU_ATTRIBUTE_ICON` is a
 /// SERIALIZED GIcon rather than a name, which is why the themed icon is built
-/// here instead of writing a string attribute.
-///
-/// MEASURED, and the reason this arm claims nothing about pixels (container,
-/// GTK 4.18.6, adwaita-icon-theme 48.1): the attribute DOES reach the widget
-/// — the realized `GtkModelButton` holds `GThemedIcon object-select-symbolic`
-/// — and GTK's menu dress then keeps that image HIDDEN, since
-/// `update_visibility` sets `visible = has_icon && (iconic || !has_text)`;
-/// the probe read `GtkImage visible=0` beside `GtkLabel visible=1
-/// label=Save`. It follows that NO accessible description is stamped on a
-/// menu row: it would announce an icon this platform draws nowhere.
+/// here. The attribute reaches the widget and GTK's menu dress then keeps the
+/// image HIDDEN, so this arm claims nothing about pixels and NO accessible
+/// description is stamped on a menu row (docs/traps.md: "A GMenu row's icon
+/// reaches the widget and is never drawn").
 fn set_row_symbol(row: &gio::MenuItem, symbol: i64) {
     if symbol == 0 {
         return;
@@ -4760,27 +4537,11 @@ fn promoted_items(reg: &MenuRegistry, window: u64) -> Vec<u64> {
 }
 
 /// THE PROMOTION (docs/chrome-plan.md C2's GTK row): the window's primary
-/// catalog actions as real buttons in its AdwHeaderBar, packed in catalog
-/// preorder into the group `install_nav_chrome` put there.
-///
-/// SYMBOL-FIRST — GNOME's HIG says label-only buttons "should generally be
-/// avoided for primary window header bars" — falling back to a label button
-/// for an item that declares no symbol.
-///
-/// THE ACCESSIBLE LABEL IS EXPLICIT, and that is the measured half. An
-/// icon-only GtkButton carrying only an action-name publishes
-/// `role='button' name=''` on the AT-SPI bus (docs/chrome-plan.md's GTK row;
-/// reproduced 2026-08-17 with this arm's exact shape). The tooltip happens to
-/// fill it too, but a tooltip is a hover affordance, not a name.
-///
-/// THE DESCRIPTION CARRIES THE SEMANTIC SYMBOL NAME, which is what scopes the
-/// harness's bus walk to kaya's own promoted buttons, since the header also
-/// holds GTK's window controls and libadwaita's back button.
-///
-/// ENABLEMENT IS FREE: the button names the item's existing `win.kmi-<id>`
-/// action. NO CAPACITY, because k is the PLATFORM's number and GTK does not
-/// have one — a header bar takes what fits and then raises the window's
-/// minimum width (docs/chrome-plan.md: 24 buttons -> 1155px).
+/// catalog actions as real buttons in its AdwHeaderBar, in catalog preorder,
+/// SYMBOL-FIRST per GNOME's HIG. THE ACCESSIBLE LABEL IS EXPLICIT — an
+/// icon-only GtkButton with only an action-name publishes `name=''` — and the
+/// DESCRIPTION carries the semantic name, which scopes the harness's bus walk.
+/// NO CAPACITY: GTK has no k, it just raises the window's minimum width.
 fn refresh_toolbar(core: &CoreState, window: u64) {
     use gtk4::prelude::{AccessibleExtManual, ActionableExt, BoxExt, WidgetExt};
     let Some(group) = core.toolbar_groups.get(&window) else {
@@ -5068,17 +4829,11 @@ fn widget_typeface(widget: &gtk4::Widget) -> Option<(String, String)> {
 }
 
 /// Every text-bearing widget under the app's windows, read the honest way.
-///
 /// THE WIDGETS AND NOT THE MODEL: every font API renders SOMETHING for a
-/// family it cannot match, so a read that reported what kaya asked for would
-/// report a perfect swap for a family that was never installed. THE LABELS
-/// ARE WHERE THE ANSWER IS — a GtkButton's title is a GtkLabel child and a
-/// GtkEntry's editable is a GtkText, so walking to the text-bearing leaf
-/// covers every kind without naming any of them.
-///
-/// `.monospace` IS SKIPPED, DELIBERATELY. It is the one slot libadwaita's
-/// stylesheet claims a family for, and `:root` is chosen precisely so that it
-/// keeps it (a `*` rule would swap the editor's face).
+/// family it cannot match, so a read of what kaya asked for would report a
+/// perfect swap for a family that was never installed. `.monospace` IS
+/// SKIPPED DELIBERATELY — it is the one slot libadwaita's stylesheet claims a
+/// family for, and `:root` is chosen so that it keeps it.
 #[cfg(feature = "harness")]
 fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
     use gtk4::prelude::{Cast, WidgetExt};
@@ -5112,14 +4867,11 @@ fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
     seen
 }
 
-/// The answer `expect_typeface` compares, and — when it is not the one
-/// the app asked for — a diagnosis printed beside it.
-///
-/// THE DIAGNOSIS PRINTS ONLY WHAT THIS PROCESS MEASURED. A platform may give
-/// more than one cause the same resolved family, so that family is not causal
-/// evidence even when the current fixture happens to distinguish the cases.
-/// docs/styling/typeface-gtk.md §3 holds the watched proof (invariant 3; the
-/// `kayaOpenPanelWhyNot` shape).
+/// The answer `expect_typeface` compares, and — when it is not the one the
+/// app asked for — a diagnosis printed beside it. THE DIAGNOSIS PRINTS ONLY
+/// WHAT THIS PROCESS MEASURED: a platform may give more than one cause the
+/// same resolved family, so that family is not causal evidence
+/// (docs/styling/typeface-gtk.md §3; invariant 3).
 #[cfg(feature = "harness")]
 fn typeface_verdict(core: &CoreState, seen: &TypefaceSeen) -> String {
     let answer = match seen.families.len() {
@@ -5315,9 +5067,9 @@ fn ensure_menu_strip(core: &mut CoreState, window: u64) {
 }
 
 /// The window's shell — the AdwToolbarView installed by
-/// `install_nav_chrome`, whose content slot IS what used to be the window's
-/// child. Every content route goes through this, which keeps the header bar
-/// from being replaced by a mounted root.
+/// `install_nav_chrome`, whose content slot holds what would otherwise be
+/// the window's child. Every content route goes through this, which keeps
+/// the header bar from being replaced by a mounted root.
 fn window_shell(core: &CoreState, window: u64) -> adw::ToolbarView {
     core.toolbar_views
         .get(&window)
@@ -5337,15 +5089,11 @@ fn window_content(core: &CoreState, window: u64) -> Option<gtk4::Widget> {
     core.toolbar_views.get(&window).and_then(adw::ToolbarView::content)
 }
 
-/// The window's live content width in pixels, read from its ALLOCATION
-/// rather than from `default_size()`, which is the size REQUESTED: under a
-/// bare Xvfb with no window manager the two drift apart, and the arm and the
-/// assertion then disagree about the same instant (the arm rendered `split`
-/// while the read said `compact`). Falls back to the request before the
-/// window is mapped, when the allocation is legitimately 0.
-///
-/// `None` is a window this process does not hold — never a width. A
-/// fabricated 0 would classify as `compact`.
+/// The window's live content width in pixels, read from its ALLOCATION and
+/// not `default_size()`, which is the size REQUESTED: under a bare Xvfb the
+/// two drift apart and the arm and the assertion disagree about the same
+/// instant. Falls back to the request before the window is mapped. `None` is
+/// a window this process does not hold — a fabricated 0 would read `compact`.
 fn window_width(core: &CoreState, window: u64) -> Option<i32> {
     use gtk4::prelude::{GtkWindowExt, WidgetExt};
     let target = gtk_window_read(core, window)?;
@@ -5449,16 +5197,10 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
                 return;
             }
             // A CLOSE THAT ARRIVES WITH THE CLAIM STILL SET IS A FAILED
-            // PRESENTATION, NOT A DISMISSAL — under the harness, which is the
-            // only place this distinction is reachable. There is no user in a
-            // scene, so a close landing here means popup() did not keep the
-            // menu up, and the right answer is to put it back.
-            //
-            // MEASURED, not reasoned: menus-{csharp,java}-wayland both failed
-            // with `no such menu item "Remove"` and a trail reading `popover
-            // closed -> cleared` 0ms before the panic. The anchor is a STAMPED
-            // ROW, restamped by the re-render the preceding Rename caused.
-            // Wayland only; every x11 twin passed (docs/traps.md).
+            // PRESENTATION, NOT A DISMISSAL: there is no user in a scene, so
+            // popup() did not keep the menu up and the answer is to put it
+            // back. Measured on menus-{csharp,java}-wayland, a stamped row
+            // restamped by the preceding Rename; wayland only (docs/traps.md).
             #[cfg(feature = "harness")]
             {
                 note_claim(&trail_closed, "popover closed without showing — re-presenting", Some(widget));
@@ -5558,23 +5300,12 @@ fn menu_activation_route(
     }
 }
 
-// ---------------------------------------------------------------------
-// Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §5b for what this
-// platform was measured to charge).
-//
-// The COPY arm is one provider per populated representation, unioned — an
-// arbitrary slash-bearing custom mime included (measured; a SLASHLESS type is
-// advertised and never served, which is why the id grammar is validated at
-// the root). The READ arm consults formats() and transfers exactly the one
-// representation it chooses; an unsatisfiable read answers NOW (measured:
-// GDK fails it in 0ms).
-//
-// THE FAILURE THIS ARM CANNOT SEE: Wayland lets a client take the selection
-// only with an input-event serial, and a headless seat can never deliver one
-// — the compositor drops set_content SILENTLY while GDK's own bookkeeping
-// reports it set. The harness primes one serial per leg
-// (ensure_serial_primed).
-// ---------------------------------------------------------------------
+// --- Clipboard (DESIGN.md; docs/clipboard-plan.md §5b) ----------------
+// The COPY arm is one provider per populated representation, unioned; a
+// SLASHLESS custom type is advertised and never served, which is why the id
+// grammar is validated at the root. THE FAILURE THIS ARM CANNOT SEE: wayland
+// gives the selection only with an input-event serial and a headless seat
+// never delivers one, so set_content is dropped SILENTLY (ensure_serial_primed).
 
 /// Everything a menu-role activation needs WITHOUT borrowing CORE: a stage
 /// verb activates actions while it holds the core borrow.
@@ -5608,18 +5339,11 @@ impl ClipboardHub {
     }
 
     /// The kaya widget that owns focus: the DEEPEST registered widget
-    /// containing the toplevel's focus widget, because a GtkEntry delegates to
-    /// an internal GtkText and every ancestor container "contains" the focus
-    /// too.
-    ///
-    /// THE ACTIVE TOPLEVEL FIRST, AND THEN EVERY OTHER ONE. Window activation
-    /// belongs to the WINDOW MANAGER, and after a modal dialog closes there
-    /// may be no active toplevel at all: the lane's X server has none and the
-    /// headless compositor does not re-activate a parent either. Measured
-    /// 2026-08-10 on the editor scene: after File>Open, `undo_route` saw no
-    /// focused field and no can-undo, so Edit>Undo routed to the CORE tier —
-    /// a PROGRAMMATIC write, which reaches no app — and `expect_dirty false`
-    /// failed for fifteen seconds with the buffer already correct.
+    /// containing the toplevel's focus widget, since a GtkEntry delegates to
+    /// an internal GtkText. THE ACTIVE TOPLEVEL FIRST, AND THEN EVERY OTHER
+    /// ONE — window activation belongs to the WINDOW MANAGER and the lane has
+    /// none, so after a modal dialog closes there may be no active toplevel at
+    /// all (measured 2026-08-10, docs/traps.md).
     fn focused_widget_id(&self) -> Option<u64> {
         use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
         let toplevels = gtk4::Window::toplevels();
@@ -5793,18 +5517,12 @@ fn clipboard_offers_text(formats: &gdk::ContentFormats) -> bool {
         || formats.contains_type(glib::types::Type::STRING)
 }
 
-/// Recompute the GESTURE roles' action enablement. THE MAC FINDING, spelled
-/// GTK (docs/clipboard-plan.md §3): enablement is the intersection of what
-/// the clipboard offers and what the focused widget accepts, and both move
-/// long after the bar was built. The GAction's enabled flag is what grays the
-/// row AND what refuses a harness activation, so this runs wherever
-/// enablement can change hands. menu_sync_enabled writes the STRUCTURAL
-/// enablement alone, so every site that calls it for a role-bearing tree
-/// follows with this.
-///
-/// UNDO AND REDO JOIN THE SAME FILTER (docs/undo-plan.md): a role outside it
-/// never has its enablement recomputed at all. Theirs moves with the LEDGER,
-/// so the ledger's own movers call this too.
+/// Recompute the GESTURE roles' action enablement (docs/clipboard-plan.md
+/// §3): the intersection of what the clipboard offers and what the focused
+/// widget accepts, both of which move long after the bar was built. Runs
+/// wherever enablement can change hands, since menu_sync_enabled writes the
+/// STRUCTURAL half alone. UNDO AND REDO JOIN THE SAME FILTER — theirs moves
+/// with the LEDGER, so the ledger's own movers call this too.
 fn refresh_roles(core: &CoreState) {
     let reg = core.menus.borrow();
     for (id, item) in &reg.items {
@@ -5819,36 +5537,19 @@ fn refresh_roles(core: &CoreState) {
 }
 
 // --- The undo tier (docs/undo-plan.md D6/D7/A1/A4, §3) -----------------
-//
-// GTK OWNS RAW CONTROLS, which is the whole difference between this arm and
-// the mac one. §3a asks every arm whether a native undo reaches kaya's model
-// BY MEASUREMENT; here the answer is YES on both kinds, synchronously, on the
-// ordinary `changed` signal (measured: an undo through GtkText's `text.undo`
-// action and one through GtkTextBuffer::undo each moved the text and each
-// emitted `changed`). So the work is the opposite of §3a's three channels:
+// GTK OWNS RAW CONTROLS: a native undo reaches kaya's model synchronously on
+// the ordinary `changed` signal (measured on both kinds), so the work is to
 // SUPPRESS the banking half for an undo this backend routed (ledger_quiet)
-// and report it once, with a sample, through `note_native_undo`.
-//
-// D7 IS FREE HERE TOO: a programmatic `set_text` WIPES the field's history by
-// itself, on both kinds (measured). The explicit clear below documents the
-// rule rather than buying it — except at A1's call site, where nothing is
-// written and the clear is the whole operation.
+// and report it once through `note_native_undo`. D7 is free too — a
+// programmatic `set_text` wipes the field's history by itself (measured).
 
 impl CoreState {
     /// A4's ONE named query — "can the focused widget undo?" — answered in
-    /// this platform's vocabulary and asked nowhere else in this file.
-    ///
-    /// THE TWO KINDS ANSWER DIFFERENTLY BECAUSE GTK DOES. A GtkTextBuffer
-    /// publishes `can-undo`/`can-redo`. The GtkText behind a GtkEntry
-    /// publishes NOTHING, and its action muxer is private (measured:
-    /// `gtk_widget_activate_action` returns TRUE for `text.undo` even with an
-    /// empty history), so the entry is answered from `native_dirty`.
-    ///
-    /// THE MODEL IS EXACT BECAUSE THE STACK HAS ONLY TWO MOVERS, both through
-    /// this file: input through the platform's own path fills it, and any
-    /// programmatic write empties it (measured). Where it could still be
-    /// stale, the ACTIVATION finds out — an undo with nothing left moves
-    /// nothing, which `perform_undo_role` reports as `can_undo = false`.
+    /// this platform's vocabulary and asked nowhere else in this file. THE TWO
+    /// KINDS ANSWER DIFFERENTLY BECAUSE GTK DOES: a GtkTextBuffer publishes
+    /// `can-undo`, the GtkText behind a GtkEntry publishes nothing, so the
+    /// entry is answered from `native_dirty`. Where that could be stale the
+    /// ACTIVATION finds out — an undo with nothing left moves nothing.
     fn focused_can_undo(&self, redo: bool) -> bool {
         // The hub already resolves the focused widget across toplevels (a
         // GtkEntry delegates to an internal GtkText).
@@ -5977,15 +5678,12 @@ impl CoreState {
     }
 }
 
-/// D7 + A3 at the quiet-write sites: a programmatic write to a text widget
-/// resets THAT widget's native undo history — but only when the write CHANGED
-/// the text. GTK's own `set_text` leaves the history alone when the text is
-/// identical (measured), so an app that mirrors a field into a signal and
-/// writes it back keeps its typing history, and an unconditional clear from
-/// kaya would be the thing that took it away.
-///
-/// Called from the APPLY ARMS rather than the writing sites, so an inverse
-/// the CORE writes travels the same path a forward write does.
+/// D7 + A3 at the quiet-write sites: a programmatic write resets THAT
+/// widget's native undo history — but only when the write CHANGED the text,
+/// because GTK's own `set_text` leaves the history alone when the text is
+/// identical (measured) and an unconditional clear would take away the
+/// typing history of an app that mirrors a field into a signal. Called from
+/// the APPLY ARMS, so a core-written inverse travels the forward path.
 fn note_quiet_text_write(core: &CoreState, id: WidgetId, previous: &str, next: &str) {
     if previous == next {
         return;
@@ -5993,15 +5691,11 @@ fn note_quiet_text_write(core: &CoreState, id: WidgetId, previous: &str, next: &
     core.clear_native_undo(id);
 }
 
-/// The reconciliation sample (§3): what a NATIVE undo left behind. The core
-/// walks its frontier episode backwards from three facts — the field, the
-/// text the walk landed on, and whether the field can still undo.
-///
+/// The reconciliation sample (§3): what a NATIVE undo left behind — the
+/// field, the text the walk landed on, and whether the field can still undo.
 /// THE THIRD FACT IN BOTH DIRECTIONS is `can_undo`, deliberately: it is the
 /// core's exhausted-walk test, and a redo answering `can_redo` would report
-/// false at the end of a forward walk and send the core backwards. For an
-/// entry the walk's own movement answers it — an activation with nothing left
-/// moves nothing, measured.
+/// false at the end of a forward walk and send the core backwards.
 fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
     let Some(text) = core.text_of(field) else { return };
     let window = core.window_of_widget(field).unwrap_or(WindowId(0));
@@ -6021,12 +5715,9 @@ fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
 }
 
 /// Perform an undo/redo role on the focused surface. Answers whether it WAS
-/// one, so a plain action falls through to its own dispatch.
-///
-/// ROUTING IS KAYA'S HERE, all of it (docs/undo-plan.md §1): GTK has no
-/// responder chain and no Edit-menu resolution of its own.
-///
-/// DEFERRED TO AN IDLE, this file's standing discipline: a menu action's
+/// one, so a plain action falls through to its own dispatch. ROUTING IS
+/// KAYA'S HERE, all of it (docs/undo-plan.md §1): GTK has no responder chain.
+/// DEFERRED TO AN IDLE, this file's standing discipline — a menu action's
 /// handler may run while the harness holds the CORE borrow, and both tiers of
 /// an undo need `&mut CoreState`. Idle sources run FIFO.
 fn perform_undo_role(role: &str) -> bool {
@@ -6070,16 +5761,12 @@ fn perform_undo_role(role: &str) -> bool {
                     }
                     core.ledger_quiet.set(false);
                     let moved = core.text_of(field).unwrap_or_default() != before;
-                    // THE NATIVE TIER MUST ACTUALLY HAVE SOMETHING, and under
-                    // the harness that is provable rather than hopeful. An
-                    // activation that moves nothing means the stack was EMPTY
-                    // where routing said it was not, and in a scene the only
-                    // ways that can happen are the two this milestone must
-                    // never ship: the characters never travelled the
-                    // platform's input path, or GTK stopped recording typed
-                    // input. Both would otherwise be SILENT. (No harness: a
-                    // user's own Ctrl+Z can empty the stack legitimately —
-                    // A6's gap.)
+                    // THE NATIVE TIER MUST ACTUALLY HAVE SOMETHING, provable
+                    // under the harness: an activation that moves nothing
+                    // means the keys never travelled the platform's input path
+                    // or GTK stopped recording typed input, both otherwise
+                    // SILENT. (No harness: a user's own Ctrl+Z can empty the
+                    // stack legitimately — A6's gap.)
                     #[cfg(feature = "harness")]
                     assert!(
                         moved || redo,
@@ -6126,14 +5813,11 @@ fn perform_undo_role(role: &str) -> bool {
 }
 
 /// Bank one text edit into the ledger (§3's episode banking), off the
-/// occurrence the widget just emitted.
-///
-/// THE TAG RESOLVES THE FIELD, not a captured id: the ledger keys on the
-/// widget id a programmatic write would name, and `Scene::text_field_of_tag`
-/// answers None for a stamped collection row, whose typing is therefore not
-/// banked on any backend. DEFERRED, like everything else that needs
-/// `&mut CoreState` from a widget signal; idle sources run FIFO, so edits
-/// bank in the order they happened.
+/// occurrence the widget just emitted. THE TAG RESOLVES THE FIELD, not a
+/// captured id: the ledger keys on the widget id a programmatic write would
+/// name, and `Scene::text_field_of_tag` answers None for a stamped row, whose
+/// typing is therefore banked on no backend. DEFERRED; idle sources run FIFO,
+/// so edits bank in the order they happened.
 fn bank_text_changed(tag: Vec<u8>, text: String, focused: bool) {
     glib::idle_add_local_once(move || {
         CORE.with_borrow_mut(|core| {
@@ -6198,24 +5882,12 @@ fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
     {
         return true;
     }
-    // THE SECOND CLAUSE, and the one a session with no window manager needs.
-    // GTK keeps both flags above in step with WINDOW ACTIVATION, so both
-    // CLEAR the moment the toplevel goes inactive — while
+    // THE SECOND CLAUSE, and the one a session with no window manager needs:
+    // GTK clears both flags above the moment the toplevel goes INACTIVE, while
     // `gtk_window_get_focus` still names the same widget and keystrokes still
-    // land in it. A modal dialog deactivates its parent, and re-activating it
-    // is the window manager's job; the lane's X server has none.
-    //
-    // MEASURED 2026-08-10, editor scene, linux/x11, right after File>Open…
-    // closed:
-    //
-    //   widget_focused flags=false win_active=false
-    //                  win_has_focus_widget=true
-    //
-    // What that cost: this function classifies a text change as a USER EDIT
-    // rather than a programmatic one, so the keystroke after the dialog was
-    // banked as programmatic, no open episode was recorded, and `route_undo`
-    // sent Edit>Undo to the CORE tier — a programmatic write, which reaches
-    // no guest.
+    // land in it. Without it a modal dialog's close makes the next keystroke
+    // read as a programmatic write (docs/traps.md: "GTK's focus flags clear
+    // with window activation, and the lane has no window manager").
     let Some(window) = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok()) else {
         return false;
     };
@@ -6227,12 +5899,9 @@ fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
 
 /// Choose the RICHEST representation the clipboard offers that the accept
 /// list takes, transfer exactly that one, and answer exactly once — None for
-/// no intersection or a failed transfer, the universal no. Shared by the
-/// privileged read and the declared-paste delivery.
-///
-/// The chooser consults formats() — the OFFER — so no transfer runs for a
-/// representation nobody asked for, and the unsatisfiable case answers
-/// immediately (measured §5b: a GDK read of an unoffered type fails in 0ms).
+/// no intersection or a failed transfer, the universal no. The chooser
+/// consults formats(), so no transfer runs for a representation nobody asked
+/// for and the unsatisfiable case answers immediately (measured §5b: 0ms).
 /// Descending clip value — custom, files, image, html, text (§1).
 fn materialize_clipboard(
     clipboard: &gdk::Clipboard,
@@ -6377,16 +6046,12 @@ fn read_stream_to_end(
     );
 }
 
-/// THE CANVAS'S WIDGET: a `GdkPaintable` drawn at the size the CORE
-/// rastered it for, centred in whatever track layout assigned, clipped
-/// to it.
-///
-/// NOT A `GtkPicture`, and the size policy is why (docs/canvas-plan.md
-/// §3.2.1, ruling 2): `fixed` rasters at the viewbox whatever the track
-/// is, so the blit has to be strictly 1:1, and no member of
-/// `GtkContentFit` means that (docs/traps.md, "A canvas sized by its own
-/// blit NEVER STARTS", second half). tools/check-canvas-blit.py refuses
-/// that vocabulary by name.
+/// THE CANVAS'S WIDGET: a `GdkPaintable` drawn at the size the CORE rastered
+/// it for, centred in whatever track layout assigned, clipped to it. NOT A
+/// `GtkPicture`, and the size policy is why (docs/canvas-plan.md §3.2.1,
+/// ruling 2): the blit has to be strictly 1:1 and no member of
+/// `GtkContentFit` means that (docs/traps.md, "A canvas sized by its own blit
+/// NEVER STARTS"); tools/check-canvas-blit.py refuses that vocabulary.
 mod canvas_view {
     use gtk4::glib;
     use gtk4::prelude::*;
@@ -6490,17 +6155,12 @@ mod canvas_view {
 
 use canvas_view::KayaCanvas;
 
-/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into
-/// a `GdkMemoryTexture`, handed to the canvas at the LOGICAL size the
-/// raster's own scale names.
-///
-/// `R8g8b8a8Premultiplied` IS tiny-skia's `Pixmap` layout — R at byte 0,
-/// A at byte 3 — so this arm swizzles nothing. `expect_ink` is what fails
-/// if that ever stops being true.
-///
-/// THE SIZE IS WHERE THE SCALE GOES (§5 rule 2). A `GdkTexture` carries
-/// none, so a 2x raster handed over by its pixel count would ask layout
-/// for twice the viewbox and every container above it would inherit that.
+/// THE BLIT (docs/canvas-plan.md §8): the core's premultiplied RGBA8 into a
+/// `GdkMemoryTexture`, handed to the canvas at the LOGICAL size the raster's
+/// own scale names. `R8g8b8a8Premultiplied` IS tiny-skia's `Pixmap` layout,
+/// so this arm swizzles nothing. THE SIZE IS WHERE THE SCALE GOES (§5 rule
+/// 2): a `GdkTexture` carries none, so a 2x raster handed over by its pixel
+/// count would ask layout for twice the viewbox.
 fn set_drawing(canvas: &KayaCanvas, width: u32, height: u32, scale: f64, pixels: &[u8]) {
     let stride = width as usize * 4;
     let want = stride * height as usize;
@@ -6639,15 +6299,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // Invisible at natural size — there the box IS the text.
                     label.set_xalign(0.0);
                     // TEXT WRAPS, the same semantics SwiftUI and Compose
-                    // carry (the 2026-08-29 ruling): a label given less
-                    // width than its text breaks lines instead of forcing
-                    // its container wider than the screen. GTK's own
-                    // documentation warns that `wrap` alone does not make a
-                    // label wrap AT the parent's width — a widget's
-                    // requisition cannot depend on its parent — so the
-                    // natural width is bounded too; without that bound the
-                    // window simply grows to the longest line, which is
-                    // exactly the defect this rule exists to end.
+                    // carry (the 2026-08-29 ruling): a label given less width
+                    // than its text breaks lines instead of forcing its
+                    // container wider than the screen. `wrap` alone does not
+                    // wrap AT the parent's width — a requisition cannot depend
+                    // on its parent — so the natural width is bounded too.
                     label.set_wrap(true);
                     label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
                     label.set_max_width_chars(KAYA_LABEL_MAX_WIDTH_CHARS);
@@ -6663,13 +6319,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
                     // A SCROLL IS A VERTICAL CONTAINER, and saying so is what
                     // makes it SPAN a row's breadth (the 2026-08-22 crossing
-                    // rule, `crosses_container`). Unmarked it crossed nothing,
-                    // took Align::Start and therefore its NATURAL height —
-                    // which for a scroller is tiny — so the portfolio's
-                    // Transactions summary rendered as three clipped lines
-                    // with its filter and recents table simply absent, while
-                    // the same declaration filled correctly on SwiftUI and
-                    // Compose (measured 2026-08-30).
+                    // rule, `crosses_container`). Unmarked it took Align::Start
+                    // and its NATURAL height — tiny for a scroller — so the
+                    // portfolio's Transactions summary rendered as three
+                    // clipped lines (measured 2026-08-30).
                     set_container_vertical(scrolled.upcast_ref::<gtk4::Widget>(), true);
                     set_scroll_kind(scrolled.upcast_ref::<gtk4::Widget>());
                     core.scrolls.push(scrolled.clone());
@@ -6687,30 +6340,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // contract — the buffer's `changed` fires for programmatic
 // set_text too, so the split rides apply_quiet.
                     let view = gtk4::TextView::new();
-                    // THE SIZING CONTRACT. The editor takes its LAYOUT size
-                    // and its content scrolls inside it: a bare GtkTextView
-                    // grows to its content, so 400 lines made a 6400px widget
-                    // in a 6692px window — no scrollbar, no keyboard scroll,
-                    // the text unreachable, and `scroll_to_mark` returning
-                    // true while moving nothing because the view believed the
-                    // whole buffer was visible (all measured, GTK 4.18.6).
-                    //
-                    // The viewport is the fix, in the ONE shape that works:
-                    // the TextView as the DIRECT child of the
-                    // GtkScrolledWindow. GtkTextView implements GtkScrollable,
-                    // so the scrolled window drives the view's own
-                    // adjustments and adds no GtkViewport; put a Box between
-                    // them and the view is handed its natural height again
-                    // and nothing scrolls. The 240x96 minimum moves to the
-                    // viewport, which is now the widget the parent measures.
-                    //
-                    // ONE AXIS, like kaya's `scroll` kind. Only honest if no
-                    // line can escape sideways, so the view WRAPS — WordChar
-                    // rather than Word so a single unbreakable token cannot
-                    // reopen the unbounded-width half of the same wart.
-                    // Wrapping touches no observable: the buffer, `read_text`
-                    // and the AT-SPI Text interface all speak the stored
-                    // string.
+                    // THE SIZING CONTRACT: the editor takes its LAYOUT size
+                    // and its content scrolls inside it. A bare GtkTextView
+                    // grows to its content instead (400 lines, a 6400px widget,
+                    // nothing scrollable — measured), so the TextView is the
+                    // DIRECT child of the GtkScrolledWindow and wraps WordChar
+                    // (docs/traps.md: "A bare GtkTextView grows to its content").
                     view.set_wrap_mode(gtk4::WrapMode::WordChar);
                     let scroller = gtk4::ScrolledWindow::new();
                     scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -7681,18 +7316,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::SetAppIdentity(identity) => {
             // THE APP'S NAME AND ITS MARK, GTK's half
             // (docs/app-identity-plan.md I4a and I9). Both halves are lowered
-            // here and both are recorded, because the read has to tell "kaya
-            // never set one" from "kaya set one and the platform did not keep
-            // it".
-            //
-            // THE NAME GOES ON THE PROGRAM NAME FIRST, and that is the lever:
-            // `g_get_prgname()` is what GTK's Wayland backend sends as the
-            // toplevel's `app_id` and what its X11 backend writes into
-            // `WM_CLASS`, which is what decides the `.desktop` match. It is
-            // also readable cross-process: AT-SPI's application accessible
-            // hard-wires Name = prgname and Description =
-            // g_get_application_name (I9, measured). It only reaches surfaces
-            // NOT YET CREATED, which is why `reclass_toplevels` follows.
+            // AND recorded, because the read has to tell "kaya never set one"
+            // from "kaya set one and the platform did not keep it". THE NAME
+            // GOES ON THE PROGRAM NAME FIRST — `g_get_prgname()` is the lever
+            // for app_id, WM_CLASS and AT-SPI — so `reclass_toplevels` follows.
             if !identity.name.is_empty() {
                 glib::set_prgname(Some(identity.name.as_str()));
                 glib::set_application_name(&identity.name);
@@ -8118,29 +7745,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     dropdown.set_selected(v as u32);
                     core.apply_quiet.set(false);
                 }
-                // THE UNIVERSAL PROPS. Every other arm keys on a (kind, prop)
-                // pair; these name something every element has, so they match
-                // the prop ALONE and reach the widget through
-                // NativeWidget::control.
-                //
-                // THE CONTROL AND NOT THE LAYOUT WIDGET: for the textarea that
-                // is the difference between naming the `text` node an
-                // assistive client reads and naming the `scroll pane` around
-                // it (route this to `widget` and `expect_ax textarea#0` reads
-                // `field/` instead of `field/Notes`). The LABEL OVERRIDES
-                // whatever the control derived from its own content, so an
-                // unset label must never be written as "".
+                // THE UNIVERSAL PROPS: every other arm keys on a (kind, prop)
+                // pair, these on the prop ALONE, reaching the widget through
+                // NativeWidget::control. THE CONTROL AND NOT THE LAYOUT WIDGET
+                // — route this to `widget` and `expect_ax textarea#0` reads
+                // `field/` instead of `field/Notes`. The LABEL OVERRIDES what
+                // the control derived, so an unset label must never be "".
                 (w, Prop::A11yLabel, Value::Str(label)) => {
                     use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
                     if !label.is_empty() {
                         core.a11y_labels.insert(id.0, label.clone());
                         let widget = w.control();
-                        // Promote a CONTAINER to a semantic group. GTK made
-                        // GtkBox's role GENERIC in 4.12 — "a nameless
-                        // container with no semantic meaning" — so a label set
-                        // on one does not surface as an AT-SPI name. EVERY
-                        // container kind, not just row and column: measured
-                        // 2026-07-25 over AT-SPI, a named grid and a named
+                        // Promote a CONTAINER to a semantic group: GTK made
+                        // GtkBox's role GENERIC in 4.12, so a label set on one
+                        // does not surface as an AT-SPI name. EVERY container
+                        // kind — measured 2026-07-25, a named grid and a named
                         // radio group both stayed role `panel` with an EMPTY
                         // name, and a named scroll stayed `scroll pane`.
                         if matches!(
@@ -8198,13 +7817,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     refresh_roles(core);
                 }
                 // SEMANTIC EMPHASIS (docs/styling-plan.md D4): what the widget
-                // MEANS, lowered to the platform's OWN name for it.
-                // libadwaita ships both button affordances as documented style
-                // classes — there is no `.brand-action`, and inventing one
-                // would mean writing colors, which is leaving the tier. Both
-                // classes are removed before one is added: they are mutually
-                // exclusive in libadwaita's stylesheet, and a re-applied role
-                // would otherwise leave the previous one stacked underneath.
+                // MEANS, lowered to libadwaita's own documented style classes
+                // — inventing a `.brand-action` would mean writing colors,
+                // which is leaving the tier. Both classes come off before one
+                // goes on: they are mutually exclusive in the stylesheet, and a
+                // re-applied role would leave the previous one underneath.
                 (NativeWidget::Button(button), Prop::Role, Value::I64(role @ (1 | 2))) => {
                     use gtk4::prelude::WidgetExt;
                     button.remove_css_class("destructive-action");
@@ -8217,14 +7834,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 // THE HEADING ROLE IS TWO FACTS AT ONCE: the platform's
                 // heading TEXT STYLE and its heading ACCESSIBLE role.
-                //
-                // `.heading` and not `.title-1`..`.title-4`: those are a SIZE
-                // ladder (measured — .title-2 and .title-3 are the same size
-                // and differ only in weight). And a style class does not touch
-                // the accessible role (measured: a `.title-1` label still
-                // publishes `label`), so without this line the role would be
-                // invisible to `expect_ax` — GTK 4.18 maps HEADING to
-                // ATSPI_ROLE_HEADING, which the steps freeze.
+                // `.heading` and not `.title-1`..`.title-4`, which are a SIZE
+                // ladder, and a style class does not touch the accessible role
+                // (measured: a `.title-1` label still publishes `label`), so
+                // without this line the role is invisible to `expect_ax`.
                 (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
                     use gtk4::prelude::{AccessibleExt, WidgetExt};
                     label.add_css_class("heading");
@@ -8327,11 +7940,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // TWO LAYOUT PATHS, TWO WRITES, and the write is why the
                     // stored value exists: GtkBox owns the gap until a child
                     // grows, and forwarding to it AFTER ensure_flex asserts
-                    // GTK_IS_BOX_LAYOUT and drops the write on the floor. The
-                    // bindings differ on which case a scene hits — python,
-                    // csharp and ocaml emit this prop before the children's
-                    // weights, rust, go, haskell and java after — so both arms
-                    // carry real legs (docs/deferred.md's always-8 GAP).
+                    // GTK_IS_BOX_LAYOUT and drops the write. The bindings
+                    // differ on which case a scene hits, so both arms carry
+                    // real legs (docs/deferred.md's always-8 GAP).
                     match widget
                         .layout_manager()
                         .and_then(|m| m.downcast::<flex::FlexLayout>().ok())
@@ -8632,14 +8243,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     note_quiet_text_write(core, id, &previous, "");
                 }
                 CommandKind::Focus => {
-                    // grab_focus is per-window (the toplevel's focus widget),
-                    // so parallel tiled suite legs cannot steal each other's
-                    // focus assertions. The materialization class
-                    // (docs/traps.md): an unmapped widget cannot take focus
-                    // and the bool is discarded, so a not-yet-mapped widget
-                    // takes a one-shot re-grab from its own map signal. THE
-                    // CONTROL, not the layout widget: `expect_focused
-                    // textarea#0` reads the GtkTextView, not its viewport.
+                    // grab_focus is per-window, so parallel tiled legs cannot
+                    // steal each other's focus assertions. The materialization
+                    // class (docs/traps.md): an unmapped widget cannot take
+                    // focus and the bool is discarded, so it takes a one-shot
+                    // re-grab from its own map signal. THE CONTROL, not the
+                    // layout widget — `expect_focused textarea#0` reads the view.
                     let w = widget.control();
                     if w.is_mapped() {
                         w.grab_focus();
@@ -8663,15 +8272,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 }
 
 /// Load one of kaya's OWN generated stylesheets, with a parse error made
-/// FATAL rather than silent.
-///
-/// `GtkCssProvider::parsing-error` is NECESSARY AND NOT SUFFICIENT, measured
-/// both ways: `var(--kaya-no-such-variable)` raises nothing and silently
-/// inherits, so this catches "kaya's CSS is malformed" and never "the
-/// variable name is one libadwaita does not read". The panic is raised HERE
-/// rather than in the handler: `load_from_data` calls it synchronously, and
-/// unwinding a Rust panic through GTK's C frames is not something to do for
-/// a diagnostic.
+/// FATAL rather than silent. `GtkCssProvider::parsing-error` is NECESSARY AND
+/// NOT SUFFICIENT, measured both ways: `var(--kaya-no-such-variable)` raises
+/// nothing and silently inherits. The panic is raised HERE and not in the
+/// handler, since `load_from_data` calls it synchronously and unwinding
+/// through GTK's C frames for a diagnostic is not worth it.
 fn load_kaya_css(
     provider: &gtk4::CssProvider, what: &str, css: &str,
     error: &Rc<RefCell<Option<String>>>,
@@ -8688,22 +8293,11 @@ fn load_kaya_css(
 }
 
 /// A CONTAINER's own inset (prop 17): the space between its bounds and its
-/// children, lowered onto the container's CSS box.
-///
-/// A TRANSPARENT BORDER, NOT `padding` — the one spelling in this file GTK's
-/// cascade chose rather than kaya. This backend mounts the root with no
-/// wrapper, so `.kaya-root`, which carries the WINDOW inset, sits on the very
-/// widget a root container's own inset lands on, and two `padding`
-/// declarations on one widget do not add: the later provider simply wins.
-/// Measured — `.kaya-root { padding: 16px }` plus a second provider's
-/// `padding: 8px` places its children 8 in, and the window's 16 is gone with
-/// no error anywhere. A border is a different CSS box, so they add here
-/// (measured: 16 + 8 puts the content 24 in) and, being transparent, it
-/// draws nothing.
-///
-/// ONE RULE PER DISTINCT VALUE in one display-level provider: the stamped
-/// case is what scales — a thousand collection rows inset by 8 share one
-/// rule.
+/// children, on the container's CSS box. A TRANSPARENT BORDER, NOT `padding`:
+/// this backend mounts the root with no wrapper, so `.kaya-root`'s WINDOW
+/// inset sits on the same widget, and two `padding` declarations do not add —
+/// the later provider simply wins (measured; a border adds, 16 + 8 = 24).
+/// ONE RULE PER DISTINCT VALUE, so a thousand inset rows share one.
 fn set_container_inset(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
     use gtk4::prelude::WidgetExt;
     // Whole pixels, the window arm's rule — the value is a CSS length,
@@ -8744,25 +8338,11 @@ fn watch_css_errors(provider: &gtk4::CssProvider, error: &Rc<RefCell<Option<Stri
 
 /// THE BRAND ACCENT, GTK's half (docs/styling-plan.md D1): libadwaita's
 /// documented app-override route, carrying the values the CORE derived.
-///
-/// Three variables and no fourth: `--accent-bg-color`, `--accent-fg-color`
-/// and `--accent-color` (the STANDALONE variant, which libadwaita's own docs
-/// say must be set alongside the background or it goes stale), all read
-/// straight out of the appearance's `DerivedAccent`. In particular this does
-/// NOT use libadwaita's per-widget recipe `oklab(from
-/// var(--accent-bg-color) var(--standalone-color-oklab))`, which the
-/// research measured producing an out-of-gamut GdkRGBA (a negative green
-/// channel) for a saturated seed.
-///
-/// CUSTOM PROPERTIES ONLY, NEVER `@name`: `@accent_bg_color` still parses on
-/// 4.18.6 and resolves to the SYSTEM accent even while `--accent-bg-color`
-/// is overridden (measured), so mixing them yields a half-branded window
-/// with no error anywhere.
-///
-/// One appearance at a time, because GTK CSS has no appearance selector; the
-/// `dark` notify wired in `run_core` rewrites it. `AdwStyleManager:dark`
-/// reads the SESSION's preference correctly — unlike its accent getters,
-/// which report the system accent even after an app override succeeds.
+/// Three variables and no fourth, all out of `DerivedAccent` — never
+/// libadwaita's per-widget oklab recipe, which measured out of gamut for a
+/// saturated seed. CUSTOM PROPERTIES ONLY, NEVER `@name`: `@accent_bg_color`
+/// still resolves to the SYSTEM accent under the override (docs/styling-plan.md
+/// D1). One appearance at a time; the `dark` notify rewrites it.
 fn brand_css_for(accent: crate::brand::BrandAccent, dark: bool) -> String {
     let a = if dark { accent.dark } else { accent.light };
     format!(
@@ -8773,20 +8353,11 @@ fn brand_css_for(accent: crate::brand::BrandAccent, dark: bool) -> String {
 }
 
 /// THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice 2b): one
-/// inherited `font-family`, and nothing else in the sheet.
-///
-/// `:root`, NEVER `*`. `*` matches the `.monospace` element itself and beats
-/// libadwaita's own rule for it, so a brand family would swap the face of
-/// every monospace surface — kaya's own text editor among them. `:root` sets
-/// an INHERITED value the theme overrides exactly where it means to:
-/// libadwaita 1.7's compiled stylesheet declares a font-family in
-/// `.monospace` and its four row variants ONLY, and GTK's built-in Adwaita
-/// declares none at all (measured both ways).
-///
-/// THE FAMILY AND NOT THE SCALE: nine surfaces across the type ramp measured
-/// identical in size and weight to the pixel, branded and unbranded. The
-/// rejected alternative, `GtkSettings:gtk-font-name`, moves every size with
-/// the family and stomps a session-global setting from inside an app.
+/// inherited `font-family`, and nothing else in the sheet. `:root`, NEVER `*`
+/// — `*` matches the `.monospace` element itself and beats libadwaita's own
+/// rule for it, swapping the face of every monospace surface. THE FAMILY AND
+/// NOT THE SCALE: `GtkSettings:gtk-font-name` moves every size with the
+/// family and stomps a session-global setting from inside an app.
 fn typeface_css_for(family: &str) -> String {
     format!(":root {{\n  font-family: {};\n}}\n", css_string(family))
 }
@@ -8817,24 +8388,11 @@ fn css_string(family: &str) -> String {
 }
 
 /// FONT BYTES, GTK's half: register the blob with the live text system and
-/// answer with the family it registered under, so the name machinery above
-/// takes over unchanged (register-then-resolve). `None` when the file added
-/// nothing this process can name.
-///
-/// PANGO'S ROUTE AND NOT FONTCONFIG'S, measured rather than stylistic.
-/// `FcConfigAppFontAddFile` RETURNS SUCCESS AND DOES NOTHING once GTK has
-/// started: registered before `Application::run` the family joins the map and
-/// resolves; registered anywhere after it the call still returns 1, the
-/// family never appears in the realized `PangoFontMap`, and the request falls
-/// back to DejaVu Sans. `pango_font_map_changed()` does not help. Measured
-/// three ways; the whole apply path sits on the wrong side of that line.
-/// `pango_font_map_add_font_file()` (Pango 1.56, the lane image's 1.56.3)
-/// adds the file to the realized `PangoCairoFcFontMap` at any time: measured
-/// HIT where the fontconfig route silently missed.
-///
-/// THE FILE, not the bytes: Pango's API takes a path, so the blob is written
-/// to a temp file named after its own content and left for the process's
-/// life.
+/// answer with the family it registered under (register-then-resolve).
+/// PANGO'S ROUTE AND NOT FONTCONFIG'S — `FcConfigAppFontAddFile` returns
+/// success and does nothing once GTK has started, while
+/// `pango_font_map_add_font_file` lands at any time
+/// (docs/styling/typeface-gtk-arm.md).
 fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<String> {
     use gtk4::pango::prelude::{FontFamilyExt, FontMapExt};
     use gtk4::prelude::WidgetExt;
@@ -8844,17 +8402,12 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     let path = std::env::temp_dir().join(format!("kaya-font-{hash:016x}"));
-    // NEVER TRUNCATE THE SHARED NAME IN PLACE. The path is content-named and
-    // shared by every process shipping these bytes, and freetype MAPS it: an
-    // `fs::write` here is open(O_TRUNC), which drops the file to zero length
-    // under any process that already has it mapped, and that process then dies
-    // of SIGBUS (BUS_ADRERR) the next time Pango touches a cold page. Measured
-    // 2026-08-16: the linux lane runs its legs in a parallel pool, and
-    // typeface-java-wayland crashed inside libfreetype exactly this way while
-    // a sibling leg re-wrote the file (hs_err mapped the faulting address to
-    // /tmp/kaya-font-e67019d22467d0da). So: skip when the bytes are already
-    // there, otherwise write a UNIQUE temp name and rename() it in. The winui
-    // arm learned the same lesson the same day (os error 1224).
+    // NEVER TRUNCATE THE SHARED NAME IN PLACE: the path is content-named and
+    // shared by every process shipping these bytes, freetype MAPS it, and an
+    // `fs::write` (open(O_TRUNC)) drops it to zero length under a process that
+    // then dies of SIGBUS. Skip when the bytes are already there, otherwise
+    // write a UNIQUE temp name and rename() it in (docs/traps.md: "A per-app
+    // font is never in the system font collection").
     let already = std::fs::read(&path).is_ok_and(|have| have == bytes);
     if !already {
         let staged = path.with_extension(format!("stage-{}", std::process::id()));
@@ -8973,13 +8526,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             .default_height(330)
             .build();
         // THE BREAKPOINT CHANNEL (docs/adaptive-layout-plan.md D3): the
-        // window's content size, reported into THIS BACKEND'S OWN scene
-        // (canvas_track_report's route — the capi presentation slot is
-        // the interpreters', and a report there reaches a scene this
-        // backend never reads). SCHEDULED, never inline: the notify
-        // fires inside resize_window's on_main with CORE borrowed, the
-        // schedule_presentation_report rule. The scene ignores a report
-        // that changes nothing, so notify-noise costs nothing.
+        // window's content size, into THIS BACKEND'S OWN scene — the capi
+        // presentation slot is the interpreters', and a report there reaches a
+        // scene this backend never reads. SCHEDULED, never inline: the notify
+        // fires inside resize_window's on_main with CORE borrowed.
         {
             use gtk4::prelude::GtkWindowExt;
             window.connect_default_width_notify(|_| schedule_window_metrics());
@@ -9330,14 +8880,12 @@ fn foreign_clip_write(mime: Option<&str>, bytes: Vec<u8>) {
         }
         c
     };
-    // ALL THREE DESCRIPTORS SET EXPLICITLY, never inherited: a host
-    // runtime may mark its own standard descriptors close-on-exec — node
-    // does — and a child that inherits one starts with it CLOSED, which
-    // wl-copy refuses by design and xclip answers by hanging (measured
-    // on the js legs 2026-09-01, docs/traps.md). stderr goes to a FILE
-    // so the refusal below carries the writer's own words: a pipe would
-    // be inherited by the serving child both tools fork, and reading it
-    // to EOF waits on a daemon that never exits.
+    // ALL THREE DESCRIPTORS SET EXPLICITLY, never inherited: a host runtime
+    // may mark its own standard descriptors close-on-exec — node does — and a
+    // child that inherits one starts with it CLOSED (measured on the js legs
+    // 2026-09-01, docs/traps.md). stderr goes to a FILE, never a pipe: the
+    // serving child both tools fork would inherit it and reading to EOF waits
+    // on a daemon that never exits.
     let err_path = std::env::temp_dir().join(format!(
         "kaya-clip-seed-{}-{}.err",
         std::process::id(),
@@ -9426,21 +8974,11 @@ static TYPED_ONCE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Wayland charges an input-event serial for TAKING the selection, and the
-/// charge is not one-time (docs/clipboard-plan.md §5b finding 3, all of it
-/// measured): the lane's headless seat has no input devices, so no client
-/// earns a serial on its own, AND wlroots rejects a set_selection whose
-/// serial is older than the current selection's — every wl-copy seed advances
-/// that watermark. The rejection is silent, and a GDK client with a live
-/// local claim IGNORES incoming offers, so ONE dropped copy leaves the guest
-/// deaf to the clipboard for the rest of its life.
-///
-/// So the harness taps a virtual-keyboard F24 before EVERY step that can lead
-/// to a copy. The FIRST tap uses the press-hold-release form — the press
-/// races GDK's late wl_keyboard bind and is lost, the release at +800ms lands
-/// after it. The keyboard exists only for the tap's own lifetime ON PURPOSE:
-/// a session-held one makes keyboard focus EXCLUSIVE across the compositor,
-/// and adding a holder broke three unrelated legs' expect_focused the day it
-/// was tried (2026-08-03).
+/// charge is NOT ONE-TIME (docs/clipboard-plan.md §5b finding 3): a headless
+/// seat earns none, wlroots rejects a stale serial silently, and one dropped
+/// copy leaves the guest deaf for the rest of its life. So the harness taps a
+/// virtual-keyboard F24 before every step that can copy, press-hold-release
+/// the first time, and the keyboard lives only for the tap (2026-08-03).
 #[cfg(feature = "harness")]
 fn freshen_wayland_serial() {
     use std::sync::atomic::Ordering;
@@ -9682,27 +9220,13 @@ impl crate::harness::Stage for GtkStage {
         // set_widget_name does NOT surface as one), unlike macOS.
         #[cfg(feature = "harness")]
         {
-            // THE ROLE COMES FROM THE WIDGET, NOT FROM ITS KIND. For every
-            // kind but one they agree by construction; where they part is the
-            // styling pass's heading role (docs/styling-plan.md D4), since a
-            // LABEL carrying it publishes ATSPI heading. atspi_role_of is also
-            // the function atspi_rank ranks BY, so asking it here keeps the
-            // ordinal and the collected role from being two questions.
-            //
-            // AND THE ORDINAL IS NOT kaya's INDEX. `label#0` means the first
-            // label kaya created, but the bus's Nth Label counts the captions
-            // inside buttons and check boxes too — so `label#0` read
-            // `label/Save`, the caption inside the first button (measured
-            // 2026-07-25). The same collision hits every shared role: an entry
-            // and a textarea are both `text`; every named container is
-            // `grouping`.
-            //
-            // So kaya's index resolves a WIDGET (creation order), and the
-            // widget's rank among the widgets publishing the SAME bus role,
-            // walked depth-first, is the ordinal to ask for. Widget-tree order
-            // rather than creation order on purpose: creation is parent-first
-            // in statement-shaped languages and child-first in
-            // expression-shaped ones, while the tree is identical in both.
+            // THE ROLE COMES FROM THE WIDGET, NOT FROM ITS KIND: the styling
+            // pass's heading role makes a LABEL publish ATSPI heading, and
+            // atspi_role_of is what atspi_rank ranks by. AND THE ORDINAL IS
+            // NOT kaya's INDEX — the bus's Nth Label counts the captions
+            // inside buttons too (`label#0` read `label/Save`, measured
+            // 2026-07-25), so kaya's index resolves a WIDGET and its rank
+            // among the same bus role, walked DEPTH-FIRST, is the ordinal.
             let Some((want, index)) = Self::on_main(move |core| {
                 target_widget(core, target).and_then(|widget| {
                     let want = atspi_role_of(&widget)?;
@@ -9779,16 +9303,12 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    /// Start a real input-method composition in the textarea.
-    ///
-    /// THE ONLY DOOR GTK LEAVES OPEN. A preedit exists because an INPUT
-    /// METHOD produced it: `gtk_im_context_set_preedit` does not exist, the
-    /// preedit never enters the buffer (measured: `char_count` stayed at 4
-    /// with a live preedit), and emitting `preedit-changed` by hand only makes
-    /// the view ask the same context the same question. So kaya BECOMES the
-    /// input method for the duration, and everything downstream is the
-    /// platform's — including the RESET on any programmatic cursor or
-    /// selection move, which is the D4 hazard this scene proves.
+    /// Start a real input-method composition in the textarea. THE ONLY DOOR
+    /// GTK LEAVES OPEN: `gtk_im_context_set_preedit` does not exist and the
+    /// preedit never enters the buffer, so kaya BECOMES the input method for
+    /// the duration and everything downstream is the platform's — including
+    /// the RESET on any programmatic cursor or selection move, which is the
+    /// D4 hazard this scene proves.
     fn compose(&self, target: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         let marked = text.clone();
@@ -9889,25 +9409,12 @@ impl crate::harness::Stage for GtkStage {
                  process does not hold (live windows: {live})"
             );
         }
-        // WAIT FOR THE ALLOCATION, then re-run the arm. set_default_size
-        // returns before GTK has laid out, so an arm that re-ran immediately
-        // measured the OLD width and stamped the OLD presentation while the
-        // assertion, polling a beat later, saw the new one (docs/traps.md).
-        // Polled from the HARNESS thread, never by pumping the main loop from
-        // inside a CoreState borrow: re-entering CORE there aborts. And wait
-        // for the SAME SIDE OF THE BOUNDARY, not for equality — a window
-        // manager is free to grant a different size, so exact equality never
-        // held and every resize paid the full timeout.
-        // RE-ISSUED WHILE IT WAITS, AND LOUD WHEN IT NEVER LANDS
-        // (2026-09-01, docs/traps.md's wayland resize entry): on
-        // wayland the compositor decides the surface's size, and a request
-        // racing a configure already in flight was measured lost — the
-        // metrics report read default 900 against an allocated 560, then
-        // the toplevel settled at 575, its natural width, and the fold
-        // assertion three steps later was the one that failed. The
-        // request goes again every half second until the width is on the
-        // wanted side of the boundary; five seconds without it is this
-        // verb's own refusal, naming the size the surface holds.
+        // WAIT FOR THE ALLOCATION, then re-run the arm: set_default_size
+        // returns before GTK has laid out (docs/traps.md). Polled from the
+        // HARNESS thread, never by pumping the main loop inside a CoreState
+        // borrow, and for the SAME SIDE OF THE BOUNDARY rather than equality,
+        // since a window manager may grant another size. RE-ISSUED EVERY HALF
+        // SECOND AND LOUD AT FIVE (docs/traps.md's wayland resize entry).
         let want_regular = width >= 600.0;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut requested = std::time::Instant::now();
@@ -10125,14 +9632,11 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn menu_symbol(&self, path: &str) -> String {
-        // THE REAL ROW GTK BUILT, never the registry's mirror: the GIcon held
-        // by the materialized GtkModelButton. GtkModelButton is private to GTK
-        // — there is no public type to downcast to and none in gtk4-rs — so
-        // the row is found by GType NAME and read through GObject properties,
-        // which is why every step below states what it measured: a walk that
-        // finds nothing must not answer like a row that carries nothing.
-        // TOTAL, the menu_state style: every failure is a short sentence and a
-        // retryable non-match, never a panic.
+        // THE REAL ROW GTK BUILT, never the registry's mirror. GtkModelButton
+        // is private to GTK, so the row is found by GType NAME and read
+        // through GObject properties — which is why every step below states
+        // what it measured: a walk that finds nothing must not answer like a
+        // row that carries nothing. TOTAL, the menu_state style.
         let path = path.to_owned();
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};
@@ -10249,19 +9753,11 @@ impl crate::harness::Stage for GtkStage {
     }
 
     /// THE expect_toolbar READ on GTK: `<promoted found>/<promoted in the
-    /// catalog>/<buttons the header holds>/<remainder's home>`.
-    ///
-    /// THREE DIFFERENT SIDES, on purpose. The second number is the model. The
-    /// third is the REAL AdwHeaderBar, walked for buttons that name a
-    /// `win.kmi-<id>` action. The first is the ACCESSIBILITY BUS: the names an
-    /// assistive client is given, matched in order against the promoted
-    /// labels, which is the one reading that fails when the accessible name is
-    /// missing (an icon-only GtkButton publishes `name=''`).
-    ///
-    /// THE REMAINDER'S HOME IS THE MENU BAR, a repo fact rather than a choice
-    /// made here: this backend renders the WHOLE catalog as a GtkPopoverMenuBar
-    /// in a strip above the content, so one home is all there is. If kaya's
-    /// linux menu lowering ever stops being a bar, this is the line to change.
+    /// catalog>/<buttons the header holds>/<remainder's home>`. THREE
+    /// DIFFERENT SIDES on purpose — the model, the REAL AdwHeaderBar, and the
+    /// ACCESSIBILITY BUS, which is the one reading that fails when the
+    /// accessible name is missing. THE REMAINDER'S HOME IS THE MENU BAR
+    /// because this backend renders the whole catalog as one.
     fn toolbar_chrome(&self) -> String {
         let (title, promoted, held, home) = Self::on_main(|core| {
             let promoted: Vec<String> = {
@@ -10296,20 +9792,11 @@ impl crate::harness::Stage for GtkStage {
     }
 
     /// THE expect_toolbar_item READ on GTK: one aspect of the real header
-    /// button, addressed by the name the ACCESSIBILITY BUS publishes for it —
-    /// never by kaya's promotion list, and never by the tooltip (which fills
-    /// the same name and would let the a11y property be dropped unnoticed).
-    ///
-    /// ENABLEMENT IS `sensitive`, MEASURED. GTK publishes both ENABLED and
-    /// SENSITIVE; on this stack ENABLED is false for every node including the
-    /// frame and the application, while SENSITIVE tracks the action exactly —
-    /// measured 2026-08-17 with one action disabled mid-run: the disabled
-    /// button read `sens=False` and its untouched sibling `sens=True`.
-    ///
-    /// THE SYMBOL IS THE ICON THE BUTTON REALLY DRAWS, mapped back to its
-    /// semantic name. The bus half and the widget half are paired BY POSITION,
-    /// both walks visiting the same buttons in the same order, and a length
-    /// disagreement is REPORTED rather than paired across.
+    /// button, addressed by the name the ACCESSIBILITY BUS publishes — never
+    /// by kaya's promotion list and never by the tooltip, which fills the same
+    /// name. ENABLEMENT IS `sensitive`, measured: ENABLED is false for every
+    /// node on this stack while SENSITIVE tracks the action. The bus and
+    /// widget halves pair BY POSITION, and a length mismatch is REPORTED.
     fn toolbar_item(&self, label: &str, aspect: &str) -> String {
         let (title, drawn, held) = Self::on_main(|core| {
             use gtk4::prelude::Cast;
@@ -10478,27 +9965,11 @@ impl crate::harness::Stage for GtkStage {
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to harness.rs's
-    /// six-point contract.
-    ///
-    /// 1. THE PLATFORM'S OWN INPUT PATH — a transient Wayland virtual keyboard
-    ///    (`wtype`) or XTEST (`xdotool`) — so the field's native history fills
-    ///    exactly as a user's typing fills it. Measured: a programmatic insert
-    ///    fills NOTHING here (a GtkText records no history for
-    ///    gtk_editable_insert_text), so a stand-in would leave the native tier
-    ///    empty and let a native-tier leg pass having observed nothing.
-    /// 2. WHATEVER HOLDS FOCUS RECEIVES IT: both tools deliver to the
-    ///    session's focused surface.
-    /// 3. IT APPENDS: the caret goes to the END with nothing selected first,
-    ///    which matters because kaya's `focus` command is grab_focus and GTK
-    ///    selects an entry's contents on focus.
-    /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED.
-    /// 5. NO SYNTHETIC COALESCING: one key event per character; GTK merges a
-    ///    run into one undo step by itself (measured).
-    ///
-    /// THE FIRST KEYSTROKE IS LOST WITHOUT A WARM-UP on Wayland (measured:
-    /// `wtype tea` types "ea", every invocation): a fresh virtual keyboard
-    /// races GDK's wl_keyboard bind, so the press-hold-release of F24 rides
-    /// INSIDE the same invocation. X11 has no such race.
+    /// six-point contract: the PLATFORM'S OWN INPUT PATH (`wtype` or
+    /// `xdotool`), delivered to whatever holds focus, APPENDING at the end
+    /// with nothing selected, blocking until the text has landed, one key
+    /// event per character. THE FIRST KEYSTROKE IS LOST WITHOUT A WARM-UP on
+    /// wayland (docs/traps.md: "A fresh wtype keyboard loses its first key").
     fn type_text(&self, text: &str) {
         assert!(
             !text.starts_with('-'),
@@ -10506,17 +9977,12 @@ impl crate::harness::Stage for GtkStage {
              option — type text that does not, or teach this verb a tool that takes a \
              payload on stdin"
         );
-        // FIRST, LET THE PREVIOUS STEP'S CONSEQUENCES LAND — correctness,
-        // measured by the lane rather than reasoned about. The scene clicks a
-        // button whose handler focuses the field and then types; an ACTION
-        // returns as soon as it is delivered, so the guest's `focus`
-        // transaction is still in flight, and GTK's grab_focus SELECTS THE
-        // ENTRY'S CONTENTS — turning an append into a REPLACE. Pooled eight
-        // wide, `type "s"` on a field holding "tea" read "s" on both protocols
-        // (2026-08-04) while the same leg alone passed six times running.
-        //
-        // Quiescence, bounded: several consecutive empty drains before typing,
-        // then type anyway.
+        // FIRST, LET THE PREVIOUS STEP'S CONSEQUENCES LAND: an ACTION returns
+        // as soon as it is delivered, so a `focus` transaction can still be in
+        // flight, and GTK's grab_focus SELECTS THE ENTRY'S CONTENTS — turning
+        // an append into a REPLACE (measured under an eight-wide pool
+        // 2026-08-04). Quiescence, bounded: several consecutive empty drains
+        // before typing, then type anyway.
         let settle = std::time::Instant::now() + std::time::Duration::from_millis(500);
         let mut quiet = 0;
         while quiet < 3 && std::time::Instant::now() < settle {
@@ -10593,20 +10059,12 @@ impl crate::harness::Stage for GtkStage {
                 ],
             )
         } else {
-            // THE POINTER IS PARKED OVER THE PRIMARY WINDOW FIRST, and
-            // focus re-asserted: the lane has no window manager, so a
-            // closing dialog's X focus reverts to POINTERROOT — whoever
-            // is under the pointer gets FocusIn, and GTK delivers keys
-            // only while its toplevel is active. The pointer rests at
-            // the screen's centre: inside the window on a 1024x768
-            // stage and on the ROOT of a larger one, which is how
-            // growing the Xvfb screen turned editor-go-x11's
-            // post-dialog typing into keys that landed nowhere
-            // (measured 2026-08-20, deterministic per size, while GTK's
-            // own focus widget read correctly the whole time —
-            // active=false was the discriminating print). The window id
-            // is resolved by pid first because this xdotool rejects an
-            // explicit `%1` stack reference as an unknown command.
+            // THE POINTER IS PARKED OVER THE PRIMARY WINDOW FIRST, and focus
+            // re-asserted: with no window manager a closing dialog's X focus
+            // reverts to POINTERROOT, so growing the Xvfb screen put the
+            // centred pointer on the ROOT and post-dialog typing landed
+            // nowhere (docs/traps.md: "The x11 lane has NO window manager, so
+            // X focus reverts to POINTERROOT"). The window id is by pid first.
             ("xdotool", {
                 pid_arg = std::process::id().to_string();
                 let found = std::process::Command::new("xdotool")
@@ -10647,15 +10105,12 @@ impl crate::harness::Stage for GtkStage {
         // Point 4: every character delivered AND processed.
         let Some((id, before)) = target else { return };
         let want = format!("{before}{text}");
-        // THE SEND IS RETRIED ONCE, savename's rule on this platform's
-        // soil: a GTK dialog's X teardown can reset input focus AFTER
-        // the focus-then-keys chain ran — the reset races the send, and
-        // it lands later the more pixels the software renderer pushes,
-        // which is how growing the Xvfb screen turned a green leg red
-        // (measured 2026-08-20, deterministic per size). The retry is
-        // taken ONLY when the field provably holds exactly the pre-send
-        // text: a partial landing means the keys are reaching the
-        // field, and a resend there would append twice.
+        // THE SEND IS RETRIED ONCE: a GTK dialog's X teardown can reset input
+        // focus AFTER the focus-then-keys chain ran, later the more pixels the
+        // software renderer pushes (measured 2026-08-20). The retry is taken
+        // ONLY when the field provably holds exactly the pre-send text — a
+        // partial landing means the keys are arriving, and a resend would
+        // append twice.
         let mut resent = false;
         let mut deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
         loop {
@@ -11328,17 +10783,11 @@ impl crate::harness::Stage for GtkStage {
                 return "no container layout recorded".to_owned();
             }
             // THE BREADTH CLAUSE (the ruling's second slice, 2026-08-22): a
-            // CROSSING container — a row in a column, a column in a row —
-            // spans its parent's inner breadth under EVERY align mode. Its
-            // own main axis IS the parent's cross axis, so its ALLOCATION is
-            // the breadth (width()/height() would be the content box, and the
-            // parent places the outer one). The parent's axis comes from its
-            // LAYOUT MANAGER, ours or GtkBox's — never GtkBox::orientation,
-            // whose owner ensure_flex replaces, and never the AXIS_KEY the
-            // lowering stamps, which would make this a copy of the model it
-            // is here to check. Skipped honestly when the parent has neither
-            // manager (a viewport, a window shell, a grid) or laid nothing
-            // out.
+            // CROSSING container spans its parent's inner breadth under EVERY
+            // align mode, read off its ALLOCATION rather than width()/height().
+            // The parent's axis comes from its LAYOUT MANAGER — never
+            // GtkBox::orientation, whose owner ensure_flex replaces, and never
+            // the AXIS_KEY the lowering stamps, which would copy the model.
             if let Some(parent) = widget.parent() {
                 let parent_vertical = parent.layout_manager().and_then(|m| {
                     m.downcast_ref::<flex::FlexLayout>()
@@ -11605,25 +11054,19 @@ impl crate::harness::Stage for GtkStage {
             }
             let all = |f: &dyn Fn(&(i32, i32)) -> bool| rects.iter().all(f);
             // Baseline first: GTK 4.12 spells it BASELINE_FILL, so the boxes
-            // legitimately fill the row too — but the box hands children an
-            // allocated baseline ONLY under baseline alignment (plain fill
-            // reads -1), the one discriminator stretch geometry cannot fake.
-            // PARTICIPATION is the whole check: the values are not comparable
-            // across kinds (a label reports the box-allocated line, a button
-            // its content-relative one — 37 vs 27 for a visually ALIGNED
-            // pair).
+            // fill the row too, but a child is handed an allocated baseline
+            // ONLY under baseline alignment (plain fill reads -1). PARTICIPATION
+            // is the whole check — the values are not comparable across kinds
+            // (37 vs 27 for a visually ALIGNED label and button).
             if !vertical && baselines.len() >= 2 {
                 return "baseline".to_owned();
             }
             // THEN STRETCH, before the positional modes and alone: spanning
-            // geometry is DEGENERATE — a child at (0, inner) satisfies start,
-            // center and end too, so this arm answered
-            // "ambiguous (stretch|start|center|end)" for every true stretch
-            // and could not reach the word at all (the ruling of 2026-08-22;
+            // geometry is DEGENERATE, since a child at (0, inner) satisfies
+            // start, center and end too (the ruling of 2026-08-22;
             // tools/scenes/align.steps carries the separability burden).
-            // BASELINE STILL OUTRANKS IT HERE, unlike the other backends:
-            // GTK 4.12's BASELINE_FILL spans the row as well, and the
-            // allocated baseline above is the one signal stretch cannot fake.
+            // BASELINE STILL OUTRANKS IT HERE, unlike the other backends,
+            // because BASELINE_FILL spans the row as well.
             if all(&|r| r.0.abs() <= 2 && (r.1 - inner).abs() <= 2) {
                 return "stretch".to_owned();
             }
@@ -11693,20 +11136,11 @@ impl crate::harness::Stage for GtkStage {
 
     fn window_dirty(&self, window: u64) -> bool {
         // THE CHROME, OVER THE BUS — the read D5's table names for this
-        // backend. GTK publishes no getter for accessible properties and
-        // kaya's own model would only agree with itself, so the honest
-        // question is the one an assistive client asks: does this window's
-        // accessibility subtree contain the marker node?
-        //
-        // The window is identified by its frame's NAME, the window title GTK
-        // publishes (measured: the property, _NET_WM_NAME and sway's IPC name
-        // agreed exactly, every time) — and `dirty` never touches that string.
-        // Two windows wearing one title is reported as ambiguous.
-        //
-        // UNREADABLE IS ITS OWN FAILURE, NEVER `false`. The common cause is a
-        // leg wired WITHOUT tools/linux/a11y-leg.sh: GTK publishes an
-        // accessibility tree only under GTK_A11Y=atspi with a bus to sit on.
-        // The bounded retry is for PUBLICATION LAG, not for the answer.
+        // backend, since kaya's own model would only agree with itself. The
+        // window is identified by its frame's NAME (the title GTK publishes,
+        // which `dirty` never touches); two windows wearing one title is
+        // ambiguous. UNREADABLE IS ITS OWN FAILURE, NEVER `false`: a leg wired
+        // without tools/linux/a11y-leg.sh publishes no tree at all.
         use std::time::{Duration, Instant};
         let title = self.window_title(window);
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -11821,18 +11255,11 @@ impl crate::harness::Stage for GtkStage {
             );
         }
         // AND WAIT FOR IT TO ACTUALLY GO, which is what makes this verb mean
-        // the same thing here as everywhere else. Activating the button only
-        // ASKS: `AlertDialog::choose` answers through an async callback, and
-        // that callback runs capi::alert_retire. Until it lands the core still
-        // holds the alert in its one live slot, so an app that shows its NEXT
-        // alert from any other event walks into "alert N is already live" and
-        // that alert is never shown — a red leg now, an abort before
-        // (crates/kaya/src/fault.rs). Measured 2026-08-10, both protocols: the editor
-        // scene cancels File>New's alert, and 40ms later a close_requested
-        // shows the second one. Every other backend's alert_choose is settled
-        // when it returns, so the difference is paid here (invariant 1). A
-        // stuck alert dies LOUDLY: a silent give-up would leave the next
-        // expect_alert reading the wrong dialog and passing.
+        // the same thing here as everywhere else: activating the button only
+        // ASKS, and `AlertDialog::choose`'s async callback is what runs
+        // capi::alert_retire. Until it lands the core still holds the one live
+        // slot, so the next show_alert is refused (measured 2026-08-10, both
+        // protocols). A stuck alert dies LOUDLY rather than giving up.
         let deadline = std::time::Instant::now() + crate::harness::POLL_DEADLINE;
         loop {
             if Self::on_main(move |core| core.live_alert.borrow().is_none()) {
@@ -11857,16 +11284,12 @@ impl crate::harness::Stage for GtkStage {
 
     fn back(&self, window: u64) {
         Self::on_main(move |core| {
-            // The REAL affordance: activate the header bar's back button — its
+            // The REAL affordance: activate the header bar's back button, whose
             // click handler runs the same user-pop path a pointer press does.
-            // Deferred one idle tick: the handler re-borrows CORE, which this
-            // closure holds.
-            //
-            // ONE PATH, list-detail included: libadwaita draws no back button
-            // for these pages (see refresh_nav), so the split arm shows kaya's
-            // when collapsed and the two-pane rule falls out of the SAME
-            // visibility test. A HIDDEN button is not an affordance —
-            // emit_clicked runs the handler regardless of visibility.
+            // Deferred one idle tick, since the handler re-borrows CORE. ONE
+            // PATH, list-detail included — libadwaita draws no back button for
+            // those pages, so the split arm shows kaya's when collapsed. A
+            // HIDDEN button is not an affordance.
             if let Some(back) = core.back_buttons.get(&window).cloned() {
                 if !gtk4::prelude::WidgetExt::get_visible(&back) {
                     return;
@@ -12053,13 +11476,10 @@ impl crate::harness::Stage for GtkStage {
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
         // The REAL chooser, read over the bus as an assistive client would —
         // never this backend's own record of what it asked for. NOT on the GTK
-        // main thread: this is a dbus round trip, and the main loop is what
-        // has to keep answering it.
-        //
-        // A SAVE PANEL IS NOT A PICKER HERE, deliberately. `open()` and
-        // `save()` are two calls on ONE `gtk::FileDialog`, so there is no type
-        // to ask and the tree answers instead; the two readers stay mutually
-        // exclusive all the same.
+        // main thread: this is a dbus round trip and the main loop has to keep
+        // answering it. A SAVE PANEL IS NOT A PICKER HERE: `open()` and
+        // `save()` are two calls on ONE `gtk::FileDialog`, so the tree is what
+        // tells them apart.
         let read = file_dialog_atspi(DialogOp::Read)?;
         match read.save_name {
             Some(_) => None,
@@ -12561,19 +11981,11 @@ impl crate::harness::Stage for GtkStage {
 }
 
 /// The sections arm a window ACTUALLY rendered — what
-/// `expect_sections_presentation` believes.
-///
-/// NEVER the declared hint (wprop 5, `core.sections_presentation`): a read
-/// that consults the prop agrees with the lowering by construction and cannot
-/// fail when the lowering is wrong. Two independent things have to hold, and
-/// the sentence names the one that did not: the branch that assembled the
-/// chrome stamped its own name on the window (`sections_rendered`), and the
-/// widget it left behind is the one that name claims, wired to THIS window's
-/// stack, and MAPPED.
-///
-/// The mapped clause is what makes an auxiliary window honest here. GTK
-/// builds its widget tree eagerly, so a chrome merely EXISTING proves that
-/// refresh_sections ran and nothing more.
+/// `expect_sections_presentation` believes. NEVER the declared hint: a read
+/// that consults the prop agrees with the lowering by construction. Two
+/// independent things have to hold and the sentence names the one that did
+/// not — the arm stamped its own name, and the widget it left behind is the
+/// one that name claims, wired to THIS window's stack, and MAPPED.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
     use gtk4::prelude::{Cast, ObjectExt, WidgetExt};
@@ -12626,15 +12038,11 @@ fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
 }
 
 /// THE SECTION ROW'S SYMBOL, off the GtkImage the real switcher button draws
-/// — the strong channel, never `GtkSectionPage::symbol` beside it and never
-/// the accessible Description kaya wrote.
-///
-/// TITLE -> ROW is positional and that is forced by the platform:
-/// `GtkStackSwitcher` renders icon OR title (refresh_section_symbols' fact
-/// 1), so a section WITH a symbol has no visible label to match on. The
-/// pairing is the switcher's own: its Nth button is the stack's Nth page.
-/// EVERY WINDOW, in id order, since the sections scene puts its sidebar rows
-/// in an aux window.
+/// — never `GtkSectionPage::symbol` beside it and never the accessible
+/// Description kaya wrote. TITLE -> ROW is positional and the platform forces
+/// it: a switcher renders icon OR title, so a section WITH a symbol has no
+/// visible label to match on, and its Nth button is the stack's Nth page.
+/// EVERY WINDOW, in id order.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn section_symbol_read(core: &CoreState, title: &str) -> String {
     use gtk4::prelude::{Cast, WidgetExt};
@@ -12717,22 +12125,13 @@ fn section_symbol_read(core: &CoreState, title: &str) -> String {
     format!("no section row is titled {title:?} (the switchers carry: {seen:?})")
 }
 
-/// The inset MEASURED on a widget's own CSS box: the offset from its border
-/// box to the box its children are placed from, per side, in whole layout
-/// units.
-///
-/// `compute_bounds(w, w)` gives the widget's BORDER box in the widget's OWN
-/// coordinate space, and GTK4 puts that space's origin at the CONTENT box, so
-/// the origin it returns is exactly minus the inset on each side. Measured: a
-/// box under `padding: 16px` reports @(-16,-16), and one carrying that plus
-/// an 8px border reports @(-24,-24).
-///
-/// THE FIRST-CHILD WALK CANNOT WORK HERE, and this backend shipped it: a
-/// child sitting at its parent's content origin translates to (0, 0) whatever
-/// the parent's inset is (measured, both spellings). `inset` did exactly that
-/// and answered 0 for every window, and the only step that has ever asserted
-/// it is the styling scene's `expect_inset 0` — so the vacuous number WAS the
-/// expected one and no lane ever failed.
+/// The inset MEASURED on a widget's own CSS box, per side, in whole layout
+/// units: `compute_bounds(w, w)` gives the BORDER box in a space GTK4 origins
+/// at the CONTENT box, so the origin it returns is minus the inset (measured:
+/// `padding: 16px` reports @(-16,-16); plus an 8px border, @(-24,-24)).
+/// THE FIRST-CHILD WALK CANNOT WORK HERE — a child at its parent's content
+/// origin translates to (0, 0) whatever the inset is, and reads 0 for every
+/// window.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn css_inset_of(widget: &gtk4::Widget) -> String {
     use gtk4::prelude::WidgetExt;
@@ -12788,15 +12187,11 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     use gtk4::prelude::{AccessibleExt, Cast};
-    // A ScrolledWindow FIRST, before the promotion check below: the lowering
-    // names it like any other container, and GTK takes the name but NOT the
-    // role — the bus still publishes `scroll pane` (measured).
-    //
-    // AND EVERY TEXTAREA'S VIEWPORT IS ONE OF THESE. The rule this function
-    // lives by is that its count must MATCH the bus's: the bus publishes the
-    // textarea's scroll pane exactly like the scene's own, so skipping it
-    // would put the count one behind and make every scene holding both a
-    // textarea and a scroll viewport read the wrong element's name.
+    // A ScrolledWindow FIRST, before the promotion check below: GTK takes the
+    // name but NOT the role, so the bus still publishes `scroll pane`
+    // (measured). AND EVERY TEXTAREA'S VIEWPORT IS ONE OF THESE — this walk's
+    // count must MATCH the bus's, so skipping it would put every scene holding
+    // both a textarea and a scroll viewport one element behind.
     if w.is::<gtk4::ScrolledWindow>() {
         return Some(atspi::Role::ScrollPane);
     }
@@ -12913,12 +12308,9 @@ fn atspi_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
 /// Read this app's accessibility tree over AT-SPI, as a real assistive client
 /// does. GTK exposes NO getter for accessible properties — the accessible
 /// surface IS AT-SPI — so an in-process read would only return kaya's own
-/// writes, and it is why the harness (and this dependency) is feature-gated:
-/// a shipped app must never link a dbus client to serve a test verb.
-///
-/// What to do with the live file chooser: read it back, or drive it. One walk
-/// shape serves all three; everything here was MEASURED against GTK 4.18 in
-/// the validation image (docs/traps.md).
+/// writes, which is why the harness and this dependency are feature-gated: a
+/// shipped app must never link a dbus client to serve a test verb. Everything
+/// here was MEASURED against GTK 4.18 in the image (docs/traps.md).
 #[cfg(all(feature = "harness", target_os = "linux"))]
 enum DialogOp<'a> {
     /// The directory it is showing, the names its list contains, and the
@@ -12958,22 +12350,13 @@ struct DialogRead {
     save_name: Option<String>,
 }
 
-/// Read or drive the live GTK file chooser over AT-SPI.
-///
-/// THE DIALOG IS IN OUR PROCESS and on the same bus as every other widget:
-/// with no xdg-desktop-portal installed GTK presents its own chooser rather
-/// than handing off. The walk starts at the desktop, so a portal-hosted one
-/// would still be found.
-///
-/// Three things the tree does NOT do the way the mac panel does, all measured:
-///
-/// - There is no "where" control. The current folder is the path bar's
-///   PRESSED toggle button (`checked` is false on all of them), and the filter
-///   combo's own toggle button has to be excluded or it collides.
-/// - Rows carry the whole line as one name, "picked.txt 12 bytes Text 01:00",
-///   so the filename is the first field.
-/// - The header row is a `table row` too. Data rows are the ones whose parent
-///   is the inner `list`; the header hangs off the `tree table` directly.
+/// Read or drive the live GTK file chooser over AT-SPI. THE DIALOG IS IN OUR
+/// PROCESS and on the same bus as every other widget (no portal is installed),
+/// though the walk starts at the desktop so a portal-hosted one is still
+/// found. Three things the tree does NOT do the way the mac panel does, all
+/// measured (docs/traps.md: "What GTK's file chooser publishes, and what it
+/// does not"): no "where" control, whole-line row names, and a header row
+/// that is a `table row` too.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn file_dialog_atspi(op: DialogOp<'_>) -> Option<DialogRead> {
     use atspi::proxy::accessible::AccessibleProxy;
@@ -13226,13 +12609,9 @@ enum RangeRead {
 }
 
 /// Read one of the three range observables off the Nth `Text` node this
-/// application publishes. ONE WALK, ONE CONNECTION, THREE READS.
-///
-/// AT-SPI OFFSETS ARE CHARACTERS, which for GTK means CODE POINTS — the same
-/// unit the buffer counts and the core lowered. The harness spelling is UTF-8
-/// BYTES, so every offset below is converted against the text the BUS
-/// returned, never against kaya's copy.
-///
+/// application publishes. ONE WALK, ONE CONNECTION, THREE READS. AT-SPI
+/// OFFSETS ARE CHARACTERS, which for GTK means CODE POINTS, so every offset
+/// below is converted against the text the BUS returned and never kaya's copy.
 /// NEVER `GetAttributeValue`: the deprecated point getter SIGSEGVs a
 /// GtkTextView, reproduced twice. `GetAttributeRun` is the safe one.
 #[cfg(all(feature = "harness", target_os = "linux"))]
@@ -13521,16 +12900,12 @@ struct AtspiMiss {
     retryable: bool,
 }
 
-/// THE OTHER CAUSE OF EVERY BUS MISS, which the tree-shaped readers
-/// cannot see: no bus at all. `atspi_window_marker` says "no
-/// accessibility bus" outright, but `atspi_collect` and
-/// `atspi_range_read` answer in `Option`, so a failed CONNECT and a
-/// missing NODE arrive as the same `None` — and the sentence the caller
-/// then prints names the node. That sentence is believed (invariant 3):
-/// a leg with no DBUS_SESSION_BUS_ADDRESS reads exactly like a broken
-/// lowering, and cost a session before anyone looked at the bus
-/// (measured 2026-08-27, docs/traps.md). Asked only on a failure path,
-/// so the second connect is not on anyone's clock.
+/// THE OTHER CAUSE OF EVERY BUS MISS, which the tree-shaped readers cannot
+/// see: no bus at all. `atspi_collect` and `atspi_range_read` answer in
+/// `Option`, so a failed CONNECT and a missing NODE arrive as the same `None`
+/// and the sentence the caller prints names the node — which a leg with no
+/// DBUS_SESSION_BUS_ADDRESS makes a lie, and it cost a session (measured
+/// 2026-08-27, docs/traps.md). Asked only on a failure path.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_absent() -> Option<String> {
     atspi::zbus::block_on(async {
@@ -13555,15 +12930,11 @@ fn atspi_miss(node: &str) -> String {
 }
 
 /// Is the marker node — a descendant named `marker` — inside the frame this
-/// app publishes under the name `title`?
-///
-/// The `dirty` prop's read on GTK (docs/dirty-plan.md D5), and the reason the
-/// marker carries an accessible label at all: an unlabelled bullet publishes
-/// as `label name='• '`, which no client can address. Measured with the
-/// scene's toggle: the node appears and disappears in lockstep with
-/// `gtk_widget_set_visible`, both directions, while the frame's own name stays
-/// clean. SCOPED TO ONE FRAME, unlike `atspi_collect`, because `window_dirty`
-/// is asked about a WINDOW.
+/// app publishes under the name `title`? The `dirty` prop's read on GTK
+/// (docs/dirty-plan.md D5), and the reason the marker carries an accessible
+/// label at all: an unlabelled bullet publishes as `label name='• '`, which no
+/// client can address. SCOPED TO ONE FRAME, unlike `atspi_collect`, because
+/// `window_dirty` is asked about a WINDOW.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_window_marker(title: &str, marker: &str) -> Result<bool, AtspiMiss> {
     use atspi::proxy::accessible::AccessibleProxy;
@@ -13681,18 +13052,10 @@ fn atspi_window_marker(title: &str, marker: &str) -> Result<bool, AtspiMiss> {
 
 /// The promoted header buttons as an assistive client sees them: the
 /// accessible NAME and the SENSITIVE state of each, in tree order, inside the
-/// frame this app publishes under the name `title`.
-///
-/// THE SCOPE IS THE DESCRIPTION. A window's frame holds plenty of buttons, so
-/// the walk keeps only the ones carrying a kaya symbol name as their
-/// accessible description. The alternative scopes were measured and rejected:
-/// the header publishes as an unnamed `panel` like every other box, and
-/// setting an accessible ROLE on a box to mark it changed the published role
-/// of EVERY other box in the process (measured 2026-08-17).
-///
-/// SENSITIVE AND NOT ENABLED, also measured: ENABLED is false for every node
-/// including the frame and the application, while SENSITIVE moves with the
-/// action. SCOPED TO ONE FRAME, like `atspi_window_marker`.
+/// frame this app publishes under the name `title`. THE SCOPE IS THE
+/// DESCRIPTION — the header publishes as an unnamed `panel`, and setting an
+/// accessible ROLE on a box to mark it changed the published role of EVERY
+/// other box in the process (measured 2026-08-17). SENSITIVE, NOT ENABLED.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss> {
     use atspi::proxy::accessible::AccessibleProxy;

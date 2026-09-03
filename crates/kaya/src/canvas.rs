@@ -1,10 +1,8 @@
 //! The canvas raster: validate the op stream, fold it into paths and
 //! shaped text, resolve the paint roles, and hand out PIXELS. Every
 //! backend's canvas arm is a blit; nothing below this module reaches a
-//! platform (docs/canvas-plan.md §1.1, ruling 1).
-//!
-//! The refusals live here and nowhere else, which is the point: there is
-//! one place that draws, so there is one place that can disagree.
+//! platform (docs/canvas-plan.md §1.1, ruling 1). The refusals live here
+//! and nowhere else.
 
 use crate::protocol::Value;
 use crate::wire;
@@ -44,25 +42,12 @@ pub(crate) const CANONICAL_SCALE: f64 = 1.0;
 pub(crate) const CANONICAL_MODE: Mode = Mode::Light;
 
 /// `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance, for
-/// the two backends written in Rust.
+/// the two backends written in Rust — hence the cfg
+/// (tools/check-appearance.py).
 ///
-/// UNSET RETURNS None AND NOTHING IS INSTALLED — the platform default, byte
-/// for byte (tools/check-appearance.py's inert clause). A value that is
-/// neither word panics rather than being ignored: a typo would otherwise
-/// run a whole leg under the host's palette and freeze a wrong string.
-///
-/// This does NOT change what a backend REPORTS. Each backend installs the
-/// override on its own toolkit and then reads that toolkit back as it
-/// always did, so the report keeps coming from the platform rather than
-/// from this variable — which is what makes the dark leg a real proof and
-/// not a self-fulfilling one.
-///
-/// CFG'd TO ITS TWO CALLERS. gtk.rs and winui/mod.rs are the only users
-/// and each compiles on one target, so on a mac host this is dead code
-/// and rustc says so. NOT wired into the raster's mode selection, which
-/// would be the same self-fulfilling defect the gate refuses: the core
-/// takes its mode from the backend's presentation report, never from
-/// this variable.
+/// UNSET RETURNS None AND NOTHING IS INSTALLED, a typo PANICS rather than
+/// being ignored, and this is NOT wired into the raster's mode selection:
+/// the core's mode comes from the backend's own presentation report.
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) fn appearance_override() -> Option<Mode> {
     let want = std::env::var("KAYA_APPEARANCE").ok()?;
@@ -112,8 +97,7 @@ pub struct Raster {
 
 /// What the harness reads back: the canonical raster's fingerprint plus
 /// the two legible facts. ONE answer for five platforms, computed in the
-/// core, because a per-backend answer is exactly what the buffer exists
-/// to remove (§7.1).
+/// core (§7.1).
 pub struct Probe {
     pub hash: u64,
     pub ops: usize,
@@ -273,9 +257,6 @@ pub fn validate(viewbox: (f64, f64), stream: &[Value]) -> Result<Drawing, String
                         ));
                     }
                 };
-                // The resolver answers for the reserved name and for the
-                // app's own assets alike; its sentence is the one the
-                // guest already knows.
                 crate::assets::font_bytes(&asset)?;
                 ops.push(Op::Font { asset, size, weight });
                 font_selected = true;
@@ -384,12 +365,9 @@ fn string_operand(op: &str, which: &str, v: &Value) -> Result<String, String> {
 // The palette (§6)
 // ---------------------------------------------------------------------
 
-/// kaya's own two-mode chart palette. Both platform vendors decline to
-/// define a data-series role — Apple's semantic list and Material 3's
-/// role vocabulary each have none — and every mainstream charting
-/// library owns its palette, so this is the established answer rather
-/// than an invention. It is also the only arrangement under which the
-/// buffer is byte-identical per mode, which is what §7.1 rests on.
+/// kaya's own two-mode chart palette, which is the only arrangement
+/// under which the buffer is byte-identical per mode (docs/canvas-plan.md
+/// §6 holds the survey behind that ruling).
 ///
 /// Packed as 0xRRGGBBAA.
 const PALETTE_LIGHT: [(i64, u32); 5] = [
@@ -457,15 +435,8 @@ pub fn fit(viewbox: (f64, f64), track: (f64, f64)) -> Fit {
 /// at `p.scale` device pixels per point, with the viewbox fitted into it
 /// uniformly and centred.
 ///
-/// ONE SCALE FOR EVERYTHING, which is the correction ruling 12 made: the
-/// superseded rule held stroke widths and font sizes at the device scale
-/// alone so a non-uniform stretch could not produce an elliptical pen,
-/// and under a uniform fit there is no such stretch to mitigate. Holding
-/// the pen at 1pt while positions grew would make `scale` a third thing
-/// that is neither the same drawing nor a redrawn one.
-///
 /// A canvas at its natural size passes `drawing.viewbox` and gets k = 1
-/// with no margin, which is every caller before the size policy existed.
+/// with no margin.
 pub fn rasterize(drawing: &Drawing, track: (f64, f64), p: Presentation) -> Raster {
     let (t_w, t_h) = track;
     let width = ((t_w * p.scale).round() as i64).clamp(0, 16384) as u32;
@@ -586,10 +557,9 @@ pub fn probe(drawing: &Drawing) -> Probe {
     Probe { hash: hash(&raster), ops: drawing.op_count(), ink: ink(&raster) }
 }
 
-/// FNV-1a over the buffer's dimensions and its bytes. A cryptographic
-/// digest would buy nothing here — this is a change detector for a
-/// frozen string, not a signature — and FNV is already the tree's
-/// fingerprint of record (spec::hash).
+/// FNV-1a over the buffer's dimensions and its bytes — a change detector
+/// for a frozen string, and the tree's fingerprint of record
+/// (spec::hash).
 pub fn hash(raster: &Raster) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
@@ -904,24 +874,12 @@ mod tests {
         v
     }
 
-    /// WHAT THE CORE PUTS AT THE SCENE'S TWO PROBE POINTS, pinned here
-    /// so a figure or palette edit reddens in this suite in a second
-    /// rather than on five lanes in ten minutes.
-    ///
-    /// BOTH POINTS ARE OPAQUE IN THE CORE, and `expect_ink` rests on
-    /// that: the sampling backends drop the alpha byte and report RGB
-    /// straight (crates/kaya/src/winui/mod.rs's `sample_shot`,
-    /// gtk.rs's `canvas_ink`), so a probe point whose alpha fell below
-    /// 255 would read darkened toward the compositor's ground with no
-    /// diagnostic saying why, while the hash stayed green.
-    ///
-    /// THE SCENE FREEZES THESE BYTES, and `expect_ink` compares them
-    /// within ±1 per channel: the mac reads D2E2F7 back off its own
-    /// window where the core wrote D2E3F7, because that window's backing
-    /// store carries the display's profile (docs/traps.md, "a canvas ink
-    /// read crosses the display's colour space"; ruled 2026-08-26,
-    /// docs/canvas-plan.md §7.2). So a probe colour whose channels move
-    /// by MORE than one here is a re-freeze, not a rounding.
+    /// WHAT THE CORE PUTS AT THE SCENE'S TWO PROBE POINTS, pinned here so a
+    /// figure or palette edit reddens in this suite rather than on five
+    /// lanes. BOTH POINTS MUST BE OPAQUE (the sampling backends drop the
+    /// alpha byte) and `expect_ink` compares within ±1 per channel, so a
+    /// channel moving by more is a re-freeze (docs/canvas-plan.md §7.2;
+    /// docs/traps.md, "a canvas ink read crosses the display's colour space").
     #[test]
     fn the_scene_probe_points_are_opaque_and_pinned() {
         // This stream NAMES A FONT ASSET, and assets::tests move
@@ -931,18 +889,10 @@ mod tests {
         let d = validate((300.0, 120.0), &scene_chart()).expect("the scene's stream validates");
         assert_eq!(d.op_count(), 41, "tools/scenes/canvas.steps freezes 41 ops");
         let p = probe(&d);
-        // THE EARLIER WALL. The raster now REFUSES a run whose font will
-        // not resolve (ruled 2026-08-26, see
-        // a_vanished_font_refuses_the_run_rather_than_dropping_it), so
-        // the hash can no longer move for this reason in silence — but
-        // this assert reaches it FIRST and names the asset before the
-        // frozen hash is compared, which is the difference between
-        // "the font is gone" and "the picture changed". Measured
-        // 2026-08-26: this test failed 8/8 against one build with
-        // c4fa15caf170a5ff, which is EXACTLY this scene with its one
-        // disk-resolved run (`Q3`, fonts/sora-wght.ttf) missing — the
-        // three tick labels use the embedded default and were fine
-        // (docs/traps.md).
+        // THE EARLIER WALL: this assert names the asset before the frozen
+        // hash is compared, which is the difference between "the font is
+        // gone" and "the picture changed" (docs/traps.md, "A canvas text
+        // run whose font will not resolve WAS DROPPED SILENTLY").
         assert!(
             crate::assets::font_bytes("fonts/sora-wght.ttf").is_ok(),
             "the scene's disk-resolved font did not resolve, so its `Q3` run is about \
@@ -1019,15 +969,12 @@ mod tests {
         v
     }
 
-    /// WHAT tools/scenes/sizepolicy.steps FREEZES, derived here and
-    /// copied there — never typed from a platform's read, and never
-    /// guessed (the dark ink pair was guessed wrong by one on two
-    /// channels before the canvas scene derived it, docs/traps.md).
-    ///
-    /// THE FIGURE IS FRACTIONS OF WHATEVER BOX IT IS HANDED, which is
-    /// what lets one frozen string hold for four canvases whose tracks
-    /// differ on every platform: the bounds normalize to the same
-    /// hundredths at 300x120 and at whatever the mac column assigns.
+    /// WHAT tools/scenes/sizepolicy.steps FREEZES, derived here and copied
+    /// there — never typed from a platform's read and never guessed (the
+    /// dark ink pair was guessed wrong by one on two channels,
+    /// docs/traps.md). THE FIGURE IS FRACTIONS OF WHATEVER BOX IT IS HANDED,
+    /// which is what lets one frozen string hold for four canvases whose
+    /// tracks differ on every platform.
     #[test]
     fn the_size_policy_scene_expectations_are_derived() {
         let _serial = crate::assets::serially();
@@ -1047,14 +994,10 @@ mod tests {
                 assert_eq!(drawing_observation(&probe(&d)), want, "bar {frame} at {box_:?}");
             }
         }
-        // THE TWO CONSTANT-MODE CANVASES KEEP §7.1's PRIMARY OBSERVABLE,
-        // and this is the amendment made concrete: `scale` and `fixed`
-        // declare the drawing a constant function of the track, so their
-        // op stream is a pure function of the guest's declaration and
-        // hashes to one string on five platforms. The redraw and tick
-        // canvases beside them have NO frozen hash — their streams are
-        // functions of a track the platforms legitimately differ on —
-        // and the scene says so out loud.
+        // THE TWO CONSTANT-MODE CANVASES KEEP §7.1's PRIMARY OBSERVABLE:
+        // `scale` and `fixed` hash to one string on five platforms, while
+        // the redraw and tick canvases beside them have NO frozen hash —
+        // their streams are functions of a track the platforms differ on.
         let constant = validate((300.0, 120.0), &scene_figure((300.0, 120.0))).unwrap();
         assert_eq!(
             format!("{:016x}", probe(&constant).hash),
@@ -1213,8 +1156,7 @@ mod tests {
     }
 
     /// EVERY REFUSAL IN §3.5, MADE TO FIRE. A wall nobody has watched
-    /// refuse is a guess about a state nobody has reached (invariant 3);
-    /// `cargo test -- --nocapture` prints the sentence each one gives.
+    /// refuse is a guess about a state nobody has reached (invariant 3).
     #[test]
     fn every_refusal_says_what_is_wrong() {
         let seen = |vb: (f64, f64), ops: Vec<Value>| -> String {
@@ -1470,11 +1412,6 @@ mod tests {
     /// the size policy no scene can see: `expect_drawing`'s bounds and
     /// §7.1's hash both come from `probe`, which rasterizes at the
     /// VIEWBOX, so the fit is invisible to every canvas observable.
-    ///
-    /// It replaces `a_stretch_does_not_thicken_the_pen`, which proved the
-    /// arithmetic of the SUPERSEDED §3.2 rule 3 (positions carry the
-    /// stretch, pens do not) — the mitigation for a hazard the uniform
-    /// fit removes.
     #[test]
     fn the_fit_is_uniform_and_centred() {
         // A wider track than the viewbox's aspect: k is the HEIGHT's
@@ -1486,15 +1423,13 @@ mod tests {
         // Taller: the same the other way round.
         let f = fit((100.0, 50.0), (100.0, 200.0));
         assert_eq!((f.k, f.ox, f.oy), (1.0, 0.0, 75.0), "{f:?}");
-        // The natural size is the identity, which is what makes every
-        // pre-policy caller byte-identical.
+        // The natural size is the identity.
         assert_eq!(fit((300.0, 120.0), (300.0, 120.0)), Fit { k: 1.0, ox: 0.0, oy: 0.0 });
     }
 
-    /// THE PEN SCALES WITH EVERYTHING ELSE. Ruling 12 replaced §3.2's
-    /// rule 3 along with the stretch it mitigated: `scale` is THE SAME
-    /// DRAWING at a new size, so a 2pt rule in a box fitted at k=2 is 4
-    /// device points thick, and the ROWS it covers double exactly as its
+    /// THE PEN SCALES WITH EVERYTHING ELSE (ruling 12): `scale` is THE
+    /// SAME DRAWING at a new size, so a 2pt rule in a box fitted at k=2 is
+    /// 4 device points thick, and the ROWS it covers double exactly as its
     /// length does.
     #[test]
     fn the_uniform_fit_scales_the_pen_with_the_drawing() {

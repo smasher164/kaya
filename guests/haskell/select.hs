@@ -1,5 +1,5 @@
--- The select conformance scene, Haskell port. See
--- guests/rust/select.rs and tools/scenes/select.steps.
+-- The select scene, Haskell port — guests/rust/select.rs,
+-- tools/scenes/select.steps.
 
 import KayaApp
 import KayaWire (Value (..))

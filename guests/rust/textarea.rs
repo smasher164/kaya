@@ -1,7 +1,5 @@
-//! The textarea conformance scene: the entry's uncontrolled round trip
-//! with the one observable that separates it — a newline rides the text
-//! both ways. `clear` echoes text_changed(""), per the command
-//! contract. The contract is tools/scenes/textarea.steps.
+//! The textarea conformance scene (tools/scenes/textarea.steps): a newline
+//! rides the text both ways, and `clear` echoes text_changed("").
 
 #[derive(Clone)]
 enum Msg {

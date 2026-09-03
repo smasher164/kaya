@@ -1,17 +1,5 @@
-"""The undo scene, Python port: two tiers, one Edit menu, and one ledger
-that orders them (DESIGN.md, Menus; docs/undo-plan.md D1-D6, §3).
-
-THE AMBIENT TIER NAMES ITS TRANSACTION FROM INSIDE, because a handler
-does not open one: the binding does (App._dispatch), and a second scope
-inside a handler raises. The marker still leads the batch wherever it
-sits in the body, exactly as `tx.undoable` does in the handle languages.
-
-`clear` inside an undoable group is REFUSED at apply (D4), which is why
-the add below finishes the form in a SECOND transaction.
-
-Canonical semantics in guests/rust/undo.rs; the byte-frozen contract in
-tools/scenes/undo.steps.
-"""
+"""The undo conformance scene (tools/scenes/undo.steps). THE AMBIENT TIER
+NAMES ITS TRANSACTION FROM INSIDE; a second scope in a handler raises."""
 
 import sys
 from dataclasses import dataclass
@@ -26,9 +14,7 @@ class Todo:
 
 app = kaya.App()
 
-# The fold: widget-owned state arrives as occurrences, not a widget read.
-# Two mirrors because there are two kinds of text field on screen — the
-# draft and one per row — and the payload's path is what tells them apart.
+# Two mirrors of widget-owned text; the payload's path tells them apart.
 draft = ""
 row_notes = {}
 
@@ -89,8 +75,7 @@ def on_note(key, text):
         row_notes[key] = text
     else:
         row_notes.pop(key, None)
-    # NOT a step: an uncontrolled field's typing is banked by the ledger,
-    # never by the app.
+    # NOT a step: the ledger banks an uncontrolled field's typing.
     notes.set(note_list())
 
 
@@ -99,15 +84,13 @@ def on_add():
         status.set(f"nothing to add, {len(todos)} total")
         return
     kaya.undoable(f"add {draft}")
-    # The binding mints the key (docs/fresh-key-plan.md); this app names
-    # no todo.
+    # The binding mints the key (docs/fresh-key-plan.md).
     todos.insert_fresh(Todo(title=draft))
     status.set(f"added {draft}, {len(todos)} total")
     keys.set(key_list())
     field.focus()
-    # Finishing the form is a SECOND transaction: `clear` inside the group
-    # would be refused, and undoing the add must not put the draft back.
-    # A handler IS one transaction here, so this one is posted.
+    # A SECOND transaction: `clear` inside the group is refused, and a
+    # handler IS one transaction here.
     app.post(field.clear)
 
 
@@ -116,8 +99,7 @@ def on_remove():
     if not entries:
         status.set(f"nothing to remove, {len(todos)} total")
         return
-    # The collection's FIRST entry, from the model — never a widget — so
-    # the restored entry has to come back BEFORE the one that stayed.
+    # The FIRST entry, so the restore has to come back before the rest.
     key, todo = entries[0]
     kaya.undoable(f"remove {todo.title}")
     todos.remove(key)
@@ -126,7 +108,6 @@ def on_remove():
 
 
 def on_star():
-    # A group at its smallest: one signal write.
     kaya.undoable("star")
     status.set("starred")
 
@@ -178,8 +159,7 @@ with app.window(title="undo", on_undone=undone, on_redone=redone):
         field = kaya.entry(on_change=on_change).a11y_id("draft")  # entry#0
         kaya.button("add", on_click=on_add)                 # button#0
         kaya.button("star", on_click=on_star)               # button#1
-        # The scene's way back to the field, so the routing question
-        # ("what is focused?") stays visible in the script.
+        # The scene's way back to the field.
         kaya.button("focus", on_click=on_focus)             # button#2
         kaya.button("remove", on_click=on_remove)           # button#3
         for todo in todos:

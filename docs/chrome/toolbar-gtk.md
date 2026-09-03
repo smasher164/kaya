@@ -12,8 +12,8 @@ version); **[MEASURED]** = I ran it in this repo's own lane image today;
 | libadwaita (runtime + dev) | **1.7.6** (`1.7.6-1~deb13u1`) | **[MEASURED]** `docker run --rm kaya-linux:latest pkg-config --modversion libadwaita-1` → `1.7.6`; `dpkg -l` → `libadwaita-1-0:arm64 1.7.6-1~deb13u1` |
 | GTK | **4.18.6** (`4.18.6+ds-2`) | **[MEASURED]** same command → `4.18.6` |
 | adwaita-icon-theme | **48.1-1** | **[MEASURED]** `dpkg -l` |
-| `libadwaita` Rust crate | **0.9.2**, `features = ["v1_4"]` | crates/kaya/Cargo.toml:175 — so the compile-time API floor kaya may use is **libadwaita 1.4**, deliberately below the image's 1.7 |
-| `gtk4` Rust crate | **0.11.4**, `features = ["v4_10"]` | crates/kaya/Cargo.toml:151 |
+| `libadwaita` Rust crate | **0.9.2**, `features = ["v1_4"]` | crates/kaya/Cargo.toml:107 — so the compile-time API floor kaya may use is **libadwaita 1.4**, deliberately below the image's 1.7 |
+| `gtk4` Rust crate | **0.11.4**, `features = ["v4_10"]` | crates/kaya/Cargo.toml:87 |
 | base image | `debian@sha256:fac46bf…` (trixie, digest-pinned) | tools/linux/Dockerfile:23 |
 
 Everything below that says "the platform" means **GTK 4.18.6 +

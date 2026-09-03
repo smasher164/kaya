@@ -2,20 +2,8 @@
 // core plus the tier-1 sugar, bindings/python/kaya/__init__.py's twin in
 // plain-JS clothes (docs/js-plan.md §4 records the spellings).
 //
-// AMBIENT TRANSACTIONS: `app.window(opts, () => ...)` and every handler
-// body run inside one, submitting atomically on exit; container bodies
-// auto-parent; handlers co-locate with their widget and a template
-// handler receives the stamped copy's keys first; `for (const row of
-// coll)` traces the For template, running its body ONCE.
-//
-// THE COLLECTION IS THE MODEL, the only copy: every mutation edits it and
-// becomes the wire delta in one recorded operation, and an abandoned
-// transaction rolls both back together. Signals have NO read method.
-// Model reads in template position throw at record time.
-//
 // Dispatch runs on the app thread — the worker this module bootstraps
-// (runtime.ts) — after the pump pulls from the ring; the core never
-// calls into the guest.
+// (runtime.ts) — after the pump pulls from the ring.
 
 import * as runtime from "./runtime.ts";
 import * as wire from "./wire.ts";
@@ -131,16 +119,12 @@ function records(): Uint8Array[] {
   return _tx!;
 }
 
-/** THE IMPLICIT TRANSACTION (ruled 2026-09-01, docs/js-plan.md §4): the
- * app thread is one thread, so a mutation with no transaction open opens
- * one, and a microtask commits it when the current continuation runs out
- * — one continuation, one atomic batch, the guarantee app.post gives by
- * hand and the thing that makes `await` inside a handler just work.
- * Declarations never open one (allocWidgetOrNode refuses a parentless
- * widget), and a top-level scope opened while one is pending commits it
- * first. THE RESIDUE, stated: nothing sees a continuation throw, so the
- * writes before the throw stand; a handler's own transaction still rolls
- * back, and app.post(fn) still runs fn with that guarantee. */
+/** THE IMPLICIT TRANSACTION (docs/js-plan.md §4): a mutation with no
+ * transaction open opens one and a microtask commits it — one
+ * continuation, one atomic batch. Declarations never open one, and a
+ * top-level scope opened while one is pending commits it first. THE
+ * RESIDUE: nothing sees a continuation throw, so writes before the throw
+ * stand. */
 function openImplicit(): void {
   requireAppThread();
   _tx = [];
@@ -352,14 +336,10 @@ class Derived<T, U> extends Signal<U> {
   }
 }
 
-/** Binding-maintained from a collection: recomputed after every mutation
- * of the live-zone instance, batched into the same transaction. */
 /** A derived string over ANY number of signals, from a template literal:
- * kaya.fmt`${count} items left` (ruled 2026-09-01, docs/js-plan.md §4).
- * Constants interpolate as themselves; a signal interpolates as its
- * current value and the string is recomputed binding-side, from the
- * mirrors, whenever any of them moves — Signal.fmt(fn) is the one-source
- * function form of the same derivation. */
+ * kaya.fmt`${count} items left` (docs/js-plan.md §4). A signal
+ * interpolates as its current value and the string is recomputed
+ * binding-side whenever any of them moves. */
 export function fmt(strings: TemplateStringsArray, ...parts: readonly unknown[]): Signal<string> {
   if (!Array.isArray(strings) || !("raw" in strings)) {
     throw new TypeError("kaya: fmt is a template tag — kaya.fmt`${signal} text`; Signal.fmt((v) => ...) is the function form");
@@ -553,13 +533,10 @@ export class Handle {
   }
 }
 
-/** A widget handle: a LIVE widget (exactly one thing on screen) or a
- * TEMPLATE NODE (a blueprint entry, stamped per collection entry, whose
- * copies' clicks and pastes arrive with the copy's key path). One class
- * for both because the transaction is ambient and one constructor set
- * serves both zones; `isNode` says which, and the one-shot commands and
- * dynamic prop setters refuse a node — a blueprint is declared, never
- * mutated, and its declarative spelling is the constructor option. */
+/** A widget handle: a LIVE widget, or a TEMPLATE NODE whose copies'
+ * clicks and pastes arrive with the copy's key path. One class for both,
+ * `isNode` saying which; the one-shot commands and dynamic prop setters
+ * refuse a node, whose declarative spelling is the constructor option. */
 export class Widget extends Handle {
   /** True for a template node: declared inside a For or When body. */
   readonly isNode: boolean;
@@ -670,11 +647,10 @@ export class Widget extends Handle {
     return this;
   }
 
-  /** The context anchor. LIVE: the body declares the same command
-   * vocabulary scoped to this NOUN (no shortcuts here). TEMPLATE NODE:
-   * attach a live-zone-built context catalog — every stamped copy shows
-   * the same catalog, each activation carrying that copy's key path, and
-   * an item takes exactly ONE anchor. */
+  /** The context anchor. LIVE: the body declares the command vocabulary
+   * scoped to this NOUN (no shortcuts here). TEMPLATE NODE: attach a
+   * live-zone-built catalog, each activation carrying that copy's key
+   * path; an item takes exactly ONE anchor. */
   contextMenu(bodyOrCatalog: (() => void) | ContextCatalog): this {
     if (bodyOrCatalog instanceof ContextCatalog) {
       if (!this.isNode) {
@@ -850,9 +826,8 @@ function fieldEncoder(tag: number, type: string): (v: unknown, name: string) => 
     case wire.VALUE_I64:
       return (v, name) => (typeof v === "number" && Number.isSafeInteger(v) ? new I64(v) : refuse(v, name, "kaya.Int (safe integer)"));
     case wire.VALUE_BLOB:
-      // Register the bytes now, at encode time — handles are
-      // single-submit, so every mutation that carries a blob field
-      // re-registers (the model keeps the guest's own bytes).
+      // At encode time: handles are single-submit, so every mutation
+      // carrying a blob field re-registers.
       return (v, name) => (v instanceof Uint8Array ? new BlobHandle(runtime.registerBlob(v)) : refuse(v, name, "Uint8Array"));
     default:
       throw new Error(`kaya: no encoder for wire type ${tag}`);
@@ -1004,10 +979,9 @@ export class BoundCollection<E, R> {
   }
 
   /** Insert a record under a key the binding authors, and hand the key
-   * back — for data that has no identity of its own. One counter per
-   * collection instance, starting at 0; the minted key is an integer,
-   * counter+1, and a fresh key is fresh forever (the counter sits outside
-   * the rollback journal on purpose; docs/fresh-key-plan.md). */
+   * back. One counter per collection instance, starting at 0; a fresh key
+   * is fresh forever, since the counter sits outside the rollback journal
+   * on purpose (docs/fresh-key-plan.md). */
   insertFresh(value: E): number {
     const path = pathKey(this._path);
     const key = (this._owner._fresh.get(path) ?? 0) + 1;
@@ -1187,12 +1161,11 @@ export class Collection<E, R> extends BoundCollection<E, R> {
     return { [Symbol.iterator]: () => trace as unknown as Iterator<R> };
   }
 
-  /** The column header bar on this collection's For — the table
-   * spelling of the same loop: `for (const item of items.columns(["Name",
-   * "Size"], {onSort}))`. One title per column; the row template's body
-   * must hold a row of exactly one cell per column. `onSort` takes the
-   * 0-based column index of a header click (a nested template's copy keys
-   * precede it). Re-declare with setColumns() after sorting. */
+  /** The column header bar on this collection's For — the table spelling
+   * of the same loop. The row template's body must hold a row of exactly
+   * one cell per column; `onSort` takes the 0-based column index of a
+   * header click, a nested template's copy keys first. Re-declare with
+   * setColumns() after sorting. */
   columns(titles: readonly string[], opts: ColumnsOptions = {}): Iterable<R> {
     return new ColumnsTrace(this as Collection<unknown, unknown>, [...titles], opts) as unknown as Iterable<R>;
   }
@@ -1318,10 +1291,9 @@ class Template {
   }
 }
 
-/** The for-of tracer: opens the For template, hands the body one element
- * tracer, and closes the template when the loop asks for a second
- * element. THE BODY RUNS ONCE — stamping is the core's replay. A break
- * (iterator.return) leaves the template open, caught at transaction exit. */
+/** The for-of tracer: opens the For template and closes it when the loop
+ * asks for a second element. THE BODY RUNS ONCE — stamping is the core's
+ * replay. A break leaves the template open, caught at transaction exit. */
 class ForTrace implements Iterator<unknown> {
   readonly _template: Template;
   _grow: number | null = null;
@@ -1403,8 +1375,7 @@ class ColumnsTrace implements Iterable<unknown> {
 
 function allocWidgetOrNode(): Widget {
   // A declaration never rides the implicit transaction: with no scope and
-  // no container it would be an orphan the core refuses at apply. Inside
-  // a scope (a scene body, a handler, app.build) it is what it always was.
+  // no container it would be an orphan the core refuses at apply.
   if (_tx === null || (_implicit && !_recording && _parents.length === 0)) {
     throw new Error(
       "kaya: a widget is declared inside a scene scope — app.window(opts, () => ...), " +
@@ -1472,12 +1443,10 @@ export type AlertOptions = {
 
 /** Request a modal alert: up to two action labels (the platform floor)
  * plus the REQUIRED cancel label. onResult(choice) fires exactly once —
- * 0 or 1 for actions, kaya.CANCEL for every native dismissal. One alert
- * may be live per process. */
-/** With `onResult`, the handler receives the choice and the call answers
- * the alert's id; WITHOUT it, the call answers a promise of the choice —
- * `const choice = await kaya.showAlert({...})` — and the continuation is
- * its own transaction (the implicit one; ruled 2026-09-01). */
+ * 0 or 1 for actions, kaya.CANCEL for every native dismissal — and
+ * WITHOUT it the call answers a promise of the choice instead, whose
+ * continuation is its own implicit transaction. One alert may be live
+ * per process. */
 export function showAlert(opts: AlertOptions & { onResult: (choice: number) => void }): number;
 export function showAlert(opts: AlertOptions): Promise<number>;
 export function showAlert(opts: AlertOptions): number | Promise<number> {
@@ -2289,10 +2258,9 @@ export function signal<T extends string | number | boolean>(initial: T): Signal<
 }
 type Widen<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
 
-/** Declare a collection. With no argument, a scalar (string) table. With a
- * record type, a record collection: the schema IS the type, and
- * `row.field` / `patch(key, {field})` project it. With a list of record
- * types, a sum: one variant per member, in that order. */
+/** Declare a collection: no argument for a scalar (string) table, a
+ * record type for a record one, a list of record types for a sum — one
+ * variant per member, in that order. */
 export function collection(): Collection<string, Element>;
 export function collection<S extends Schema>(type: RecordType<S>): Collection<Fields<S>, Row<S>>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2309,16 +2277,12 @@ export function collection(type?: RecordType | readonly RecordType[]): Collectio
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type InstanceOfAny<T extends readonly RecordType<any>[]> = { [K in keyof T]: T[K] extends RecordType<infer S> ? Fields<S> : never }[number];
 
-/** THE ROW A STAMPED HANDLER IS ABOUT (ruled 2026-09-01, docs/js-plan.md
- * §4): where the other bindings hand a handler the key, this hands it the
- * row — its fields read the model's copy and ASSIGN AS A PATCH
- * (`todo.done = checked`), and the row's own moves and removal sit
- * beside them. A PROXY, deliberately: a misspelled field on assignment
- * is refused by name, which per-field accessors cannot do — they would
- * grow a plain property and patch nothing, and a plain-JS guest has no
- * tsc to say so. `instanceof` narrows a sum's row because the proxy's
- * prototype is the variant's. A row that has left the collection reads
- * undefined, says `exists === false`, and matches no variant. */
+/** THE ROW A STAMPED HANDLER IS ABOUT (docs/js-plan.md §4): its fields
+ * read the model's copy and ASSIGN AS A PATCH (`todo.done = checked`).
+ * A PROXY, so a misspelled field on assignment is refused BY NAME — a
+ * per-field accessor would grow a plain property and patch nothing.
+ * `instanceof` narrows a sum's row; a row that has left the collection
+ * reads undefined, says `exists === false`, and matches no variant. */
 export type RowHandle<E> = (E extends object ? E : { value: E }) & {
   readonly key: Key;
   readonly path: readonly Key[];
@@ -2738,8 +2702,7 @@ export function caption(a: string | LabelOptions, b?: LabelOptions): Widget {
 export type ImageSource = Uint8Array | Asset | Signal<unknown> | FieldRef;
 
 /** An image displaying encoded bytes: the toolkit decodes natively. The
- * source is bytes (one registration copy), an Asset (no copy), a Signal,
- * or an element field. */
+ * source is bytes, an Asset, a Signal, or an element field. */
 export function image(source?: ImageSource, opts: GrowOption = {}): Widget {
   const handle = widget(wire.KIND_IMAGE);
   if (source !== undefined) {
@@ -3091,10 +3054,9 @@ export class App {
 
   /** @internal */
   _register(handle: Handle, kind: number, fn: Handler): void {
-    // THE ROW HANDLE'S OWNER: the innermost For open at registration is
-    // the collection whose row a stamped occurrence names; a catalog item
-    // registered in the live zone learns its owner when the catalog is
-    // attached (contextMenu).
+    // THE ROW HANDLE'S OWNER: the innermost For open at registration. A
+    // catalog item registered live learns its owner at the attach
+    // (contextMenu).
     const owner = _forCollections[_forCollections.length - 1];
     if (owner !== undefined) this._nodeOwners.set(handle.id, owner);
     else if (handle instanceof MenuItem) {
@@ -3113,8 +3075,9 @@ export class App {
   }
 
   /** @internal The registration half of `canvas({onDraw})`/`({onTick})`.
-   * THE HANDLER IS WIDENED HERE: a TICK canvas is a REDRAW canvas too,
-   * so the answer path has ONE call shape (docs/traps.md, 2026-08-28). */
+   * THE HANDLER IS WIDENED HERE: a TICK canvas is a REDRAW canvas too, so
+   * the answer path has ONE call shape (docs/canvas-plan.md, "WIDEN THE
+   * HANDLER AT REGISTRATION"). */
   _registerDraw(handle: Widget, policy: number, fn: ((d: Draw, size: Size) => void) | ((d: Draw, size: Size, time: number) => void)): void {
     const widened = policy === wire.SIZE_POLICY_REDRAW ? (d: Draw, size: Size, _time: number) => (fn as (d: Draw, size: Size) => void)(d, size) : (fn as (d: Draw, size: Size, time: number) => void);
     this._drawHandlers.set(handle.id, [handle, widened]);
@@ -3140,9 +3103,8 @@ export class App {
     if (onRedone !== undefined) this._redone.set(windowId, onRedone);
   }
 
-  /** An auxiliary surface's scene scope: create_window plus its props,
-   * and the single top-level container mounts INTO IT on exit.
-   * Capability-gated. The handlers ride the declaration. */
+  /** An auxiliary surface's scene scope: the single top-level container
+   * mounts INTO IT on exit. Capability-gated. */
   createWindow(windowId: number, opts: WindowOptions, body: () => void): void {
     if (opts.onCloseRequested !== undefined) this._closeRequested.set(windowId, opts.onCloseRequested);
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
@@ -3154,11 +3116,10 @@ export class App {
   }
 
   /** The scene scope: an ambient transaction whose single top-level
-   * container mounts into the window on exit. The attribute set is
-   * EXACTLY createWindow's. THE LIVE SPELLING IS THIS SAME CONSTRUCT,
-   * CALLED WITHOUT A BODY inside a handler: `app.window({dirty: true})`.
-   * onUndone(label, delta) fires each time kaya routes an undo at this
-   * surface; per window and persistent. */
+   * container mounts into the window on exit. THE LIVE SPELLING IS THIS
+   * SAME CONSTRUCT, CALLED WITHOUT A BODY inside a handler:
+   * `app.window({dirty: true})`. onUndone(label, delta) fires per undo
+   * routed at this surface, and never retires. */
   window(opts: WindowOptions, body?: () => void): void;
   window(body: () => void): void;
   window(a: WindowOptions | (() => void), b?: () => void): void {
@@ -3270,17 +3231,13 @@ export class App {
     }
   }
 
-  /** Run fn as a transaction on the app thread, soon — after whatever is
-   * running now, never nested. The way an async continuation gets back
-   * into a transaction:
-   *
-   *     const data = await fetch(url).then((r) => r.text());
-   *     app.post(() => content.set(data));
-   */
+  /* post(), below, runs fn as a transaction on the app thread after
+     whatever is running now, never nested — the way an async
+     continuation gets back into a transaction. */
   /** Commit what this continuation has written and go on in a new
    * transaction: `await app.commit()`. Inside a handler the handler's own
-   * transaction commits when its synchronous part returns, before any
-   * continuation runs, so this only has to flush an implicit one. */
+   * transaction commits when its synchronous part returns, so this only
+   * has to flush an implicit one. */
   commit(): Promise<void> {
     commitImplicit();
     return Promise.resolve();

@@ -1,10 +1,5 @@
-// UndoProbe round 2 (iOS simulator) — the ROUTING and GESTURE cells that
-// round 1 could only set up.
-//
-// What round 1 established, the J-cells this round asks and what they
-// answered are docs/undo-plan.md §0; the J-labels below mark which
-// reading is which.
-//
+// UndoProbe round 2 (iOS simulator) — the ROUTING and GESTURE cells.
+// The J-cells and their answers: docs/undo-plan.md §0.
 // THROWAWAY. Nothing builds it but build2.sh beside it.
 import SwiftUI
 import UIKit

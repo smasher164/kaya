@@ -4,10 +4,7 @@ import dev.kaya.KayaApp;
 import dev.kaya.KayaWire;
 
 /**
- * The confirm conformance scene from the JVM — the modal-alert grammar
- * via the chain spelling. The three rounds take the three answer paths
- * (action 0, action 1, and KayaWire.ALERT_CHOICE_CANCEL, which is every
- * platform-native dismissal). See guests/rust/confirm.rs and
+ * The confirm scene from the JVM — guests/rust/confirm.rs,
  * tools/scenes/confirm.steps.
  */
 public final class Confirm {

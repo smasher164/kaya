@@ -1,11 +1,5 @@
-// The sections conformance scene, JS port: two peer roots in the primary
-// window's section set — presentation context, not lifecycle. The archive
-// pane folds onSelected into a visit count, pinning the echo doctrine
-// from both sides: the user's switch emits (the harness drives the real
-// switcher), while the feed button's programmatic kaya.selectSection
-// moves the selection silently. The count surviving switch round trips
-// proves retention. See guests/rust/sections.rs and
-// tools/scenes/sections.steps.
+// The sections conformance scene (tools/scenes/sections.steps): two peer
+// roots in the primary window's section set.
 
 import * as kaya from "kaya-gui";
 
@@ -29,10 +23,8 @@ function goArchive(): void {
 }
 
 function openLibrary(): void {
-  // THE SIDEBAR HALF of the presentation enum, in an aux window, so one
-  // shared scene covers BOTH arms. Reachability is the gate: only the
-  // desktop tail's click lands here, so the phones never see a
-  // createWindow their host would reject.
+  // An aux window, reached only by the desktop tail's click, so the phones
+  // never see a createWindow their host rejects.
   kaya.createWindow(LIBRARY);
   app.window({
     windowId: LIBRARY, title: "library",
@@ -54,16 +46,12 @@ function openLibrary(): void {
 
 let visits!: kaya.Signal<string>;
 
-// With sections the window has no root of its own — the switcher IS the
-// window content — so this body carries only props and the shared signal,
-// and NOTHING MOUNTS. The presentation hint is ADVISORY.
+// With sections the window has no root: NOTHING MOUNTS here.
 app.window({ title: "sections", sectionsPresentation: kaya.SECTIONS_BAR }, () => {
   visits = kaya.signal("archive: 0 visits");
 });
 
-// The symbol is SEMANTIC, never an asset (docs/styling-plan.md D6): the
-// glyph meaning `home` differs per platform, and SF Symbols are licensed
-// to Apple platforms only.
+// SF Symbols are licensed to Apple platforms: no shared asset exists.
 app.addSection(FEED, { title: "Feed", symbol: kaya.Symbol.HOME }, () => {
   const ready = kaya.signal("feed ready");
   kaya.column(() => {

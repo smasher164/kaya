@@ -3,12 +3,10 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The milestone-2 scene from the JVM: nested collections, and a click
- * on a stamped copy arriving with that copy's key path. The keys are
- * the app's own ("g1", "a"), so no minter is involved.
+ * The milestone2 scene from the JVM — guests/rust/milestone2.rs,
+ * tools/scenes/milestone2.steps.
  */
 public final class Milestone2 {
-    /** The handles the build body hands back out. */
     private static final class Scene {
         final KayaApp.Signal<String> status;
         final KayaApp.Collection items;
@@ -33,9 +31,7 @@ public final class Milestone2 {
 
             KayaApp.Collection groups = tx.collection();
 
-            // Java lambdas cannot assign captured locals, so handles
-            // declared inside a container body come back out through
-            // one-slot arrays.
+            // Java lambdas cannot assign captured locals.
             KayaApp.Collection[] items = new KayaApp.Collection[1];
             KayaApp.Node[] remove = new KayaApp.Node[1];
 
@@ -56,9 +52,8 @@ public final class Milestone2 {
                     t.write(status, "step " + steps);
                 });
                 tx.label(status); // label#0
-                // A BLOCK body: an expression lambda is ambiguous
-                // between the Consumer and Function `when` overloads
-                // (docs/traps.md).
+                // A BLOCK body: an expression lambda is ambiguous between the
+                // Consumer and Function `when` overloads (docs/traps.md).
                 tx.when(extras, t -> {
                     t.label("extras on");
                 });

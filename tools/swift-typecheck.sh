@@ -138,22 +138,12 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
     PASSES+=("tools/ios/xcuidrive/KayaDrive.swift + Target.swift: iphonesimulator SDK + platform XCTest, arm64-apple-ios17.0-simulator")
 
     # AND THE GUESTS FOR iOS: the macOS loop at the top compiles ONE side
-    # of every `#if os(...)` a guest carries.
-    #
-    # THE FILE SET AND THE FLAGS ARE THE LANE'S, never restated here:
-    #   - the swift roster is the lane MODULE's SWIFT_ENTRIES (entries
-    #     `scene` or `scene:guest`, the SOURCE after the colon) since
-    #     the runner conversion — IMPORTED, the same table the runner
-    #     iterates. The rest are desktop-only by design.
-    #   - IOS_MIN (16.0) is the runner's, and NOT the 17.0 the
-    #     interpreter passes use: the older target is STRICTER for
-    #     availability diagnostics, so a hardcoded 17.0 would make this
-    #     gate looser than the lane.
-    # No -warnings-as-errors: the lane's guest builds do not use it, and
-    # a gate stricter than the lane fails builds that would have shipped.
-    #
-    # The reader refuses rather than returning nothing — an empty parse
-    # would agree with everything.
+    # of every `#if os(...)` a guest carries. THE FILE SET AND THE FLAGS
+    # ARE THE LANE'S, never restated here — the roster is the lane
+    # module's SWIFT_ENTRIES, and IOS_MIN (16.0) is the runner's, NOT the
+    # 17.0 the interpreter passes use, since the older target is STRICTER
+    # for availability diagnostics. No -warnings-as-errors: a gate
+    # stricter than the lane fails builds that would have shipped.
     if ! ios_lane_spec="$(python3 - tools/ios/run-sim.py <<'PY'
 import pathlib
 import re

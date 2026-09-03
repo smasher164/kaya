@@ -1,14 +1,5 @@
-//! The background conformance scene: work off the app thread, posted
-//! back (DESIGN.md's threading model; docs/background-work-plan.md).
-//! The byte-frozen contract is tools/scenes/background.steps.
-//!
-//! THE ODD SHAPE IS THE POINT: a wrong implementation must DEADLOCK
-//! rather than disagree. The worker parks until a CLICK releases it, so
-//! a binding that let background work occupy the app thread could not
-//! even deliver its own release.
-//!
-//! Signals are write-only, so the accumulators are the guest's own
-//! state. `Arc<Mutex<..>>` because a posted closure must be `Send`.
+//! The background scene (tools/scenes/background.steps): the worker parks
+//! for a CLICK, so a binding that used the app thread DEADLOCKS here.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -32,9 +23,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .column(|tx| {
                 tx.label(status).a11y_id("status"); // label#0
                 tx.label(alive).a11y_id("alive"); // label#1
-                // Authored because the closing AX read needs an
-                // identifier: an index read passes for an arm that ran
-                // and drew nothing.
+                // Addressed by id: an index read passes for an empty arm.
                 tx.label(nested).a11y_id("nested"); // label#2
                 let start = tx.button("start").id(); // button#0
                 msgs.on_click(start, Msg::Start);
@@ -50,10 +39,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (status, alive, nested)
     });
 
-    // The release channel: the app thread sends, the worker receives.
-    // A handler that blocked handing this over would fail the very claim
-    // being tested, so the send must not wait for the receiver — mpsc's
-    // does not.
+    // The send must NOT wait for the receiver — mpsc's does not.
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let mut release_tx = Some(release_tx);
     let mut release_rx = Some(release_rx);
@@ -67,11 +53,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 std::thread::Builder::new()
                     .name("background-worker".into())
                     .spawn(move || {
-                        // Parks until the scene clicks release; on the
-                        // app thread that click could never be processed.
+                        // Parks: on the app thread that click could never
+                        // be processed.
                         let _ = rx.recv();
-                        // The accumulator makes this a test of ORDER,
-                        // not merely of which post ran last.
                         for step in ["1", "2", "3"] {
                             let acc = Arc::clone(&acc);
                             poster.post(move |tx| {
@@ -90,10 +74,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let _ = tx.send(());
                 }
             }
-            // A post from INSIDE a transaction queues for after; it never
-            // nests. Queued writes "ac" and then "acb"; nesting can only
-            // ever produce "abc", and the two are unreachable from each
-            // other.
+            // A post from INSIDE a transaction QUEUES for after.
             Msg::Nest => {
                 let poster = ctx.poster();
                 let seq = Arc::new(Mutex::new(String::new()));

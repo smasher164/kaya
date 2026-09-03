@@ -1,55 +1,13 @@
-# The assets conformance scene (docs/assets-plan.md, ratified
-# 2026-08-18). `asset(name)` is a CORE call, and this scene is the only
-# place its two halves are observed THROUGH A REAL SURFACE on every
-# platform kaya ships.
-#
-# WHY AN IMAGE AND NOT `expect_typeface`. The typeface scene already
-# proves the BLOB redemption — the vendored font's bytes go from the
-# core's read straight into the platform's font API and never enter the
-# guest — but iOS depth-stubs `expect_typeface`, which would have
-# exempted the one lane whose asset delivery IS the shipped packaging
-# mechanism (a copy into the bundle's Resources). An image needs no new
-# verb, no interpreter arm and no wire constant: the guest hands the
-# vendored mark's BYTES to an Image, the platform's own decoder decodes
-# them, and the harness reads the decoded size off the real image view.
-# That is the gallery scene's shape with an asset on the input side, and
-# it is the BYTES redemption — the half of the ruling that nothing else
-# in the tree observes at run time on any lane.
-#
-# THE CENSUS IS THE FORCING FUNCTION, and it is why the third line is so
-# long. `asset_miss_sentence` answers the sentence a miss WOULD raise,
-# totally, without unwinding — because unwinding is not one semantics in
-# nine languages and the C floor catches nothing at all (docs/deferred.md,
-# the assets entry). Line 1 of that sentence names what the package
-# CARRIES, so this
-# expectation can only pass on a lane that stages the WHOLE asset root
-# rather than the one file it happens to need (docs/assets-plan.md A5.1,
-# "the root moves as a unit"). Nothing else in the tree observes that
-# property at run time; adding an asset reddens this line, and
-# tools/check-assets.py holds the frozen string equal to the root's own
-# listing so the red arrives from a gate, naming this file, before any
-# lane runs.
-#
-# THIS LINE ALSO PINS THE GRAMMAR. The sentence contains a `;`, which is
-# the newline stand-in a transport without newlines uses (an Android
-# intent extra). All three interpreters split statements on it and all
-# three now do so QUOTE-AWARE — crates/kaya/src/harness.rs's
-# `split_statements`, KayaSwiftUI.swift's and KayaCompose.kt's
-# `kayaSplitStatements` — and this scene is the wall that holds them
-# equal, because it runs the same quoted `;` through all three on five
-# lanes.
-#
-# No opening settle: the first expect's bounded retry IS the scene-ready
-# wait.
+# docs/assets-plan.md. An IMAGE, because iOS depth-stubs
+# `expect_typeface` and iOS is the lane whose asset delivery IS the
+# shipped packaging mechanism. THE MISS SENTENCE names what the package
+# CARRIES, so it passes only on a lane that staged the WHOLE root
+# (tools/check-assets.py holds it equal to that root's listing), and its
+# quoted `;` is the wall holding the three statement splitters equal.
 expect label#0 "assets"
 expect image#0 "64x64"
 expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, images/README.md, images/a11y-logo.png, market/README.md, market/prices.csv, market/transactions.csv, win/README.md, win/minimal-resources.pri"
-# The other end of the same query, and the large asset. 111400 is the
-# vendored font's whole size (guests/assets/fonts/README.md says why it
-# ships whole), so a reader that truncated into a fixed buffer fails
-# here rather than passing with a sentence that still looked right. The
-# tail is the query's POSITIVE answer: for a name that resolves it
-# returns the empty string, and "no complaint" is this scene's rendering
-# of that — when it is not empty the guest shows the sentence instead,
-# so a failure prints what was measured.
+# 111400 is the vendored font's WHOLE size, so a reader that truncated
+# into a fixed buffer fails here. "no complaint" is the query's positive
+# answer (the empty string) rendered.
 expect label#2 "fonts/sora-wght.ttf: 111400 bytes, no complaint"

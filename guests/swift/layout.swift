@@ -1,7 +1,5 @@
-// The layout scene, Swift port — the native-default observation vehicle;
-// see guests/rust/layout.rs. It asserts NO geometry: container targets
-// index by creation order, which legitimately differs per language. The
-// grow contract is asserted in the grow scene instead.
+// The layout scene, Swift port — guests/rust/layout.rs,
+// tools/scenes/layout.steps.
 
 import Foundation
 

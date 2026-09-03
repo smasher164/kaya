@@ -1,6 +1,4 @@
-// The toolbar conformance scene, C# port: the `primary` bit as real
-// window chrome (docs/chrome-plan.md C2). Canonical semantics in
-// guests/rust/toolbar.rs; the byte-frozen contract in
+// The toolbar scene, C# port — guests/rust/toolbar.rs,
 // tools/scenes/toolbar.steps.
 
 using System;
@@ -16,19 +14,15 @@ static class ToolbarScene
         app.Build(tx =>
         {
             var status = tx.Signal("ready");
-            // Written against the MENU ITEM and nothing else: the
-            // promoted button is that same item, so it follows or the
-            // lowering kept a copy.
+            // Written against the MENU ITEM: the promoted button IS that item.
             var canSave = tx.Signal(true);
 
-            // CATALOG PREORDER DECIDES PROMOTION — menubar-append order,
-            // then each node's children depth-first. Save is the first
-            // primary and Find the second, so every host's promoted set
-            // is [Save, Find] however large its own k is.
+            // CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
+            // children depth-first, so every host promotes [Save, Find].
             var file = tx.Menu("File", items: new[]
             {
-                // The symbol vocabulary has no save-specific glyph; Done
-                // is the checkmark idiom (docs/styling-plan.md D6).
+                // No save-specific glyph; Done is the checkmark idiom
+                // (docs/styling-plan.md D6).
                 tx.Item("Save", shortcut: "primary+s", enabled: canSave,
                     symbol: Symbol.Done, primary: true,
                     onActivate: t => t.Write(status, "saved")),

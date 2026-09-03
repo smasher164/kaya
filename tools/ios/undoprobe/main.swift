@@ -1,23 +1,10 @@
-// UndoProbe (iOS simulator) — does a kaya programmatic text write land
-// in the field's native undo stack, which UndoManager serves a focused
-// kaya TextField/TextEditor, and does shake-to-undo present the system
-// UI (P3-ios and P6, docs/undo-plan.md §0).
-//
-// The SIMULATOR is the right host: these are UIKit questions, not
-// sandbox ones, and the simulator runs the same UIKit (the rule
-// tools/ios/clipprobe/build.sh's header states).
-//
-// The app is shaped like kaya's: a SwiftUI `App` with a
-// `@UIApplicationDelegateAdaptor` whose delegate SUBCLASSES UIResponder
-// (swift/KayaSwiftUIEntry.swift), and the two text views are KayaEntry
-// and KayaTextarea copied in shape — TextField/TextEditor over an
-// `@Observable` node, uncontrolled toward the app.
-//
-// The cells and their answers are docs/undo-plan.md §0; the I- and
-// P-labels below mark which reading is which.
-//
-// Answers land on stdout under "PROBE". THROWAWAY; nothing builds it
-// but build.sh beside it.
+// UndoProbe (iOS simulator) — P3-ios and P6, docs/undo-plan.md §0: does
+// a kaya programmatic text write land in the field's native undo stack,
+// which UndoManager serves a focused kaya field, and does shake-to-undo
+// present the system UI? The app MIRRORS kaya's own shape — a
+// UIResponder-subclassing delegate, TextField/TextEditor over an
+// `@Observable` node — or it would answer a question kaya never asks.
+// THROWAWAY; nothing builds it but build.sh beside it.
 import SwiftUI
 import UIKit
 

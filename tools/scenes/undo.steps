@@ -1,63 +1,24 @@
-# The undo scene: ONE history, walked newest-first, over two tiers the
-# user never has to know about (DESIGN.md, Menus; docs/undo-plan.md
-# D1-D6 and §3).
-#
-# WHAT THIS SCENE IS FOR is the ORDER. Every framework that keeps a
-# native text widget ends up with two undo stacks and no total order
-# between them, and the literature has a name for what that produces —
-# SELECTIVE UNDO, "a new node that has never existed before" (Yoon &
-# Myers, ICSE 2015). VS Code documents kaya's exact two stacks and
-# carries an open issue; Drupal filed the redo version. Type "a", do an
-# app action X, type "b", and two bare stacks walk back b, a, X: the
-# typing goes first because it lives on the other stack, and the user
-# passes through a state that never was. This script asserts b, X, a.
-#
-# THE FRONTIER'S GRANULARITY IS PLATFORM-FLAVORED AND THE ORDER IS NOT,
-# which is why every assertion here is about the STATE each step
-# restores. Whether the newest typing is taken back by the field's own
-# stack (a native step) or by the ledger (one coarse step) is the
-# platform's business and legitimately differs per lane; that the todo
-# comes back before the earlier typing does is kaya's promise
-# everywhere. So the history label is read after the steps whose route
-# is decided, never at the frontier.
-#
-# TYPING IS REAL KEYSTROKES (`type`), never set_text: a programmatic
-# write CLEARS a field's native history on every platform (D7), which is
-# the very history the first tier is made of. A scene built out of
-# set_text would destroy what it came to observe and pass anyway.
-#
-# LABEL#2 IS THE APP'S OWN MIRROR, RENDERED — the keys its collection
-# holds, in the order it holds them, written by whichever handler just
-# ran. It is how this script observes the two things a count cannot: an
-# undone REMOVE comes back under its ORIGINAL key at its ORIGINAL
-# position (the delta's entries and orders runs, both), and a key minted
-# after a history walk is still FRESH (docs/fresh-key-plan.md — no guest
-# spells a counter any more; `insert_fresh` mints, and undo/redo replay
-# captured keys inside the core without ever re-entering that path).
-#
-# EVERY label#2 ASSERTION IS PRECEDED BY THE label#0 OR label#1
-# ASSERTION WRITTEN IN THE SAME TRANSACTION, and that ordering is
-# load-bearing. After an undo the core restores what the group wrote
-# and THEN the app hears the occurrence; a bare `expect label#2` could
-# match the core's restored value before the app's own write landed and
-# pass on a mirror it never read. Reading the app-written label first
-# means the transaction carrying both has already been applied.
+# DESIGN.md, Menus; docs/undo-plan.md D1-D6 and §3. WHAT THIS SCENE IS
+# FOR is the ORDER: two bare stacks with no total order between them
+# walk "type a, act X, type b" back as b, a, X, through a state that
+# never existed, and this script asserts b, X, a. The FRONTIER'S
+# GRANULARITY is platform-flavored where the order is not, so every
+# assertion is about the STATE a step restores, and TYPING IS REAL
+# KEYSTROKES (set_text would clear the native history this is made of).
 expect label#0 "no todos"
 expect label#1 "history empty"
 expect label#2 "no keys"
 
-# NOTHING HAS HAPPENED, SO BOTH COMMANDS ARE INERT — and they say so.
 # Enablement is not a build-time fact and no app computes it: it is
-# "does anything answer this right now", asked live at activation, the
-# same shape paste's offer-meets-accepts already has.
+# "does anything answer this right now", asked live.
 expect_menu "Edit>Undo" disabled
 expect_menu "Edit>Redo" disabled
 
 # ---- the scenario that motivated the milestone --------------------
 #
-# The entry scene's add: it appends a todo AND empties the field. One
-# Undo must take back the ADD. Under two unordered stacks it takes back
-# the CLEAR — "milk" returns, the todo stays.
+# The add appends a todo AND empties the field, so one Undo must take
+# back the ADD. Under two unordered stacks it takes back the CLEAR —
+# "milk" returns and the todo stays.
 click button#2
 expect_focused entry#0
 type "milk"
@@ -65,20 +26,20 @@ expect entry#0 "milk"
 expect_menu "Edit>Undo" enabled
 click button#0
 expect label#0 "added milk, 1 total"
-# THE MINTER'S FIRST ANSWER. The app passed no key: the binding
-# authored one, and it is the I64 sequence starting at 1 that every
-# language mints (docs/fresh-key-plan.md).
+# THE MINTER'S FIRST ANSWER: the app passed no key, and every language
+# mints the same I64 sequence from 1 (docs/fresh-key-plan.md). label#2
+# is the APP'S OWN MIRROR of its collection's keys, and every label#2
+# assertion stands behind the label#0/#1 assertion written in the SAME
+# transaction: after an undo the core restores before the app hears the
+# occurrence, so a bare read could match the restored value too early.
 expect label#2 "keys 1"
 expect entry#0 ""
 
 menu_activate "Edit>Undo"
 expect label#0 "no todos"
-# The app hears ONE occurrence carrying the label and the whole
-# restored state; the count is read from the app's own collection
-# mirror, which the binding reconciled from that payload.
 expect label#1 "undid add milk, 0 total"
 expect label#2 "no keys"
-# AND THE FIELD IS UNTOUCHED. The clear was never a step, so undoing the
+# AND THE FIELD IS UNTOUCHED: the clear was never a step, so undoing the
 # add cannot put the draft back beside a todo that is gone.
 expect entry#0 ""
 
@@ -95,12 +56,9 @@ expect entry#0 "tea"
 click button#1
 expect label#0 "starred"
 click button#2
-# AND TYPING APPENDS (harness.rs Stage::type_text, contract point 3).
-# This is the step that says so: macOS SELECTS A FIELD'S WHOLE CONTENTS
-# when it becomes first responder, so a verb that typed "wherever the
-# caret happens to be" would append here and replace on another lane,
-# and one script is compared byte-for-byte on all five. A backend that
-# skips the caret move fails right here, reading "s" for "teas".
+# TYPING APPENDS (harness.rs Stage::type_text, contract point 3): macOS
+# SELECTS A FIELD'S WHOLE CONTENTS when it becomes first responder, so a
+# backend that skips the caret move reads "s" for "teas" right here.
 type "s"
 expect entry#0 "teas"
 
@@ -109,36 +67,16 @@ menu_activate "Edit>Undo"
 expect entry#0 "tea"
 
 # ---- and a step back is a step forward, WHICHEVER TIER TOOK IT ----
-#
-# The walk above took the run to its start, so the field's own stack is
-# spent and the ledger's frontier has moved to the app's step underneath.
-# That is what makes this the interesting redo: the platform can no
-# longer offer this typing in either direction, so if the ledger did not
-# BANK the spent episode forward, the run would be gone for good — a hole
-# in a history the whole design promises has none. The enablement is read
-# first because it is the falsifiable half: unbanked, Edit>Redo is inert
-# here (the ledger's forward side is empty and the routing says so), and
-# no assertion about text could tell you why.
-#
-# THE ROUTE IS THE CORE'S ON EVERY LANE, which is what makes this
-# platform-uniform: the frontier is a group, so `route_redo` cannot offer
-# the native tier, and the whole after-image comes back in one coarse
-# step whether the undo above was taken natively or coarsely. Frontier
-# granularity is not being asserted here — the granularity was already
-# spent by the walk.
-#
-# AND IT IS ASKED BEFORE THE NEXT APP ACTION, deliberately: a banked
-# episode is forward history like any other, so the next step commits
-# over it (scene.rs's
-# `a_new_step_after_a_banked_walk_spends_the_forward_history`). Clicking
-# something to move focus first would take the typing with it.
+# The field's own stack is spent, so without the ledger BANKING the
+# episode forward the run would be gone for good. THE ENABLEMENT IS READ
+# FIRST, the falsifiable half: unbanked, Edit>Redo is inert and no
+# assertion about text could say why. ASKED BEFORE THE NEXT APP ACTION,
+# since a banked episode is forward history the next step commits over
+# (scene.rs's a_new_step_after_a_banked_walk_spends_the_forward_history).
 expect_menu "Edit>Redo" enabled
 menu_activate "Edit>Redo"
 expect entry#0 "teas"
 expect label#1 "redid typing, 1 total"
-# ...and back where the interleave was, so the walk below is the one this
-# scene came for. A closed episode is not frontier-live, so this one is
-# the coarse restore on every lane too.
 menu_activate "Edit>Undo"
 expect entry#0 "tea"
 expect label#1 "undid typing, 1 total"
@@ -148,59 +86,38 @@ expect label#1 "undid typing, 1 total"
 menu_activate "Edit>Undo"
 expect label#0 "added milk, 1 total"
 expect label#1 "undid star, 1 total"
-# a — and the earlier typing last, at the granularity banking left it:
-# one coarse step back to where that run began.
+# a — the earlier typing last, one coarse step back to where it began.
 menu_activate "Edit>Undo"
 expect entry#0 ""
 expect label#1 "undid typing, 1 total"
 
 # ---- the delta is the only notification, AND IT IS FALSIFIABLE ----
-#
-# Restoring text is a programmatic write, so it emits no text_changed:
-# an app that folds edits into its own model (which is every app — the
-# field is uncontrolled) learns this one from the occurrence's payload
-# or not at all.
-#
-# THE NEXT LINE IS THE PROOF, and it is a proof because it reads the
-# APP'S copy of the draft at a moment when the widget's and the app's
-# would disagree. The coarse undo above put the field back to "" while
-# the last ordinary text_changed this app heard said "tea"; an app that
-# ignores `delta.texts` still holds "tea" and its add ADDS. Only an app
-# that folded the payload refuses.
-#
-# The earlier script asserted the same D5 promise one step later, at the
-# add after the redo — and that assertion could not fail: the redo lands
-# the episode's after-image, which is exactly where the last ordinary
-# emission had left the app, so the two ignores cancelled. Measured
-# vacuous independently on the Java and Haskell lanes. A refusal is not
-# a step, so the forward history survives it.
+# Restoring text is a programmatic write and emits no text_changed, so
+# an app learns it from the payload or not at all. THIS ADD IS THE
+# PROOF, at the one moment the widget's draft and the app's disagree: an
+# app ignoring `delta.texts` still holds "tea" and its add ADDS. One
+# step later, at the add after the redo, it CANNOT fail (measured
+# vacuous on the Java and Haskell lanes). A refusal is not a step.
 click button#0
 expect label#0 "nothing to add, 1 total"
 
-# And now the other half of the same fold, which the step above has
-# just made checkable: the redo writes "tea" programmatically and emits
-# nothing, so the app can only NAME it if the payload reached its draft
-# — and the refusal proved the draft was "" a moment ago, so there is
-# nowhere else for the name to come from.
+# The other half of the fold: the redo writes "tea" programmatically and
+# emits nothing, and the refusal above proved the draft was "" a moment
+# ago, so the name can only have come from the payload.
 menu_activate "Edit>Redo"
 expect entry#0 "tea"
 expect label#1 "redid typing, 1 total"
 click button#0
 expect label#0 "added tea, 2 total"
-# A FRESH KEY IS FRESH FOREVER. The first add's undo and redo walked
-# this very entry out of the collection and back in; a counter that
-# rewound would mint 1 again here and collide with the milk that is
-# still there. 2 is the whole never-rewind rule, observed.
+# A FRESH KEY IS FRESH FOREVER: a counter that rewound would mint 1
+# again here and collide with the milk that is still there.
 expect label#2 "keys 1,2"
 expect entry#0 ""
 
-# And the new step is undoable like any other — a history is walked as
-# often as the user likes, so the handlers outlive every step.
-#
 # THE STATUS COMES BACK TO WHAT THE REFUSAL WROTE, not to what the
-# previous add wrote, and that is the inverse being exactly what it
-# claims: a group restores the signal it overwrote to the value it found
-# there, whoever put it there and whether or not that writer was a step.
+# previous add wrote: a group restores the signal it overwrote to the
+# value it found there, whoever put it there and whether that writer was
+# a step.
 menu_activate "Edit>Undo"
 expect label#0 "nothing to add, 1 total"
 expect label#1 "undid add tea, 1 total"
@@ -208,31 +125,26 @@ expect label#2 "keys 1"
 
 # ---- the remove: the case where identity IS what undo asserts -----
 #
-# Every other step here restores CONTENT. This one restores an ENTRY,
-# and an entry is a key: an undone remove that came back under a new
-# name, or at the end instead of where it was, would satisfy every
-# count in this file and still be wrong. So both are read off label#2.
+# An undone remove that came back under a new key, or at the end instead
+# of where it was, satisfies every COUNT in this file and is still
+# wrong, so both are read off label#2.
 menu_activate "Edit>Redo"
 expect label#0 "added tea, 2 total"
 expect label#1 "redid add tea, 2 total"
 expect label#2 "keys 1,2"
 
-# The remove takes the collection's first entry — the model's own
-# answer, never a widget's — so the entry that comes back has to come
-# back BEFORE the one that stayed.
+# The remove takes the collection's FIRST entry, so the entry that comes
+# back has to come back BEFORE the one that stayed.
 click button#3
 expect label#0 "removed milk, 1 total"
 expect label#2 "keys 2"
 
 menu_activate "Edit>Undo"
-# The group's inverse restores the status the remove wrote, and the
-# occurrence carries the entry and the order that group disturbed.
 expect label#0 "added tea, 2 total"
 expect label#1 "undid remove milk, 2 total"
-# ITS ORIGINAL KEY, AT ITS ORIGINAL POSITION. A mirror that folds the
-# entries run and drops the orders run reads "keys 2,1" here — the
-# restored entry appended rather than replaced — and a mirror that
-# folds neither reads "keys 2".
+# ITS ORIGINAL KEY, AT ITS ORIGINAL POSITION: a mirror that folds the
+# entries run and drops the orders run reads "keys 2,1" here, and one
+# that folds neither reads "keys 2".
 expect label#2 "keys 1,2"
 
 menu_activate "Edit>Redo"
@@ -241,60 +153,33 @@ expect label#1 "redid remove milk, 1 total"
 expect label#2 "keys 2"
 
 # ---- and one level down: a ROW's field is a field too --------------
-#
-# Every step above is about the DRAFT — a live widget, whose id the app
-# holds. A collection row's field has no id an app could hold: its
-# identity is (template node, key path), the same pair its clicks and
-# its edits already arrive under. That is the whole reason this block
-# exists, and the reason the payload's texts run had to become an
-# arity-first group like its entries and orders siblings: a fixed pair
-# of (widget id, text) had nowhere to put the path, so a row's typing
-# could not be NAMED to the app and was therefore not banked at all
-# (docs/undo-plan.md §3b).
-#
-# THE ROW IS ADDED HERE AND ADDRESSED AS `#last` ON PURPOSE. By this
-# point the scene has stamped six row copies and destroyed four of them
-# (two adds and a remove, each walked back and forward), and a backend
-# is not required to prune its harness registry when a copy is
-# destroyed — the SwiftUI interpreter does not. A fixed `entry#N` would
-# name a dead node on some lanes and a live one on others; the newest
-# stamped copy is the newest live one everywhere.
-#
-# AND THE EDIT IS `set_text`, which is the one place this scene departs
-# from its own real-keystrokes rule, for a reason that is not
-# convenience: nothing can FOCUS a stamped copy. `tx.focus` takes a
-# widget id and no app has one for a row, and `click` targets buttons.
-# What is asserted here is therefore the LEDGER's half — a row's run is
-# banked, ordered with everything else, and restored by the core — and
-# not the native tier, which an unfocused field could not offer anyway.
-# Focus stays on the draft, so this undo routes to the core on every
-# lane and no frontier granularity is being asserted.
+# A row's field has no id an app could hold — its identity is (template
+# node, key path) — which is why the payload's texts run is an
+# arity-first group (docs/undo-plan.md §3b). `#last` ON PURPOSE: six row
+# copies have been stamped and four destroyed, and a backend need not
+# prune its harness registry. AND THE EDIT IS `set_text`, since nothing
+# can FOCUS a stamped copy, so this asserts the LEDGER's half only.
 click button#2
 type "jam"
 click button#0
 expect label#0 "added jam, 2 total"
-# A THIRD FRESH KEY. The minter has been walked back and forward over
-# both earlier todos and still never rewinds.
+# A THIRD FRESH KEY, after walks back and forward over both earlier
+# todos.
 expect label#2 "keys 2,3"
 set_text entry#last "ha"
-# label#3 IS THE APP'S OWN MAP OF WHAT IS TYPED IN THE ROWS, by key —
-# the row fields are uncontrolled exactly as the draft is, so this is
-# the app's copy and never a widget read.
+# label#3 IS THE APP'S OWN MAP of what is typed in the rows, by key —
+# never a widget read.
 expect label#3 "notes 3=ha"
 
 menu_activate "Edit>Undo"
 expect label#1 "undid typing, 2 total"
-# THE FALSIFIABLE HALF, and the only one of the two. The restore of a
-# row's field is a programmatic write, so it emits nothing: an app that
-# ignores the payload's texts run still holds "3=ha" and reads it back
-# out here. The redo below cannot catch that on its own — an app that
-# ignored BOTH directions ends up back at "notes 3=ha" and the two
-# ignores cancel, which is the same vacuity this file's earlier D5 pin
-# was rewritten to escape.
+# THE FALSIFIABLE HALF, and the only one of the two: an app that ignores
+# the payload's texts run still holds "3=ha" and reads it back here. The
+# redo below cannot catch that alone — ignoring BOTH directions ends up
+# at "notes 3=ha" and the two ignores cancel.
 expect label#3 "no notes"
-# ...and the widget followed, which is the other half of one step: the
-# core wrote the text back into whichever copy carries that template
-# node at that key right now.
+# ...and the widget followed: the core wrote the text back into whichever
+# copy carries that template node at that key right now.
 expect entry#last ""
 
 menu_activate "Edit>Redo"

@@ -181,8 +181,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  return cat(head, body);");
     c.line("}");
 
-    // One packer per fixed-layout tx record; set_property gets one
-    // helper per source arm.
     for r in spec.tx {
         if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
@@ -223,8 +221,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The set_property trios, one per property: spec-driven so new
-    // props reach every binding without emitter edits.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = value_expr(kind, prop);
@@ -245,8 +241,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The window-prop duos (const + signal — element sources are
-    // rejected by the wire; windows are not collection elements).
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = value_expr(kind, prop);
@@ -263,8 +258,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = value_expr(kind, prop);
@@ -281,8 +276,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The section-prop duos (const + signal); icon rides the blob
-    // channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = value_expr(kind, prop);
@@ -314,11 +309,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("/** Canonicalize a shortcut spelling to the wire form: lowercase '+'-joined");
     c.line(" * tokens, modifiers ordered primary, shift, alt, then one key (a-z, 0-9,");
-    c.line(" * or the closed named set). Accepts ASCII case variants and any modifier");
-    c.line(" * order; rejects whitespace, empty tokens, repeated modifiers, aliases");
-    c.line(" * (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY stays");
-    c.line(" * at the core: escape, shift-only and bare alphanumerics, and the reserved");
-    c.line(" * floor are validated there, on the canonical spelling, never rewritten. */");
+    c.line(" * or the closed named set). Rejects whitespace, empty tokens, repeated");
+    c.line(" * modifiers, aliases (ctrl/cmd/option), and unknown or multiple or missing");
+    c.line(" * keys. POLICY stays at the core, validated on the canonical spelling. */");
     c.line("export function canonicalize_shortcut(spelling: string): string {");
     c.line("  if (!spelling) throw new Error(\"kaya: shortcut is empty\");");
     c.line("  if (/[ \\t\\n\\v\\f\\r]/.test(spelling)) throw new Error(`kaya: shortcut ${JSON.stringify(spelling)} contains whitespace`);");
@@ -341,8 +334,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  return [...[\"primary\", \"shift\", \"alt\"].filter((m) => seen.includes(m)), key].join(\"+\");");
     c.line("}");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones.
+    // Signal binders only for the bindable props.
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = match kind {

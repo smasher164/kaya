@@ -7,16 +7,13 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# Typecheck the JS binding and every JS guest with tsc — the compiler
-# the guests never otherwise meet, since node strips their types and
-# checks nothing (docs/js-plan.md §5). The binding's own tsconfig is
-# strict; the guests' extends it.
+# Typecheck the JS binding and every JS guest with tsc — the compiler the
+# guests never otherwise meet, since node strips their types and checks
+# nothing (docs/js-plan.md §5).
 #
 # THE WORKSPACE LINK IS MADE HERE, on the path nobody can avoid: the
-# guests import "kaya-gui", which resolves through
-# guests/js/node_modules/kaya-gui -> bindings/js, and `npm install
-# --offline` is what writes that symlink (a file: dependency needs no
-# registry). Idempotent and ~100ms once linked.
+# guests import "kaya-gui" through guests/js/node_modules/kaya-gui, and
+# `npm install --offline` is what writes that symlink.
 
 import os
 import subprocess

@@ -1,9 +1,5 @@
-"""The entry scene: the first widget with owned state, exercising the
-uncontrolled contract end to end. The field owns its text and reports
-each edit as a text-changed occurrence; the app folds those into
-`draft` and never reads back from the widget.
+"""The entry scene (tools/scenes/entry.steps).
 
-Build the library first (cargo build), then:
     KAYA_SELFTEST=entry python3 guests/python/entry.py
 """
 
@@ -18,8 +14,6 @@ draft = ""
 
 
 def on_change(text):
-    # The fold: widget-owned state arrives as occurrences; the app's
-    # copy is this variable, not a widget read.
     global draft
     draft = text
 
@@ -31,9 +25,7 @@ def on_add():
     # The binding mints the key (docs/fresh-key-plan.md).
     todos.insert_fresh(draft)
     status.set(f"added {draft}, {len(todos)} total")
-    # Finish the form, atomically with the insert. The field answers with
-    # text_changed("") through its normal edit path, so on_change empties
-    # the draft.
+    # Atomic with the insert; the field's text_changed("") empties draft.
     field.clear()
     field.focus()
 

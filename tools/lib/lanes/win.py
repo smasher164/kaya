@@ -57,12 +57,10 @@ PY_ONLY_SCENES = ["portfolio", "varied"]
 # is pooled, alone where python is alone, absent where python is absent.
 MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 
-# THE ROSTER AND ITS ORDER. A list of BLOCKS: each block's legs run
-# in the WIDTH-wide slot pool, and the pool DRAINS between blocks —
-# a one-leg block is a leg that runs ALONE between drains. The
-# barriers are measured contention fixes, never style; each block
-# comment names its reason, and check-steps' serial clauses read
-# this structure instead of counting drain_suites lines.
+# THE ROSTER AND ITS ORDER. A list of BLOCKS: each block's legs run in
+# the WIDTH-wide slot pool and the pool DRAINS between blocks, so a
+# one-leg block runs ALONE. The barriers are measured contention fixes,
+# never style, and check-steps' serial clauses read this structure.
 ORDER = [
     # The wide pool: no typed input, no window close, no OS-global
     # chrome in any of these. milestone2's five legs are the bare
@@ -98,12 +96,11 @@ ORDER = [
     [
      "dirty_rust",
     ],
-    # Pooled depth + python-only + the styling family: windowed/canvas/
-    # canvasdark/sizepolicy are rust-only by design (docs/canvas-plan.md,
-    # docs/virtualization-plan.md §6.3), portfolio/varied are python by
-    # design (docs/portfolio-plan.md). canvasdark is the appearance
-    # override's set proof — its launcher sets KAYA_APPEARANCE=dark and
-    # runs the same canvas.exe (check-appearance holds the leg here).
+    # Pooled depth + python-only + the styling family, each rust-only or
+    # python-only by design (docs/canvas-plan.md,
+    # docs/virtualization-plan.md §6.3, docs/portfolio-plan.md).
+    # canvasdark is the appearance override's set proof, running the same
+    # canvas.exe under KAYA_APPEARANCE=dark.
     [
      "windowed_rust",
      "canvas_rust",

@@ -1,7 +1,5 @@
-//! The standard-commands scene: a chord on every leaf kind and the
-//! `settings` role, which macOS relocates into the application menu
-//! while the model keeps the item where it was declared. The
-//! byte-frozen contract is tools/scenes/commands.steps.
+//! The standard-commands scene (tools/scenes/commands.steps): macOS moves
+//! the `settings` role but the item stays addressable where declared.
 
 #[derive(Clone)]
 enum Msg {
@@ -17,8 +15,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let details = tx.signal(false);
         let sort = tx.signal(0.0);
 
-        // Reload sits beside Settings so the menu that declared it is
-        // not left empty once macOS moves Settings away.
+        // Keeps the menu non-empty once macOS MOVES Settings away.
         let settings = tx
             .window(kaya::DEFAULT_WINDOW)
             .title("commands")
@@ -32,7 +29,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .out;
         msgs.on_menu_item(settings, Msg::Settings);
 
-        // Option order IS the index vocabulary: Name = 0, Date = 1.
+        // Option order IS the index.
         let (details_item, sort_group) = tx
             .window(kaya::DEFAULT_WINDOW)
             .menu("View", |m| {
@@ -73,9 +70,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Sorted(index) => ctx.apply(|tx| {
                 tx.write(status, if index == 1 { "sorted date" } else { "sorted name" });
             }),
-            // Fires twice on purpose: once by the chord, once by
-            // activating the item at its DECLARED path — which on macOS
-            // lives in the application menu by then.
+            // Fires twice on purpose: the chord, then the item.
             Msg::Settings => {
                 settings_count += 1;
                 let text = format!("settings {settings_count}");

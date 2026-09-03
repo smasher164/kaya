@@ -1,9 +1,5 @@
-//! The window conformance scene: the primary surface's properties as
-//! assertions. The contract is tools/scenes/window.steps.
-//!
-//! 640x400 is deliberately OFF the 540x330 default, so an ignored size
-//! request cannot pass by luck. Desktop-only: phones reject the size by
-//! physics, so runners register this scene on the desktops alone.
+//! The window conformance scene (tools/scenes/window.steps): 640x400 is
+//! deliberately OFF the default, so an ignored request cannot pass.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

@@ -1,19 +1,10 @@
-(* The clipboard conformance scene, OCaml port — one clip in several
-   representations, and the privileged read that takes one back
-   (DESIGN.md, Clipboard; docs/clipboard-plan.md).
-
-   Every assertion but the custom format's is made by a FOREIGN tool.
-   The image is asserted as a DECODED SIZE and never as bytes — every
-   host re-encodes freely.
-
-   Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
-   contract in tools/scenes/clipboard.steps. *)
+(* The clipboard scene, OCaml port — guests/rust/clipboard.rs,
+   tools/scenes/clipboard.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* A 4x4 PNG spelled out rather than generated: a foreign decoder asserts
-   its size, so the size has to be knowable from the script. *)
+(* A real 4x4 PNG: a foreign decoder asserts its size. *)
 let pixel_png_bytes =
   [
              0x89; 0x50; 0x4E; 0x47; 0x0D; 0x0A; 0x1A; 0x0A (* signature *);
@@ -32,20 +23,16 @@ let pixel_png =
   String.init (List.length pixel_png_bytes) (fun i ->
       Char.chr (List.nth pixel_png_bytes i))
 
-(* Reverse-DNS and space-free: this id reaches every platform's own
-   registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 target
-   atom, an Android MIME type). *)
+(* Reverse-DNS and space-free: reaches every registry VERBATIM. *)
 let note_id = "dev.kaya/note"
 
 (* NO QUOTES IN THE PAYLOAD: the step grammar escapes newline, carriage
-   return and backslash but not a quote, so a quoted byte cannot be
-   spelled in the expectation. (OCaml lexes a quote inside a comment as
-   a string, so this one cannot show the escapes either.) *)
+   return and backslash only. (OCaml lexes a quote inside a comment as a
+   string, so this one cannot show the escapes either.) *)
 let note_bytes = "note=1"
 
-(* Guest and interpreter are the same process and compute this path
-   identically; the pid keeps parallel legs apart, and
-   [Filename.get_temp_dir_name] honours TMPDIR. *)
+(* The pid keeps parallel legs apart, and [Filename.get_temp_dir_name]
+   honours TMPDIR. *)
 let scene_dir =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "kaya-clip-%d" (Unix.getpid ()))
@@ -83,9 +70,6 @@ let () =
 
       let answered clip =
         match clip with
-        (* Empty cannot discriminate its causes — denied, unfocused,
-           absent, or nothing this read accepted — so the guest does not
-           claim to know which. *)
         | None -> write status (Str "empty")
         | Some (Text text) -> write status (Str (Printf.sprintf "text %s" text))
         | Some (Html html) -> write status (Str (Printf.sprintf "html %s" html))
@@ -97,8 +81,7 @@ let () =
         | Some (Files []) -> write status (Str "files none")
         | Some (Files (first :: _)) ->
             let worker () =
-              (* OFF THE APP THREAD: [open_picked] blocks, and a pasted
-                 file redeems exactly like a picked one. *)
+              (* OFF THE APP THREAD: [open_picked] blocks. *)
               let text =
                 try
                   let fd, _seekable =
@@ -120,9 +103,6 @@ let () =
       in
 
       let copy_rich () =
-        (* One clip, four representations. kaya derives NONE of them
-           from any other, so an app that wants text beside html spells
-           out both. *)
         copy ~text:"kaya clip" ~html:"<b>kaya</b> clip" ~image:pixel_png
           ~custom:[ (note_id, note_bytes) ] ();
         write status (Str "copied")
@@ -154,9 +134,7 @@ let () =
               ~on_click:(fun () -> Option.iter focus !plain)
               (* button#6 *);
             (fun () ->
-              (* A non-empty accept list is what turns the paste hook
-                 on; without one the platform inserts and the app never
-                 sees it. *)
+              (* A non-empty accept list is what turns the paste hook on. *)
               let w = entry ~a11y_id:"rich" () in
               set_accepts w [ accept_text ];
               on_paste app w (fun clip ->
@@ -168,17 +146,12 @@ let () =
               w)
             (* entry#0 *);
             (fun () ->
-              (* No accept list: the platform inserts and the field's
-                 ordinary change path reports it. *)
               let w = entry ~a11y_id:"plain" () in
               plain := Some w;
               w)
             (* entry#1 *);
-            (* The same two doors on a STAMPED copy: the accept list is
-               declared on the TEMPLATE, and without it the node hook
-               registers, dispatches and can never fire
-               (docs/tpl-props-plan.md §1). The copy's own key arrives in
-               front of the payload. *)
+            (* The accept list is declared on the TEMPLATE; without it the
+               node hook can never fire (docs/tpl-props-plan.md §1). *)
             label ~a11y_id:"row-status" ~bind:row_status (* label#1 *);
             each notes (fun () ->
                 Tpl.(

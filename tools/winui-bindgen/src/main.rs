@@ -1,8 +1,9 @@
 //! Regenerates crates/kaya/src/winui/bindings.rs from the Windows App SDK
-//! metadata in third_party/ (run tools/fetch-winappsdk.sh first).
-//!
-//! Filters are type-level to keep the generated file small; windows-bindgen
-//! pulls in dependencies automatically.
+//! metadata in third_party/ (run tools/fetch-winappsdk.sh first). EVERY
+//! TYPE IS NAMED EXPLICITLY, enums and event args included: an unfiltered
+//! one leaves the method naming it a bare `usize` vtable pad.
+//! docs/traps.md: windows-bindgen type filters do not pull referenced
+//! types transitively. Each comment says what its entry unlocks.
 
 fn main() {
     let sdk = "../../third_party/winappsdk";
@@ -11,11 +12,9 @@ fn main() {
         "default".to_string(),
         "--in".to_string(),
         format!("{sdk}/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Xaml.winmd"),
-        // The RichEdit text object model, which is a SEPARATE winmd in
-        // the same WinUI package: RichEditBox has no Text property and
-        // no editing commands of its own — every one of them lives on
-        // Microsoft.UI.Text.RichEditTextDocument, so the textarea's
-        // control cannot be bound without this input
+        // The RichEdit text object model is a SEPARATE winmd in the same
+        // WinUI package: every RichEditBox editing command lives on
+        // Microsoft.UI.Text.RichEditTextDocument
         // (docs/textarea-foundation-plan.md, the windows arm).
         "--in".to_string(),
         format!("{sdk}/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Text.winmd"),
@@ -46,8 +45,7 @@ fn main() {
         "Microsoft.UI.Xaml.FrameworkElement".to_string(),
         "Microsoft.UI.Xaml.Controls.Control".to_string(),
         // Unlocks UIElement.Focus/FocusState for the focus command and
-        // the harness's is_focused (the slots were `usize` pads while
-        // the enum was unfiltered).
+        // the harness's is_focused.
         "Microsoft.UI.Xaml.FocusState".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentControl".to_string(),
         "Microsoft.UI.Xaml.Controls.Panel".to_string(),
@@ -55,91 +53,52 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.ButtonBase".to_string(),
         "Microsoft.UI.Xaml.Controls.Button".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBlock".to_string(),
-        // TEXT WRAPS (the 2026-08-29 ruling), and these two enums are what
-        // it takes to say so in Rust. `SetTextWrapping`/`SetTextTrimming`
-        // were vtable PADS because the filter never pulls referenced types
-        // transitively (docs/traps.md) — the METHOD was reachable, its
-        // parameter type was not — which is why the caption title has to
-        // build its TextBlock out of XAML markup. With the enums named,
-        // both are ordinary setters.
+        // TEXT WRAPS (the 2026-08-29 ruling): the two enums
+        // `SetTextWrapping`/`SetTextTrimming` take.
         "Microsoft.UI.Xaml.TextWrapping".to_string(),
         "Microsoft.UI.Xaml.TextTrimming".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),
-        // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md).
-        // RichEditBox is the rich-CAPABLE control kaya pins to
-        // plain-text behavior; TextBox stays the entry's. It is not a
-        // drop-in — it has no Text property and none of the editing
-        // commands — so the text object model comes with it, and each
-        // type is named explicitly because the filter never pulls
-        // referenced types transitively (docs/traps.md).
-        //
-        // RichEditTextDocument is what RichEditBox.TextDocument
-        // answers with; ITextDocument/ITextDocument2 are the
-        // interfaces it implements (a class whose default interface is
-        // filtered out keeps its methods as bare vtable pads).
-        // ITextSelection is Document.Selection — cut, copy, paste and
-        // the caret — and ITextRange is the base it extends.
+        // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md):
+        // RichEditBox is the rich-CAPABLE control kaya pins to plain
+        // text; TextBox stays the entry's. It has no Text property and
+        // none of the editing commands, so its text object model —
+        // RichEditTextDocument, ITextDocument/2, ITextSelection,
+        // ITextRange — comes with it.
         "Microsoft.UI.Xaml.Controls.RichEditBox".to_string(),
         "Microsoft.UI.Text.RichEditTextDocument".to_string(),
         "Microsoft.UI.Text.ITextDocument".to_string(),
         "Microsoft.UI.Text.ITextDocument2".to_string(),
         "Microsoft.UI.Text.ITextSelection".to_string(),
         "Microsoft.UI.Text.ITextRange".to_string(),
-        // The plain-text PINS, each an enum the setter takes — and an
-        // unfiltered enum takes its setter down with it, silently, so
-        // an unnamed pin here reads as "no such method" rather than as
-        // a missing filter:
-        //   TextGetOptions::AdjustCrlf  — the read that does NOT append
-        //     the story's trailing paragraph mark (GetText(None) does,
-        //     and after lf() that is a newline the guest never wrote).
-        //   TextSetOptions::None        — the write that treats kaya's
-        //     string as TEXT rather than as RTF markup.
+        // The plain-text PINS, each an enum the setter takes:
+        //   TextGetOptions::AdjustCrlf — the read that does NOT append
+        //     the story's trailing paragraph mark.
+        //   TextSetOptions::None — kaya's string as TEXT, not RTF markup.
         //   RichEditClipboardFormat::PlainText — nothing RTF leaves a
         //     kaya textarea on copy or cut.
         //   DisabledFormattingAccelerators::All — Ctrl+B/I/U never
-        //     format; the default (None) makes them bold/italic/
-        //     underline the user's text.
-        // The Paste pair is the fourth pin's mechanism: the control's
-        // own paste is cancelled and kaya inserts the clipboard's plain
-        // text itself, so every paste route lands what the entry's
-        // TextBox would land.
+        //     format. The Paste pair cancels the control's own paste so
+        //     kaya inserts the clipboard's plain text itself.
         "Microsoft.UI.Text.TextGetOptions".to_string(),
         "Microsoft.UI.Text.TextSetOptions".to_string(),
-        // THE TEXT-RANGE PRIMITIVES (docs/ranges-plan.md D1). Each of
-        // these three names an ITextRange member that does not exist
-        // without it — the transitivity trap again, and here it hides
-        // the whole milestone: `get_CharacterFormat`, `ScrollIntoView`
-        // and `GetRect` are all in the metadata (52 members on
-        // ITextRange) and all three were absent from the generated file
-        // because their parameter and return types were unfiltered.
-        //   ITextCharacterFormat — the highlight itself. A declared
-        //     range is `range.CharacterFormat.BackgroundColor = colour`,
-        //     which is the ONLY per-range decoration a WinUI text
-        //     control can express (TextBox cannot express it at all,
-        //     which is why the textarea is a RichEditBox).
-        //   PointOptions — `ScrollIntoView`'s placement argument (reveal)
-        //     and `GetRect`'s coordinate space (the viewport read: a
-        //     range's rectangle in CLIENT coordinates is where it sits
-        //     relative to what is on screen right now).
-        //   TextConstants — `AutoColor`, the background value an
-        //     UNPAINTED run carries. Clearing a highlight means writing
-        //     that value back, and naming the platform's own constant is
-        //     the difference between a clear and a guess at a magic
-        //     colour (measured: an unpainted run reads #00000001).
-        // Windows.Foundation.Rect is GetRect's out parameter; without it
-        // the method vanishes with the rest.
+        // THE TEXT-RANGE PRIMITIVES (docs/ranges-plan.md D1), each
+        // unlocking an ITextRange member:
+        //   ITextCharacterFormat — the highlight, the ONLY per-range
+        //     decoration a WinUI text control can express.
+        //   PointOptions — ScrollIntoView's placement and GetRect's
+        //     coordinate space (CLIENT coordinates).
+        //   TextConstants — `AutoColor`, the background an UNPAINTED run
+        //     carries; clearing a highlight writes it back (measured: an
+        //     unpainted run reads #00000001).
+        //   Windows.Foundation.Rect — GetRect's out parameter.
         "Microsoft.UI.Text.ITextCharacterFormat".to_string(),
         "Microsoft.UI.Text.PointOptions".to_string(),
         "Microsoft.UI.Text.TextConstants".to_string(),
         "Windows.Foundation.Rect".to_string(),
         // D4's refusal needs to KNOW a composition is live, and this
         // control is the only party that does: an input method's
-        // composition is on no kaya channel and never will be. The two
-        // event args types are named for the transitivity reason
-        // everything else here is — without them `add_TextCompositionStarted`
-        // and `add_TextCompositionEnded` are absent from the generated
-        // RichEditBox, which reads as "WinUI has no composition events"
-        // when it has six.
+        // composition is on no kaya channel and never will be. These
+        // two unlock add_TextCompositionStarted/Ended.
         "Microsoft.UI.Xaml.Controls.TextCompositionStartedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.TextCompositionEndedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.RichEditClipboardFormat".to_string(),
@@ -161,12 +120,10 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase".to_string(),
         "Microsoft.UI.Xaml.Style".to_string(),
         "Microsoft.UI.Xaml.Controls.Orientation".to_string(),
-        // Grid, not StackPanel, is what carries the row/column
-        // containers: proportional `grow` needs star sizing, and a
-        // StackPanel sizes children to their natural extent along its
-        // stacking axis with no weight concept anywhere. GridLength
-        // with GridUnitType::Star is the whole reason these are here;
-        // Grid's Row/Column attached properties place each child.
+        // Grid, not StackPanel, carries the row/column containers:
+        // proportional `grow` needs star sizing and a StackPanel has no
+        // weight concept anywhere. GridLength with GridUnitType::Star is
+        // the whole reason these are here.
         "Microsoft.UI.Xaml.Controls.Grid".to_string(),
         "Microsoft.UI.Xaml.Controls.RowDefinition".to_string(),
         "Microsoft.UI.Xaml.Controls.ColumnDefinition".to_string(),
@@ -176,31 +133,23 @@ fn main() {
         "Microsoft.UI.Xaml.GridUnitType".to_string(),
         // The root-fills observation compares the mounted root against
         // the content island's size — UIElement.XamlRoot is the only
-        // window-content geometry the framework exposes. Size must be
-        // named explicitly too: the filter never pulls referenced types
-        // transitively (see docs/traps.md).
+        // window-content geometry the framework exposes.
         "Microsoft.UI.Xaml.XamlRoot".to_string(),
         "Windows.Foundation.Size".to_string(),
         // The normalized root inset rides Grid.Padding, whose methods
-        // vanish silently while Thickness is unfiltered (the
-        // transitivity trap again).
+        // take a Thickness.
         "Microsoft.UI.Xaml.Thickness".to_string(),
         // The list-detail arm hides the covered entry's back bar, since
-        // a detail pane sitting BESIDE its list covers nothing and has
-        // nowhere to go back to. UIElement.Visibility carries that, and
-        // the enum must be named for the same transitivity reason as
-        // everything else in this list.
+        // a detail pane BESIDE its list covers nothing and has nowhere
+        // to go back to. UIElement.Visibility carries that.
         "Microsoft.UI.Xaml.Visibility".to_string(),
-        // TwoPaneView is the platform's own list-detail container, and
-        // unlike GNOME's and Material's it is pure layout: no
-        // navigation, no history, nothing that wants to own the stack
-        // kaya's core owns. Adopting it hands Windows the decision of
-        // WHERE one pane becomes two (MinWideModeWidth), which is the
-        // whole point — kaya no longer draws that line itself.
-        //
-        // Every enum it answers with has to be named here too, for the
-        // transitivity reason above: Mode is what the split observation
-        // reads, and PanePriority is which pane survives the collapse.
+        // TwoPaneView is the platform's own list-detail container and,
+        // unlike GNOME's and Material's, pure layout: no navigation, no
+        // history, nothing that wants to own the stack kaya's core owns.
+        // Adopting it hands Windows the decision of WHERE one pane
+        // becomes two (MinWideModeWidth), which is the point. Mode is
+        // what the split observation reads; PanePriority is which pane
+        // survives the collapse.
         "Microsoft.UI.Xaml.Controls.TwoPaneView".to_string(),
         "Microsoft.UI.Xaml.Controls.TwoPaneViewMode".to_string(),
         "Microsoft.UI.Xaml.Controls.TwoPaneViewPriority".to_string(),
@@ -208,9 +157,7 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.TwoPaneViewTallModeConfiguration".to_string(),
         // The align observation reads child positions through
         // UIElement.TransformToVisual (and text baselines through
-        // TextBlock.BaselineOffset beneath them); the transform's own
-        // types must be named or the method vanishes silently — the
-        // same transitivity trap as Thickness.
+        // TextBlock.BaselineOffset beneath them).
         "Microsoft.UI.Xaml.Media.GeneralTransform".to_string(),
         "Windows.Foundation.Point".to_string(),
         // Per-child cross placement stamps.
@@ -226,26 +173,22 @@ fn main() {
         // from an in-memory stream (encoded bytes arrive as blobs;
         // there is no file to point a Uri at).
         "Microsoft.UI.Xaml.Controls.Image".to_string(),
-        // The class filter is explicit: without it windows-bindgen
-        // emits only the IImageSource interface, leaving BitmapImage's
-        // required_hierarchy! (and Image.Source/SetSource) referencing
-        // a type that does not exist.
+        // Without the class filter windows-bindgen emits only the
+        // IImageSource interface, leaving BitmapImage's
+        // required_hierarchy! (and Image.Source/SetSource) referencing a
+        // type that does not exist.
         "Microsoft.UI.Xaml.Media.ImageSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapImage".to_string(),
         // THE CANVAS BLIT (docs/canvas-plan.md §8). The raw-pixel
         // sibling of the encoded path above: the core hands over device
-        // pixels, so nothing here decodes. `IBuffer` is named because
-        // `WriteableBitmap.PixelBuffer` returns one and the filter never
-        // pulls referenced types transitively (the trap this file
-        // documents four times over) — without it PixelBuffer is a
-        // vtable pad and the blit has nowhere to write.
+        // pixels, so nothing here decodes. `IBuffer` is what
+        // `WriteableBitmap.PixelBuffer` returns.
         "Microsoft.UI.Xaml.Media.Imaging.WriteableBitmap".to_string(),
         "Windows.Storage.Streams.IBuffer".to_string(),
-        // `Image.Stretch`, the same transitivity trap: unfiltered, the
-        // enum leaves `SetStretch` a vtable pad. The blit fills a box
-        // the backend sized from the BUFFER, so Fill is exact rather
-        // than a stretch (docs/canvas-plan.md §3.2.1).
+        // `Image.Stretch`. The blit fills a box the backend sized from
+        // the BUFFER, so Fill is exact rather than a stretch
+        // (docs/canvas-plan.md §3.2.1).
         "Microsoft.UI.Xaml.Media.Stretch".to_string(),
         // THE SIZE POLICY'S TWO CHANNELS (§3.2.1). The REPORT is what
         // layout assigned a canvas, and `LayoutSlot` is the only read
@@ -257,34 +200,22 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.LayoutInformation".to_string(),
         "Microsoft.UI.Xaml.Media.CompositionTarget".to_string(),
         "Microsoft.UI.Xaml.Media.RenderingEventArgs".to_string(),
-        // The transitivity trap once more, one type down: `RenderingTime`
-        // is a vtable pad without its return struct, which would leave
-        // the frame drive holding a frame with no time in it — and a
-        // clock read inside the callback is exactly the jitter the
-        // platform's own frame timestamp exists to remove.
+        // `RenderingTime`'s return struct. A clock read inside the
+        // callback is exactly the jitter the platform's own frame
+        // timestamp exists to remove.
         "Windows.Foundation.TimeSpan".to_string(),
-        // THE SCALE CHANNEL (§5): `XamlRoot.RasterizationScale` already
-        // reached the file, but its `Changed` event did not — the
-        // add-handler's argument type was unfiltered, so only
-        // `RemoveChanged` was emitted. Windows delivers a DPI change per
-        // top-level window and the core has to re-raster on it.
+        // THE SCALE CHANNEL (§5): the argument of
+        // `XamlRoot.Changed`'s add-handler. Windows delivers a DPI change
+        // per top-level window and the core has to re-raster on it.
         "Microsoft.UI.Xaml.XamlRootChangedEventArgs".to_string(),
-        // THE APPEARANCE BIT (§6), and the same trap once more:
-        // `ActualThemeChanged` was already emitted but the GETTER beside
-        // it was a vtable pad, because its return enum was unfiltered —
-        // so this backend could be told the theme moved and had no way
-        // to ask what it moved to.
+        // THE APPEARANCE BIT (§6): the enum the getter beside
+        // `ActualThemeChanged` returns, without which the backend can be
+        // told the theme moved and cannot ask what it moved to.
         "Microsoft.UI.Xaml.ElementTheme".to_string(),
-        // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). The
-        // transitivity trap in its usual disguise: `FontFamily` appeared
-        // nine times in the generated file before this line and every one
-        // was a vtable PAD — `IControl_Vtbl { FontFamily: usize,
-        // SetFontFamily: usize }`, the same on ITextBlock and IFontIcon,
-        // plus three FontFamilyProperty statics — so the backend read as
-        // "WinUI controls have no font family". One filter entry turns all
-        // of them into methods and unlocks the constructor
-        // (`CreateInstanceWithName`) and the `Source` accessor the
-        // typeface read starts from.
+        // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). One entry
+        // turns nine FontFamily pads into methods and unlocks the
+        // constructor (`CreateInstanceWithName`) and the `Source`
+        // accessor the typeface read starts from.
         "Microsoft.UI.Xaml.Media.FontFamily".to_string(),
         "Windows.Storage.Streams.InMemoryRandomAccessStream".to_string(),
         "Windows.Storage.Streams.DataWriter".to_string(),
@@ -309,26 +240,19 @@ fn main() {
         // The progress bar: RangeBase descendant like Slider;
         // IsIndeterminate is the activity mode.
         "Microsoft.UI.Xaml.Controls.ProgressBar".to_string(),
-        // The scroll viewport: ScrollViewer is the platform's own
-        // machinery — ScrollableHeight/VerticalOffset are the
-        // observation sources and ChangeView the API scroll_end
-        // drives. The mode/visibility enums must be named or the
-        // properties vanish (the transitivity trap).
+        // The scroll viewport: ScrollableHeight/VerticalOffset are the
+        // observation sources and ChangeView the API scroll_end drives.
         "Microsoft.UI.Xaml.Controls.ScrollViewer".to_string(),
         "Microsoft.UI.Xaml.Controls.ScrollMode".to_string(),
         "Microsoft.UI.Xaml.Controls.ScrollBarVisibility".to_string(),
         // The alert vocabulary: ContentDialog's three slots ARE the
-        // shape (two actions + close). The result/button enums must
-        // be named or the properties vanish (the transitivity trap);
-        // ShowAsync's IAsyncOperation rides windows-future paths like
-        // TextBox's.
+        // shape (two actions + close). ShowAsync's IAsyncOperation rides
+        // windows-future paths like TextBox's.
         "Microsoft.UI.Xaml.Controls.ContentDialog".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentDialogResult".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentDialogButton".to_string(),
-        // The select: ComboBox rows are ComboBoxItems (their content
-        // is each option's TextBlock); SelectionChanged reports
-        // picks. The selector base and its event types must be named
-        // or the members vanish (the transitivity trap).
+        // The select: ComboBox rows are ComboBoxItems (their content is
+        // each option's TextBlock); SelectionChanged reports picks.
         "Microsoft.UI.Xaml.Controls.ComboBox".to_string(),
         "Microsoft.UI.Xaml.Controls.ComboBoxItem".to_string(),
         "Microsoft.UI.Xaml.Controls.ItemsControl".to_string(),
@@ -344,8 +268,7 @@ fn main() {
         // The sections switcher: NavigationView is the platform's own
         // idiom (left pane for auto/sidebar, Top for the bar hint) —
         // items are NavigationViewItems with string content, selection
-        // rides SelectionChanged. The enums and event args must be
-        // named or the members vanish (the transitivity trap).
+        // rides SelectionChanged.
         "Microsoft.UI.Xaml.Controls.NavigationView".to_string(),
         "Microsoft.UI.Xaml.Controls.NavigationViewItem".to_string(),
         "Microsoft.UI.Xaml.Controls.NavigationViewItemBase".to_string(),
@@ -370,32 +293,22 @@ fn main() {
         // identity here rather than by ordinal.
         "Microsoft.UI.Xaml.Automation.AutomationProperties".to_string(),
         // The control-type enum the peer's GetAutomationControlType
-        // returns. Without it windows-bindgen filters the type out AND
-        // drops the method that returns it — the vtable slot survives as
-        // a bare usize, so the omission reads as "no such method".
+        // returns.
         "Microsoft.UI.Xaml.Automation.Peers.AutomationControlType".to_string(),
-        // The heading role's enum (docs/styling-plan.md D4), and it
-        // gates BOTH halves of that role at once: without it
-        // IAutomationPropertiesStatics keeps HeadingLevelProperty,
-        // GetHeadingLevel and SetHeadingLevel as bare usize pads (the
-        // SETTER), and every peer's GetHeadingLevel/GetHeadingLevelCore
-        // is padded the same way (the READ `ax` reports `heading/<label>`
-        // from). Measured before it was added: 5 pads, no type. UIA's
-        // HeadingLevel is the property that gives real heading
-        // NAVIGATION; AutomationProperties::SetLevel is a different
-        // property (hierarchical item level) and SetLocalizedControlType
-        // would only make Narrator say the word.
+        // The heading role's enum (docs/styling-plan.md D4), gating BOTH
+        // halves of that role at once: AutomationProperties' setter and
+        // every peer's GetHeadingLevel read. UIA's HeadingLevel is the
+        // property that gives real heading NAVIGATION;
+        // AutomationProperties::SetLevel is a different property
+        // (hierarchical item level) and SetLocalizedControlType would
+        // only make Narrator say the word.
         "Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel".to_string(),
         // Menus (DESIGN.md, Menus and the command vocabulary): the
-        // ratified WinUI lowering — MenuBar in its own Auto row of the
-        // window shell Grid, MenuBarItem per top-level grouping node,
-        // the flyout item kinds 1:1, KeyboardAccelerator per shortcut
-        // (primary → Control), MenuFlyout as ContextFlyout for the
-        // widget/node anchor. Each class is named explicitly: the
-        // filter never pulls referenced types transitively
-        // (docs/traps.md), and the item base class must be present or
-        // MenuBarItem.Items/MenuFlyout.Items reference a type that
-        // does not exist.
+        // ratified WinUI lowering — MenuBar, MenuBarItem per grouping
+        // node, the flyout item kinds 1:1, KeyboardAccelerator per
+        // shortcut, MenuFlyout as ContextFlyout. The item base class must
+        // be present or MenuBarItem.Items/MenuFlyout.Items name a type
+        // that does not exist.
         "Microsoft.UI.Xaml.Controls.MenuBar".to_string(),
         "Microsoft.UI.Xaml.Controls.MenuBarItem".to_string(),
         "Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase".to_string(),
@@ -404,11 +317,9 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.RadioMenuFlyoutItem".to_string(),
         "Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem".to_string(),
         "Microsoft.UI.Xaml.Controls.MenuFlyoutSeparator".to_string(),
-        // Shortcuts ride the REAL accelerator machinery: the chord
-        // enums live in Windows.System and must be named or
-        // KeyboardAccelerator's Key/Modifiers setters vanish silently
-        // (the transitivity trap; UIElement.KeyboardAccelerators was a
-        // usize pad while the class was unfiltered).
+        // Shortcuts ride the REAL accelerator machinery; the chord
+        // enums KeyboardAccelerator's Key/Modifiers setters take live in
+        // Windows.System.
         "Microsoft.UI.Xaml.Input.KeyboardAccelerator".to_string(),
         "Windows.System.VirtualKey".to_string(),
         "Windows.System.VirtualKeyModifiers".to_string(),
@@ -424,165 +335,58 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IExpandCollapseProvider".to_string(),
-        // THE SEMANTIC ICONS (docs/styling-plan.md D6). Before these four
-        // entries this backend could not construct an icon at all, and the
-        // reason was the transitivity trap wearing its usual disguise:
-        // `Icon`/`SetIcon` DO exist in the metadata on IMenuFlyoutItem,
-        // IMenuFlyoutSubItem and INavigationViewItem, but IconElement was
-        // unfiltered, so windows-bindgen dropped all three accessors and
-        // left `usize` pads in their vtable slots. Reading the generated
-        // file then says "WinUI menu items have no icon", which is false.
-        //
-        // Both routes are needed, and the second is not optional: the
-        // `Symbol` enum covers 17 of kaya's 20 concepts and the other
-        // three — info, warning, lock — have no enum member at all, so
-        // they can only be spelled as Segoe Fluent Icons codepoints
-        // through FontIcon (docs/styling/symbols-fluent.md).
-        //   IconElement — the base BOTH routes return and the type every
-        //     Icon setter takes; without it nothing else here helps.
-        //   Symbol      — the enum. An unfiltered enum takes its setter
-        //     down with it (the FocusState precedent above).
-        //   SymbolIcon  — route 1, the stable API-name spelling: kaya
-        //     writes `Symbol::Copy`, never a codepoint.
-        //   FontIcon    — route 2. Neither route sets a FontFamily: both
-        //     resolve through the SymbolThemeFontFamily theme resource,
-        //     which is also what makes the Windows 10 fallback to Segoe
-        //     MDL2 Assets free (all codepoints kaya uses are in both
-        //     catalogs — checked mechanically, 33/33).
+        // THE SEMANTIC ICONS (docs/styling-plan.md D6): every `Icon`
+        // setter takes an IconElement, and BOTH routes are needed —
+        // `Symbol` covers 17 of kaya's 20 concepts, and info, warning and
+        // lock have no member at all, so those are Segoe Fluent
+        // codepoints through FontIcon (docs/styling/symbols-fluent.md).
+        // Neither route sets a FontFamily: both resolve through the
+        // SymbolThemeFontFamily theme resource, which is what makes the
+        // Windows 10 fallback to Segoe MDL2 Assets free (33/33).
         "Microsoft.UI.Xaml.Controls.IconElement".to_string(),
         "Microsoft.UI.Xaml.Controls.Symbol".to_string(),
         "Microsoft.UI.Xaml.Controls.SymbolIcon".to_string(),
         "Microsoft.UI.Xaml.Controls.FontIcon".to_string(),
-        // THE TOOLBAR (docs/chrome-plan.md C2's WinUI row): the window's
-        // promoted catalog actions as a CommandBar of AppBarButtons in
-        // its own Auto row of the shell Grid. Dynamic overflow, the 48px
-        // transparent bar and the icon rescaling are the platform's
-        // defaults — kaya writes the list and nothing else.
-        //
-        // THE TRANSITIVITY TRAP WEARS ITS USUAL DISGUISE HERE, and the
-        // research measured it from both sides: filtering `CommandBar`
-        // ALONE emits a CommandBar with NO PrimaryCommands and no
-        // SecondaryCommands at all (176 methods, neither present), which
-        // reads as "WinUI's command bar has no command collections".
-        // Both are IObservableVector<ICommandBarElement>, so it is
-        // ICommandBarElement — a type kaya never names in a signature —
-        // that unlocks them.
-        //   CommandBar          — the bar, its two collections and the
-        //     overflow knobs kaya deliberately never sets.
-        //   AppBar              — CommandBar's BASE. Without it the
-        //     hierarchy stops short of ContentControl/FrameworkElement
-        //     and the bar cannot be cast into the shell Grid at all.
-        //   ICommandBarElement  — the collections' element type.
-        //   AppBarButton        — one per promoted action: Label, the
-        //     `Icon` slot that takes the very IconElement symbol_icon
-        //     already builds, Click, and IsEnabled off Control.
-        // NOT filtered, and each absence is a decision: AppBarToggleButton
-        // and AppBarSeparator (only `action` items are promotable, the
-        // uniform rule every backend's promotion shares — and the toggle's
-        // IsChecked is a NULLABLE bool here, a three-state kaya's menu
-        // vocabulary does not have), and the CommandBar*/AppBar* enums
-        // (DefaultLabelPosition, OverflowButtonVisibility,
-        // ClosedDisplayMode), every one of which is a Windows-only
-        // styling knob chrome-plan refuses by name.
+        // THE TOOLBAR (docs/chrome-plan.md C2's WinUI row): the promoted
+        // catalog actions as a CommandBar of AppBarButtons. Filtering
+        // `CommandBar` ALONE emits it with NO PrimaryCommands and no
+        // SecondaryCommands (measured: 176 methods, neither present) —
+        // both are IObservableVector<ICommandBarElement>, so that element
+        // type, which kaya never names in a signature, unlocks them.
+        // AppBar is CommandBar's BASE, without which the bar cannot be
+        // cast into the shell Grid. NOT filtered, each absence a
+        // decision: AppBarToggleButton and AppBarSeparator (only `action`
+        // items are promotable) and the CommandBar*/AppBar* styling enums.
         "Microsoft.UI.Xaml.Controls.CommandBar".to_string(),
         "Microsoft.UI.Xaml.Controls.AppBar".to_string(),
         "Microsoft.UI.Xaml.Controls.ICommandBarElement".to_string(),
         "Microsoft.UI.Xaml.Controls.AppBarButton".to_string(),
         // THE TITLEBAR THE TOOLBAR MERGES INTO (docs/chrome-plan.md C2's
-        // WinUI row, revised 2026-08-17). The modern Win11 shell — Files,
-        // Terminal, Settings — does not stack a command strip under the
-        // caption; the commands ride IN the caption row. Microsoft's
-        // recommended path for that is this control, not a hand-rolled
-        // Grid: `Window.SetTitleBar`'s own remarks say "Starting in
-        // Windows App SDK 1.7, you can use the XAML TitleBar control to
-        // create a custom title bar… We recommend the XAML TitleBar
-        // control for this."
-        //
-        // ONE ENTRY IS ENOUGH HERE, and that is measured rather than
-        // assumed — the transitivity trap two paragraphs up is real, so
-        // the emitted file was read for the five names this arm calls
-        // (SetTitle, SetRightHeader, SetAutoRefreshDragRegions,
-        // RecomputeDragRegions, new) before anything was written against
-        // them. The reason one entry suffices: every slot this arm uses
-        // is typed in ALREADY-FILTERED types — `HSTRING` for Title and
-        // `UIElement` for the three header/content slots — unlike
-        // CommandBar's collections, whose element type had to be dragged
-        // in by name.
-        //
-        // NOT filtered, an absence with a reason:
-        //   TitleBarTemplateSettings — kaya reads no template state; it is
-        //     a type this arm never names, and windows-bindgen leaves its
-        //     accessor as a vtable pad, which is the honest record of
-        //     "not used here".
+        // WinUI row): the commands ride IN the caption row. ONE ENTRY IS
+        // ENOUGH, measured: every slot this arm uses is typed in
+        // already-filtered types. TitleBarTemplateSettings is deliberately
+        // absent — kaya reads no template state.
         "Microsoft.UI.Xaml.Controls.TitleBar".to_string(),
-        // THE APP IDENTITY'S CAPTION SINK (docs/app-identity-plan.md I3).
-        // The line above used to say kaya draws no window icon and that
-        // IconSource was therefore an honest pad. It draws one now, and
-        // the pads are what stood in the way: `ITitleBar`'s vtable read
-        // `IconSource: usize, SetIconSource: usize`, so the property the
-        // metadata has since Windows App SDK 1.7 read, from the generated
-        // file, as "the TitleBar control has no icon slot".
-        //
-        // ONE SUBCLASS REACHES BYTES and it is measured, not assumed
-        // (the winmd walk in the plan's I1/§2): of the seven IconSource
-        // subclasses only ImageIconSource carries an `ImageSource` slot,
-        // and BitmapIconSource — the one whose NAME suggests it — has
-        // `UriSource : Windows.Foundation.Uri` as its only picture slot
-        // and would force a temp file. BitmapImage and ImageSource are
-        // already filtered above for the Image widget, so the blob route
-        // is the Image widget's block with two lines changed.
-        //   IconSource      — the abstract base SetIconSource takes.
-        //     Without it the setter stays a pad even with the subclass
-        //     filtered (the transitivity trap, its usual disguise).
-        //   ImageIconSource — the concrete class kaya constructs.
+        // THE APP IDENTITY'S CAPTION SINK (docs/app-identity-plan.md I3):
+        // `ITitleBar`'s IconSource slot. ONE SUBCLASS REACHES BYTES,
+        // measured (the plan's I1/§2): of the seven IconSource subclasses
+        // only ImageIconSource carries an `ImageSource` slot, and
+        // BitmapIconSource's only picture slot is a `Uri`, which would
+        // force a temp file. IconSource is the base SetIconSource takes.
         "Microsoft.UI.Xaml.Controls.IconSource".to_string(),
         "Microsoft.UI.Xaml.Controls.ImageIconSource".to_string(),
-        // THE TASKBAR AND ALT-TAB SINK, which is the WINDOW's icon and not
-        // the control's (I3: one declaration, two sinks — the second
-        // repairs what a custom caption takes away from the first).
-        // `Microsoft.UI.IconId` is the parameter type of every
-        // `…WithIconId` overload on IAppWindow/IAppWindow4, and every one
-        // of them was a `usize` pad, which left ONLY the overloads that
-        // demand an .ico path on disk. kaya's icon arrives as bytes and
-        // six of its eight languages load kaya into someone else's
-        // process, so a path on disk is not a route this design has.
+        // THE TASKBAR AND ALT-TAB SINK, the WINDOW's icon and not the
+        // control's (I3: one declaration, two sinks). `Microsoft.UI.IconId`
+        // is the parameter type of every `…WithIconId` overload on
+        // IAppWindow/IAppWindow4; without it only the overloads demanding
+        // an .ico path on disk survive, and kaya's icon arrives as bytes.
         "Microsoft.UI.IconId".to_string(),
-        // THE WINDOW'S OWN CAPTION HEIGHT (the 2026-08-17 one-band
-        // revision). This entry was refused by the first titlebar arm,
-        // in a comment right here that said kaya "sets no height on this
-        // platform at all" — and the picture that arm shipped is what
-        // refusing it looks like: the control took its 48px EXPANDED
-        // state the moment a slot was filled (TitleBar.cpp:493
-        // UpdateHeight), the system caption buttons stayed in the
-        // standard 32px band, and the two runs of buttons in one row sat
-        // on centres 9 DIP apart. Upstream microsoft-ui-xaml#9863 is
-        // that exact mismatch, and its app-side answer is this property:
-        // the XAML control does not tell the WINDOW what its caption is,
-        // so the app must.
-        //
-        // IT IS NOT A HEIGHT KNOB AND NOT A STYLE. `PreferredHeightOption`
-        // takes one of three named options; kaya writes `Tall` on exactly
-        // the windows whose caption it has already extended, and
-        // `Standard` when that promotion empties — the same derivation,
-        // in both directions, that `ExtendsContentIntoTitleBar` follows.
-        // No app-facing vocabulary is added and no number is invented:
-        // 48 is the platform's own Tall band, matching the control's own
-        // expanded state.
-        //
-        //   AppWindow            — reached from `Window.AppWindow`, which
-        //     without this entry is a `usize` vtable pad (bindings.rs's
-        //     IWindow2). It is the ONLY route: the window's caption is a
-        //     windowing fact, not a XAML one.
-        //   AppWindowTitleBar    — where the option lives.
-        //   TitleBarHeightOption — the enum. THE TRANSITIVITY TRAP AGAIN:
-        //     unfiltered, its setter would come back as a pad and the
-        //     whole entry would read as "WinUI cannot set this", which is
-        //     how the CommandBar collections went missing once already.
-        // NOT filtered, deliberately: every other Windowing type
-        // (AppWindowPresenter, OverlappedPresenter, DisplayArea, the
-        // Changed/Closing event args) — kaya positions, sizes and closes
-        // its windows through XAML and the HWND subclass, and those
-        // accessors stay pads, which is the honest record of it.
+        // THE WINDOW'S OWN CAPTION HEIGHT: the XAML control does not
+        // tell the WINDOW what its caption is, so the app must
+        // (docs/chrome-plan.md C2's WinUI row and
+        // docs/chrome/toolbar-winui.md carry the measurements).
+        // `Window.AppWindow` is the ONLY route. NOT filtered: every other
+        // Windowing type, since kaya sizes its windows through XAML.
         "Microsoft.UI.Windowing.AppWindow".to_string(),
         "Microsoft.UI.Windowing.AppWindowTitleBar".to_string(),
         "Microsoft.UI.Windowing.TitleBarHeightOption".to_string(),
@@ -594,24 +398,12 @@ fn main() {
     println!("generated crates/kaya/src/winui/bindings.rs");
 }
 
-/// windows-bindgen 0.62 emits `windows_core::ArrayProxy::from_raw_parts
-/// (..).as_array()` in the IPropertyValue vtable shims (pulled in by the
-/// IReference filter), but windows-core 0.62.2 keeps that type at
-/// `imp::array_proxy` with a Deref-to-Array API. Rewrite to the
-/// spelling the pinned windows-core actually exports; `&mut proxy`
-/// coerces to `&mut Array<T>` and the proxy's Drop performs the
-/// write-back after the call, same semantics either way.
-/// ItemCollection (ComboBox.Items) has IObservableVector as its
-/// DEFAULT interface, but windows-bindgen's built-in reference maps
-/// all of Windows.Foundation.Collections to the windows-collections
-/// crate — whose pinned 0.3 ships only the plain vector/iterable
-/// types, not the observable ones. The references list is
-/// first-match-wins with the built-ins inserted at the front, so no
-/// --reference override can carve the two observable types out.
-/// Re-point them at the full `windows` crate (Foundation_Collections
-/// feature), which does ship them; the hierarchy macros declare
-/// per-type conversions independently, so mixing the two crates'
-/// collection interfaces in one hierarchy is sound.
+/// ItemCollection (ComboBox.Items) has IObservableVector as its DEFAULT
+/// interface, but windows-bindgen's built-in reference maps all of
+/// Windows.Foundation.Collections to the windows-collections crate, whose
+/// pinned 0.3 ships only the plain vector/iterable types. The references
+/// list is first-match-wins with the built-ins inserted at the front, so
+/// no --reference override can carve the two observable types out.
 fn fix_observable_vector_paths() {
     let path = "../../crates/kaya/src/winui/bindings.rs";
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
@@ -637,6 +429,10 @@ fn fix_observable_vector_paths() {
     std::fs::write(path, fixed).expect("write bindings.rs");
 }
 
+/// windows-bindgen 0.62 emits `windows_core::ArrayProxy::from_raw_parts
+/// (..).as_array()` in the IPropertyValue vtable shims (pulled in by the
+/// IReference filter), but windows-core 0.62.2 keeps that type at
+/// `imp::array_proxy` with a Deref-to-Array API.
 fn fix_array_proxy_paths() {
     let path = "../../crates/kaya/src/winui/bindings.rs";
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");

@@ -7,20 +7,13 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# Compile-check the Compose interpreter and the three Android app
-# modules — the swift-typecheck/java-typecheck sibling for Kotlin. The
+# Compile-check the Compose interpreter and the Android app modules; the
 # emulator must never be the first compiler to see KayaCompose.kt.
-#
-# The Java task is named EXPLICITLY: compileDebugKotlin does not imply
+# The javac task is named EXPLICITLY — compileDebugKotlin does not imply
 # it, and the Android SDK is a DIFFERENT java.lang from the desktop JDK
 # java-typecheck uses, so that gate cannot stand in for this one.
-#
-# AND THE MODULE'S HOST-JVM TESTS, since the M3 scheme ruling
-# (docs/deferred.md "THE FULL M3 SCHEME"): KayaColorSchemes.of() is a
-# pure function and KayaColorSchemesTest is its wall — the four seed
-# palettes moving, the error family refusing to — run here because no
-# scene freezes a scheme byte, so the emulator would otherwise be the
-# first and only thing to prove the brand scheme.
+# The kaya module's host-JVM tests run here because no scene freezes a
+# scheme byte (docs/deferred.md "THE FULL M3 SCHEME").
 
 import subprocess
 

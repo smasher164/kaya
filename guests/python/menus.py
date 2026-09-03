@@ -1,9 +1,5 @@
-"""The menus conformance scene, Python port: the command vocabulary (a
-File/View/Sort menu bar, context menus on a live label and on stamped
-rows), the uncontrolled-menu echo doctrine, and a late
-rename/append/promotion rework. Canonical semantics in
-guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
-"""
+"""The menus conformance scene (tools/scenes/menus.steps). Canonical
+semantics in guests/rust/menus.rs."""
 
 import sys
 from dataclasses import dataclass
@@ -40,9 +36,7 @@ def on_share():
 
 
 def on_reset():
-    # The folds never echo the user's pick, so details/sort still hold
-    # False/0; these two prop writes are real checked/value records (never
-    # coalesced) that reset the backend's user-state mirror.
+    # The folds never echo, so these reset the user-state mirror.
     details.set(False)
     sort.set(0.0)
     status.set("ready")
@@ -58,8 +52,6 @@ def on_remove(group, item):
 
 
 def on_rework():
-    # Append-only: rename the retained File, move the promotion hint from
-    # Share to Publish, grow the bar by Tools.
     share.primary(False)
     file.label("Document")
     with file.append():
@@ -76,9 +68,7 @@ with app.window(title="menus"):
     sort = kaya.signal(0.0)
 
     with app.menu("File", enabled=can_export) as file:
-        # The symbol is a CONCEPT drawn by each platform in its own set
-        # (docs/styling-plan.md D6). The vocabulary has no `save`, so
-        # `done` — the checkmark idiom — is the spelling.
+        # The vocabulary has no `save` glyph, so `done` is the spelling.
         kaya.item("Save", symbol=kaya.Symbol.DONE, shortcut="primary+s",
                   on_activate=on_save)
         kaya.item("Export", enabled=can_export, symbol=kaya.Symbol.FORWARD)
@@ -88,7 +78,7 @@ with app.window(title="menus"):
         kaya.toggle("Details", checked=details, symbol=kaya.Symbol.INFO,
                     on_toggle=on_details)
 
-    # Option order IS the index vocabulary: Name = 0, Date = 1.
+    # Option order IS the index.
     with app.radio_group("Sort", value=sort, on_select=on_sorted):
         kaya.option("Name")
         kaya.option("Date")

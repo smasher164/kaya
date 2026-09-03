@@ -1,9 +1,8 @@
 package kaya
 
-// The asset surface's guards (docs/assets-plan.md). These resolve the
-// REPO's asset root, so the vendored font is here and its byte count is
-// a fact; whether a bundled or packaged root resolves is a question
-// about a .app and an APK, and the lanes ask it.
+// docs/assets-plan.md. These resolve the REPO's asset root, so the vendored
+// font is here and its byte count is a fact; whether a BUNDLED or PACKAGED
+// root resolves is a question about a .app and an APK, and the lanes ask it.
 
 import (
 	"bytes"
@@ -56,8 +55,8 @@ func TestAssetReadsTheFileTheBuildShipped(t *testing.T) {
 	}
 }
 
-// A miss panics with the CORE's sentence, byte for byte — the binding
-// writes no prose of its own, so one scene can freeze it everywhere.
+// The binding writes no prose of its own, so one scene can freeze the miss
+// sentence everywhere.
 func TestAMissingAssetPanicsWithTheCoresSentence(t *testing.T) {
 	want := assetMissSentence("fonts/nope.ttf")
 	if want == "" {
@@ -99,8 +98,7 @@ func TestAssetRefusesANameThatEscapesTheRoot(t *testing.T) {
 	})
 }
 
-// Closing is idempotent, and a closed asset raises rather than
-// answering nil.
+// Closing is idempotent.
 func TestAClosedAssetRefusesToRead(t *testing.T) {
 	font := openFont(t)
 	font.Close()
@@ -118,8 +116,6 @@ func TestAClosedAssetRefusesToRead(t *testing.T) {
 	font.Bytes()
 }
 
-// FontAsset reaches the wire as the same record FontBytes produces:
-// mask bit 0 set, a live handle in the font slot.
 func TestFontAssetShipsTheBlobForm(t *testing.T) {
 	font := openFont(t)
 	defer font.Close()

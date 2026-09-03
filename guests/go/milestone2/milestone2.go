@@ -1,15 +1,4 @@
-// The milestone-2 scene from Go, on the construction sugar.
-//
-// WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and only
-// that. The remove button is a STAMPED copy, so its handler is
-// registered CENTRALLY against the template node and receives that
-// copy's key path; the live step button rides its constructor.
-//
-// AND THE APP NAMES EVERY KEY HERE, on purpose: "g1" and "a" are this
-// app's own identity for a group and an item, re-addressed later by
-// name. That is exactly what InsertFresh is NOT for
-// (docs/fresh-key-plan.md).
-//
+// The milestone-2 scene: a stamped handler registered against its node.
 //	KAYA_SELFTEST=1 go run dev.kaya/guests/go/cmd
 package milestone2
 
@@ -22,9 +11,7 @@ import (
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// The handles the central registration below needs: a node parents
-	// into its container AT CREATION, so both are built inside the
-	// template bodies that hold them and escape through these.
+	// A node parents AT CREATION, so these escape the template bodies.
 	var (
 		status       kaya.Signal[string]
 		items        kaya.Collection

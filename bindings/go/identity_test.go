@@ -1,14 +1,8 @@
 package kaya
 
-// The app identity's guards (docs/app-identity-plan.md).
-//
-// NOTHING HERE READS THE IDENTITY BACK THROUGH THE API THAT WROTE IT:
-// every platform draws SOMETHING where an app's mark goes, so an echo is
-// the one answer always available and never meaningful. Two surfaces
-// answer instead — the WIRE BYTES decoded out of the queued record, and
-// THE APPLY STREAM out of the batch a real pump produced. Whether the
-// platform DREW it is expect_app_icon's question on a real lane
-// (tools/scenes/identity.steps).
+// docs/app-identity-plan.md. Nothing here reads the identity back through the
+// API that wrote it — every platform draws SOMETHING where a mark goes; that
+// it was DRAWN is expect_app_icon's question (tools/scenes/identity.steps).
 
 import (
 	"context"
@@ -26,9 +20,9 @@ import (
 
 // ---- one decoder, both channels ----------------------------------
 //
-// The tx record and the apply record carry the SAME body, written by one
-// function (crates/kaya/src/wire.rs's write_app_identity). Unlike the
-// typeface's, the second word is reserved on BOTH.
+// The tx and apply records carry the SAME body (crates/kaya/src/wire.rs's
+// write_app_identity). Unlike the typeface's, the second word is reserved on
+// BOTH.
 
 type identityBody struct {
 	mask     uint32
@@ -37,8 +31,7 @@ type identityBody struct {
 	icon     wireValue
 }
 
-// decodeIdentity reads one whole record — header included — as an
-// identity body, over typeface_test.go's one wire walker.
+// Over typeface_test.go's wire walker.
 func decodeIdentity(rec []byte) identityBody {
 	r := &reader{b: rec, at: 8} // past {u32 size, u16 kind, u16 pad}
 	body := identityBody{mask: r.u32(), reserved: r.u32()}
@@ -53,8 +46,8 @@ func decodeIdentity(rec []byte) identityBody {
 
 // ---- the wire-byte half ------------------------------------------
 
-// identityRecord submits nothing: it reads the record the binding
-// QUEUED, which is what would leave this process.
+// identityRecord submits nothing: it reads the record the binding QUEUED,
+// which is what would leave this process.
 func identityRecord(t *testing.T, build func(tx *Tx)) []byte {
 	t.Helper()
 	app := NewApp()
@@ -76,9 +69,9 @@ func identityRecord(t *testing.T, build func(tx *Tx)) []byte {
 	return found
 }
 
-// A real PNG would prove less: the core never inspects these bytes, so
-// what this can prove is that the CHANNEL carries every one of them.
-// Whether a real picture decodes is each backend's own probe.
+// The core never inspects these bytes, so all this can prove is that the
+// CHANNEL carries every one of them; whether a real picture decodes is each
+// backend's own probe.
 var identityIconBytes = func() []byte {
 	b := make([]byte, 512)
 	for i := range b {
@@ -87,8 +80,7 @@ var identityIconBytes = func() []byte {
 	return b
 }()
 
-// One call is one record. The mask and the slot are the pair that goes
-// silently wrong, so this reads what the binding actually wrote.
+// The mask and the slot are the pair that goes silently wrong.
 func TestAppIdentityPacksOneRecord(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -114,9 +106,9 @@ func TestAppIdentityPacksOneRecord(t *testing.T) {
 			if body.name != "Aurora Notes" {
 				t.Errorf("the name shipped as %q, want \"Aurora Notes\"", body.name)
 			}
-			// The slot is ALWAYS written, so the field count never
-			// varies: an absent icon rides as an empty string and the
-			// mask alone says which it is.
+			// The slot is ALWAYS written, so the field count never varies:
+			// an absent icon rides as an empty string and the mask alone says
+			// which it is.
 			if c.blob {
 				if body.icon.tag != ValueBlob || body.icon.i64 == 0 {
 					t.Errorf("icon slot shipped as tag %d handle %d, want a live blob handle", body.icon.tag, body.icon.i64)
@@ -128,10 +120,9 @@ func TestAppIdentityPacksOneRecord(t *testing.T) {
 	}
 }
 
-// An empty slice is not the name-only form: `AppIdentity(name, nil)`
-// sets the mask and ships zero bytes, and the ROOT refuses that. A
-// binding that demoted it to AppIdentityNamed would make the wall
-// unreachable from Go alone.
+// An empty slice is not the name-only form: `AppIdentity(name, nil)` sets the
+// mask and ships zero bytes, and the ROOT refuses that. A binding that
+// demoted it to AppIdentityNamed would make the wall unreachable from Go.
 func TestAppIdentityDoesNotDemoteEmptyBytes(t *testing.T) {
 	body := decodeIdentity(identityRecord(t, func(tx *Tx) {
 		tx.AppIdentity("Aurora Notes", nil)
@@ -144,8 +135,7 @@ func TestAppIdentityDoesNotDemoteEmptyBytes(t *testing.T) {
 
 // ---- the real-root half ------------------------------------------
 
-// identityTrap builds one scene through the ordinary Go sugar and pumps
-// it through the root. It returns only when the root ALLOWED the scene.
+// identityTrap returns only when the root ALLOWED the scene.
 func identityTrap(trap string) {
 	app := NewApp()
 	mount := func(tx *Tx) { tx.Mount(tx.Column(func() { tx.LabelText("identity") })) }
@@ -179,8 +169,8 @@ func identityTrap(trap string) {
 			mount(tx)
 		})
 	case "empty-icon":
-		// The mask says a picture rides and no bytes do — which would
-		// read exactly like an icon that applied.
+		// The mask says a picture rides and no bytes do, which would read
+		// exactly like an icon that applied.
 		app.Build(func(tx *Tx) {
 			tx.AppIdentity("Aurora Notes", nil)
 			mount(tx)
@@ -197,9 +187,8 @@ func identityTrap(trap string) {
 	os.Exit(0)
 }
 
-// reportIdentityApply says what a BACKEND would receive, in measured
-// terms only: the icon's bytes are fetched back out of the core's blob
-// table rather than assumed to be the slice this process sent.
+// The icon's bytes are fetched back out of the core's blob table rather than
+// assumed to be the slice this process sent.
 func reportIdentityApply(batch []byte) {
 	var (
 		body    identityBody
@@ -252,9 +241,8 @@ func runIdentityTrap(t *testing.T, trap string) (string, error) {
 }
 
 // Each case runs in a re-exec because a root refusal ends the process, not a
-// Go panic. The ALIVE cases carry as much weight as the dead ones, and
-// `full` more than either: it is the only place that reads the
-// declaration as a LOWERING will get it.
+// Go panic. `full` is the only case that reads the declaration as a LOWERING
+// will get it.
 func TestTheRootIsTheIdentityWall(t *testing.T) {
 	if trap, set := LookupEnv("KAYA_IDENTITY_TRAP"); set && trap != "" {
 		identityTrap(trap)

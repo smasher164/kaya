@@ -15,7 +15,7 @@ the plan relied on them.
 ## §0 — what is settled (probed, not assumed)
 
 - **The core is done.** The template declare arm runs `check_prop`
-  (crates/kaya/src/scene.rs:3587), so the a11y pair is admitted on every
+  (crates/kaya/src/scene.rs:3409), so the a11y pair is admitted on every
   kind and `accepts` on entry/textarea; the stamping arm applies props
   generically. A probe proved a CONST a11y id and a ROW-FIELD a11y label
   both stamp to the right per-copy ApplyOps. Nothing to build below the

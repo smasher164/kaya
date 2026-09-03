@@ -1,7 +1,4 @@
-// The menus conformance scene, C# port: the command vocabulary (a
-// File/View/Sort menu bar, context menus on a live label and on stamped
-// rows) and the uncontrolled-menu echo doctrine. Canonical semantics in
-// guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
+// The menus scene, C# port — guests/rust/menus.rs, tools/scenes/menus.steps.
 
 using System;
 using System.Collections.Generic;
@@ -27,9 +24,8 @@ static class MenusScene
             var share = tx.Item("Share", primary: true, onActivate: onShare);
             var file = tx.Menu("File", enabled: canExport, items: new[]
             {
-                // A symbol names a CONCEPT, drawn by each platform in
-                // its own set (docs/styling-plan.md D6). There is no
-                // `save` in the vocabulary; Done is the checkmark idiom.
+                // No `save` in the symbol vocabulary; Done is the checkmark
+                // idiom (docs/styling-plan.md D6).
                 tx.Item("Save", shortcut: "primary+s", symbol: Symbol.Done,
                     onActivate: t => t.Write(status, "saved")),
                 tx.Item("Export", enabled: canExport, symbol: Symbol.Forward),
@@ -65,17 +61,12 @@ static class MenusScene
                     t.Write(canExport, true));
                 tx.Button("reset menu state", t => // button#1
                 {
-                    // Menus are uncontrolled: the folds never echo the
-                    // user's pick, so these writes are real records,
-                    // never coalesced away.
                     t.Write(details, false);
                     t.Write(sort, 0.0);
                     t.Write(status, "ready");
                 });
                 tx.Button("extend menus", t => // button#2
                 {
-                    // Append-only: rename the retained File, move the promotion
-                    // hint from Share to Publish, grow the bar by Tools.
                     t.Menu(share, primary: false);
                     t.Menu(file, label: "Document", items: new[]
                     {
@@ -102,14 +93,8 @@ static class MenusScene
                     items = g.Collection();
                     g.Each(items, r =>
                     {
-                        // The element token, not a hand-minted index:
-                        // KayaRecords.FieldAt is the generator's spelling
-                        // (its own doc says so) and a scene is not the
-                        // floor's documentation. Swift's `KayaField
-                        // <String>.element` and Go's `row.Value()` are the
-                        // same read. The For stays open here because the
-                        // generated row façade forwards no ContextMenu
-                        // (docs/deferred.md, the three-façades entry).
+                        // The For stays open: the generated row façade forwards no
+                        // ContextMenu (docs/deferred.md, the three-façades entry).
                         var row = r.Label(Field<string>.Element); // label#2 once g2/a stamps
                         r.ContextMenu(row, catalog);
                     });
@@ -117,7 +102,7 @@ static class MenusScene
             }));
         });
 
-        // Seed after mount: the stamp path attaches the shared catalog and keys.
+        // Seeded after the mount, so the copy stamps from a closed template.
         app.Build(tx =>
         {
             tx.Insert(groups, "g2", "Home");

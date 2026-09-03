@@ -6,8 +6,7 @@ edition = "2024"
 [lib]
 proc-macro = true
 
-# Compile-time only, like paste before it: syn/quote are the universal
-# derive substrate, and none of this reaches a runtime binary.
+# Compile-time only: none of this reaches a runtime binary.
 [dependencies]
 proc-macro2 = "1"
 quote = "1"

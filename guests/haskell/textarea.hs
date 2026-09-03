@@ -1,5 +1,5 @@
--- The textarea conformance scene, Haskell port. See
--- guests/rust/textarea.rs and tools/scenes/textarea.steps.
+-- The textarea scene, Haskell port — guests/rust/textarea.rs,
+-- tools/scenes/textarea.steps.
 
 import KayaApp
 import KayaWire (Value (..))
@@ -14,9 +14,7 @@ main = kayaMain $ \app -> do
     window 0 [WTitle "textarea"]
     lineCount <- signal (VStr "0 lines")
 
-    -- Realized here because the handlers below need their handles;
-    -- `pure` then places each in the column at the position every other
-    -- language puts it.
+    -- Realized here because the handlers below need their handles.
     editor <- textarea
     clearBtn <- button "clear"
     root <- column [] [pure editor, labelBound lineCount, pure clearBtn]

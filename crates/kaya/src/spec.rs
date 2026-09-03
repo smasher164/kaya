@@ -1,24 +1,15 @@
 //! The protocol, as data: the root document the binding generator walks
-//! (invariant 7). tools/kaya-bindgen consumes this module as a library;
-//! wire.rs remains the hand-written implementation, and the tests at the
-//! bottom hold the two together.
-//!
-//! Field types are deliberately few. New vocabulary should be new
-//! RECORDS over the existing types, not new types — that is what keeps
-//! eight bindings mechanical.
+//! (invariant 7); wire.rs is the hand-written implementation and the
+//! tests at the bottom hold the two together. New vocabulary is new
+//! RECORDS over the existing field types, never new types.
 
-/// THE SAFE-INTEGER CONTRACT (ruled 2026-08-31, the ninth binding's
-/// gate): a kaya integer is a COUNT or a QUANTITY, exact to
-/// ±(2^53 − 1) in every binding, and the wire refuses one beyond that
-/// at the value-decode chokepoint (wire.rs). Identity — database ids,
-/// timestamps, anything that must survive past 2^53 — rides as a
-/// string or an opaque tag, which already round-trip any width.
-/// The bound is IEEE-754's exact-integer range, so all nine bindings
-/// share one integer semantics with no BigInt asymmetry.
+/// THE SAFE-INTEGER CONTRACT (ruled 2026-08-31): a kaya integer is a
+/// COUNT or a QUANTITY, exact to ±(2^53 − 1) in every binding, and the
+/// wire refuses one beyond that at the value-decode chokepoint
+/// (wire.rs). Identity rides as a string or an opaque tag instead.
 /// pub(crate): a bare `pub` exports it into kaya.h, where cbindgen's
-/// transliteration `((1 << 53) - 1)` shifts a 32-bit int — UB — and
-/// the unprefixed name lands in every C guest. The wall is the core's
-/// decode; no binding carries this number.
+/// transliteration `((1 << 53) - 1)` shifts a 32-bit int — UB — and the
+/// unprefixed name lands in every C guest.
 pub(crate) const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
 /// A record field: its name (for generated helper signatures and docs)
@@ -131,18 +122,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // "double tap to", and only a verb phrase reads on both.
     ("a11y_hint", 14, PropKind::Str),
     // WHICH CLIP REPRESENTATIONS THIS WIDGET ACCEPTS: a space-separated
-    // accept list — the closed kinds by name (`text`, `html`, `image`,
-    // `files`) plus any number of custom format ids, which are open by
-    // nature and so cannot be a mask. `"text html dev.kaya/note"` is a
-    // whole declaration. Per-widget, because whether Paste should be
-    // live is the INTERSECTION of what the clipboard offers and what
-    // the focused target takes.
-    //
-    // The id's grammar is MIME-SHAPED — a slash, lowercase, no
-    // whitespace — validated at apply, because GDK's serving path
-    // interns the requested type as a mime type and lowercases it
-    // (docs/clipboard-plan.md §5b finding 4). read_clipboard takes the
-    // same string.
+    // accept list, closed kinds plus open custom ids, so it cannot be a
+    // mask. The id's grammar is MIME-SHAPED, validated at apply
+    // (docs/clipboard-plan.md §5b finding 4).
         ("accepts", 15, PropKind::Str),
     // SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
     // MEANS, never how it looks. Which VARIANT fits which kind is the
@@ -186,54 +168,20 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("sections_presentation", 5, PropKind::Enum("sections_presentation")),
     // How this window presents its ENTRY STACK (DESIGN.md; the ruling,
     // the mechanics and their measurements are docs/multicolumn-plan.md's
-    // Status block). `panes` is the DECLARED CEILING on how many stack
-    // entries present side by side: 1 (the default) is the serial
-    // stack; 2 and 3 present up to that many columns when the window
-    // is wide enough, shedding the SHALLOWEST column first as it
-    // narrows — the stack order is the priority order, so no second
-    // vocabulary exists. WHO decides the live count: the platform's
-    // own adaptive judgment where it has one (iPadOS size classes,
-    // Android window size classes), kaya's minimum-width arithmetic
-    // where it does not (macOS — and those minimums are kaya's model's
-    // alone, declared to no platform API: a declared minimum becomes
-    // the WINDOW's floor and the collapse can never fire). The root
-    // wall refuses 0 and anything above 3.
+    // Status block). The DECLARED CEILING on how many stack entries
+    // present side by side: 1 (the default) is the serial stack, and the
+    // shallowest column sheds first as the window narrows. The root wall
+    // refuses 0 and anything above 3.
     ("panes", 6, PropKind::Enum("panes")),
-    // WHETHER THIS SURFACE HOLDS UNSAVED WORK (docs/dirty-plan.md D1).
-    // The app declares STATE; the backend spells the chrome, and the
-    // spellings genuinely differ — macOS puts the whole signal in the
-    // close button's dot (measured: 88 backing pixels change and the
-    // title string does not), Windows composes a leading `*` into the
-    // rendered caption, GTK draws a bullet beside the header-bar title,
-    // and the phones show nothing at all because they have no chrome to
-    // show it in (D4: the prop still applies and reads back there —
-    // their unsaved-work affordances are FLOW, which kaya spells
-    // through veto_close and navigation).
-    //
-    // A BOOLEAN AND NOT A TITLE TEMPLATE, which is Qt's design and the
-    // named rejection: `setWindowModified` requires the app's own title
-    // to carry a `[*]` placeholder, so the mechanism leaks into
-    // app-facing text, the constraint lives on a STRING no type system
-    // sees (Qt's own answer is a runtime warning that fires only when
-    // the window is dirty AND the platform has no native support), and
-    // kaya's scene titles are compared byte-for-byte across platforms —
-    // the declared string must stay identical everywhere while the
-    // chrome diverges.
-    //
-    // IT ARMS NOTHING (D3). "Unsaved changes, close anyway?" is already
-    // expressible from veto_close plus the dialog machinery, apps
-    // legitimately differ on what it should do, and macOS attaches no
-    // behavior of its own: measured, a real Cmd+W on an edited window
-    // calls windowShouldClose exactly once and closes, with no sheet and
-    // no alert. One attribute, one meaning: show the platform's
-    // unsaved-work affordance.
+    // WHETHER THIS SURFACE HOLDS UNSAVED WORK (docs/dirty-plan.md
+    // D1-D4, which carries the per-backend chrome, the Qt `[*]`
+    // rejection and the mobile carve-out). The app declares STATE and
+    // never spells chrome; it arms nothing.
     ("dirty", 7, PropKind::Bool),
     // THE WINDOW CONTENT INSET, in layout units — LAYOUT, not
-    // appearance (docs/styling-plan.md D3). Defaults to 16. It is
-    // KAYA'S OWN padding, applied inside the root, so 0 is honored
-    // unconditionally; what it does NOT remove is a platform's safe
-    // area (notch, home indicator) — content extends to the safe-area
-    // edge, not past it.
+    // appearance (docs/styling-plan.md D3). Defaults to 16. KAYA'S OWN
+    // padding inside the root, so 0 is honored unconditionally; it does
+    // NOT remove a platform's safe area.
     ("inset", 8, PropKind::F64),
 ];
 
@@ -259,14 +207,9 @@ pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("symbol", 3, PropKind::Enum("symbol")),
 ];
 
-/// Menu-item properties (DESIGN.md, Menus). `label`/`enabled` apply to
-/// every kind but `separator`; `checked` is toggle-only, `value`
-/// radio-group-only, `primary`/`shortcut` action-only — the scene core
-/// enforces that scoping, keeping this table a flat spec fact. The
-/// signal-bindable slots are `label`, `enabled`, `checked` and `value`;
-/// `icon`, `primary` and `shortcut` are const-only. `value` is an
-/// integral 0-based option index; `shortcut` is a normalized spelling
-/// the core validates but never rewrites.
+/// Menu-item properties (DESIGN.md, Menus), a flat spec fact: the scene
+/// core enforces the per-kind scoping. `label`/`enabled`/`checked`/`value`
+/// are signal-bindable, `icon`/`primary`/`shortcut` const-only.
 pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("label", 1, PropKind::Str),
     ("enabled", 2, PropKind::Bool),
@@ -277,9 +220,7 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("shortcut", 7, PropKind::Str),
     ("role", 8, PropKind::Str),
     // The semantic icon name (docs/styling-plan.md D6) — const-only.
-    // NOT id 6: these ids are wire facts and APPEND-ONLY, so a new prop
-    // takes the next free number rather than renumbering `primary` out
-    // from under every generated surface.
+    // NOT id 6: these ids are wire facts and APPEND-ONLY.
     ("symbol", 9, PropKind::Enum("symbol")),
 ];
 
@@ -291,15 +232,12 @@ pub const SET_PROPERTY_NOTE: &str =
      | u32 level, u32 field (SOURCE_ELEMENT — which field of the element's \
      record; 0 for a scalar collection)";
 
-/// The layout of `undone`/`redone`'s one flat `delta` list, read as
-/// four runs in this order. It lives here AS A FINGERPRINTED STRING
-/// because a reader with the wrong shape decodes garbage silently: the
-/// counts still parse and only the meanings slide, so a run layout
-/// described in a doc comment alone could change under a binding
-/// without the spec hash moving.
-///
-/// Keep it in step with the `undone` record's doc. Changing a run's
-/// shape here moves the hash (docs/undo-plan.md).
+/// The layout of `undone`/`redone`'s one flat `delta` list, read as four
+/// runs in this order. A FINGERPRINTED STRING because a reader with the
+/// wrong shape decodes garbage silently — the counts still parse and only
+/// the meanings slide — so a layout described in a doc comment alone
+/// could change under a binding without the spec hash moving. Keep it in
+/// step with the `undone` record's doc (docs/undo-plan.md).
 pub const UNDO_DELTA_RUNS: &str = "\
     signals: pairs(i64 signal_id, value); \
     texts: groups(i64 size, i64 id, i64 path_len, path_len key values, str text); \
@@ -312,8 +250,8 @@ pub const UNDO_DELTA_RUNS: &str = "\
 /// it (capi::kaya_spec_hash), the generator bakes it into every wire
 /// file, and every runtime asserts the two agree at load.
 pub fn hash() -> u64 {
-    // FNV-1a, over a canonical walk. Stable across platforms and
-    // builds by construction; any spec edit changes it.
+    // FNV-1a over a canonical walk: stable across platforms and builds
+    // by construction.
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
         for b in bytes {
@@ -365,11 +303,10 @@ pub fn hash() -> u64 {
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
     }
-    // The one part of the vocabulary that is a LAYOUT rather than a
-    // field: the undo payload's runs. Hashed for the same reason the
-    // fields are — a binding that reads the old shape out of new bytes
-    // gets values of the right types in the wrong places, which no
-    // assertion downstream can catch.
+    // The undo payload's runs are a LAYOUT rather than a field, and are
+    // hashed for the same reason the fields are: a binding reading the
+    // old shape out of new bytes gets values of the right types in the
+    // wrong places, which no assertion downstream can catch.
     eat(b"undo_delta_runs");
     eat(UNDO_DELTA_RUNS.as_bytes());
     h
@@ -2427,16 +2364,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
         },
         EnumSpec {
-            // THE DRAW OPCODES (docs/canvas-plan.md §3.3). Five geometry
-            // ops and two text ops; each is followed on the wire by its
-            // own operands as tagged values. Curves, dashes, joins,
-            // blends, gradients and antialiasing control are refusals,
-            // not omissions — each is a measured platform divergence the
-            // core would now have to CHOOSE a behaviour for, and the
-            // choice is bought with an artifact.
-            //
-            // THE IDS ARE APPEND-ONLY: wire values in eight bindings and
-            // three interpreter copies.
+            // THE DRAW OPCODES (docs/canvas-plan.md §3.3): five geometry
+            // ops and two text ops, each followed on the wire by its own
+            // operands as tagged values. Curves, dashes, joins, blends,
+            // gradients and antialiasing control are refusals, not
+            // omissions (§3.3). THE IDS ARE APPEND-ONLY: wire values in
+            // eight bindings and three interpreter copies.
             name: "draw_op",
             variants: &[
                 ("move_to", 1),
@@ -2468,30 +2401,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             // WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
-            // (docs/canvas-plan.md §3.2.1). A drawing is a FUNCTION OF
-            // SIZE; `scale` and `fixed` are declarations that the
-            // function is CONSTANT, which is what licenses the core to
-            // answer a size change by itself.
-            //
-            // `scale` is 0 because it is what a guest that declares
-            // nothing gets: the mode that needs least from the app is
-            // the one that must be free, and a default of `redraw`
-            // would make the no-handler case undefined rather than
-            // simple.
-            //
-            // `tick` IS `redraw` PLUS THE FRAME DRIVE, not a fourth
-            // geometry: an on_tick canvas answers the same
-            // drawing-at-this-size question, on the platform's frame
-            // clock (§15.4).
+            // (docs/canvas-plan.md §3.2.1). `scale` and `fixed` declare
+            // the drawing CONSTANT in size, which licenses the core to
+            // answer a size change by itself. `scale` is 0 because it is
+            // what a guest that declares nothing gets; `tick` IS `redraw`
+            // plus the frame drive, not a fourth geometry (§15.4).
             name: "size_policy",
             variants: &[("scale", 0), ("fixed", 1), ("redraw", 2), ("tick", 3)],
         },
         EnumSpec {
-            // SVG's `text-anchor`, deliberately: it is the established
-            // vocabulary, and under the buffer kaya DEFINES it rather
-            // than reconciling four engines that disagree. Separate from
-            // the `align` enum, which is a layout cross-axis rule and
-            // has no `middle`.
+            // SVG's `text-anchor`, deliberately. Separate from the
+            // `align` enum, which is a layout cross-axis rule and has no
+            // `middle`.
             name: "text_align",
             variants: &[("start", 0), ("middle", 1), ("end", 2)],
         },
@@ -2603,16 +2524,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             // WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR
-            // (docs/styling-plan.md Slice 2b). One entry per BACKEND
-            // ROSTER row rather than per operating system, because the
-            // roster is what resolves these.
-            //
-            // A TAG NEVER REACHES A GUEST'S PLATFORM QUESTION. The
-            // binding does not resolve it — it cannot, the JVM says
-            // "Linux" on Android — it carries every pair through, and
-            // each backend knows which row is its own.
-            //
-            // The ids are APPEND-ONLY: wire values in eight bindings.
+            // (docs/styling-plan.md Slice 2b), one entry per BACKEND
+            // ROSTER row. A TAG NEVER REACHES A GUEST'S PLATFORM
+            // QUESTION: the binding cannot resolve it (the JVM says
+            // "Linux" on Android). The ids are APPEND-ONLY.
             name: "platform",
             variants: &[
                 ("mac", 1),
@@ -2667,14 +2582,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6;
             // DESIGN.md, "Icons want names, not bytes"): an app names a
             // CONCEPT and each backend draws its own platform's glyph.
-            // Closed and small on purpose — Apple's own equivalent
-            // (CoreGlyphs' semantic_to_descriptive_name.strings) keeps
-            // to fifteen entries.
-            //
             // THE IDS ARE APPEND-ONLY, FOREVER: wire values in eight
             // generated bindings and four backends' lowering tables, so
-            // a renumber would silently redraw every shipped app's
-            // menus. A new concept takes 21.
+            // a renumber would silently redraw every shipped app's menus.
+            // A new concept takes 21.
             name: "symbol",
             variants: &[
                 ("add", 1),
@@ -2731,8 +2642,7 @@ mod tests {
     use crate::wire;
 
     /// A spec-driven generic encoder: what any generated binding does,
-    /// expressed once here. If this encodes and wire.rs decodes to the
-    /// expected op, the generated bindings agree with the core.
+    /// expressed once here.
     struct GenericWriter {
         buf: Vec<u8>,
         // The batch's blob table, exactly as a generated binding and
@@ -2818,9 +2728,8 @@ mod tests {
         SPEC.tx.iter().find(|r| r.name == name).unwrap()
     }
 
-    /// The fingerprint is stable and nonzero; a spec edit that fails
-    /// to change it would let revisions collide, so eat() separates
-    /// every component.
+    /// The fingerprint is stable and nonzero; a spec edit that failed to
+    /// change it would let revisions collide.
     #[test]
     fn spec_hash_is_stable() {
         assert_ne!(hash(), 0);
@@ -2963,26 +2872,19 @@ mod tests {
         );
     }
 
-    /// A BACKEND MAY ONLY UNWRAP A TAG THE CORE PROMISES TO SET.
-    ///
-    /// The sibling test in scene.rs holds the two core paths in
-    /// agreement with each other, which is not the same as holding them
-    /// in agreement with the BACKENDS: flip `carries_tag` to false for a
-    /// kind and both paths still agree, on None, while
-    /// `tag.expect("selects carry a tag")` aborts the process on GTK and
-    /// WinUI — a line no build a mac session runs ever compiles.
-    ///
-    /// `include_str!` reads the text regardless of cfg, so this runs on
-    /// every platform in rung 1. Each `expect` sentence names its kind
-    /// in plain words, which is what makes the pairing readable.
+    /// A BACKEND MAY ONLY UNWRAP A TAG THE CORE PROMISES TO SET — the
+    /// scene.rs sibling holds the two CORE paths together, which is not
+    /// the same thing: flip `carries_tag` to false and both still agree,
+    /// on None, while `tag.expect(...)` aborts on GTK and WinUI, a line
+    /// no mac build compiles.
     #[test]
     fn backends_only_unwrap_tags_the_core_sets() {
         let sources: &[(&str, &str)] = &[
             ("gtk.rs", include_str!("gtk.rs")),
             ("winui/mod.rs", include_str!("winui/mod.rs")),
         ];
-        // "textareas carry a tag" -> Textarea. The match is on the
-        // kind's name rather than on a list this test would carry.
+        // The match is on the kind's name rather than on a list this
+        // test would carry.
         let mut seen = 0usize;
         for (file, src) in sources {
             for (i, line) in src.lines().enumerate() {
@@ -2996,8 +2898,8 @@ mod tests {
                     continue;
                 }
                 seen += 1;
-                // The sentences are English, so the noun is plural.
-                // Match the leading noun against each kind's spellings
+                // The sentences are English, so the noun is plural:
+                // match the leading noun against each kind's spellings
                 // rather than making the backends write "entrys".
                 let noun = sentence.split_whitespace().next().unwrap_or("");
                 let named = WidgetKind::ALL.iter().find(|k| {
@@ -3041,10 +2943,9 @@ mod tests {
         );
     }
 
-    /// `WidgetKind::ALL` IS THE SPEC'S KIND LIST, one entry per variant.
-    /// The sweeps that must not miss a kind walk ALL rather than repeat
-    /// a list, so a kind added to the spec and NOT added to ALL would
-    /// join the wire vocabulary while sitting outside every one of them.
+    /// `WidgetKind::ALL` IS THE SPEC'S KIND LIST, one entry per variant:
+    /// a kind added to the spec and NOT to ALL would join the wire
+    /// vocabulary while sitting outside every sweep that walks ALL.
     #[test]
     fn all_widget_kinds_are_the_spec_s_kinds() {
         let kind_enum = SPEC
@@ -3290,12 +3191,10 @@ mod tests {
     }
 
     /// The six canvas vocabularies are each spelled TWICE — the spec's
-    /// enum and wire.rs's (value, name) table, which is what the core's
-    /// refusals and every canvas diagnostic print from. enums_match_wire
-    /// pins the VALUES through canvas_pin; this pins the NAMES and the
-    /// COVERAGE, because a drifted name leaves a refusal naming an
-    /// opcode the app never wrote, and a missing row leaves a legal op
-    /// refused as unknown.
+    /// enum and wire.rs's (value, name) table, which the core's refusals
+    /// and every canvas diagnostic print from. enums_match_wire pins the
+    /// VALUES; this pins the NAMES and the COVERAGE, because a drifted
+    /// name leaves a refusal naming an opcode the app never wrote.
     #[test]
     fn canvas_names_match_the_spec_enums() {
         let pairs: &[(&str, &[(i64, &str)])] = &[
@@ -3337,8 +3236,7 @@ mod tests {
     /// wire::SYMBOLS is a SECOND spelling of the symbol vocabulary — the
     /// (id, name) table the root's wall and every diagnostic print from.
     /// enums_match_wire pins the VALUES; this pins the NAMES, because a
-    /// drifted name leaves the wall firing with a sentence that names a
-    /// concept the app never wrote.
+    /// drifted name leaves the wall naming a concept the app never wrote.
     #[test]
     fn symbol_names_match_the_spec_enum() {
         let e = SPEC
@@ -3725,11 +3623,9 @@ mod tests {
         });
     }
 
-    /// THE IDENTITY'S SLOT, THE SAME WALL. The record copies the
-    /// typeface's mask-plus-always-written-slot convention, so it needs
-    /// the same guard: a clear mask bit over a real blob would drop the
-    /// app's MARK silently, every backend leaving the platform default
-    /// in place and every observation reporting that default.
+    /// THE IDENTITY'S SLOT, THE SAME WALL: the record copies the
+    /// typeface's mask-plus-always-written-slot convention, so a clear
+    /// mask bit over a real blob would drop the app's MARK silently.
     #[test]
     #[should_panic(expected = "carries an icon blob but its mask")]
     fn identity_mask_slot_disagreement_is_loud() {

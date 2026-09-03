@@ -1,9 +1,4 @@
-// The feed scene from Swift: sum-typed elements, end to end. The enum is
-// the sum; kaya-swift-gen reads this declaration and generates
-// feed+Kaya.swift (prototypes, init(variant:values:), typed field
-// tokens, the collection factory, and the compile-total postEachSum
-// eliminator). Handlers eliminate with `if case`, and the witnessed
-// updateField checks that refinement rather than trusting it.
+// The feed scene, Swift port — guests/rust/feed.rs, tools/scenes/feed.steps.
 
 import Foundation
 
@@ -24,9 +19,8 @@ app.build { tx in
         return .str("\(n) done")
     }
 
-    // Every child is declared WHERE IT STANDS: a widget parents at
-    // CREATION, and a bare expression never reaches buildExpression
-    // (docs/traps.md, result builders).
+    // A bare expression never reaches buildExpression, so every child is
+    // declared WHERE IT STANDS (docs/traps.md, result builders).
     let root = tx.row {
     tx.button("promote") { tx in
         for entry in feed.items(tx) {
@@ -45,8 +39,8 @@ app.build { tx in
         todo: { todo in
             _ = todo.row {
                 todo.checkbox(todo.done) { tx, keys, checked in
-                    // Optional chaining re-eliminates at write time: a
-                    // stale occurrence folds into nil.
+                    // Optional chaining re-eliminates at write time: a stale
+                    // occurrence folds into nil.
                     postAsTodo(tx, feed, keys[0])?.done(checked)
                 }
                 todo.label(todo.title)

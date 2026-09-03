@@ -3,11 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The align conformance scene from the JVM — see guests/rust/align.rs
- * and tools/scenes/align.steps. The tall no-baseline image in the
- * baseline row is the construction that separates the modes on every
- * platform's control metrics; the grown, stretched nested column under
- * row#1 is the ruling's own.
+ * The align scene from the JVM — guests/rust/align.rs, tools/scenes/align.steps.
  */
 public final class Align {
     // A 2x64 PNG: the tall no-baseline child.
@@ -43,8 +39,6 @@ public final class Align {
                 tx.row(() -> { // row#1: the stretch pair's host
                     tx.label(anchor); // label#2
                     tx.column(() -> {
-                        // grown into the row's leftover, stretched
-                        // across its own breadth
                         tx.label(fit); // label#3
                         tx.button("wide");
                     }).grow(1.0).align(KayaApp.Align.STRETCH).a11yId("fitcol");

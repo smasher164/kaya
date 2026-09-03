@@ -1,11 +1,5 @@
-"""The nav conformance scene, Python port — the north-star spelling
-for the serial navigation grammar: each pushed screen is one
-`push_entry` scope (nesting inside the click handler's ambient
-transaction), the veto class one handler. The covered root is
-RETAINED (status keeps taking writes while covered); a programmatic
-kaya.pop_entry does not echo entry_popped, so the settings round's
-final status stays "back requested". See guests/rust/nav.rs and
-tools/scenes/nav.steps."""
+"""The nav conformance scene (tools/scenes/nav.steps): a programmatic
+pop_entry does NOT echo entry_popped."""
 
 import sys
 
@@ -22,15 +16,13 @@ def popped_detail():
 
 
 def back_asked_settings():
-    # The veto class: nothing has popped yet. No entry_popped will fire,
-    # so this write is the round's final status.
+    # Nothing has popped, and no entry_popped will follow.
     status.set("back requested")
     kaya.pop_entry()
 
 
 def open_detail():
-    # The push scope NESTS inside the handler's ambient transaction, so
-    # the status write rides the same commit.
+    # The push NESTS in the handler's transaction: one commit.
     with app.push_entry(DETAIL, title="detail", on_popped=popped_detail):
         caption = kaya.signal("detail pane")
         with kaya.column():

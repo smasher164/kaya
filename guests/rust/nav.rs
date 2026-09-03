@@ -1,10 +1,5 @@
-//! The nav conformance scene: the serial navigation grammar as
-//! assertions (DESIGN.md, Navigation). Two pushes — one plain, one
-//! with intercept_back armed. The byte-frozen contract is
-//! tools/scenes/nav.steps.
-//!
-//! A programmatic `pop_entry` does NOT echo entry_popped, which is why
-//! the settings round's status stays "back requested".
+//! The nav conformance scene (tools/scenes/nav.steps): a programmatic
+//! `pop_entry` does NOT echo entry_popped.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
@@ -13,8 +8,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     enum Msg {
         OpenDetail,
         OpenSettings,
-        // Distinct variants per entry: the association is structural,
-        // so no guest inspects an id anywhere.
+        // Distinct variants per entry: no guest inspects an id.
         PoppedDetail,
         BackAskedSettings,
     }
@@ -51,8 +45,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         })
                         .id();
                     tx.mount_in(entry, pane);
-                    // The covered root keeps taking writes: retention,
-                    // observable after the pop.
+                    // The covered root keeps taking writes: retention.
                     tx.write(status, "pushed detail");
                     entry
                 });
@@ -82,9 +75,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "popped detail");
             }),
             Msg::BackAskedSettings => ctx.apply(|tx| {
-                // The veto class: nothing has popped yet. No
-                // entry_popped will follow the confirm below, so this
-                // write is the round's final status.
+                // Nothing has popped, and no entry_popped will follow.
                 tx.write(status, "back requested");
                 tx.pop_entry();
             }),

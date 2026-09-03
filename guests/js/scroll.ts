@@ -1,8 +1,5 @@
-// The scroll conformance scene, JS port — the viewport grows so the
-// enclosing track constrains it (an unconstrained viewport hugs its
-// content and nothing overflows); the bottom button, reachable only by
-// scrolling, proves the scrolled-to content is live. See
-// guests/rust/scroll.rs and tools/scenes/scroll.steps.
+// The scroll conformance scene (tools/scenes/scroll.steps). The viewport
+// GROWS: unconstrained it hugs its content and nothing overflows.
 
 import * as kaya from "kaya-gui";
 

@@ -1,110 +1,43 @@
-# THE TEXT EDITOR (docs/editor-plan.md E5): the whole of what "done"
-# means for v1, in one script — launch to an empty buffer, type,
-# save-as to a new file, reopen a file, edit it, undo, save, summon the
-# find bar and search with a regex, dismiss it, and be warned about
-# unsaved work on close.
-#
-# THIS SCENE IS NOT A CONFORMANCE SCENE. Every other script here drives
-# one feature to its edges; this one drives an APP, and its assertions
-# are the ones a person would make. That is what buys the editor the
-# same proof every scene gets — byte-frozen output compared across
-# platforms, and check-steps demanding a leg wherever it can run. An app
-# only a human has ever run is an app nobody can change safely.
-#
-# THE DIRTY MARK IS THE ASSERTION ALMOST EVERYWHERE, and it is a much
-# stronger claim than it looks: the app declares `dirty` from
-# `text != saved`, so `expect_dirty false` after an undo says the
-# restored buffer is BYTE-IDENTICAL to what is on disk — a comparison of
-# the whole document, made by the app, read back off the platform's own
-# window chrome (the dot in the macOS close button, a leading `*` in the
-# WinUI caption, a bullet in the GTK header bar).
-#
-# THE FILES ARE THE APP'S OWN, written before anything is shown, at
-# <temp>/kaya-editor-<pid>/. App and interpreter are the same process, so
-# they agree on that path with no runner involvement, and the pid keeps
-# parallel legs from colliding. Only BASENAMES are named, so one script
-# serves five lanes whose temp directories differ.
-#
-# NO EXTENSIONS ON ANY NAME, the save scene's rule and for its reason: a
-# save panel publishes its name field with a known extension HIDDEN when
-# the user's Finder preference says so, so `expect_save_dialog` would
-# read the stem on one machine and the whole name on another. A name
-# with no extension has no stem to differ from.
-#
-# THE DOCUMENT'S NAME IS THE WINDOW'S TITLE and appears nowhere else
-# (2026-08-10). The four expect_title lines below are the whole of that
-# claim: the no-destination name at launch, the name the save panel was
-# given, the name the picker chose, and that name again after a plain
-# Save — and the status line beneath never repeats any of them.
-#
-# EVERY expect_title HERE SITS AT A CLEAN MOMENT, and that is a rule and
-# not a coincidence (docs/dirty-plan.md, §2 open question 2). The
-# declared title is untouched by `dirty` on every backend — a marker
-# composed into the app's own string is D1's named rejection — but the
-# WinUI arm composes its asterisk into the RENDERED caption, which is
-# exactly what expect_title reads there. A title assertion inside a
-# dirty stretch is therefore a byte comparison that cannot hold on five
-# lanes at once. dirty.steps carries the same sentence and the same
-# discipline; this scene is the first to need it four times, which is
-# why the sentence stopped being prose: tools/check-steps.py now refuses
-# any expect_title standing between an `expect_dirty true` and the next
-# `expect_dirty false`. It caught three of the four lines below on the
-# first run that worked — written after their save, where the app was
-# genuinely clean and the SCRIPT had not said so, and a script's own
-# claim is the only record a gate can read.
-#
-# THE EDITOR OPENS ON A BUFFER AND A STATUS LINE AND NOTHING ELSE
-# (2026-08-10): sublime-shaped, the buffer filling the window, no find
-# bar until somebody asks for one. So the first reading is the status
-# line — label#0, the app's leftmost bottom label — and label#1, the find
-# tally, is EMPTY because the bar it belongs to is not mounted.
+# THE TEXT EDITOR (docs/editor-plan.md E5) — an APP rather than a
+# conformance scene, so the assertions are the ones a person would make.
+# The app declares `dirty` as `text != saved`, which makes an
+# `expect_dirty false` after an undo a claim that the restored buffer is
+# BYTE-IDENTICAL to disk, read off the platform's own window chrome. It
+# opens on a buffer and a status line and NOTHING else, so label#1 — the
+# find tally — is empty until the bar is asked for.
 expect label#0 "new file"
 expect textarea#0 ""
 expect label#1 ""
 expect_dirty false
-# A BUFFER WITH NO DESTINATION IS CALLED SOMETHING, and this is the word
-# every editor uses for it. The window is named before the document is.
+# The window is named before the document is.
 expect_title "untitled"
-# THE SAME TWO LABELS READ OFF THE REAL TREE, in child order, which the
-# creation-ordered registries above cannot see: one status row, the
-# document's state on the left and a silent tally on the right. This is
-# the assertion that fails if the find bar is ever mounted at launch
-# again — a bar puts its own row between the buffer and this one, and its
-# controls carry no label, so the row this reads would be the wrong one.
+# THE SAME TWO LABELS IN CHILD ORDER, which the creation-ordered
+# registries cannot see. This is what fails if the find bar is ever
+# mounted at launch again: its row would land between the buffer and
+# this one, and row#0 would read the wrong row.
 expect_order row#0 "new file|"
 
-# AND THE BUFFER FILLS THE WINDOW, which is the whole of "sublime-style"
-# and was the defect this app opened with: a 240x96 box in the corner of
-# a 640x420 window, with every share assertion passing, because
-# expect_shares reads the TRACK and the track was right all along. The
-# two readings below are the two halves of "fills" that a harness can
-# see: the root consumes the window's content area, and the buffer
-# consumes the track its column handed it.
+# THE BUFFER FILLS THE WINDOW: this app opened with a 240x96 box in the
+# corner of a 640x420 window while every SHARE assertion passed, because
+# shares read the TRACK and the track was right all along.
 #
-# ONE HALF IS NOT MECHANIZED HERE AND SAYING SO IS THE POINT: both verbs
-# read the MAIN axis, and the buffer's WIDTH comes from `align: stretch`
-# on the cross one, which no observation in the harness reads
-# (expect_aligned cannot separate stretch from start — every stretched
-# child also starts at zero, so the classifier reports an ambiguity and
-# refuses). The stills in the capture set are its only record today.
+# ONE HALF IS NOT MECHANIZED, and saying so is the point: both verbs read
+# the MAIN axis, while the buffer's WIDTH comes from `align: stretch` on
+# the cross one, which no harness observation can separate from start.
 expect_root_fills
 expect_fills textarea#0
 
-# THE MENU BAR IS TWO GROUPS: File (New, Open, Save, Save As) and Edit
-# (Undo, Redo, Cut, Copy, Paste, Find). Five of Edit's six items are
-# kaya ROLES the app writes no behaviour for at all — which is the whole
-# reason the forcing artifact is worth building.
+# Five of Edit's six items are kaya ROLES the app writes no behaviour
+# for at all.
 expect_menus 2
-# NOTHING HAS BEEN TYPED, so the platform's own undo has nothing to
-# offer and the item says so. Enablement is not a build-time fact and
-# this app computes none of it.
+# Enablement is not a build-time fact and this app computes none of it:
+# the platform's own undo has nothing to offer yet.
 expect_menu "Edit>Undo" disabled
 
 # ---- type into the empty buffer -----------------------------------
 #
-# The app puts the cursor in the document at mount, which is what an
-# editor does and also what the Edit menu needs: undo, cut and paste all
-# act on whatever is focused.
+# The app focuses the document at mount, which is what the Edit menu
+# needs: undo, cut and paste all act on whatever is focused.
 expect_focused textarea#0
 type "alpha 1 beta 22"
 expect textarea#0 "alpha 1 beta 22"
@@ -112,174 +45,115 @@ expect_dirty true
 expect_menu "Edit>Undo" enabled
 
 # ---- save as ------------------------------------------------------
-#
-# ARM THE DIRECTORY FIRST: a panel honors its initial location only AT
-# presentation, and otherwise restores wherever it was last — which is
-# how one run inherited a directory an unrelated binary left behind.
+# The app's files live at <temp>/kaya-editor-<pid>/, named by BASENAME
+# and with NO EXTENSION (save.steps' rule: a hidden extension makes
+# `expect_save_dialog` read the stem on one machine and the whole name
+# on another). ARM THE DIRECTORY FIRST: a panel honors its initial
+# location only AT presentation, and otherwise restores where it was.
 file_dialog_goto $TMP/kaya-editor-$PID
 menu_activate "File>Save As…"
-# The panel opens on the name the APP suggested; the harness types over
-# it the way a person would, which is what a save dialog is for.
 expect_save_dialog kaya-editor-$PID untitled
 file_dialog_name draft
 expect_save_dialog kaya-editor-$PID draft
 file_save
-# THE DESTINATION DID NOT EXIST — a desktop save panel answers with a
-# name for a file nobody has made — and the byte count is READ BACK OFF
-# THE DISK rather than being the length the app handed over. A write
-# that returned success and landed nowhere is exactly the failure "save"
-# has, and only reopening can see it.
+# THE DESTINATION DID NOT EXIST, and the byte count is READ BACK OFF THE
+# DISK rather than the length the app handed over — a write that returns
+# success and lands nowhere is exactly the failure "save" has.
 expect label#0 "saved, 15 bytes"
-# THE MARK COMES DOWN FIRST, AND THAT ORDER IS THE RULE rather than
-# taste: on WinUI the unsaved-work asterisk rides the RENDERED CAPTION,
-# which is what expect_title reads there, so a title read is only a
-# five-lane byte comparison once the scene has CLAIMED the window clean.
-# Every expect_title below therefore stands behind an expect_dirty
-# false. tools/check-steps.py enforces the shape now; it caught this
-# exact stretch written the other way round.
+# THE MARK COMES DOWN FIRST, AND EVERY expect_title STANDS BEHIND AN
+# expect_dirty false: the WinUI arm composes its unsaved asterisk into
+# the RENDERED caption, which is what expect_title reads there, so a
+# title read inside a dirty stretch cannot hold on five lanes at once
+# (tools/check-steps.py refuses the shape).
 expect_dirty false
-# AND THE WINDOW TOOK THE FILE'S NAME. The destination moved, so the
-# title moved with it — the status line says only what happened, and the
-# name it used to carry is up in the chrome where a person looks for it.
+# The destination moved, so the TITLE moved with it: the document's name
+# lives in the chrome and nowhere else.
 expect_title "draft"
 
 # ---- open a file --------------------------------------------------
 #
-# THE DECOY IS LOAD-BEARING: with one file in the directory a dialog
+# THE DECOY IS LOAD-BEARING: with ONE file in the directory a dialog
 # completes with it when nothing is selected, so `file_choose` would
-# pass on a backend that never selected anything. "decoy" sorts first,
-# so that backend gets the WRONG file and every byte count below fails
-# too.
+# pass on a backend that never selected anything. "decoy" sorts first.
 file_dialog_goto $TMP/kaya-editor-$PID
 menu_activate "File>Open…"
 expect_file_dialog kaya-editor-$PID decoy draft notes
 file_choose notes
 expect label#0 "opened, 131 bytes"
 expect_dirty false
-# THE SECOND WAY A DESTINATION MOVES, and the title follows it exactly
-# as it followed the save. `notes` is also the assertion that the DECOY
-# was not opened: a backend that completed the picker with the
-# first-sorted file would be titled `decoy` here.
+# Also the assertion that the DECOY was not opened: a backend that
+# completed the picker with the first-sorted file is titled `decoy`.
 expect_title "notes"
 
 # ---- edit, and undo -----------------------------------------------
-#
-# TYPING IS REAL KEYSTROKES (`type`), never set_text: a programmatic
-# write CLEARS a field's native undo history on every platform, which is
-# the very history this step observes. Opening the document was such a
-# write, so the run below is the only thing in that history.
-#
-# ONE CHARACTER, AND THE SCENE IS WRONG IF IT IS EVER MORE. How much of
-# a typed run ONE undo spends is FRONTIER GRANULARITY — "the only
-# platform-flavored part" of the undo design, which invariant 6 forbids a
-# shared scene from asserting "across five lanes with five keystroke
-# cadences" (docs/undo-plan.md §2 and §5.2). A one-character run is the
-# floor every platform agrees on, and it is what undo.steps types for
-# this same reason.
-#
-# THIS SHIPPED WRONG AND ONLY A SECOND CADENCE CAUGHT IT. The run here
-# was ` tail`, and it passed on mac — AppKit coalesces a typing burst
-# whole. On linux/x11 the same five characters arrive through
-# `xdotool --delay 0` and GtkTextHistory spends ONE of them per undo, so
-# the document came back four bytes long and every byte count below it
-# failed. Wayland's `wtype -d 1` coalesced and passed. Same scene, same
-# backend, two cadences, two answers — which is exactly what the rule
-# says will happen. tools/check-steps.py now refuses the shape.
+# TYPING IS REAL KEYSTROKES, never set_text: a programmatic write CLEARS
+# the native undo history this step observes. ONE CHARACTER, AND THE
+# SCENE IS WRONG IF IT IS EVER MORE — how much of a run one undo spends
+# is FRONTIER GRANULARITY, forbidden to a shared scene (undo-plan §5.2);
+# check-steps' typing lint refuses the shape and holds the measurement.
 expect_focused textarea#0
 type "z"
 expect_dirty true
-# AND ONE UNDO PUTS THE DOCUMENT BACK, byte for byte. The app writes no
-# undo stack, no command objects and no handlers for this: Edit>Undo is
-# a ROLE, it routes to whatever is focused, and the field's own history
-# answers. `expect_dirty false` is the strong form of the claim — the
-# restored buffer equals the 131 bytes on disk exactly, or the mark
-# would still be up.
+# ONE UNDO PUTS THE DOCUMENT BACK BYTE FOR BYTE, with no undo stack or
+# handler in the app: Edit>Undo is a ROLE routed to whatever is focused,
+# and `expect_dirty false` is the whole-document comparison.
 menu_activate "Edit>Undo"
 expect_dirty false
 
 # ---- edit, and save to the file already chosen --------------------
 #
-# SAVE NEEDS NO DIALOG once a destination exists: the user already chose
-# this file, and the handle they chose it with is writable.
+# SAVE NEEDS NO DIALOG once a destination exists: the handle the user
+# chose the file with is writable.
 expect_focused textarea#0
 type " 99"
 expect_dirty true
 menu_activate "File>Save"
 expect label#0 "saved, 134 bytes"
 expect_dirty false
-# THE TITLE DID NOT MOVE, which is the assertion with the negative in
-# it: a Save that re-ran the panel, or that adopted some other handle,
-# would rename the window here.
+# THE TITLE DID NOT MOVE: a Save that re-ran the panel, or adopted some
+# other handle, renames the window here.
 expect_title "notes"
 
 # ---- summon the find bar ------------------------------------------
-#
-# THE BAR IS BUILT WHEN IT IS ASKED FOR, and the four widgets below did
-# not exist a step ago: Edit>Find… writes a bool signal and kaya STAMPS
-# the blueprint the app declared. That is the only conditional display
-# kaya has — there is no visibility property and no way to take a live
-# widget out of a tree — so "shown and hidden" (docs/editor-plan.md E1)
-# means built and torn down, which is a stronger claim than hidden.
-#
-# THE TALLY IS THE PROOF THAT IT CAME UP. label#1 is a LIVE label in the
-# status line, so its index never moves; it is empty while the bar is
-# away and answers for the search while the bar is up. A backend that
-# ignored the stamp would leave it empty here.
+# THE BAR IS BUILT WHEN IT IS ASKED FOR: kaya has no visibility property
+# and no way to take a live widget out of a tree, so "shown and hidden"
+# (docs/editor-plan.md E1) means STAMPED and torn down. label#1 is the
+# proof it came up — a live label whose index never moves, empty while
+# the bar is away.
 menu_activate "Edit>Find…"
 expect label#1 "no matches"
 expect entry#0 ""
-#
-# AND THE QUERY ARRIVES BY set_text, which is this script's one
-# departure from its own real-keystrokes rule and not a convenience:
-# NOTHING CAN FOCUS A STAMPED COPY. `focus` is a widget_command aimed at
-# a live widget id, a copy's identity is (template node, key path), and
-# `click` targets buttons — the same sentence tools/scenes/undo.steps
-# already carries for a collection row's field. So the cursor stays in
-# the document, the app cannot move it into a bar it can hide, and the
-# scene writes the field instead of typing into it.
-#
-# THE HALF-TYPED REGEX IS THEREFORE SPELLED OUT rather than left to a
-# keystroke cadence, which is the better shape anyway: find-as-you-type
-# hands the app `[` before it hands it `[0-9]+`, and an app that treated
-# a compile error as an incident would die on the first one. This is the
-# state, named, and the app's answer to it asserted — which typing it
-# could never do, since the intermediate states flew past unread.
+# THE QUERY ARRIVES BY set_text, the one departure from this script's
+# real-keystrokes rule: NOTHING CAN FOCUS A STAMPED COPY (`focus` takes
+# a live widget id, `click` targets buttons). THE HALF-TYPED REGEX IS
+# SPELLED OUT rather than left to a cadence: find-as-you-type hands the
+# app `[` before `[0-9]+`, and that state is asserted here instead of
+# flying past unread.
 set_text entry#0 "["
 expect label#1 "bad pattern"
 expect_highlights textarea#0 ""
 set_text entry#0 "[0-9]+"
-# THE MATCHES ARE FOUR RUNS OF DIFFERENT LENGTHS, so a backend that
-# lowered one range's length onto all of them fails. The offsets are
-# UTF-8 BYTE offsets into the app's own string — what Go's
-# FindAllStringIndex answers in, what kaya.TextRange holds, and what the
-# wire carries — and each assertion carries the text it covers as well
-# as the numbers, because the core converts to the backend's unit to
-# lower a range and back to read one: two symmetric mistakes would
-# cancel, and offsets alone would pass while the wrong characters were
-# decorated.
+# FOUR RUNS OF DIFFERENT LENGTHS, so a backend that lowered one range's
+# length onto all of them fails. The offsets are UTF-8 BYTES and each
+# assertion carries the covered TEXT as well, because the core converts
+# into the backend's unit and back: two symmetric mistakes cancel.
 expect label#1 "1 of 4"
 expect_highlights textarea#0 "4:5=7|66:68=13|129:131=42|132:134=99"
 expect_selection textarea#0 "4:5=7"
-# REVEAL, ASSERTED IN BOTH DIRECTIONS. The `offscreen` line is what
-# makes the `visible` one mean anything: the document is 59 lines, the
-# last match is far below the window, and on a document that fits
-# containment would be true before anything scrolled.
+# The `offscreen` line is what makes the `visible` one mean anything: on
+# a document that fits, containment is true before anything scrolls.
 expect_revealed textarea#0 132:134 offscreen
-# THE WALK IS DRIVEN THROUGH THE STAMPED BUTTONS, whose creation indices
-# are stable HERE and only here: nothing has been torn down yet, so this
-# first copy owns button#0 and button#1 on every lane. After a teardown
-# a backend is not required to prune its harness registry (the SwiftUI
-# interpreter does not, undo.steps:259), so every later step addresses
-# the bar as `#last` — the newest stamped copy is the newest live one
-# everywhere.
+# THE STAMPED BUTTONS' INDICES ARE STABLE HERE AND ONLY HERE: nothing
+# has been torn down yet. After a teardown a backend need not prune its
+# harness registry (the SwiftUI interpreter does not), so every later
+# step addresses the bar as `#last`.
 click button#1
 click button#1
 click button#1
 expect label#1 "4 of 4"
 expect_selection textarea#0 "132:134=99"
 expect_revealed textarea#0 132:134 visible
-# AND THE WALK WRAPS, both ways, which is the only behaviour a person
-# ever notices about a find bar.
+# AND THE WALK WRAPS, both ways.
 click button#1
 expect label#1 "1 of 4"
 click button#0
@@ -287,10 +161,9 @@ expect label#1 "4 of 4"
 
 # ---- a declared set is bound to the text it was declared against ---
 #
-# The document changes, so kaya DROPS the decorations — it tracks
-# nothing across an edit — and the app re-declares from the fold its
-# change handler already drives. Here the re-declaration finds nothing,
-# and the count says so rather than going stale.
+# The document changed, so kaya DROPS the decorations and the app
+# re-declares from its own change handler: here that finds nothing, and
+# the count says so rather than going stale.
 set_text textarea#0 "scratch"
 expect textarea#0 "scratch"
 expect label#1 "no matches"
@@ -299,70 +172,47 @@ expect_dirty true
 
 # ---- dismiss it, and it is GONE -----------------------------------
 #
-# `done` is the bar's own door, because it cannot be a keystroke: kaya's
-# shortcut floor reserves no bare Escape and an app cannot claim one. It
-# is the last control the blueprint declares, so `#last` names it in any
-# copy.
+# `done` is the bar's own door because it cannot be a keystroke (kaya's
+# shortcut floor reserves no bare Escape), and it is the blueprint's
+# LAST control, so `#last` names it in any copy.
 click button#last
-# THE TALLY GOES QUIET and the cursor goes back to the document — the
-# two things a person sees when a find bar leaves.
 expect label#1 ""
 expect_focused textarea#0
-# AND THE PROOF THAT THE BAR WAS TORN DOWN RATHER THAN LEFT UP: summon
-# it again and the field is EMPTY. Nothing in the app clears that field
-# — dismissal forgets the app's own pattern and never touches the widget
-# — so an empty one is a widget that did not exist a moment ago. A bar
-# that had merely stayed mounted still reads "[0-9]+" here.
+# THE PROOF THAT THE BAR WAS TORN DOWN rather than left up: nothing in
+# the app clears that field, so an EMPTY one is a widget that did not
+# exist a moment ago. A bar that stayed mounted reads "[0-9]+" here.
 menu_activate "Edit>Find…"
 expect entry#last ""
 expect label#1 "no matches"
 click button#last
 expect label#1 ""
 expect_order row#0 "saved, 134 bytes|"
-# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3 one level down):
-# the window declares 0 — the buffer's full bleed — and the chrome row
-# declares 8, measured here as the halved gap between the row's outer
-# box and its content box. Placed at a BAR-FREE moment deliberately:
-# the find bar's stamped row would shift row ordinals (the a11yrows
-# lesson), and right here the status row is the only row there is.
+# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), at a BAR-FREE
+# moment deliberately: the find bar's stamped row would shift row
+# ordinals, and here the status row is the only row there is.
 expect_inset row#0 8
 
 # ---- the unsaved-work guard, from two different doors --------------
 #
-# Nothing in kaya says "ask before you discard": the app composes it out
-# of parts that predate it — the alert machinery for New, and
-# veto_close + close_requested for the window. Both refuse, both leave
-# the work exactly where it was, and the second one proves the first
-# dialog's id retired.
+# Nothing in kaya says "ask before you discard": the app composes it
+# from the alert machinery and veto_close. Both doors refuse, and the
+# second proves the first dialog's id retired.
 menu_activate "File>New"
 expect_alert "unsaved changes"
 alert_choose cancel
 expect textarea#0 "scratch"
 expect_dirty true
-# AND THE DIALOG IS GONE BEFORE ANYTHING ASKS FOR ANOTHER — the wait
-# that has to be spelled, MEASURED on the iOS lane 2026-08-10. A CANCEL
-# whose continuation does nothing leaves no state for the next
-# assertion to wait on: the two lines above were already true before the
-# alert opened, so they passed in the same millisecond, the next
-# `expect_alert` matched the alert STILL ON SCREEN (both doors carry the
-# same title), and the app's second show hit the core's one-alert
-# assertion —
-#   kaya: alert 1 is already live — one alert per process
-# — and aborted the guest. macOS dismisses fast enough to hide it; the
-# simulator does not. This line is the only assertion that can hold here
-# because it is about the DIALOG rather than about the document.
+# AND THE DIALOG IS GONE BEFORE ANYTHING ASKS FOR ANOTHER: a CANCEL's
+# continuation does nothing, so every other assertion here was already
+# true and only the dialog count can be the wait (docs/traps.md, measured
+# on the iOS lane 2026-08-10; check-steps' alert_wait_lint holds it).
 expect_alerts 0
 
 # ---- and the answer that AGREES ------------------------------------
 #
-# Nothing in this script had ever taken the Discard arm: both doors
-# above refuse, so the continuation the whole `ask` composition exists
-# to run had never run. It is also the ONLY path that CLEARS the
-# destination — save-as adopts one and open adopts one, and both are
-# announced by a dialog the scene can read, while New drops one
-# silently. The title is what makes it visible: the window goes back to
-# the no-destination name, which is the third and last of the three
-# ways a document's identity can move.
+# The Discard arm, and the ONLY path that CLEARS the destination — save
+# and open both adopt one behind a dialog, New drops one silently, so
+# the title going back to "untitled" is what makes it visible.
 menu_activate "File>New"
 expect_alert "unsaved changes"
 alert_choose 0
@@ -370,18 +220,13 @@ expect textarea#0 ""
 expect label#0 "new file"
 expect_dirty false
 expect_title "untitled"
-# The same wait before the third door, for the same reason. Here the
-# continuation DID change the document, so the four lines above are real
-# synchronization — but the rule is about the shape and not about
-# whether this particular stretch would have got away with it.
+# The same wait before the third door: the rule is about the shape, not
+# about whether this stretch would have got away without it.
 expect_alerts 0
 
-# DIRTY AGAIN FOR THE SECOND DOOR, and this keystroke is load-bearing:
-# a CLEAN document does not ask. The close would run straight through
-# the guard into the affirmative arm, and that arm is os.Exit — the one
-# call this app makes outside kaya (see editor.go's `quit`) — so the
-# process would leave rather than the window. One character puts the
-# state back that the next stretch is about.
+# DIRTY AGAIN FOR THE SECOND DOOR, and this keystroke is load-bearing: a
+# CLEAN document does not ask, so the close would run through the guard
+# into the affirmative arm, which is os.Exit.
 expect_focused textarea#0
 type "q"
 expect_dirty true
@@ -392,6 +237,6 @@ alert_choose cancel
 expect_windows 1
 expect_dirty true
 
-# One REAL-TREE read at the end: everything above reads kaya's own
-# model, and would pass for an arm that ran and drew nothing.
+# One REAL-TREE read at the end: everything above reads kaya's own model
+# and would pass for an arm that drew nothing.
 expect_ax label#0 "label/new file"

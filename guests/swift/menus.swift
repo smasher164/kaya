@@ -1,7 +1,5 @@
-// The menus conformance scene, Swift port: the command vocabulary (a
-// File/View/Sort menu bar, context menus on a live label and on stamped
-// rows) and the uncontrolled-menu echo doctrine. See
-// guests/rust/menus.rs and tools/scenes/menus.steps.
+// The menus scene, Swift port — guests/rust/menus.rs,
+// tools/scenes/menus.steps.
 
 import Foundation
 
@@ -19,8 +17,8 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     let file = tx.menu(
         "File", enabled: canExport,
         items: [
-            // A semantic icon is a CONCEPT drawn per platform; `done` is
-            // the checkmark idiom (docs/styling-plan.md D6).
+            // No `save` in the symbol vocabulary; `done` is the checkmark
+            // idiom (docs/styling-plan.md D6).
             tx.item("Save", shortcut: "primary+s", symbol: .done) { t in
                 t.write(status, .str("saved"))
             },
@@ -60,15 +58,11 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             t.write(canExport, .bool(true))
         }
         tx.button("reset menu state") { t in  // button#1
-            // The folds never echo the user's pick; these writes reset
-            // the user-state mirror.
             t.write(details, .bool(false))
             t.write(sort, .f64(0.0))
             t.write(status, .str("ready"))
         }
         tx.button("extend menus") { t in  // button#2
-            // Append-only: rename the retained File, move the promotion
-            // hint, grow the bar by Tools.
             t.menu(share, primary: false)
             t.menu(
                 file, label: "Document",
@@ -91,9 +85,8 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
         tx.each(groups) { g in
             let items = g.collection()
             itemsOut = items
-            // The For is declared INSIDE the column it belongs to and
-            // parents itself there at creation; a bare mention in the
-            // builder is DISCARDED (docs/traps.md, result builders).
+            // A bare mention in the builder is DISCARDED, so the For is
+            // declared INSIDE the column (docs/traps.md, result builders).
             _ = g.column {
                 g.each(items) { r in
                     // label#2 once g2/a stamps.
@@ -107,7 +100,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     return (groups, itemsOut)
 }
 
-// Seed after mount: the stamp path attaches the shared catalog and keys.
+// Seeded after the mount, so the copy stamps from a closed template.
 app.build { tx in
     tx.insert(groups, .str("g2"), .str("Home"))
     tx.insert(items.at(.str("g2")), .str("a"), .str("water plants"))

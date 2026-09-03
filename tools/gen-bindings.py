@@ -31,11 +31,6 @@ def kaya_generator_id():
 # KAYA_REGENERATING exempts this one build from the staleness refusal in
 # crates/kaya/build.rs: the generator depends on the kaya crate, so
 # without it a generator edit deadlocks against its own staleness.
-# --locked: the shell body ran a bare `cargo run` for its whole life —
-# `run` resolves dependencies exactly as `build` does, and it was the
-# one cargo invocation outside the (build|check|test) alternation both
-# cargo rules police (audit follow-up 2026-08-31; the rules now name
-# `run` too).
 r = subprocess.run(
     ["cargo", "run", "--locked", "--quiet", "--", str(ROOT),
      *sys.argv[1:]],

@@ -1,5 +1,4 @@
-// The radio conformance scene, JS port. See guests/rust/radio.rs and
-// tools/scenes/radio.steps.
+// The radio conformance scene (tools/scenes/radio.steps).
 
 import * as kaya from "kaya-gui";
 

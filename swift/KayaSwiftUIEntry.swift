@@ -33,12 +33,10 @@ struct KayaApp: App {
 #if os(macOS)
 final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, because an
-        // unbundled binary with no policy set defaults to PROHIBITED (measured:
-        // policy=2, no activation, and a partially unpublished AX tree — merely
-        // skipping the accessory call left the app LOWER, not higher). A
-        // pixel-proof capture needs active-window chrome. The lanes never set
-        // it, so suite runs stay accessory and steal nobody's keyboard.
+        // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, since an unbundled
+        // binary with no policy set defaults to PROHIBITED (measured: policy=2,
+        // no activation, a partly unpublished AX tree). The lanes never set it,
+        // so suite runs stay accessory and steal nobody's keyboard.
         if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
             NSApplication.shared.setActivationPolicy(.regular)
         } else if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {

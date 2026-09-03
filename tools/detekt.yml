@@ -1,20 +1,13 @@
 # The detekt configuration for tools/check-detekt.py.
 #
-# This file is the WHOLE config on purpose — it is passed without
-# --build-upon-default-config, so a rule not named here does not run.
-# The gate is about DEAD CODE, not about style: detekt's default config
-# would also report MagicNumber, LongMethod, FunctionNaming (every
-# @Composable is PascalCase) and friends on this repo, and a gate that
-# fires on things the house style does deliberately is a gate people
-# learn to skip.
+# THE WHOLE CONFIG on purpose — passed without
+# --build-upon-default-config, so a rule not named here does not run. The
+# gate is about DEAD CODE, not style: a gate that fires on what the house
+# style does deliberately is one people learn to skip.
 #
-# The one class it exists for: a value computed and then never used.
-# The Kotlin compiler will never report it — K2 moved the UNUSED_*
-# diagnostics out of the compiler into IDE inspections (KT-69698), so
-# allWarningsAsErrors is false comfort here. It shipped a false green
-# once already: the accessibility lowering was written as a dead
-# `val a11y`, applied to no widget, and compiled clean through
-# check-compose and check-verbs.
+# The Kotlin compiler cannot serve here: K2 moved the UNUSED_*
+# diagnostics into IDE inspections (KT-69698), which is how a dead
+# `val a11y` compiled clean through check-compose and check-verbs.
 build:
   maxIssues: 0
 

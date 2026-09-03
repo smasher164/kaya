@@ -1,12 +1,10 @@
-# ClipProbe's foreign half: the stock-PowerShell side of every
-# assertion, orchestrating the whole run so that EVERYTHING happens in
-# the ONE interactive-session task (each ssh connection has its own
-# window station and its own clipboard — measured; see src/main.rs).
+# ClipProbe's foreign half, orchestrating the whole run inside the ONE
+# interactive-session task (each ssh connection has its own window
+# station and its own clipboard — see src/main.rs).
 #
-# Windows PowerShell 5.1 ONLY: pwsh has neither -Format nor
-# -TextFormatType on Get-Clipboard, nor -AsHtml/-LiteralPath on
-# Set-Clipboard — those capabilities vanish silently there, so the
-# edition is asserted rather than assumed.
+# Windows PowerShell 5.1 ONLY: pwsh silently lacks -Format /
+# -TextFormatType on Get-Clipboard and -AsHtml/-LiteralPath on
+# Set-Clipboard, so the edition is asserted rather than assumed.
 $ErrorActionPreference = 'Continue'
 if ($PSVersionTable.PSEdition -ne 'Desktop') {
     "PROBE FATAL: not Windows PowerShell (Desktop) - the clipboard cmdlet surface is different"

@@ -99,12 +99,11 @@ REMOUNT_SCENE = "todos"
 REMOUNT_STEP = 6
 REMOUNT_LINE = "KAYA_REMOUNT: recreating after step 6 (expect_focused entry#0)"
 
-# Per-leg exceptions, keyed by LEG NAME. `scene` where the name does
-# not spell it; `tablet` for the one lockless-device leg; `remount` as
-# (step, expected-line); `asset_dir` passes KAYA_ASSET_DIR;
-# `appearance` the dark override; `append` extra script steps only
-# true on this device. Everything else derives: `<scene>-<suite>` and
-# the bare suite names are milestone2's.
+# Per-leg exceptions, keyed by LEG NAME: `scene` where the name does not
+# spell it, `tablet` for the one lockless-device leg, `remount` as
+# (step, expected-line), `asset_dir` for KAYA_ASSET_DIR, `appearance` for
+# the dark override, `append` for steps only true on this device.
+# Everything else derives from `<scene>-<suite>`.
 FLAGS = {
     "remount-compose": {"scene": REMOUNT_SCENE,
                         "remount": (REMOUNT_STEP, REMOUNT_LINE)},
@@ -145,9 +144,9 @@ FLAGS = {
     "assets-jvm": {"asset_dir": True},
 }
 
-# Script modifiers, keyed by SCENE and shared by every suite that runs
-# the scene — the two mobile lanes take the same list and the same
-# grammar (two answers to one question is how lanes drift). `cut` is
+# Script modifiers, keyed by SCENE and shared by every suite that runs it
+# — the two mobile lanes take the same list and grammar, since two
+# answers to one question is how lanes drift. `cut` is
 # (verb, keep, extra-for-validation); `append` rides after the cut's
 # prefix. The reasons live at the runner's sites and the plans.
 MODS = {

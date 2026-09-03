@@ -1,7 +1,5 @@
-//! The grid conformance scene: a two-column form (labels aligned across
-//! rows, which nested rows cannot express) over a row whose spacer
-//! pushes its buttons apart. Display-only — the geometry observations
-//! are the whole point. The contract is tools/scenes/grid.steps.
+//! The grid conformance scene (tools/scenes/grid.steps): labels aligned
+//! across rows, which nested rows cannot express.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

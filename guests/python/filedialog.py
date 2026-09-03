@@ -1,28 +1,5 @@
-"""The filedialog conformance scene, Python port — the picker's
-request/result grammar and the capability it hands back (DESIGN.md,
-File dialogs).
-
-The guest does not assert that a dialog closed: it opens the handle it
-was given, reads the file with ORDINARY Python, and writes what it read
-into a signal, so `expect label#0 "1 picked bytes"` fails unless a real
-descriptor came back carrying the real file.
-
-THE FILE IS THE GUEST'S OWN, written before anything is shown, so guest
-and interpreter agree on a path with no runner involvement. The pid
-keeps parallel legs from colliding, and the scene names only the
-BASENAME so one script serves every lane.
-
-THE READ RUNS OFF THE APP THREAD, which is what `open` documents: it
-blocks, and a cloud provider may download the whole file first. The
-property this buys is that the CAPABILITY SURVIVES THE THREAD HOP (a
-security-scoped URL on iOS, a content:// URI plus a JNI reference on
-Android). The worker PARKS between reading and posting and only a click
-releases it, so a guest that read inline is caught by
-`expect label#0 "reading"` and one that worked on the app thread wedges
-everything after.
-
-See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
-"""
+"""The filedialog scene (tools/scenes/filedialog.steps). THE READ RUNS OFF
+THE APP THREAD, because open blocks, and the worker PARKS before posting."""
 
 import os
 import pathlib
@@ -34,21 +11,16 @@ import kaya
 
 app = kaya.App()
 
-# Both halves compute this identically, each in its own language's way.
-# `tempfile.gettempdir()` and NEVER `TMPDIR` — see docs/traps.md, the
-# POSIX-spelling trap that aimed the guest at the root of the current
-# drive on Windows while the picker opened on the real temp directory.
-# Python runs on the three desktops only, so there are no phone arms.
+# `tempfile.gettempdir()` and NEVER `TMPDIR` — docs/traps.md, the
+# POSIX-spelling trap that aimed the guest at the root of a Windows drive.
 picked_dir = pathlib.Path(tempfile.gettempdir()) / f"kaya-picked-{os.getpid()}"
 picked_dir.mkdir(parents=True, exist_ok=True)
-# The decoy MUST sort before picked.txt: pressing Open with nothing
-# selected still returns a file (docs/traps.md), so a backend that skips
-# selection has to get the WRONG one.
+# The decoy MUST sort before picked.txt: Open with nothing selected still
+# returns a file (docs/traps.md).
 (picked_dir / "picked.txt").write_text("picked bytes")
 (picked_dir / "decoy.txt").write_text("decoy")
 
-# The release gate: the app thread sends, the worker receives. The send
-# must NOT wait for the receiver.
+# The send must NOT wait for the receiver.
 released = threading.Event()
 
 
@@ -59,8 +31,6 @@ def picked(files):
         return
 
     def worker():
-        # Redeemed and read on the thread that RECEIVED the handle, which
-        # is the claim: kaya is not in this data path.
         count = len(files)
         try:
             handle, seekable = files[0].open(kaya.wire.FILE_MODE_READ)
@@ -68,8 +38,7 @@ def picked(files):
                 text = f.read().decode()
         except OSError as e:
             text = f"open failed: {e}"
-        # Parks holding the result: work on the app thread would leave
-        # the release click unprocessed and deadlock the scene.
+        # Parks: work on the app thread would starve the release click.
         released.wait()
         app.post(lambda: status.set(f"{count} {text}"))
 
@@ -80,8 +49,7 @@ def picked(files):
 
 
 def ask():
-    # Filters are ADVISORY on every platform — a default view, never a
-    # guarantee — so the guest still validates what it got.
+    # Filters are ADVISORY: the guest still validates what it got.
     kaya.pick_files(filters=[("Text", "txt")], on_result=picked)
 
 

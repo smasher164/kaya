@@ -1,7 +1,5 @@
-//! The scroll conformance scene: the viewport's contract as assertions
-//! — overflow, a real scroll to the end, and a trailing click proving
-//! the scrolled-to content is live rather than painted. The byte-frozen
-//! contract is tools/scenes/scroll.steps.
+//! The scroll conformance scene (tools/scenes/scroll.steps): the trailing
+//! click proves the scrolled-to content is live rather than painted.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
@@ -16,8 +14,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let root = tx
             .column(|tx| {
                 tx.label(status); // label#0
-                // The viewport MUST GROW: an unconstrained one hugs its
-                // content and nothing overflows.
+                // The viewport MUST GROW, or it hugs and nothing overflows.
                 tx.scroll(|tx| {
                     // scroll#0
                     tx.column(|tx| {

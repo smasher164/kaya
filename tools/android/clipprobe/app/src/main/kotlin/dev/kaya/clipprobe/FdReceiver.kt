@@ -8,14 +8,8 @@ import java.io.FileInputStream
 
 /**
  * What ART charges for BUILDING a java.io.FileDescriptor around a raw
- * integer fd — what KayaRing.openPicked must do (findings:
- * docs/clipboard-plan.md).
- *
- * F1  getDeclaredField("descriptor") — visible? settable?
- * F2  getMethod("setInt$")/getInt$ — visible? callable?
- * F3  the arm-shaped roundtrip: Os.open a real file, wrap the raw int
- *     in a hand-built FileDescriptor, read the bytes back through a
- *     FileInputStream over it.
+ * integer fd — what KayaRing.openPicked must do. Findings:
+ * docs/clipboard-plan.md; the F-labels are in the log lines below.
  */
 class FdReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

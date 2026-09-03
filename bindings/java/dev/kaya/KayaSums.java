@@ -68,8 +68,7 @@ public final class KayaSums {
             return out;
         }
 
-        /** The entry's current value — the scrutinee for the pattern
-         * match that precedes a patch — or null for a missing key. */
+        /** The entry's current value, or null for a missing key. */
         @SuppressWarnings("unchecked")
         public T get(KayaApp.Tx tx, K key) {
             for (KayaApp.Entry entry : tx.items(handle)) {
@@ -222,9 +221,6 @@ public final class KayaSums {
             }
             seen[arm.variant] = true;
         }
-        // The arms are the eliminator's shape, so this stays a
-        // combinator; what changed is the For under it, whose one pass
-        // now declares every arm in turn.
         KayaApp.Rows<KayaApp.Widget, KayaApp.Tpl> rows = tx.rows(c.handle, t -> t);
         for (KayaApp.Tpl t : rows) {
             for (Arm<K, T> arm : arms) {

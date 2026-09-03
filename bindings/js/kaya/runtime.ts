@@ -1,11 +1,9 @@
 // kaya runtime for JS guests: loading, the function floor, and the two
 // threads. Hand-written; wire.ts beside it is generated.
 //
-// THE MAIN THREAD IS SURRENDERED AT IMPORT (docs/js-plan.md §3): the
-// process main thread enters kaya_run and becomes the core's UI thread,
-// and the guest's own module runs again in a worker_thread, which IS the
-// kaya-app thread. Importing this module on the main thread therefore
-// never returns; the guest's top-level code only ever runs in the worker.
+// THE MAIN THREAD IS SURRENDERED AT IMPORT (docs/js-plan.md §3), so
+// importing this module on the main thread never returns and a guest's
+// top-level code only ever runs in the worker.
 
 import { existsSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -60,8 +58,6 @@ function loadLibrary(): Floor {
 
 const lib = loadLibrary();
 
-// The stale-artifact guard: this binding was generated from one spec
-// revision and the loaded core must speak the same one.
 if (lib.specHash() !== wire.SPEC_HASH) {
   throw new Error(
     `kaya: library speaks spec 0x${lib.specHash().toString(16)}, this binding was ` +
@@ -69,31 +65,27 @@ if (lib.specHash() !== wire.SPEC_HASH) {
   );
 }
 
-// THE HOST CAPABILITY WORD (kaya.capabilities() is the sugar over it).
-// CAP_AUX_WINDOWS IS THE CORE'S NUMBER WRITTEN AGAIN — there is no header
-// to read it out of. tools/check-sugar-surface.py holds this line to
+// CAP_AUX_WINDOWS is the core's number written again — there is no header
+// to read it out of; tools/check-sugar-surface.py holds it to
 // crates/kaya/src/scene.rs.
 export const CAP_AUX_WINDOWS = 1;
 
-/** The raw capability word. The binding's floor: guests read named
- * booleans off kaya.capabilities() and never see this. */
+/** The raw capability word. */
 export function capabilityBits(): number {
   return lib.capabilities();
 }
 
 // Copy then release, in that order: the addon does both inside
-// occurrenceBlob, and the generated decoder calls this while decoding so
-// no handle ever reaches an app.
+// occurrenceBlob, so no handle ever reaches an app.
 wire.install_occurrence_blob((handle) => lib.occurrenceBlob(handle));
 
 /** The one test seam: bindings/js/kaya_app_checks.ts routes submits into
- * a list so the binding's bookkeeping can be checked without entering
- * the core (the python checks reassign kaya.runtime.submit the same way;
- * an ES module's exports are frozen, so the seam is a property). */
+ * a list. A property rather than a reassignable export, because an ES
+ * module's exports are frozen. */
 export const hooks: { submit: ((records: readonly Uint8Array[]) => void) | null } = { submit: null };
 
-/** Submit one transaction: the concatenation of packed records (tx_*
- * results from wire.ts), applied atomically. */
+/** Submit one transaction: the concatenation of packed records, applied
+ * atomically. */
 export function submit(records: readonly Uint8Array[]): void {
   if (hooks.submit !== null) {
     hooks.submit(records);
@@ -110,9 +102,8 @@ export function submit(records: readonly Uint8Array[]): void {
   lib.submit(tx);
 }
 
-/** Register bulk payload bytes with the core: one copy into core-owned
- * memory, returning the u64 handle the next submit consumes whether
- * referenced or not. The caller's bytes may be dropped. */
+/** Register bulk payload bytes with the core, returning the handle the
+ * next submit consumes whether referenced or not. */
 export function registerBlob(data: Uint8Array): number {
   if (!(data instanceof Uint8Array)) {
     throw new TypeError(`kaya: blob data must be a Uint8Array, not ${describe(data)}`);
@@ -131,10 +122,8 @@ export function describe(v: unknown): string {
   return typeof v;
 }
 
-/** Open an asset by name; 0 is the MISS, and assetMissSentence says why.
- * ZERO RATHER THAN A THROW FROM THE CORE: a panic inside an extern "C"
- * frame is an uncatchable process abort, so the core answers a value and
- * the BINDING throws. */
+/** Open an asset by name; 0 is the MISS, and assetMissSentence says
+ * why. */
 export function assetOpen(name: string): number {
   return lib.assetOpen(name);
 }
@@ -150,9 +139,8 @@ export function assetLen(handle: number): number {
   return lib.assetLen(handle);
 }
 
-/** THE BLOB REDEMPTION: register this asset's bytes into the pending
- * table and get the handle the next submit consumes. The bytes never
- * enter JS — the core clones one refcount. */
+/** Register this asset's bytes into the pending table and get the handle
+ * the next submit consumes; the bytes never enter JS. */
 export function assetBlob(handle: number): number {
   return lib.assetBlob(handle);
 }
@@ -162,26 +150,19 @@ export function assetRelease(handle: number): void {
   lib.assetRelease(handle);
 }
 
-// NAMED FOR THE CARRYING, not for the answering, and deliberately not
-// `assetWhyNot`: tools/check-diagnostics.py reads any *why_not/*WhyNot by
-// that name and holds it to the measured-branch rule, which the function
-// that EARNED the name satisfies (crates/kaya/src/assets.rs). This copies
-// that sentence's bytes and observes nothing.
+// Deliberately not named `assetWhyNot`: tools/check-diagnostics.py reads
+// any *WhyNot by that name and holds it to the measured-branch rule,
+// which crates/kaya/src/assets.rs satisfies. This only copies bytes.
 export function assetMissSentence(name: string): string {
   return lib.assetWhyNot(name);
 }
 
 /** Redeem a picked handle: `{fd, seekable}` — a descriptor `node:fs`
- * takes, and whether it supports random access.
- *
- * BLOCKS, possibly for a long time — a cloud provider may download the
- * file first (DESIGN.md, File dialogs).
- *
- * THE DESCRIPTOR BECOMES NODE'S: close it with fs.closeSync. On Windows
- * the core hands back a HANDLE rather than a CRT descriptor, and node.exe
- * links its C runtime statically, so no descriptor can cross — the
- * streaming route is refused there by name and read/write below are the
- * spelling that works everywhere (docs/js-plan.md §6). */
+ * takes, and whether it supports random access. BLOCKS, possibly for a
+ * long time (DESIGN.md, File dialogs). THE DESCRIPTOR BECOMES NODE'S:
+ * close it with fs.closeSync. node.exe links its C runtime statically,
+ * so no descriptor can cross on Windows — this route is refused there
+ * and read/write below work everywhere (docs/js-plan.md §6). */
 export function openPicked(handle: number, mode: number): { fd: number; seekable: boolean } {
   if (process.platform === "win32") {
     throw new Error(
@@ -224,8 +205,7 @@ export function startPump(cb: (record: wire.Occurrence | null) => void): void {
   });
 }
 
-/** The entry module in the worker: the same file the process was
- * started with, so the guest's own code runs there. */
+/** True in the worker, which IS the kaya-app thread. */
 export const IS_APP_THREAD = !isMainThread;
 
 // The worker's stdio is a stream posted to the parent, whose event loop
@@ -250,25 +230,18 @@ if (!isMainThread) {
 
 /** Enter the core on the main thread after spawning the app worker on
  * the entry module. Never returns: the process exits with kaya_run's
- * code when the app ends. Called at import by index.ts on the main
- * thread, so a guest's module body only ever runs in the worker. */
+ * code when the app ends. */
 export function surrenderMainThread(): never {
   const entry = process.argv[1];
   if (!entry) {
     writeSync(2, "kaya: no entry module — run the app as `node app.ts`\n");
     process.exit(2);
   }
-  // execArgv rides along (type stripping flags, inspector); argv past
-  // the entry is the app's own. workerData marks the spawn so a guest
-  // that reads it can tell the two threads apart.
-  // THE SCENE IS QUEUED BEFORE THE PLATFORM LOOP STARTS, as in every
-  // other binding: the worker flips `ready` from app.run(), by which
-  // point its module body has submitted the scene, and only then does
-  // this thread enter kaya_run. Entering at once raced the worker's
-  // module evaluation — on the Windows lane the harness clicked
-  // `button#0 of 0` at +3ms, before the first batch existed (2026-09-01,
-  // docs/js-plan.md §3). Bounded: a guest that never calls app.run()
-  // still gets its loop, after a sentence.
+  // THE SCENE IS QUEUED BEFORE THE PLATFORM LOOP STARTS: the worker
+  // flips `ready` from app.run() with its module body's scene already
+  // submitted, and only then does this thread enter kaya_run — entering
+  // at once races the worker's module evaluation (docs/js-plan.md §3).
+  // Bounded: a guest that never calls app.run() still gets its loop.
   const ready = new Int32Array(new SharedArrayBuffer(4));
   new Worker(resolve(entry), {
     argv: process.argv.slice(2),
@@ -278,8 +251,7 @@ export function surrenderMainThread(): never {
   if (Atomics.wait(ready, 0, 0, 60_000) === "timed-out") {
     writeSync(2, "kaya: the app thread has not called app.run() within 60s — entering the platform loop anyway\n");
   }
-  // The addon's own exit, not process.exit: the verdict is out and the
-  // pump has been waited for inside run(); Node's teardown of a live
+  // The addon's own exit, not process.exit: Node's teardown of a live
   // worker is the exit-path crash this avoids (docs/js-plan.md §3).
   return lib.exit(lib.run());
 }

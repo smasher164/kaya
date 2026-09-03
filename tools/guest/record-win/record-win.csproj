@@ -1,11 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The Windows recording-mode capturer, built ON the VM (dotnet
-       SDK is provisioned there for the C# suites). GDI-family capture
-       (gdigrab, PrintWindow even with PW_RENDERFULLCONTENT, BitBlt)
-       shows a blank client area for WinUI's DirectComposition content;
-       Windows.Graphics.Capture reads the compositor itself. The
-       -windows TFM brings the CsWinRT projections; Vortice supplies
-       Direct3D11 bindings (managed AnyCPU, works on win-arm64). -->
+  <!-- The Windows recording-mode capturer, built ON the VM. GDI-family
+       capture (gdigrab, PrintWindow even with PW_RENDERFULLCONTENT,
+       BitBlt) shows a BLANK client area for WinUI's DirectComposition
+       content, so this reads the compositor through
+       Windows.Graphics.Capture; Vortice's Direct3D11 bindings are
+       managed AnyCPU and work on win-arm64. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>

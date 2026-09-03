@@ -1,9 +1,5 @@
-// The align conformance scene, Swift port. See guests/rust/align.rs and
-// tools/scenes/align.steps. The row's tall no-baseline image sits ON the
-// baseline (the CSS replaced-element rule) — the construction that
-// separates the alignment modes on every platform's control metrics; the
-// grown, stretched nested column under row#1 is the ruling's own shape
-// (docs/deferred.md, the nested-container GAP).
+// The align scene, Swift port — guests/rust/align.rs,
+// tools/scenes/align.steps.
 
 import Foundation
 
@@ -39,8 +35,7 @@ app.build { tx in
             tx.setA11yId(centered, "centered")
             tx.row {  // row#1: the stretch pair's host
                 tx.label(bind: anchor)  // label#2
-                // column#2: grown into the row's leftover, stretched
-                // across its own breadth.
+                // column#2
                 let fitcol = tx.column(grow: 1, align: .stretch) {
                     tx.label(bind: fit)  // label#3
                     tx.button("wide")

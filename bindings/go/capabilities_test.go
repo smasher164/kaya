@@ -1,12 +1,8 @@
 package kaya
 
-// The capability query's guards (crates/kaya/src/app.rs carries the
-// canonical note). These run with no GUI: tools/check-abort.py runs
-// `go test dev.kaya/bindings/go` on every desktop lane.
-//
-// The re-exec shape is identity_test.go's, for its reason: a root
-// refusal ends the process, not a Go panic (fault.rs's unwatched exit),
-// so nothing in this process can recover it.
+// crates/kaya/src/app.rs carries the canonical note. The re-exec shape is
+// identity_test.go's, for its reason: a root refusal ends the process, not a
+// Go panic (fault.rs's unwatched exit), so nothing here can recover it.
 
 import (
 	"context"
@@ -21,8 +17,8 @@ import (
 	"dev.kaya/bindings/go/internal/rootprobe"
 )
 
-// Named booleans and nothing else. Reflection asks the type itself, so
-// this covers bits nobody has invented yet.
+// Reflection asks the type itself, so this covers bits nobody has invented
+// yet.
 func TestCapabilitiesAreNamedBooleans(t *testing.T) {
 	ct := reflect.TypeOf(Caps{})
 	if ct.NumField() == 0 {
@@ -40,25 +36,23 @@ func TestCapabilitiesAreNamedBooleans(t *testing.T) {
 	}
 }
 
-// The decode, against the word the core actually handed over.
-// capAuxWindows is the header's own KAYA_CAP_AUX_WINDOWS (cgo reads
-// kaya.h), so the same wrong number cannot be written twice.
+// capAuxWindows is the header's own KAYA_CAP_AUX_WINDOWS (cgo reads kaya.h),
+// so the same wrong number cannot be written twice.
 func TestCapabilitiesDecodeTheCoresWord(t *testing.T) {
 	bits := capabilityBits()
 	if want := bits&capAuxWindows != 0; Capabilities().AuxWindows != want {
 		t.Fatalf("AuxWindows is %v where the core's word %#x says %v",
 			Capabilities().AuxWindows, bits, want)
 	}
-	// Catches what a bit test cannot: a symbol that resolved to
-	// something other than kaya_capabilities and returns 0.
+	// Catches what a bit test cannot: a symbol that resolved to something
+	// other than kaya_capabilities and returns 0.
 	if !Capabilities().AuxWindows {
 		t.Fatalf("this desktop reports no auxiliary windows (word %#x) — either the core's own arm changed or kaya_capabilities is not the symbol being called",
 			bits)
 	}
 }
 
-// capsTrap builds the one scene the capability governs and pumps it
-// through the root. It returns only when the root ALLOWED it.
+// capsTrap returns only when the root ALLOWED the scene.
 func capsTrap() {
 	app := NewApp()
 	app.Build(func(tx *Tx) {
@@ -73,9 +67,8 @@ func capsTrap() {
 	os.Exit(0)
 }
 
-// Capabilities inform; walls refuse. The child ignores the answer and
-// calls create_window regardless, so the query cannot pass by agreeing
-// with itself.
+// The child ignores the answer and calls create_window regardless, so the
+// query cannot pass by agreeing with itself.
 func TestTheCapabilityAnswerAndTheWallAgree(t *testing.T) {
 	if trap, set := LookupEnv("KAYA_CAPS_TRAP"); set && trap != "" {
 		capsTrap()

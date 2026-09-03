@@ -29,10 +29,10 @@ class MainActivity : ComponentActivity() {
         KayaCompose.mount(this)
     }
 
-    // The hardware-keyboard route for menu shortcuts (ChromeOS/DeX).
-    // The shell Activity is where Android delivers a modified chord;
-    // this forwards and never decides, so a chord no catalog action
-    // claims falls through to the platform unchanged.
+    // The hardware-keyboard route for menu shortcuts (ChromeOS/DeX):
+    // the shell Activity is where Android delivers a modified chord, and
+    // this forwards without deciding, so an unclaimed chord falls
+    // through to the platform unchanged.
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
         KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 }

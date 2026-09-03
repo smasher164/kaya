@@ -1,14 +1,14 @@
 package kaya
 
-// The save request's two binding-tier facts. The save scene proves both
-// on macOS through a real NSSavePanel, but only there and only with a
-// logged-in GUI session; the narrowing rule is docs/save-plan.md D2.
+// The save scene proves both of these on macOS through a real NSSavePanel,
+// but only there and only with a logged-in GUI session; the narrowing rule is
+// docs/save-plan.md D2.
 
 import "testing"
 
-// Cancel is nil and a destination is the first locator. The wire says
-// "exactly one locator or none" and the result record carries a LIST,
-// so SaveDialogRef.Show narrows it once for every app.
+// The wire says "exactly one locator or none" and the result record carries a
+// LIST, so SaveDialogRef.Show narrows it once for every app: cancel is nil, a
+// destination is the first locator.
 func TestSaveDialogNarrowsToOneOrNone(t *testing.T) {
 	app := NewApp()
 	var dialog uint64
@@ -24,9 +24,7 @@ func TestSaveDialogNarrowsToOneOrNone(t *testing.T) {
 		t.Fatal("Show registered no handler for the save request — the one answer would arrive nowhere")
 	}
 
-	// The empty answer: cancel.
 	app.Build(func(tx *Tx) { deliver(tx, nil) })
-	// One locator: the destination.
 	app.Build(func(tx *Tx) {
 		deliver(tx, []PickedFile{{Handle: 7, Name: "final", LocalPath: "/tmp/final"}})
 	})
@@ -45,9 +43,8 @@ func TestSaveDialogNarrowsToOneOrNone(t *testing.T) {
 	}
 }
 
-// One id space and one live slot, whichever dialog asked: the core
-// answers both kinds on file_dialog_result, so a save request drawing
-// from its own counter would steer one dialog's answer to the other.
+// The core answers both dialog kinds on file_dialog_result, so a save request
+// drawing from its own counter would steer one dialog's answer to the other.
 func TestSaveDialogSharesThePickerIdSpace(t *testing.T) {
 	app := NewApp()
 	var pick, save, next uint64

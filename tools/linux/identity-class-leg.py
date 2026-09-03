@@ -34,17 +34,11 @@ import threading
 import time
 import tomllib
 
-# THE POLL INTERVAL, in seconds, and it is TWO numbers because the first
-# sample and the hundredth are worth different amounts.
-#
-# MEASURED, and this is why the fast one exists: at a flat 1.0s an
-# identity leg that runs for 3 seconds took exactly ONE usable sample —
-# the app's windows appear about 1.2s in, behind a11y-leg.sh's bus wait,
-# and the app is gone by 3s. One sample is one scheduling hiccup away from
-# zero, and zero is this reader refusing a verdict on a leg that was fine.
-# So it polls fast until it has what it needs and then backs off, which
-# keeps the cost off the tail of a 34s wayland leg: eight short-lived
-# processes per X11 sample, and one sway IPC round trip per wayland one.
+# TWO POLL INTERVALS, MEASURED: at a flat 1.0s a 3-second identity leg
+# took exactly ONE usable sample — the windows appear ~1.2s in, behind
+# a11y-leg.sh's bus wait — and one sample is a scheduling hiccup away
+# from a refused verdict on a leg that was fine. Polls fast until it has
+# what it needs, then backs off to keep the cost off a 34s leg's tail.
 INTERVAL_FAST = 0.2
 INTERVAL_SETTLED = 1.0
 
@@ -85,18 +79,13 @@ def run(argv):
 
 
 # ---------------------------------------------------------------- X11 ----
-# THE XIDS COME FROM A SEARCH of the root's children rather than from
-# `_NET_CLIENT_LIST`, because that is a window manager's property and this
-# lane runs no window manager on X11 (one would resize windows and break
-# every expect_window_size leg). Each X11 leg owns its own Xvfb, so the
-# root's children are this process's windows and nobody else's.
-#
-# AND `Map State: IsViewable` IS THE DISCRIMINATOR, measured rather than
-# assumed: an identity leg's root has FIVE children for TWO kaya windows.
-# GDK keeps a 1x1 leader window that carries the launcher's WM_CLASS and is
-# never mapped, a second unnamed 1x1, and xvfb contributes a 10x10 with no
-# class at all. None of those is a window a desktop would ever group, and
-# demanding the declared class on every root child would fail every run.
+# THE XIDS COME FROM A SEARCH of the root's children, not
+# `_NET_CLIENT_LIST`: that is a window manager's property and this lane
+# runs none (one would resize windows and break every expect_window_size
+# leg). AND `Map State: IsViewable` IS THE DISCRIMINATOR, measured: an
+# identity leg's root has FIVE children for TWO kaya windows — GDK's
+# never-mapped 1x1 leader carrying the launcher's WM_CLASS, a second
+# unnamed 1x1, and an xvfb 10x10 with no class at all.
 WINDOW_ID = re.compile(r"^\s+(0x[0-9a-f]+)\b")
 WM_CLASS = re.compile(r'^WM_CLASS\(STRING\)\s*=\s*"(.*)",\s*"(.*)"\s*$')
 
@@ -158,12 +147,9 @@ def matches_x11(words, name):
 # ------------------------------------------------------------ WAYLAND ----
 # No Wayland client can read another client's app_id, so the read goes
 # through sway's IPC — the compositor's own grouping view.
-#
-# THE PID FILTER STAYS. The wayland pool gives every leg its own headless
-# sway (run-suites.sh, 2026-09-02), so the tree holds this leg's windows
-# alone; the filter was written against the one shared compositor, and a
-# reader satisfied by ANY window is the shape that lied then. Filtering by
-# class instead would be circular.
+# THE PID FILTER STAYS even though the pool now gives every leg its own
+# sway: a reader satisfied by ANY window is the shape that lied under the
+# shared compositor, and filtering by class instead would be circular.
 def descendants(root):
     """Every live pid below `root`, inclusive, from /proc."""
     parents = {}
@@ -285,14 +271,11 @@ def main():
                 samples["count"] += 1
                 samples["peak"] = max(samples["peak"], len(found))
                 # AND EVERY WINDOW MUST HAVE YIELDED A LIVE READING: a
-                # mapped GTK window carries its class from realize
-                # onward, so a sample with any placeholder reading is
-                # the DESTROY RACE — windows still listed while their
-                # properties are already gone (measured under the
-                # concurrent matrix, 2026-08-20: the count anchor alone
-                # took a both-windows-stripped teardown sample as the
-                # verdict and failed a leg for shutting down, the exact
-                # state the comment above promises to skip).
+                # mapped GTK window carries its class from realize on, so
+                # a placeholder reading is the DESTROY RACE — measured
+                # 2026-08-20, where the count anchor alone took a
+                # teardown sample as the verdict and failed a leg for
+                # shutting down.
                 settled = settled_x11 if backend == "x11" else settled_wayland
                 if len(found) >= 2 and all(
                     settled(words) for words in found.values()

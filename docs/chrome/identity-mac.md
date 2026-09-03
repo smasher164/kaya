@@ -48,7 +48,7 @@ cross) so a Dock tile carrying one is unmistakable in a screenshot.
 - `.app` bundles exist in this tree ONLY for one-off probes
   (`tools/mac/clipprobe/build.sh`, `tools/mac/undoprobe/build*.sh`,
   `tools/ios/*/build.sh`) — never for a guest, never for a lane leg.
-- Activation policy today (`swift/KayaSwiftUIEntry.swift:39-67`):
+- Activation policy today (`swift/KayaSwiftUIEntry.swift:36-65`):
   `.regular` under `KAYA_ACTIVATE=1` (pixel proofs only), `.accessory`
   under `KAYA_SELFTEST` (every lane leg), and the file records that an
   unbundled binary setting **neither** lands on `.prohibited`.

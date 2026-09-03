@@ -1,66 +1,26 @@
-# The todos round trip: type, add, walk the add back and forward
-# through the Edit menu, then toggle the stamped row's checkbox (a
-# field-level update). Every reading is of ONE label — the derived
-# "items left" signal — because the whole scene is about who keeps it
-# correct.
-#
-# WHAT THE UNDO PART PINS. A derived signal is recomputed by the binding
-# after every mutation and written INTO THAT SAME TRANSACTION, so when
-# the transaction is a named step the core banks the derived value in
-# both directions of it. Undo restores the label together with the
-# collection it derives from, and no binding recomputes anything on the
-# way back: absorb_undo folds the payload and nothing else. The two
-# expectations under the menu activations are that fact observed on
-# every platform instead of reasoned about — docs/deferred.md carries
-# the retracted "a derived signal goes stale after an undo" defect, and
-# these lines are what replaced it.
-#
-# THE ADD IS ONE STEP AND FINISHING THE FORM IS NOT. The guest names the
-# insert transaction and leaves clear+focus in a second one: `clear`
-# inside a group is refused at apply (D4), and an undo that put "buy
-# milk" back in the field beside a todo that is gone would be a state
-# that never existed (docs/undo-plan.md §2).
-#
-# AND THE APP WRITES NO UNDO CODE. No todos guest registers on_undone in
-# any language, and none needs to — the label is core state, so the core
-# restores it. The whole undo surface this scene asks a guest for is the
-# Edit menu and one `undoable` call.
-#
-# TEXT ARRIVES BY set_text HERE, deliberately, where the undo scene
-# insists on real keystrokes: a programmatic write leaves nothing on the
-# field's own native undo stack (D7), so the Edit>Undo below has exactly
-# one possible answer, the ledger's group. Routing is the undo scene's
-# subject; this scene wants the group and only the group.
-# The opening expect doubles as the scene-ready wait
+# The undo/redo pair pins that the CORE restores the derived signal with
+# the collection it derives from: a step that banked the collection
+# alone still reads "1 item left" after the undo (docs/deferred.md).
+# TEXT ARRIVES BY set_text HERE, where undo.steps insists on keystrokes:
+# a programmatic write leaves nothing on the field's native undo stack
+# (D7), so Edit>Undo has exactly one possible answer.
 expect label#0 "0 items left"
 set_text entry#0 "buy milk"
 click button#0
-# THE DERIVE, WRITTEN BY NOBODY'S HANDLER: one todo, not done.
 expect label#0 "1 item left"
 expect entry#0 ""
 expect_focused entry#0
 
-# The step comes back and the label comes back WITH it, out of one
-# banked group holding both the entry and the signal the insert dirtied.
-# WinUI invokes through the item, and invoking a still-disabled item
-# is the stowed-exception crash (docs/traps.md, 0xc000027b). The
-# enablement expect is the synchronization, not just the assertion —
-# same pacing as undo.steps:65.
+# WinUI invokes through the item, and invoking a still-disabled one is
+# the stowed-exception crash (docs/traps.md, 0xc000027b): the enablement
+# expect is the synchronization, not just the assertion.
 expect_menu "Edit>Undo" enabled
 menu_activate "Edit>Undo"
 expect label#0 "0 items left"
 
-# And forward again. A binding that recomputed the derive on the way
-# past instead of letting the core restore it would agree here by
-# accident; what this pair catches is a step that banked the collection
-# and not the signal, which still reads "1 item left" after the undo and
-# never moves again.
 expect_menu "Edit>Redo" enabled
 menu_activate "Edit>Redo"
 expect label#0 "1 item left"
 
-# The restored row is an ordinary row: its key round-tripped through the
-# stamped path, so one field's delta still finds it — and the derive is
-# still wired to the collection after a walk through the history.
 toggle checkbox#0 on
 expect label#0 "0 items left"

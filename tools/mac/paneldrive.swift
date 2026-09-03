@@ -1,21 +1,13 @@
 // Probe: can an NSOpenPanel be driven end to end over the accessibility
 // API — row selected, Open pressed — with no human and no synthesized
-// completion? The answer decides whether the file-dialog scene needs a
-// carve-out or can drive real chrome like alert_choose does.
+// completion? Built by hand with kaya_swiftc; not part of any lane.
 //
-// Built by hand with kaya_swiftc; not part of any lane.
-//
-// IT READS ALL THREE VIEW MODES, like the shipped reader: the browser's
-// identifier, the element a selection goes through and the attribute
-// that sets it all change with the machine-wide
-// `NSGlobalDomain NSNavPanelFileListModeForOpenMode2` (1 columns,
-// 2 list, 3 icons) — see docs/traps.md. validate-mac ROTATES that
-// preference across the filedialog legs, so the mode this runs in is
-// whatever the last run left mid-flight.
-//
+// IT READS ALL THREE VIEW MODES, like the shipped reader: identifier,
+// selection element and setting attribute all change with the
+// machine-wide `NSGlobalDomain NSNavPanelFileListModeForOpenMode2` (1
+// columns, 2 list, 3 icons; docs/traps.md), and validate-mac ROTATES it.
 // The three shapes are an enum with exhaustive switches and no
-// `default`, so a fourth mode fails the build until someone has written
-// both how to read it and how to select in it.
+// `default`, so a fourth mode fails the build.
 import AppKit
 import ApplicationServices
 
@@ -165,14 +157,10 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
     switch shape {
     case .list:
         // AXRows FIRST, children only as the fallback: an AXOutline's
-        // children are its COLUMNS as well as its rows, so a child walk
-        // prints "name / size / kind / dateAdded" beside the files.
-        //
-        // The COLUMN HEADER IS A ROW TOO, and an identical one — role
-        // AXRow, subrole AXOutlineRow — so it comes back beside the
-        // files with column titles for texts. AXDisclosureLevel separates
-        // them: 0 on the header, 1 on the files. A row publishing no
-        // level at all is kept.
+        // children are its COLUMNS as well as its rows. The COLUMN
+        // HEADER IS A ROW TOO — identical role and subrole — and
+        // AXDisclosureLevel separates them: 0 header, 1 files. A row
+        // publishing no level at all is kept.
         rows = ((copyAttr(browser, kAXRowsAttribute as String) as? [AXUIElement])
             ?? children(browser))
             .filter { (copyAttr($0, "AXDisclosureLevel") as? Int) != 0 }

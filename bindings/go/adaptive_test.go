@@ -1,11 +1,10 @@
 package kaya
 
-// The adaptive surface's wire shape (docs/adaptive-layout-plan.md D2,
-// D3). The Go leg of the adaptive scene is not on a lane yet, so these
-// read the records rather than re-calling the helpers that wrote them:
-// the defects they catch are wrong ARGUMENTS — a threshold that rode as
-// an integer, a setter triple out of order, or align's vocabulary where
-// axis's belongs. Headless, like the rest of this package's tests.
+// The adaptive surface's wire shape (docs/adaptive-layout-plan.md D2, D3).
+// The Go leg of the adaptive scene is not on a lane yet, so these read the
+// records rather than re-calling the helpers that wrote them: the defects
+// they catch are wrong ARGUMENTS — a threshold that rode as an integer, a
+// setter triple out of order, or align's vocabulary where axis's belongs.
 
 import (
 	"encoding/binary"
@@ -13,8 +12,8 @@ import (
 	"testing"
 )
 
-// StackWhen is ONE record on the PRIMARY window: an i64 size class and
-// one setter triple flat — widget, prop, value.
+// ONE record on the PRIMARY window: an i64 size class, then one setter
+// triple flat — widget, prop, value.
 func TestStackWhenRidesOneBreakpointRecord(t *testing.T) {
 	app := NewApp()
 	var row uint64
@@ -43,7 +42,6 @@ func TestStackWhenRidesOneBreakpointRecord(t *testing.T) {
 		t.Fatalf("one setter carries %d values, want 3 — the core asserts "+
 			"count*3", n)
 	}
-	// Widgets, then props, then values — thirds by position.
 	want := []any{int64(row), int64(PropAxis), int64(AxisVertical)}
 	flat := next + 16
 	for i, w := range want {
@@ -56,9 +54,8 @@ func TestStackWhenRidesOneBreakpointRecord(t *testing.T) {
 	}
 }
 
-// The dynamic path writes the axis prop with a constant: the same
-// property the breakpoint moves, so a handler's flip and a width
-// crossing are one observable.
+// The dynamic path writes the same property the breakpoint moves, so a
+// handler's flip and a width crossing are one observable.
 func TestSetAxisWritesTheAxisPropConstant(t *testing.T) {
 	app := NewApp()
 	var row uint64
@@ -83,11 +80,9 @@ func TestSetAxisWritesTheAxisPropConstant(t *testing.T) {
 	}
 }
 
-// A chain that outlived its build dies loudly instead of appending into
-// an orphaned record list — Grow's discipline, on the one chain method
-// that queues a record of its own kind. THE SENTENCE IS THE ASSERTION:
-// emit's own chokepoint panics here too, so a test that only demanded A
-// panic passed with this guard deleted (measured while writing it).
+// THE SENTENCE IS THE ASSERTION: emit's own chokepoint panics here too, so a
+// test that only demanded A panic passed with this guard deleted (measured
+// while writing it).
 func TestStackWhenOutsideItsBuildPanicsNamingItself(t *testing.T) {
 	app := NewApp()
 	var row Widget

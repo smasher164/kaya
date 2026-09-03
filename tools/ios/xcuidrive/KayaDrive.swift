@@ -1,17 +1,12 @@
 // THE iOS LANE'S HANDS AND EYES, RESIDENT: one XCUITest per simulator
-// that never finishes on its own, serving every verb the lane once
-// split across simdrive (a host-side walker of SimulatorKit's private
-// accessibility bridge) and clipctl (a spawned pasteboard process) —
-// docs/xcuidrive-plan.md records the measurements that let one public
-// API replace both. It runs as a test because that is the only process
-// Apple lets drive another app — XCUIApplication(bundleIdentifier:)
-// attaches to whatever the lane launched — and it stays resident
-// because every xcodebuild start costs ~10s.
+// that never finishes on its own (docs/xcuidrive-plan.md). It runs as a
+// TEST because that is the only process Apple lets drive another app,
+// and stays RESIDENT because every xcodebuild start costs ~10s.
 //
-// THE PROTOCOL IS simdrive's, unchanged for the guest: the host writes
-// `<dir>/request` (atomically, part-then-rename) holding one verb, this
-// answers in `<dir>/response` whose FIRST LINE is ok/err, written aside
-// and renamed the same way. `<dir>/ready` appears when the loop starts.
+// THE PROTOCOL: the host writes `<dir>/request` (atomically,
+// part-then-rename) holding one verb, this answers in `<dir>/response`
+// whose FIRST LINE is ok/err, written the same way. `<dir>/ready`
+// appears when the loop starts.
 //
 //   attach <bundle-id>          attach to a running app (brings it forward)
 //   frame | describe            the app's frame; its whole element tree, one snapshot
@@ -38,9 +33,7 @@
 //   quit                        the test returns and xcodebuild exits
 //
 // Coordinates are the app frame's points (its origin is the screen's).
-// Built and started by tools/ios/run-sim.py (xcuidrive_build/_start),
-// used by admission's export probe before any leg, and stopped in its
-// cleanup with the process list shown empty.
+// Built and started by tools/ios/run-sim.py, stopped in its cleanup.
 import UIKit
 import XCTest
 
@@ -137,15 +130,11 @@ final class KayaDrive: XCTestCase {
         return false
     }
     func cancelSheet(_ a: XCUIApplication, _ what: String) -> (Bool, String) {
-        // simdrive's rule, kept: a hittable Cancel BUTTON when the picker
-        // offers one; otherwise WALK BACK, since there is no Cancel while
-        // the browser is aimed into a subdirectory (kaya's picker at depth
-        // offers only the back button — labelled with the presenting app's
-        // name — the Actions Menu and More; measured 2026-09-02), and one
-        // appears at the root. The `Other` labelled Cancel under the More
-        // button is never tapped: it opens a MENU. As a last resort the
-        // sheet's pull-down from its list, which dismissed the export
-        // probe's sheet but not kaya's.
+        // A hittable Cancel BUTTON when the picker offers one; otherwise
+        // WALK BACK, since there is no Cancel while the browser is aimed
+        // into a subdirectory and one appears at the root (measured
+        // 2026-09-02). The `Other` labelled Cancel under More is never
+        // tapped: it opens a MENU.
         var rounds = 0
         var offers: [String] = []
         var how = ""

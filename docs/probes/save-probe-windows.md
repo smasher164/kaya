@@ -86,10 +86,10 @@ Driven on the VM against a real GENERIC_WRITE / TRUNCATE_EXISTING handle,
 using each binding's own conversion line (MEASURED):
 
 ```
-GO raw HANDLE = 0x158            # bindings/go/runtime.go:323
+GO raw HANDLE = 0x158            # bindings/go/runtime.go:256
 GO Write -> n=5 err=<nil>          os.NewFile(uintptr(raw), name)
 GO file is now 5 bytes "WROTE"
-PY raw HANDLE = 0x1c0            # bindings/python/kaya/runtime.py:192-199
+PY raw HANDLE = 0x1c0            # bindings/python/kaya/runtime.py:168-175
 PY open_osfhandle -> 3             msvcrt.open_osfhandle(raw, O_RDWR)
 PY write -> 5                      os.fdopen(fd, "wb")
 PY file is now b'WROTE'
@@ -266,7 +266,7 @@ The brief said "the open dialog UIA machinery already in deploy-win.py".
 That is not what is there, and the difference matters: **UI Automation is
 forbidden against this dialog** (`winui/mod.rs:2218-2237`, `9194-9199`,
 and the deliberate absence of the `Win32_UI_Accessibility` feature at
-`crates/kaya/Cargo.toml:69-83`) because attaching any UIA client makes
+`crates/kaya/Cargo.toml:43-50`) because attaching any UIA client makes
 the Shell's DirectUI raise a NONCONTINUABLE
 `RPC_E_CANTCALLOUT_ININPUTSYNCCALL` that kills the JVM leg. The windows
 harness drives the dialog with **classic control ids and POSTED

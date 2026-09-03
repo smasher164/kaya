@@ -1,16 +1,11 @@
-// The undo scene from C#: two tiers, one Edit menu, and one ledger that
-// orders them. Reasoning in docs/undo-plan.md; canonical semantics in
-// guests/rust/undo.rs; frozen script in tools/scenes/undo.steps.
-//
-//     KAYA_SELFTEST=undo KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project guests/csharp
+// The undo scene, C# port — guests/rust/undo.rs, tools/scenes/undo.steps.
 
 using System.Collections.Generic;
 
 static class UndoScene
 {
-    /// kaya names no typing episode, so the empty label is the app's to
-    /// spell (docs/undo-plan.md D8).
+    /// kaya names no typing episode, so the empty label is the app's to spell
+    /// (docs/undo-plan.md D8).
     static string What(string label) => label.Length == 0 ? "typing" : label;
 
     static string KeyList(Tx tx, RecordCollection<Todo> todos)
@@ -21,8 +16,7 @@ static class UndoScene
         return keys.Count == 0 ? "no keys" : $"keys {string.Join(",", keys)}";
     }
 
-    /// The key path of a stamped copy's occurrence: one key for a
-    /// top-level For, minted by InsertFresh.
+    /// The key path of a stamped copy's occurrence.
     static long RowKey(List<object> path) => (long)path[0];
 
     static string NoteList(SortedDictionary<long, string> notes)
@@ -46,8 +40,7 @@ static class UndoScene
         string draft = "";
         var rowNotes = new SortedDictionary<long, string>();
 
-        // One texts run, folded into both mirrors: the empty path is the
-        // draft, a path names a row, and an empty note is no note.
+        // The empty path is the draft, a path names a row, an empty note is none.
         void FoldTexts(List<UndoText> texts)
         {
             foreach (var text in texts)
@@ -80,9 +73,8 @@ static class UndoScene
                     FoldTexts(delta.Texts);
                     t.Write(history,
                         $"undid {What(label)}, {t.Count(todos.Collection)} total");
-                    // history, keys and notes ride ONE transaction: the
-                    // script reads them in that order and must never see a
-                    // half-updated screen.
+                    // history, keys and notes ride ONE transaction: the script
+                    // reads them in that order.
                     t.Write(keys, KeyList(t, todos));
                     t.Write(notes, NoteList(rowNotes));
                 },
@@ -115,8 +107,7 @@ static class UndoScene
                     t.Write(status, $"added {draft}, {t.Count(todos.Collection)} total");
                     t.Write(keys, KeyList(t, todos));
                     t.Focus(field);
-                    // Clearing the field is not part of the step, and Clear
-                    // inside an undoable group is refused at apply
+                    // Clear inside an undoable group is refused at apply
                     // (docs/undo-plan.md D4).
                     app.Post(after => after.Clear(field));
                 });
@@ -160,8 +151,7 @@ static class UndoScene
                     });
                 }
             });
-            // The script types with real keystrokes, so something has to
-            // be holding focus when it does.
+            // The script types with real keystrokes, so something must hold focus.
             tx.Focus(field);
             tx.Mount(root);
         });

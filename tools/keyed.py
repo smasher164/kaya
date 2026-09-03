@@ -6,18 +6,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT
 
 # Run a gate, or skip it because nothing it reads has changed since it
-# last passed.
-#
-#   tools/keyed.py <gate-name> -- <command...>
+# last passed: `tools/keyed.py <gate-name> -- <command...>`.
 #
 # OFF BY DEFAULT: without KAYA_FAST=1 this execs the command, so the
-# matrix never consults a cache. Input sets and why they are
-# deliberately over-approximate live in tools/build-id.py's GATES; a key
-# that omits an input would skip a gate whose answer had changed.
-# Failures are never stored.
-#
-# NO dev_shell_or_die, matching the shell body it replaces: the guard
-# belongs to the GATE this launches, which prints its own refusal.
+# matrix never consults a cache. Input sets live in build-id.py's GATES;
+# failures are never stored. NO dev_shell_or_die: the guard belongs to
+# the GATE this launches, which prints its own refusal.
 
 import os
 import subprocess
@@ -53,12 +47,9 @@ def main(argv):
     stamp = store / name
 
     if os.environ.get("KAYA_FAST", "0") != "1":
-        # CONSULTS NOTHING — the matrix's run answers from the gate
-        # alone — but a PASS is still recorded, so the first KAYA_FAST
-        # run after a full sweep is warm instead of re-running
-        # everything the sweep just proved (measured 2026-08-20: a cold
-        # fast sweep cost 148s against 46s warm, and a day of full runs
-        # had warmed nothing).
+        # CONSULTS NOTHING, but a PASS is still recorded, so the first
+        # KAYA_FAST run after a full sweep is warm (measured 2026-08-20: a
+        # cold fast sweep cost 148s against 46s warm).
         status = run_status(cmd)
         if status == 0:
             stamp.write_text(key, encoding="utf-8")

@@ -1,9 +1,4 @@
-// The gallery scene: a row with a checkbox and its status label, and a
-// row with a slider and its volume label. Both controls own their state
-// and report each change; the app answers by writing the paired signal —
-// the entry scene's uncontrolled contract, with a bool and a float.
-//
-// Build the library first (cargo build), then:
+// The gallery scene, a bool and a float (tools/scenes/gallery.steps).
 //     KAYA_SELFTEST=gallery node guests/js/gallery.ts
 
 import * as kaya from "kaya-gui";
@@ -17,19 +12,17 @@ const TEST_PNG = new Uint8Array([
 ]);
 
 function onToggle(checked: boolean): void {
-  // The label is a formatted signal over this one (kaya.fmt); the
-  // toggle writes the fact and the text follows.
+  // A kaya.fmt signal over this one: the text follows the fact.
   urgent.set(checked);
 }
 
 function onVolume(value: number): void {
-  // Integer percent, so every language's formatting agrees.
+  // Integer percent, so every language's formatting agrees byte for byte.
   volume.set(`volume: ${Math.round(value * 100)}%`);
 }
 
 function onQuarter(): void {
-  // A programmatic write fans out to the control and must NOT come back
-  // as an onVolume occurrence: only the user path and commands emit.
+  // A programmatic write must NOT echo an onVolume occurrence.
   pos.set(0.25);
 }
 
@@ -55,8 +48,7 @@ app.window(() => {
       kaya.button("quarter", { onClick: onQuarter });
     });
     kaya.row(() => {
-      // Deliberately invalid bytes read 0x0: decode failure is the
-      // placeholder class, never a crash, on every backend.
+      // A decode failure is the placeholder class, never a crash.
       kaya.image(TEST_PNG);
       kaya.image(new TextEncoder().encode("not an image"));
     });

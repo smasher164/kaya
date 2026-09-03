@@ -1,13 +1,4 @@
-// The reorder scene: order as collection data, end to end. Each handler
-// repositions an entry BY KEY and never touches a widget, and expect_order
-// reads the toolkit's actual child order back.
-//
-// THE ROOT IS A ROW so the For's container is the scene's only
-// column-kind widget: languages disagree on whether containers are created
-// before or after their children, and column#0 must name the same widget
-// everywhere.
-//
-// Build the library first (cargo build), then:
+// The reorder scene: THE ROOT IS A ROW, so column#0 names one widget.
 //     KAYA_SELFTEST=reorder node guests/js/reorder.ts
 
 import * as kaya from "kaya-gui";
@@ -17,8 +8,6 @@ const Item = kaya.record({ title: String }, "Item");
 const app = new kaya.App();
 
 function onRotate(): void {
-  // The MODEL owns the order, so the handler asks it which key is
-  // first; it never counts widgets.
   const first = items.keys()[0]!;
   items.moveToEnd(first);
 }

@@ -1,8 +1,3 @@
-/* The entry scene from C, on the function floor: the uncontrolled
- * contract end to end. The field owns its text, the app folds
- * text_changed into `draft`, and the clear's own text_changed("")
- * re-enters through that fold. */
-
 #include <kaya.h>
 #include <kaya_wire.h>
 
@@ -10,9 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one; signals and collections each count from 1
- * in their own (DESIGN.md, Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE (tools/check-c-ids.py); the
+ * other spaces each count from 1 in their own. */
 #define SIG_STATUS 1
 #define W_COLUMN 1
 #define W_FIELD 2
@@ -53,8 +47,6 @@ static void build_scene(void) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* Widget-owned state arrives as occurrences: the app's copy is this
-     * buffer, never a widget read. */
     char draft[128] = "";
     unsigned total = 0;
     const uint8_t *rec;

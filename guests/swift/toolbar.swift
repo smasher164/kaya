@@ -1,7 +1,5 @@
-// The toolbar conformance scene, Swift port: the `primary` bit as real
-// window chrome (docs/chrome-plan.md C2). There is no toolbar vocabulary
-// to spell — this guest is the menus guest with a promotion bit and no
-// new call. See guests/rust/toolbar.rs and tools/scenes/toolbar.steps.
+// The toolbar scene, Swift port — guests/rust/toolbar.rs,
+// tools/scenes/toolbar.steps.
 
 import Foundation
 
@@ -11,14 +9,11 @@ var saveEnabled = true
 
 app.build { tx in
     let status = tx.signal(.str("ready"))
-    // The app writes enablement against the MENU ITEM and says nothing
-    // about any button: the promoted button IS that item.
+    // Written against the MENU ITEM: the promoted button IS that item.
     let canSave = tx.signal(.bool(true))
 
-    // CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then each
-    // node's children in append order, depth-first. Save is the first
-    // primary and Find the second, so every host's promoted set is
-    // [Save, Find] however large its own k is.
+    // CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then children
+    // depth-first, so every host promotes [Save, Find].
     let file = tx.menu(
         "File",
         items: [

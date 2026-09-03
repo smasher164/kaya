@@ -44,16 +44,11 @@ def source_text(src, rel, bad, cannot_read):
 
 
 # --- THE CLIP MASKS: the vocabulary the sweep below cannot see. -------
-#
-# That sweep matches
-# APPLY_|KIND_|PROP_|COMMAND_|VALUE_|MENU_KIND_|MPROP_ and stops, so
-# wire.rs's five clip masks (BIT POSITIONS, not ordinals) are copied
-# into both interpreters with nothing pinning either copy. NAME AND
-# VALUE TOGETHER: a copy carrying all five names at four right values
+# That sweep's prefix alternation stops short of wire.rs's five clip
+# masks (BIT POSITIONS, not ordinals), which are copied into both
+# interpreters with nothing pinning either copy. NAME AND VALUE
+# TOGETHER: a copy carrying all five names at four right values
 # compiles, runs and ships one wrong kind.
-#
-# A FUNCTION, so the rule can be pointed at a PERTURBED copy of a
-# mirror — the self-tests below.
 def clip_mirrors(wire_src=None, swift_src=None, kotlin_src=None):
     bad = []
 
@@ -95,27 +90,11 @@ def clip_mirrors(wire_src=None, swift_src=None, kotlin_src=None):
 
 
 # --- THE INK TOLERANCE: one ruled number, three hand-written copies. --
-#
 # `expect_ink` compares within ±1 PER CHANNEL (ruled 2026-08-26,
-# docs/canvas-plan.md §7.2). The reason is measured: a macOS window's
-# backing store carries the DISPLAY's profile, so the core's D2E3F7 is
-# sampled back as D2E2F7 there while Android's PixelCopy reports the
-# core's own bytes, and no one frozen string can exact-match both
-# (docs/traps.md).
-#
-# THREE HARNESSES SPELL THAT NUMBER, and nothing compiles them against
-# each other — check-file-modes' trap one surface over. The danger is
-# not that they drift apart, which a lane would eventually show; it is
-# that they drift TOGETHER, because widening the tolerance makes every
-# ink assertion quieter and no test anywhere gets slower or redder. So
-# the number is pinned at the RULED value, not merely held equal:
-# moving it is the maintainer's call, and this gate is where that
-# conversation starts.
-#
-# THE RULED NUMBER (2026-08-26). One unit is the macOS display-profile
-# round trip; two is a different colour, and every failure expect_ink
-# exists for — a dropped blit, a swizzle, an upside-down or wrongly
-# sized blit — moves a channel by far more than either.
+# docs/canvas-plan.md §7.2, docs/traps.md): a macOS backing store carries
+# the DISPLAY's profile and reads the core's D2E3F7 back as D2E2F7.
+# PINNED AT THE RULED VALUE, not merely held equal — copies drifting
+# TOGETHER make every ink assertion quieter with nothing slower or redder.
 INK_RULED = 1
 
 INK_MIRRORS = [
@@ -165,28 +144,12 @@ def ink_tolerance(harness_src=None, swift_src=None, kotlin_src=None):
 
 
 # --- THE AX OBSERVATION: three harnesses, one spelling. ---------------
-#
-# An observation is the byte-compared verdict text (invariant 6), and
-# `expect_ax` was recorded TWO ways: harness.rs and KayaCompose.kt
-# quote the value, KayaSwiftUI.swift left it bare, so the one verdict
-# nothing compares across platforms was the accessibility one
-# (docs/deferred.md). RULED QUOTED 2026-08-27: two of the three already
-# spelled it that way, harness.rs is the norm the interpreters follow,
-# and the bare form has no measured reason — it is just the original
-# mac depth slice (b560753) never revisited. The quotes are also what
-# make a placeholder answer like <not in the accessibility tree> read
-# as a VALUE rather than as prose.
-#
-# NO LANE CAN FAIL THIS. Every runner greps the verdict for
-# `KAYA_SELFTEST: OK` and never diffs its text (validate-mac.py:622,
-# run-emulator.py, run-sim.py, run-suites.sh), so the spellings can
-# disagree forever with every leg green — which is exactly how they
-# did.
-#
-# The census reads each emitter out of its OWN ARM rather than
-# grepping the file: `Step::ExpectAx(` alone matches harness.rs`s
-# PARSER twice before it reaches the step arm, and a reader anchored on
-# the name found ZERO observations there and agreed with everything.
+# An observation IS the byte-compared verdict text (invariant 6), RULED
+# QUOTED 2026-08-27 (docs/deferred.md). NO LANE CAN FAIL THIS: every
+# runner greps the verdict for `KAYA_SELFTEST: OK` and never diffs its
+# text. The census reads each emitter out of its OWN ARM — `Step::ExpectAx(`
+# alone matches harness.rs's PARSER first, and a reader anchored on the
+# name found ZERO observations there.
 AX_OBS = {"ax": 'ax "<v>"', "ax hint": 'ax hint "<v>"'}
 AX_WANTED = {"ax": 'ax "<v>", wanted "<v>"',
              "ax hint": 'ax hint "<v>", wanted "<v>"'}
@@ -343,25 +306,12 @@ def ax_spelling(harness_src=None, swift_src=None, kotlin_src=None):
 
 
 # --- THE WINDOWED TIER'S LOOP: three links no scene can see. ----------
-#
-# docs/virtualization-plan.md §3/§4. The Compose tier windows its
-# tables — spacer, realized band, spacer, inside its own scroll
-# container — and THREE OF THE FOUR LINKS IN THAT LOOP ARE INVISIBLE TO
-# THE ONE SCENE THAT DRIVES IT. Measured 2026-08-25 on a real emulator,
-# each perturbation watched:
-#
-#   * the visible-range report deleted from the report loop:
-#     windowed.steps stays GREEN, because scroll_to_row moves the band
-#     itself and nothing else in the scene ever scrolls;
-#   * the measured-extent report deleted: GREEN — a height moves the
-#     ARITHMETIC and never the band (the mac tier measured the same);
-#   * both spacers zeroed: GREEN — expect_window reads the row at the
-#     viewport's top, and a tier that lays its rows out at the wrong y
-#     is internally consistent about which row that is.
-#
-# So they are held HERE, the way check-native-undo holds a pair no
-# scene can fail. The SwiftUI half of the same loop lives in
-# tools/check-table-tier.py, which reads the mac driver.
+# docs/virtualization-plan.md §3/§4. THREE OF THE FOUR LINKS ARE
+# INVISIBLE TO THE ONE SCENE THAT DRIVES THEM, each measured 2026-08-25
+# on a real emulator staying GREEN when removed: the visible-range report
+# (scroll_to_row moves the band itself), the measured-extent report (a
+# height moves the arithmetic, never the band), and both spacers zeroed.
+# The SwiftUI half of the loop lives in tools/check-table-tier.py.
 def window_tier(kotlin_src=None):
     bad = []
     if kotlin_src is None:
@@ -431,13 +381,10 @@ def window_tier(kotlin_src=None):
             ("kayaWindowSpacers(offsetPx, extentPx, bandH, tail)",
              "the two spacers stop being one function of those two "
              "numbers"),
-            # kayaFixedRepresentable since 2026-08-28: the same fixed
-            # constraints wherever they are representable, clamped
-            # only past Compose s packing edge (the zero-width
-            # portfolio mount threw; docs/deferred.md s
-            # portfolio-android entry). The third pin holds the helper
-            # honest: fitPrioritizingWidth IS the identity on every
-            # representable input, so the spacer link survives.
+            # kayaFixedRepresentable clamps only past Compose's packing
+            # edge (docs/deferred.md's portfolio-android entry). The third
+            # pin holds the helper honest: fitPrioritizingWidth IS the
+            # identity on every representable input.
             ("kayaFixedRepresentable(totalW, spacers.first)",
              "the TOP spacer stops being that function s answer"),
             ("kayaFixedRepresentable(totalW, spacers.second)",
@@ -456,20 +403,12 @@ def window_tier(kotlin_src=None):
 
 
 # --- THE METRICS CLASS CHANNEL (docs/adaptive-layout-plan.md D8, ruled
-# 2026-08-31): iOS is the ONE platform whose size class the platform
-# itself decides, and the only route it reaches the core is
-# KayaWindowMetricsReporter's report. NO LANE CAN SEE THE READ: the
-# simulator pool is phones, where deriving from the width answers
-# compact exactly as the platform does — a reporter that silently
-# hardcoded NONE (or a mac arm that invented a class) is green on
-# every leg and wrong on an iPad split view. So the reporter's block is
-# held to the shape: the environment read present, both platform
-# classes mapped, every report passing the DERIVED class, a re-report
-# on class change, and the mac arm answering NONE alone. Beside it the
-# RULED BOUNDARY is pinned at 600.0 (the ink tolerance's shape): the
-# scenes hold it only to (560, 900] — portfolio.steps' 560 stack and
-# the adaptive scene's 900 unstack — so a drift inside that band
-# reddens nothing anywhere.
+# 2026-08-31): iOS is the one platform whose size class the platform
+# decides, through KayaWindowMetricsReporter alone. NO LANE CAN SEE THE
+# READ — the pool is phones, where deriving from the width answers compact
+# exactly as the platform does, so a reporter hardcoding NONE is green on
+# every leg and wrong on an iPad. The RULED BOUNDARY is pinned at 600.0:
+# the scenes hold it only to (560, 900].
 def metrics_class(swift_src=None, wire_src=None):
     bad = []
 
@@ -566,21 +505,12 @@ def metrics_class(swift_src=None, wire_src=None):
 
 
 # --- THE VERB TRACE: one ring, three harnesses ------------------------
-#
-# crates/kaya/src/vtrace.rs keeps what every harness verb did, attempt
-# by attempt, and writes it ONLY WHEN THE RUN FAILS to the file
-# KAYA_VERB_TRACE names. The two interpreter harnesses re-implement it
-# by hand (KayaVTrace in swift/KayaSwiftUI.swift and KayaCompose.kt),
-# and a hand-copied diagnostic with no compile-time link is the drift
-# class that let the ax observation sit spelled two ways for months
-# (docs/deferred.md, the flight recorder's BUILD entry). NO LANE CAN
-# SEE IT: the file is read by a human after a failure, so a ring whose
-# line shape drifted, or whose dump crept onto the pass path, reddens
-# nothing. So this holds, per harness: the env var by name, the four
-# line shapes compared FLATTENED (interpolation to <v>), exactly two
-# dump sites — one in the script runner AFTER the green verdict's text
-# and BEFORE the publish, one on the watchdog's fire path right before
-# its exit primitive — and none anywhere else.
+# crates/kaya/src/vtrace.rs writes what every verb did ONLY WHEN THE RUN
+# FAILS (docs/deferred.md, the flight recorder's BUILD entry). NO LANE CAN
+# SEE IT: a human reads the file after a failure. Per harness: the env var
+# by name, the four line shapes compared FLATTENED, and exactly two dump
+# sites — the script runner's, after the green verdict's text and before
+# the publish, and the watchdog's, before its exit primitive.
 VTRACE = "crates/kaya/src/vtrace.rs"
 VTRACE_ENV = '"KAYA_VERB_TRACE"'
 VTRACE_LINES = [
@@ -778,22 +708,12 @@ if metrics_out:
     print("\n".join(metrics_out), file=sys.stderr)
 
 
-# THE GUARD GUARDS ITSELF, in both directions and on BOTH mirrors,
-# perturbing the REAL file rather than a fixture (docs/traps.md: the
-# wayland seat guard's negative test passed VACUOUSLY TWICE).
-#
-# A PERTURBATION THAT DID NOT APPLY PROVES NOTHING, so the substitution
-# count is printed and checked before the copy is used — the prelude's
-# doctor does both.
-#
-# AND THE REFUSAL IS SCORED, NOT JUST COUNTED: an exit code alone is
-# satisfied by any unrelated finding. Each half scores what the
-# perturbation INTRODUCED over the real check's own findings —
-# `named/total`, and the only passing score is 1/1. Left is the
-# refusal, right is the accept direction. Baseline-relative, so a
-# genuinely drifted mirror does not report as a broken guard. A clause
-# that simply PASSED the drifted copy scores 0/0 and fails the same
-# way.
+# The negatives perturb the REAL files, in both directions and on BOTH
+# mirrors. THE REFUSAL IS SCORED, NOT JUST COUNTED: each half scores what
+# the perturbation INTRODUCED over the real check's own findings —
+# `named/total`, only 1/1 passing, baseline-relative so a genuinely
+# drifted mirror does not report as a broken guard, and a clause that
+# simply PASSED the drifted copy scores 0/0 and fails the same way.
 def perturb(label, rel, pattern, repl, want=1):
     """A doctored COPY of a real file's text: the matched group 1 plus
     the literal `repl` (a lambda, never a template, so a backslash in
@@ -1045,22 +965,12 @@ for verb in verbs:
             fail(f'verb "{verb}" missing from {name}')
 
 # --- Target kinds: the core's grammar, both interpreters' tables. -----
-# EVERY KIND IS ADDRESSABLE, which is what makes a universal prop
-# universal: expect_ax, expect_ax_hint, expect_inset, expect_fills and
-# context_open all resolve a `kind@id` through ONE per-interpreter
-# table, and a kind missing from that table answers "no such target"
-# for all of them at once. Measured 2026-08-26: the canvas fan-out
-# added KayaSceneModel.canvases and a private kayaCanvasTarget for the
-# canvas verbs, and never added `canvas` to KayaCompose.kt's
-# kayaWidgetTarget — so `expect_ax canvas@chart` could not resolve on
-# that backend at all, and read in the log like a teardown after the
-# step before it failed.
-#
-# READ OUT OF EACH TABLE'S OWN BLOCK, never grepped from the file: both
-# interpreters spell the kind string in their canvas-only target helper
-# too (`target(spec, "canvas", ...)`), so a file-wide pattern is
-# satisfied by the helper and reports a table it never read — the
-# check-sugar-surface trap one gate over.
+# EVERY KIND IS ADDRESSABLE: five verbs resolve `kind@id` through ONE
+# per-interpreter table, so a kind missing from it answers "no such
+# target" for all of them (measured 2026-08-26 — the canvas fan-out never
+# added `canvas` to KayaCompose.kt's kayaWidgetTarget). READ OUT OF EACH
+# TABLE'S OWN BLOCK: both interpreters spell the kind string in their
+# canvas-only helper too, so a file-wide pattern reads the wrong table.
 def table_body(text, opener, closer, name):
     at = text.find(opener)
     if at < 0:
@@ -1107,10 +1017,8 @@ for name, text, opener, closer, spelling in TARGET_TABLES:
             f"{opener.split('(')[0].split()[-1]} table — every verb "
             f'that resolves a `kind@id` there answers "no such target '
             f'{kind}@..." whatever the scene does')
-    # WATCHED NEGATIVE, on every run: a census nobody has seen refuse
-    # is a guess. The arm is cut out of a COPY of the block and the
-    # substitution count is printed, because a perturbation that did
-    # not apply is a failed test, not a passed one (invariant 3).
+    # WATCHED NEGATIVE, on every run: the arm is cut out of a COPY of
+    # the block, with the substitution count printed.
     victim = spelling.format(kinds[0])
     hits = body.count(victim)
     doctored = g.doctor(f"{name} target census victim removed", body,
@@ -1126,12 +1034,9 @@ for name, text, opener, closer, spelling in TARGET_TABLES:
 # --- Scene substitutions: the THIRD vocabulary. -----------------------
 # A scene path may carry `$TMP` or `$PID`, and an interpreter that does
 # not expand a token uses it as a LITERAL PATH SEGMENT — on macOS the
-# picker then falls back to its last-used location and the scene
-# asserts against whatever that was (docs/traps.md). Silent on every
-# platform.
-#
-# THREE SITES, NOT TWO: harness.rs is the third implementation of these
-# verbs, the one the GTK and WinUI backends run.
+# picker then falls back to its last-used location (docs/traps.md).
+# THREE SITES, NOT TWO: harness.rs is the third implementation, the one
+# the GTK and WinUI backends run.
 subs = sorted(set(
     tok
     for f in (ROOT / "tools" / "scenes").glob("*.steps")
@@ -1160,13 +1065,11 @@ for name, text in (("KayaSwiftUI.swift", swift),
              f"forgot would read as a broken picker")
 
 # --- The step-failed line: THREE harnesses, one spelling. -------------
-# `failures` is named only by the verdict, which is printed LAST, so an
-# abort before it takes the whole list — the log shows a crash with no
-# reason. The rule is that a failure is printed the moment it is
-# final, with the TEXT interpolated: a fixed sentence names no cause
-# and is printed for every one. Two of the three carried this for
-# milestones while KayaCompose.kt did not, and only eyes ever compared
-# them (docs/deferred.md).
+# `failures` is named only by the verdict, printed LAST, so an abort
+# before it takes the whole list and the log shows a crash with no
+# reason. A failure is printed the moment it is final, with the TEXT
+# interpolated: a fixed sentence names no cause and is printed for every
+# one (docs/deferred.md).
 for name, text, interp in (("KayaSwiftUI.swift", swift, r"\\\("),
                            ("KayaCompose.kt", kotlin, r"\$"),
                            ("harness.rs", harness, r"\{")):
@@ -1176,13 +1079,11 @@ for name, text, interp in (("KayaSwiftUI.swift", swift, r"\\\("),
              f"reaches the log only if it is printed when it becomes "
              f"final, not saved for the verdict")
 
-# AND IN THE WRAPPER'S FINAL-FAILURE BRANCH, not merely somewhere in
-# the file. The interpreters print this line twice for different
-# reasons — KayaSwiftUI.swift's clip-breach arm is one — so presence
-# alone is satisfied by a copy that runs on another path, and the
-# branch that matters is the one AFTER the retry gives up. harness.rs
-# has no retryStep (its `poll` retries internally) and is held by the
-# clause above alone.
+# AND IN THE WRAPPER'S FINAL-FAILURE BRANCH, not merely somewhere in the
+# file: the interpreters print this line twice for different reasons, so
+# presence alone is satisfied by a copy on another path. harness.rs has
+# no retryStep (its `poll` retries internally) and is held by the clause
+# above alone.
 for name, text in (("KayaSwiftUI.swift", swift),
                    ("KayaCompose.kt", kotlin)):
     retries = [m.end() for m in re.finditer(r"retryStep = true", text)]
@@ -1204,14 +1105,11 @@ for name, text in (("KayaSwiftUI.swift", swift),
 # typing keeps the rest off the pump).
 rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
                   r"MENU_KIND|MPROP)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
-# THE CANVAS VOCABULARIES, which no gate held until 2026-08-26. They
-# ride the op stream as i64 rather than u32, so the sweep above cannot
-# see them by type, and their prefixes are not in its alternation
-# either — which left five enums hand-copied into two interpreters
-# with nothing checking the numbers, the exact shape check-file-modes
-# exists for (docs/canvas-plan.md §3.6, which asked for this clause).
-# Kotlin spells a Long literal with an L suffix, so the value pattern
-# allows one.
+# THE CANVAS VOCABULARIES ride the op stream as i64 rather than u32, so
+# the sweep above cannot see them by type and their prefixes are not in
+# its alternation — five enums hand-copied into two interpreters, the
+# shape check-file-modes exists for (docs/canvas-plan.md §3.6). Kotlin
+# spells a Long literal with an L suffix, so the value pattern allows one.
 canvas_rows = re.findall(
     r"pub(?:\(crate\))? const ((?:DRAW|PAINT|FILL|TEXT_ALIGN|TEXT_BASELINE)"
     r"_[A-Z_0-9]+): i64 = (\d+);", wire)
@@ -1310,15 +1208,12 @@ for m in re.finditer(r"\bkaya_[a-z_]+\s*\(", swift):
          f"KayaHost's api table (the vtable pins the one live kaya "
          f"instance; direct symbols die on static/RTLD_LOCAL hosts)")
 
-# THE STAMPED-OBSERVATION RULE. A field the harness READS must be
-# written on every platform the interpreter serves, and the way that
-# breaks is silent: the write sits inside a platform conditional, the
-# other platform leaves the field at its initial value, and the verb
-# reads a default that looks like an answer.
-#
-# So each of these fields must have at least one write OUTSIDE every
-# platform conditional. Nesting is tracked rather than grepped,
-# because a write is "conditional" whenever ANY enclosing #if is.
+# THE STAMPED-OBSERVATION RULE: a field the harness READS must be written
+# on every platform the interpreter serves, or the other platform leaves
+# it at its initial value and the verb reads a default that looks like an
+# answer. So each field has at least one write OUTSIDE every platform
+# conditional; nesting is tracked, since a write is "conditional"
+# whenever ANY enclosing #if is.
 STAMPED = ["formFactor", "splitPresentation"]
 lines = swift.splitlines()
 depths, depth = [], 0
@@ -1347,14 +1242,11 @@ if failures:
     for f_ in failures:
         print(f"check-verbs: {f_}", file=sys.stderr)
     raise SystemExit(1)
-# --- THE KEYED TARGET REACHES EVERY TAGGED KIND (2026-09-01) --------
-# `kind@id[key.path]` used to resolve for `column` alone on all four
-# backends — each early-returned on any other kind — so no scene could
-# click a stamped button (docs/deferred.md's keyed-target entry, the
-# portfolio's per-account affordance). Every occurrence tag carries the
-# table tag's own node-and-keys layout, so the arms resolve any tagged
-# kind through it now; this pins each arm's generic spelling and refuses
-# the column-only guard coming back. Byte-frozen markers, doctored away
+# --- THE KEYED TARGET REACHES EVERY TAGGED KIND --------------------
+# Every occurrence tag carries the table tag's own node-and-keys layout,
+# so every arm resolves any tagged kind through it (docs/deferred.md's
+# keyed-target entry). This pins each arm's generic spelling and refuses
+# the column-only guard coming back — byte-frozen markers, doctored away
 # one at a time and watched red.
 KEYED_ARMS = [
     ("crates/kaya/src/gtk.rs",

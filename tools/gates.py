@@ -7,41 +7,24 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE FAST-GATE SWEEP. One entry point, one list, one verdict.
+# THE FAST-GATE SWEEP. One entry point, one list, one verdict
+# (CLAUDE.md's validation ladder, rung 2).
 #
-#   tools/gates.py              build what the gates read, then run
-#                               every gate and print a per-gate line
-#                               and a count
-#   tools/gates.py --list       the list as JSON, for the tools that
-#                               must agree with it (check-gates,
-#                               check-keyed)
-#   tools/gates.py --selftest   watch the count refuse: an under-run,
-#                               a failing gate and a missing script
-#                               must all come back red
+#   tools/gates.py              build what the gates read, then run them
+#   tools/gates.py --list       the list as JSON, for check-gates and
+#                               check-keyed
+#   tools/gates.py --selftest   watch the count refuse
 #
-# TWO REFUSALS HOLD THIS UP.
+# TWO REFUSALS HOLD THIS UP. The sweep KNOWS HOW MANY GATES IT DECLARED
+# and reports success only if that many ran and passed (a hand-rolled
+# shell loop once ran 1 gate of 24 and printed a clean run); and the list
+# and the build are the same file, in that order, since a gate cannot
+# verify an artifact the run has not built yet.
 #
-# 1. The sweep KNOWS HOW MANY GATES IT DECLARED and will not report
-#    success unless that many ran and that many passed. A hand-rolled
-#    shell loop over a variable once ran 1 gate of 24 and printed a
-#    clean run. --selftest watches the refusal fire.
-# 2. The list and the build are the same file, in that order: a gate
-#    cannot verify an artifact the run has not built yet, and the
-#    build's exit status is load-bearing.
-#
-# THERE IS DELIBERATELY NO SUBSET FLAG — a flag that runs part of the
-# list and still prints a verdict is defect 1 with an interface. To
-# run one gate, run that gate; they are all standalone. (KAYA_FAST is
-# the honest version, through tools/keyed.py.)
-#
-# THE SWEEP IS macOS-SHAPED: it builds libkaya.dylib and the SwiftUI
-# interpreter and three gates load them. The other four lanes run
-# their own small per-lane subset instead, and check-gates.py does not
-# police that asymmetry.
-#
-# The census and its EXCLUDED table are importable data since the
-# runner conversion (docs/runner-conversion-plan.md §4 item 4); the
-# --list JSON stays as the interface the consumers already read.
+# THERE IS DELIBERATELY NO SUBSET FLAG — a flag that runs part of the list
+# and still prints a verdict is that defect with an interface. To run one
+# gate, run that gate. THE SWEEP IS macOS-SHAPED: the other four lanes
+# run their own per-lane subset, which check-gates.py does not police.
 
 import itertools
 import json
@@ -114,12 +97,8 @@ GATES = [
     # ONE NODE IS ONE WIDGET, even when its content will not decode: in
     # the declarative backends "render nothing" makes the node LEAVE THE
     # TREE and every positional reader above it reads the wrong child
-    # (docs/deferred.md).
-    # The five ARTIFACT gates are keyed since 2026-08-20: their keys mix
-    # the built libkaya's REAL BYTES (build-id.py's ARTIFACT_GATES), so
-    # "unchanged sources" alone can no longer hand back a stale PASS —
-    # unchanged sources AND unchanged artifact bytes can, and that is an
-    # unchanged answer.
+    # (docs/deferred.md). This and the four ARTIFACT gates below key on
+    # the built libkaya's marker too (build-id.py's ARTIFACT_GATES).
     ("check-empty-child", ["tools/check-empty-child.py"], True, ""),
     # The macOS pane ladder: no column minimum ever declared to SwiftUI,
     # and the middle rung — which no shared scene may sample — walked

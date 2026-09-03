@@ -1,12 +1,5 @@
-// The Go guests' one entry package: a scene table, and two tails that
-// differ only in who owns `main` (main_desktop.go, main_android.go).
-//
-// ONE ARTIFACT CARRIES EVERY SCENE, ON EVERY PLATFORM, and the leg names
-// the one it wants in KAYA_SELFTEST. Android forces the shape:
-// `-buildmode=c-shared` produces one .so per main package
-// (docs/go-mobile-plan.md D3). So the scenes are LIBRARIES — one
-// directory each, package named for the scene, `App()` handing back a
-// built app.
+// ONE ARTIFACT CARRIES EVERY SCENE, named by KAYA_SELFTEST: Android's
+// `-buildmode=c-shared` allows one main package (docs/go-mobile-plan.md D3).
 package main
 
 import (
@@ -58,14 +51,11 @@ import (
 )
 
 // defaultScene is what an EMPTY KAYA_SELFTEST means on a desktop and
-// nowhere else; main_android.go refuses an empty name instead. "1" is
-// milestone2's name, which the legs all still pass.
+// nowhere else; main_android.go refuses an empty name instead.
 const defaultScene = "1"
 
-// scenes is keyed by the name the leg passes in KAYA_SELFTEST. EVERY
-// SCENE THE GO TREE HAS IS IN IT, including the ones a given host cannot
-// run: an unsupported scene should die on the capability gate that
-// rejects it, naming what it could not do, rather than in pick().
+// scenes holds EVERY SCENE THE GO TREE HAS, including ones a host cannot
+// run: those die on the capability gate, not in pick().
 var scenes = map[string]func() *kaya.App{
 	"1":          milestone2.App,
 	"a11y":       a11y.App,
@@ -113,9 +103,8 @@ var scenes = map[string]func() *kaya.App{
 	"window":     window.App,
 }
 
-// pick is the half of the selector both hosts share: a name that is not
-// in the table is a WIRING BUG, and it dies here naming itself. The
-// EMPTY name is the arm the two tails answer differently.
+// pick is the half both hosts share; the EMPTY name is the arm they answer
+// differently.
 func pick(scene string) func() *kaya.App {
 	build, carried := scenes[scene]
 	if !carried {

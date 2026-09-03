@@ -8,20 +8,13 @@ enum KayaVTrace {
     static func dump(_ reason: String) {}
 }
 
-/// THE RUNTIME NEGATIVE FOR THE STEP CEILING: a REAL wedged main thread,
-/// the interpreter's OWN watchdog source (tools/check-harness-ceiling.py
-/// cuts it out of swift/KayaSwiftUI.swift and compiles it with this
-/// file), and the question the four choke measurements asked — does
-/// anything come out of a harness whose hop is never answered?
-///
-/// BOTH HOPS, because the measurement found both: a STEP that never
-/// answers (no verdict at all, macOS and iOS) and, once a verdict IS
-/// published, an EXIT that never runs (linux N=6000, verdict at 103.63s
-/// and killed from outside at 120s).
-///
-/// IN A CHILD PROCESS, because what the guard promises is that the
-/// harness LEAVES: the watchdog publishes and `_exit`s, which the
-/// process it ends cannot report on. This binary is both halves.
+/// THE RUNTIME NEGATIVE FOR THE STEP CEILING: a REAL wedged main thread
+/// and the interpreter's OWN watchdog source (tools/check-harness-ceiling.py
+/// cuts it out of swift/KayaSwiftUI.swift and compiles it with this file).
+/// BOTH HOPS, because the choke measurements found both: a STEP that never
+/// answers (no verdict at all) and, once a verdict IS published, an EXIT
+/// that never runs. IN A CHILD PROCESS, because what the guard promises is
+/// that the harness LEAVES, which the process it ends cannot report on.
 @main
 enum KayaWedgeProbe {
     static let ceilingMs = 1500
@@ -50,9 +43,8 @@ enum KayaWedgeProbe {
                 exit(9)
             }
         }
-        // THE WEDGE: a main thread that never gets back to its run loop,
-        // so nothing enqueued on the main queue can ever run. The
-        // measured one was BUSY rather than asleep (a SwiftUI update
+        // THE WEDGE: a main thread that never gets back to its run loop.
+        // The measured one was BUSY rather than asleep (a SwiftUI update
         // pass over 20000 rows); the hop cannot complete either way, and
         // sleeping keeps the gate off the CPU.
         while true {

@@ -294,9 +294,9 @@ equivalent in Gio's model; you would rebuild the APK per scene.
 
 | | Gio | gomobile | kaya |
 |---|---|---|---|
-| Who calls Go first | `Gio.init` → `Java_org_gioui_Gio_runGoMain`, from the `GioView` constructor on the UI thread (`GioView.java:85`) | framework → `ANativeActivity_onCreate` on the UI thread (`android.c:72`) | shell Activity `onCreate` → `Java_dev_kaya_KayaGo_attach` on the UI thread (`bindings/go/android.go:153 (gone)`) |
-| How `main`/app starts | `go fn()` where `fn = main.main` via linkname (`runmain.go:22-28`) | `go callfn.CallFn(mainPC)` via dlsym (`android.go:102`) | `go func(){ runtime.LockOSThread(); app() }()` (`bindings/go/android.go:184-193 (gone)`) |
-| Is that thread locked? | **No** — a bare goroutine; it migrates across Ms | **No** | **Yes** — `runtime.LockOSThread()`, because the app thread parks inside a C call (`kaya_wait_occurrences` → a pthread condvar) and the occurrence ring is single-consumer (`bindings/go/android.go:184-192 (gone)`) |
+| Who calls Go first | `Gio.init` → `Java_org_gioui_Gio_runGoMain`, from the `GioView` constructor on the UI thread (`GioView.java:85`) | framework → `ANativeActivity_onCreate` on the UI thread (`android.c:72`) | shell Activity `onCreate` → `Java_dev_kaya_KayaGo_attach` on the UI thread (`bindings/go/android.go:121 (gone)`) |
+| How `main`/app starts | `go fn()` where `fn = main.main` via linkname (`runmain.go:22-28`) | `go callfn.CallFn(mainPC)` via dlsym (`android.go:102`) | `go func(){ runtime.LockOSThread(); app() }()` (`bindings/go/android.go:152-161 (gone)`) |
+| Is that thread locked? | **No** — a bare goroutine; it migrates across Ms | **No** | **Yes** — `runtime.LockOSThread()`, because the app thread parks inside a C call (`kaya_wait_occurrences` → a pthread condvar) and the occurrence ring is single-consumer (`bindings/go/android.go:152-160 (gone)`) |
 | What ends `main` | `app.Main()` → `osMain()` → `select {}` (`os_android.go:1327-1329`) | `app.Main(f)` runs the event loop | `App.Serve()` — the dispatch loop |
 | UI thread after attach | returns to the Looper | returns to the Looper | returns to the Looper |
 
@@ -318,7 +318,7 @@ the `jni_AttachCurrentThread` helper at `os_android.go:23-25`).
   thread; the Kotlin side registers the pump natives with
   `KayaRing.attach` and every other native in the package is *registered
   by the native side rather than resolved by name*
-  (`android/kaya/src/main/kotlin/dev/kaya/Kaya.kt:15-18`).
+  (`android/kaya/src/main/kotlin/dev/kaya/Kaya.kt:14-17`).
 
 ### Text input and the soft keyboard — the documented pain
 
@@ -358,7 +358,7 @@ comparison.
 ## §4 — Do Fyne and Gio render their own pixels? (yes, MEASURED)
 
 - **Gio**: `GioView extends SurfaceView` (`app/GioView.java:61`); the GPU
-  backends are `gpu/internal/{opengl,vulkan,metal,d3d11}`; on Android
+  backends are `gpu/internal/{opengl, vulkan, metal, d3d11}`; on Android
   `app/egl_android.go` (EGL/GLES) and `app/vulkan_android.go`. Not one
   Android widget is instantiated for content.
 - **Fyne**: `internal/driver/mobile/driver.go:28` imports
@@ -408,9 +408,9 @@ Why Compose does not block it, from the tree:
   hosting… the core attaches its dispatcher to that thread instead of
   owning it" (`DESIGN.md:2339-2342`).
 - The Compose interpreter is mounted by Kotlin — `activity.setContent {
-  KayaRoot() }` (`android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:850`)
+  KayaRoot() }` (`android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:724`)
   — before the guest is started, and does not depend on how the guest
-  was started (`bindings/go/android.go:131-141` says both orders work).
+  was started (`bindings/go/android.go:99-109` says both orders work).
 - kaya's attach **already does the exact thing Gio's `runMain` does**:
   ```go
   go func() {
@@ -418,7 +418,7 @@ Why Compose does not block it, from the tree:
       app()
   }()
   ```
-  (`bindings/go/android.go:184-193 (gone)`). The only difference from Gio is
+  (`bindings/go/android.go:152-161 (gone)`). The only difference from Gio is
   where `app` comes from — a registration (`kaya.AndroidMain`, an
   `init()`) instead of `//go:linkname main.main`.
 
@@ -432,10 +432,10 @@ So the change is mechanical: add an `//go:build android` file to
 
 1. **`App.Run()` becomes platform-conditional inside the binding, and
    inherits Gio's documented wart.** Today `Run()` is
-   `go a.Serve(); code := Run(); return code` (`bindings/go/app.go:3213-3222`)
-   and the free `Run()` is `kaya_run` (`bindings/go/runtime.go:133-136`),
+   `go a.Serve(); code := Run(); return code` (`bindings/go/app.go:3040-3049`)
+   and the free `Run()` is `kaya_run` (`bindings/go/runtime.go:85-91`),
    which **panics on Android**: `"Android owns the process entry; attach
-   from an Activity instead of kaya_run"` (`crates/kaya/src/capi.rs:817`).
+   from an Activity instead of kaya_run"` (`crates/kaya/src/capi.rs:792`).
    An android arm would run `Serve()` on the calling goroutine. Gio's
    `app.Main()` states the resulting asymmetry outright: *"On most
    platforms Main blocks forever, for Android and iOS it returns
@@ -455,7 +455,7 @@ So the change is mechanical: add an `//go:build android` file to
    pair is invisible to every compiler, which is exactly the shape
    invariant 3 asks for a guard around.
 4. **The scene table stops hiding behind a build tag.** `main_android.go`
-   holds the 31-entry table and `tools/check-steps.py:3342-3441` parses
+   holds the 31-entry table and `tools/check-steps.py:3125-3224` parses
    that file to learn which scenes the APK carries. With one `main` and
    no tags, the aggregate would be an ordinary package (say
    `guests/go/androidapk/main.go (gone)`) whose `main()` reads
@@ -510,11 +510,11 @@ func main() { kaya.Run(App) }
 func init() { kaya.AndroidMain(App) }
 ```
 Cost: ~20 lines in `bindings/go`. `AndroidMain` already exists
-(`bindings/go/android.go:124-129`). No generator, no gate, no new
+(`bindings/go/android.go:96-97`). No generator, no gate, no new
 failure mode. Does not hide the split; shrinks it to its irreducible
 statement.
 
-**M2 — generate the tails.** `tools/gen-guests.py:86` already runs
+**M2 — generate the tails.** `tools/gen-guests.py:78` already runs
 `go generate ./guests/go/...` against `cmd/kaya-gen`, and `--check`
 regenerates in place and fails on any diff. Adding an emitter is one
 generator arm plus one glob in the `GENERATED=(...)` list

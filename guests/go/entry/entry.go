@@ -1,11 +1,5 @@
-// The entry scene from Go: the uncontrolled contract end to end. The
-// field owns its text and reports each edit through OnChange; the app
-// folds those into a plain variable.
-//
-// WHAT THIS SCENE DOCUMENTS IS THE OTHER EVENT SURFACE: the two
-// handlers are registered on the APP after the build, against the
-// widgets the build handed back, rather than riding their constructors
-// the way every other Go guest spells it.
+// The entry scene (tools/scenes/entry.steps). THE OTHER EVENT SURFACE: the
+// handlers register on the APP after the build, not on the constructors.
 package entry
 
 import (
@@ -47,8 +41,7 @@ func App() *kaya.App {
 			tx.Write(status, fmt.Sprintf("nothing to add, %d total", total))
 			return
 		}
-		// NO KEY: a line of text has no identity of its own, so the
-		// binding mints the name and hands it back
+		// NO KEY: the binding mints the name and hands it back
 		// (docs/fresh-key-plan.md).
 		tx.InsertFresh(todos, draft)
 		total := tx.Len(todos)

@@ -1,8 +1,5 @@
-// The layout scene, C# port — the native-default observation vehicle;
-// see guests/rust/layout.rs for the axes it stresses. The two label
-// expects only prove the tree built; the scene asserts no geometry —
-// container targets index by creation order, which legitimately differs
-// per language.
+// The layout scene, C# port — guests/rust/layout.rs,
+// tools/scenes/layout.steps.
 
 static class LayoutScene
 {

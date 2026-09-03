@@ -1,23 +1,8 @@
-// The uniform-abort guard, JVM shape. PURE JVM: no transaction with
-// records may ever commit here, because submitIfAny would call into
-// KayaRing's natives — so every mutating transaction aborts and the
-// committed ones are read-only. That makes it weaker than the desktop
-// checks: rollback and propagation are pinned, a shipped post-abort
-// commit is not.
-//
-// Compile and run (from the repo root, inside `nix develop`; javac
-// resolution mirrors tools/java-typecheck.py — the KayaRing stub
-// stands in for the Android JNI class):
-//   javac -d /tmp/java-abort-check \
-//     tools/guest/java-stub/dev/kaya/KayaRing.java \
-//     bindings/java/dev/kaya/KayaApp.java \
-//     bindings/java/dev/kaya/KayaRecords.java \
-//     bindings/java/dev/kaya/KayaSums.java \
-//     bindings/java/dev/kaya/KayaWire.java \
-//     bindings/java/dev/kaya/KayaGen.java \
-//     tools/checks/java-abort/dev/kaya/IdSpaceCheck.java \
-//     tools/checks/java-abort/AbortCheck.java
-//   java -cp /tmp/java-abort-check AbortCheck
+// The uniform-abort guard, JVM shape; tools/check-abort.py compiles and
+// runs it. PURE JVM: no transaction with records may ever commit here,
+// since submitIfAny would call into KayaRing's natives, so this is weaker
+// than the desktop checks — rollback and propagation are pinned, a
+// shipped post-abort commit is not.
 
 import dev.kaya.KayaApp;
 import java.util.function.Consumer;
@@ -148,10 +133,7 @@ public final class AbortCheck {
 
         // The menu surface, JVM shape. The record list is private to the
         // Tx, so record-level emission asserts live in the desktop
-        // fixtures; what this pins is guard BEHAVIOR — the chain
-        // constructs, the binding's ONE shortcut parser rejects aliases
-        // at record time, a context chain rejects shortcuts, and an
-        // aborted menu transaction propagates.
+        // fixtures; what this pins is guard BEHAVIOR.
         KayaApp.MenuItem[] file = new KayaApp.MenuItem[1];
         Consumer<KayaApp.Tx> menuBuild = tx -> {
             file[0] = tx.window(0).menu("File");

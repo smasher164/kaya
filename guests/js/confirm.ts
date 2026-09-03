@@ -1,9 +1,5 @@
-// The confirm conformance scene, JS port — the modal-alert grammar: TWO
-// dialogs from two buttons (delete has two actions, eject one), each
-// bound to its OWN handler at show time. The result handler rides the
-// REQUEST and retires with its one answer; ids are binding-allocated, so
-// the guest carries no correlation plumbing.
-// See guests/rust/confirm.rs and tools/scenes/confirm.steps.
+// The confirm conformance scene (tools/scenes/confirm.steps): each dialog
+// binds to its OWN handler at show time.
 
 import * as kaya from "kaya-gui";
 

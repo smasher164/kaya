@@ -3,12 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The layout scene from the JVM — the native-default observation
- * vehicle; see guests/rust/layout.rs for the axes it stresses.
- *
- * <p>It asserts NO geometry: container targets index by creation order,
- * which legitimately differs per language. The grow contract is
- * asserted in the grow scene instead.
+ * The layout scene from the JVM — guests/rust/layout.rs,
+ * tools/scenes/layout.steps.
  */
 public final class Layout {
     public static void app() {

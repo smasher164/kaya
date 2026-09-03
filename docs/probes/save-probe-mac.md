@@ -32,24 +32,24 @@ is a **milestone**.
 
 ### The path, end to end (macOS), all MEASURED by reading
 
-1. `crates/kaya/src/wire.rs:225-227` — `FILE_MODE_READ=0`, `WRITE=1`,
+1. `crates/kaya/src/wire.rs:219-221` — `FILE_MODE_READ=0`, `WRITE=1`,
    `READ_WRITE=2`.
-2. `swift/KayaSwiftUI.swift:1897-1945` — the mac half of
+2. `swift/KayaSwiftUI.swift:1666-1712` — the mac half of
    `kayaPresentFileDialog` is `NSOpenPanel`; on `.OK` it answers with
    `urls.map { $0.path }` as locators and `lastPathComponent` as names,
    through `KayaHost.api.emit_file_dialog_result`. THE LOCATOR IS A PLAIN
    POSIX PATH on this platform.
-3. `crates/kaya/src/capi.rs:1720-1739` — `kaya_emit_file_dialog_result`
+3. `crates/kaya/src/capi.rs:1613-1632` — `kaya_emit_file_dialog_result`
    → `register_picked`.
-4. `crates/kaya/src/capi.rs:1678-1683` — the `#[cfg(not(any(android,
+4. `crates/kaya/src/capi.rs:1577-1577` — the `#[cfg(not(any(android,
    ios)))]` arm builds `protocol::PathSource { name, path }`. **macOS takes
    this arm**: no `UrlSource`, no `kaya_swiftui_open_picked` round trip, no
    security scope. (`swiftui_host.rs:41-90` and `protocol.rs:205`
    `picked_mode_code` are both cfg'd to iOS.)
-5. `crates/kaya/src/capi.rs:1403-1435` — `kaya_open_picked` maps the u32 to
+5. `crates/kaya/src/capi.rs:1332-1367` — `kaya_open_picked` maps the u32 to
    `FileMode` (anything else → EINVAL 22), resolves under the lock,
    releases, then opens.
-6. `crates/kaya/src/protocol.rs:230-247` — `PathSource::open`:
+6. `crates/kaya/src/protocol.rs:224-241` — `PathSource::open`:
    `Read → read(true)`, `Write → write(true).truncate(true)`,
    `ReadWrite → read(true).write(true)`; `seekable = metadata().is_file()`;
    `into_raw_fd` transfers ownership.
@@ -68,7 +68,7 @@ Two corrections to the brief, both MEASURED:
   leg or guest asks for a non-read mode.
 - No sandbox is in play. The mac guests are bundle-less command-line
   binaries run from a terminal under `.accessory` policy
-  (`tools/validate-mac.py:99-108` stages them), so App Sandbox — which is opt-in via
+  (`tools/validate-mac.py:89-98` stages them), so App Sandbox — which is opt-in via
   the `com.apple.security.app-sandbox` entitlement (DOCUMENTED:
   https://developer.apple.com/documentation/security/app-sandbox) — is off,
   and the powerbox grant that would otherwise decide writability never
@@ -160,7 +160,7 @@ slot's type to `NSSavePanel?` covers both, and `canChooseFiles` /
 `allowsMultipleSelection` are the two lines that are open-only.
 
 Presentation is the identical call kaya already makes at
-`swift/KayaSwiftUI.swift:1944-1950`:
+`swift/KayaSwiftUI.swift:1711-1717`:
 
 ```swift
 panel.beginSheetModal(for: host) { response in ... }   // .begin { } with no host
@@ -229,7 +229,7 @@ AXSheet id=save-panel  desc="save"
 Four facts to build on:
 
 1. **The sheet identifier is `save-panel`**, where the open panel's is
-   `open-panel` (`swift/KayaSwiftUI.swift:1487`). One more constant, same
+   `open-panel` (`swift/KayaSwiftUI.swift:1293`). One more constant, same
    `kayaPanelFind` walk.
 2. **`OKButton`, `CancelButton` and `where popup` are the SAME identifiers
    the open reader already uses** (`kayaPanelOkId`, `kayaPanelCancelId`,
@@ -368,7 +368,7 @@ header + all generated surfaces move in lockstep), 4 backends (SwiftUI
 mac + iOS's `UIDocumentPickerViewController(forExporting:)`, GTK's
 `GtkFileDialog.save`, WinUI's `FileSavePicker`, Compose's
 `ACTION_CREATE_DOCUMENT`), 8 bindings (MEASURED: 7 binding files mention
-the picker — `bindings/{csharp,go,haskell,java,ocaml,python,swift}` — plus
+the picker — `bindings/{csharp, go, haskell, java, ocaml, python, swift}` — plus
 Rust in `crates/kaya/src/app.rs`) and the C floor, 6 guests today for
 `filedialog` plus the two missing (C, C#/Java share) for the new scene, the
 harness verbs in both interpreters and three `Stage` impls, and the gate

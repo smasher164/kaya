@@ -8,43 +8,22 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # KAYA RASTERIZES, BACKENDS BLIT — the architecture's one rule
-# (docs/canvas-plan.md §1.1, ruling 1), and three things about it that
-# NO SCENE CAN FAIL.
-#
-# 1. A BACKEND THAT INTERPRETED AN OP WOULD DRAW THE SAME PICTURE. That
-#    is the whole difficulty: the lowering design this plan killed
-#    (§1.2, Qt's own migration away from it and MAUI's issue record as
-#    the shipped version) reintroduces itself one arm at a time, and
-#    every canvas observable stays green while it does — the hash is
-#    taken of the CORE's raster, and expect_ink samples pixels that
-#    would still match. So the rule is held statically: outside
-#    crates/kaya/src/canvas.rs no backend may consult a draw op, a
-#    paint role, a fill rule, an align or a baseline. The two
-#    interpreters carry private COPIES of those numbers (check-verbs
-#    holds their values) and may name them in exactly two places — the
-#    definition, and the one vocabulary list that exists so the
-#    compiler does not call them unused.
-#
-# 2. A WRONG PIXEL FORMAT SURVIVES A SYMMETRIC SAMPLE. The core's
-#    buffer is premultiplied RGBA8 (tiny-skia's Pixmap layout) and each
-#    platform takes it differently — GTK's R8g8b8a8Premultiplied and
-#    Android's ARGB_8888 are that layout verbatim, SwiftUI's CGImage
-#    says so with premultipliedLast|byteOrder32Big, and WinUI is the
-#    ONE arm that swizzles, because WriteableBitmap.PixelBuffer is
-#    premultiplied BGRA8. tools/scenes/canvas.steps catches a swap only
-#    at a probe point whose colour is asymmetric: FFFFFF is not, and a
-#    scene whose points all landed on greys would pass a red-blue swap
-#    on every lane. So the format each backend declares is held here,
-#    by name.
-#
-# 3. THE SCALE MUST BE THE TRUE ONE, AND MUST BE REPORTED AT ALL.
-#    Every lane this project runs is at scale 1 (the container's Xvfb)
-#    or at a scale the platform reports exactly, so a backend that read
-#    the ROUNDED scale, or that never reported one, is invisible to all
-#    five. GTK is where it bites: gtk_widget_get_scale_factor is an
-#    integer and GTK's own docs say it "returns the next higher integer
-#    value" under fractional scaling, so a 125% display would raster at
-#    2 and blit a buffer of the wrong size (§5 rule 1).
+# (docs/canvas-plan.md §1.1, ruling 1; CLAUDE.md's gate list), in the
+# three places NO SCENE CAN FAIL.
+# 1. Outside crates/kaya/src/canvas.rs no backend may consult a draw op,
+#    paint role, fill rule, align or baseline: an interpreted op draws
+#    the SAME PICTURE, so §1.2's killed design can come back one arm at
+#    a time with every observable green. The interpreters carry private
+#    COPIES of the numbers (check-verbs holds their values) and may name
+#    one twice: at its definition, and in the one vocabulary list.
+# 2. A WRONG PIXEL FORMAT SURVIVES A SYMMETRIC SAMPLE — canvas.steps
+#    catches a channel swap only where the probe colour is asymmetric —
+#    so each backend's declared format is held here by name.
+# 3. THE SCALE MUST BE THE TRUE ONE AND REPORTED AT ALL: every lane is
+#    at 1.0 or at a scale the platform states exactly, so a rounded or
+#    missing scale is invisible to all five. GTK is where it bites —
+#    gtk_widget_get_scale_factor "returns the next higher integer value"
+#    under fractional scaling, so 125% rasters at 2 (§5 rule 1).
 
 import os
 import platform
@@ -300,24 +279,13 @@ def check(gtk, winui, swiftui, compose):
             f"no lane can tell the two apart")
 
     # --- 4. THE BLIT IS STRICTLY 1:1, AND THE TRACK IS REPORTED. ------
-    #
     # THE STRETCH DEFECT (docs/deferred.md, "A canvas STRETCHES ITS
-    # BUFFER") was exactly this pair going wrong: no backend told the
-    # core what layout had assigned, so the core could only ever
-    # raster at the VIEWBOX, and the backend then drew that buffer
-    # into whatever track it had — pen, glyphs and all. Both halves of
-    # the fix are invisible to every canvas observable, which is why
-    # they are here: the hash and the ink bounds come from the
-    # CANONICAL raster, taken at the viewbox by definition (§7.1), so
-    # a stretched blit and a re-rastered one answer them identically.
-    # `expect_raster` is the runtime half, and it can only ever run
-    # where a scene runs.
-    #
-    # `fixed` is what makes the 1:1 rule load-bearing rather than
-    # incidental (§3.2.1, ruling 2): its whole guarantee is that the
-    # content does not follow the track, and a `.resizable()` anywhere
-    # in this arm would take that away with every observable still
-    # green.
+    # BUFFER") was this pair going wrong. Both halves of the fix are
+    # invisible to every canvas observable — the hash and the ink bounds
+    # come from the CANONICAL raster, taken at the viewbox by definition
+    # (§7.1), so a stretched blit answers them identically. `fixed` is
+    # what makes 1:1 load-bearing (§3.2.1, ruling 2): a `.resizable()`
+    # anywhere in this arm takes its guarantee away, still green.
     swiftui_body = strip_comments(read("swiftui"))
     arm = re.search(r"^(\s*)case kindCanvas:\n(.*?)^\1(case |default:)",
                     swiftui_body, re.S | re.M)
@@ -383,14 +351,12 @@ def check(gtk, winui, swiftui, compose):
                     f'`expect_raster` answers "no track reported" '
                     f"(docs/canvas-plan.md §3.2.1)")
 
-        # WINUI ALONE: the report must come from the PARENT-ASSIGNED
-        # slot. The Image carries an explicit size from the buffer —
-        # that is the 1:1 blit — so a report read off the element's
-        # own box returns the RASTER's size and track==raster by
-        # construction: every observable green, the policy dead. The
-        # mac's "the reader has to sit outside the grow frame", one
-        # toolkit over (docs/deferred.md's struck winui bullet carries
-        # the measured wording).
+        # WINUI ALONE: the report comes from the PARENT-ASSIGNED slot.
+        # The Image carries an explicit size from the buffer — the 1:1
+        # blit — so a report read off the element's own box returns the
+        # RASTER's size and track==raster by construction: every
+        # observable green, the policy dead (docs/deferred.md's struck
+        # winui bullet carries the measured wording).
         if re.search(r"LayoutInformation::GetLayoutSlot\(",
                      strip_comments(winui_text)) is None:
             bad.append(
@@ -408,15 +374,12 @@ def check(gtk, winui, swiftui, compose):
                 f"it is a stretch, and no canvas observable can see "
                 f"one (docs/canvas-plan.md §3.2.1)")
 
-    # THE 1:1 HALF ON GTK, where the blit is this project's own widget
-    # and not the toolkit's. `GtkPicture` cannot express 1:1 — every
-    # member of GtkContentFit scales at some size, and GTK never
-    # allocates a widget more than its parent assigned, so a squeezed
-    # `fixed` canvas meets one of those fits whichever is chosen.
-    # KayaCanvas is the answer: its natural size is the blit and its
-    # snapshot draws the blit at that size. (The TRACK REPORT half is
-    # the SwiftUI clause above, which the canvas milestone generalizes
-    # to all four arms in one edit.)
+    # THE 1:1 HALF ON GTK, where the blit is this project's own widget.
+    # `GtkPicture` cannot express 1:1 — every member of GtkContentFit
+    # scales at some size, and GTK never allocates a widget more than
+    # its parent assigned, so a squeezed `fixed` canvas meets one of
+    # those fits whichever is chosen. KayaCanvas's natural size IS the
+    # blit and its snapshot draws the blit at that size.
     m = re.search(r"\bContentFit\b", gtk_body)
     if m:
         n = gtk_body.count("\n", 0, m.start()) + 1
@@ -582,8 +545,7 @@ def negatives():
 
     # N4c: THE TRACK REPORT REMOVED — the shipped state this closes.
     # Every canvas observable stays green and the size policy is
-    # silently inert. THREE SITES, all replaced — the old shell subn
-    # replaced every one and printed 3.
+    # silently inert. THREE SITES, all replaced.
     s = g.perturb("N4c (the SwiftUI canvas track report removed)",
                   SWIFTUI, r"KayaHost\.canvasTrack\(",
                   "kayaNoTrackReport(", want=3, flags=re.S)
@@ -659,12 +621,10 @@ negatives()
 
 # --- Clause 5: THE INK VERB'S PER-MODE COMPARE, live. -----------------
 # `expect_ink` names both palettes and the HOST picks one, so a mac leg
-# evaluates exactly one of the two arms — which is how a light-only
-# frozen string reached a dark-mode host and reddened a scene nobody
-# had touched (2026-08-27, docs/traps.md). The other arm is reachable
-# only by writing the user's own appearance setting, so both are driven
-# here against the interpreter's real matcher. check-empty-child's
-# shape.
+# evaluates one arm — which is how a light-only frozen string reached a
+# dark-mode host and reddened an untouched scene (2026-08-27,
+# docs/traps.md). The other arm is reachable only by writing the user's
+# own setting, so both are driven here against the real matcher.
 if platform.system() == "Darwin":
     if not (ROOT / "target" / "debug" / "libkaya.dylib").is_file():
         print("check-canvas-blit: target/debug/libkaya.dylib is not "

@@ -1,11 +1,5 @@
-"""The panes conformance scene, Python port — a THREE-pane ceiling as
-assertions (docs/multicolumn-plan.md D1/D5).
-
-Nothing here is panes-specific except `panes=3`, asked for ONCE — the
-stack is the ordinary navigation stack, and how many of the three fit is
-the platform's re-decision at every width. See guests/rust/panes.rs and
-tools/scenes/panes.steps.
-"""
+"""The panes scene (tools/scenes/panes.steps): nothing here is
+panes-specific except `panes=3`, asked for ONCE."""
 
 import sys
 
@@ -35,9 +29,7 @@ def open_content():
 with app.window(title="panes", panes=3):
     caption = kaya.signal("root pane")
     with kaya.column():
-        # Authored ids so the REAL-TREE read can address these:
-        # `expect_ax label#N` reads the platform's own tree, where the
-        # model reads above pass for an arm that ran and drew nothing.
+        # Authored ids: an index read passes for an empty arm.
         kaya.label(bind=caption).a11y_id("root")  # label#0
         kaya.button("open content", on_click=open_content)  # button#0
 

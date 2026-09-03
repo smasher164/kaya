@@ -1,11 +1,8 @@
 // GdkClipProbe — what GDK4 charges for the five clipboard
 // representations, and whether a FOREIGN reader sees what it wrote.
-//
-// Throwaway; nothing builds or runs this but a human. Answers land on
-// stdout under "PROBE". Run via run.sh, which greps sway's debug log for
-// set_selection rejections afterwards. Everything it measured — the
-// missing input serial, the F24 primer, the slashless custom mime type —
-// is in docs/clipboard-plan.md.
+// Everything it measured is in docs/clipboard-plan.md.
+// THROWAWAY; run via run.sh, which greps sway's debug log for
+// set_selection rejections afterwards.
 
 use gtk4::gdk;
 use gtk4::glib;

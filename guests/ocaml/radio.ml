@@ -1,5 +1,5 @@
-(* The radio conformance scene, OCaml port. See
-   guests/rust/radio.rs and tools/scenes/radio.steps. *)
+(* The radio scene, OCaml port — guests/rust/radio.rs,
+   tools/scenes/radio.steps. *)
 
 open Kaya_wire
 open Kaya_app

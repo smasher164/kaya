@@ -1,72 +1,49 @@
-# The clipboard scene: one clip in several representations, and the
-# privileged read that takes one back (DESIGN.md, Clipboard).
-#
-# EVERY ASSERTION HERE CROSSES A PROCESS BOUNDARY. What the guest copies
-# is read back by the platform's own tools, and what the guest reads was
-# put there by them — `pbcopy`/`pbpaste`/`osascript`/`sips` on mac,
-# wl-copy/wl-paste on wayland, the helper app on android. That is not
-# thoroughness for its own sake: kaya's representation set is closed
-# because the LOWERINGS are the hard part (CF_HTML's mandatory offset
-# header, Android's content:// URI for an image, CF_HDROP's struct), and
-# a check where kaya reads what kaya wrote parses its own malformed
-# header perfectly happily. It would be a check that cannot fail for the
-# reason the design exists.
-#
-# THE FILES ARE THE GUEST'S OWN, written before anything is shown, at
-# <scene root>/kaya-clip-<pid>/. Guest and interpreter agree on that
-# path with no runner involvement, and the pid keeps parallel legs from
-# colliding.
+# DESIGN.md, Clipboard. EVERY ASSERTION CROSSES A PROCESS BOUNDARY,
+# because the LOWERINGS are the hard part (CF_HTML's offset header,
+# Android's content:// URI, CF_HDROP's struct) and kaya reading what
+# kaya wrote parses its own malformed header happily. The files are the
+# guest's own, at <scene root>/kaya-clip-<pid>/, so guest and
+# interpreter agree on the path with no runner involvement.
 expect label#0 "ready"
 
 # ---- copying: four representations, one clip ----------------------
-#
-# The consumer takes the richest it understands, which is why an app
-# offers html AND text rather than making kaya derive one from the
-# other. All four come off the same clip.
 click button#0
 expect label#0 "copied"
 expect_clipboard text "kaya clip"
 expect_clipboard html "<b>kaya</b> clip"
 expect_clipboard dev.kaya/note "note=1"
 
-# THE IMAGE IS A DECODED SIZE, never a byte count: every host
-# re-encodes freely between image types — macOS synthesizes tiff, jpeg,
-# gif and four more from one png on demand — so bytes would be a
-# different number on every lane for the same picture.
+# THE IMAGE IS A DECODED SIZE, never a byte count: hosts re-encode
+# freely (macOS synthesizes tiff, jpeg, gif and more from one png), so
+# bytes would differ per lane for the same picture.
 expect_clipboard image "4x4"
 
 # ---- the custom format, read back ---------------------------------
 #
-# THE ONE THING NO FOREIGN PROCESS CAN SEED, and deliberately so: no
-# stock tool on any platform writes an app-defined type, and a helper
-# kaya wrote would be foreign in name only. Its whole specification is
-# that it round-trips within the app and that kaya does nothing clever
-# with the bytes — and the foreign read above already confirmed the
-# bytes really are on the clipboard under that id.
+# THE ONE THING NO FOREIGN PROCESS CAN SEED: no stock tool writes an
+# app-defined type, and a helper kaya wrote would be foreign in name
+# only. The foreign read above already confirmed the bytes are on the
+# clipboard under that id.
 click button#1
 expect label#0 "custom dev.kaya/note note=1"
 
 # ---- reading what another app put there ---------------------------
-#
-# The privileged read, answering content this process did not write.
 clipboard_seed text "from another app"
 click button#2
 expect label#0 "text from another app"
 
-# THE READ IS FILTERED BY WHAT IT ACCEPTS. Nothing but text is on the
-# clipboard now, and this read accepts only files — so the answer is
-# EMPTY, which is the same answer a denied prompt or an unfocused
-# reader gives. The guest does not try to tell them apart because no
-# platform says which.
+# THE READ IS FILTERED BY WHAT IT ACCEPTS: only text is on the board and
+# this read accepts only files, so the answer is EMPTY — the same answer
+# a denied prompt or an unfocused reader gives, which no platform tells
+# apart.
 click button#4
 expect label#0 "empty"
 
 # ---- an image, in and straight back out ---------------------------
 #
-# The seeded picture arrives as bytes, and the guest copies it back so a
-# foreign DECODER can say what it is. A backend that mangled the image
-# on either leg fails here rather than on a byte count nobody can
-# compare across platforms.
+# The guest copies the seeded picture back so a foreign DECODER can say
+# what it is: a backend that mangled either leg fails here rather than
+# on a byte count nobody can compare across platforms.
 clipboard_seed image "$TMP/kaya-clip-$PID/pixel.png"
 click button#3
 expect label#0 "image"
@@ -74,27 +51,23 @@ expect_clipboard image "4x4"
 
 # ---- a pasted file, opened for real -------------------------------
 #
-# ALL THE WAY TO THE BYTES, the filedialog scene's claim in the other
-# direction: a file on the clipboard is the SAME capability the picker
-# returns, so the guest redeems the handle and reads it with its own
-# file API — off the app thread, because `open` blocks. The line below
-# fails unless a real descriptor came back carrying the real file.
+# A file on the clipboard is the SAME capability the picker returns, so
+# the guest redeems the handle off the app thread (`open` blocks) and
+# this fails unless a real descriptor carried the real file.
 clipboard_seed files "$TMP/kaya-clip-$PID/pasted.txt"
 click button#4
 expect label#0 "files pasted.txt pasted bytes"
 
 # ---- the gesture layer: Paste as a standard command ---------------
 #
-# THE PATH AN EDITOR ACTUALLY TAKES, and the one that costs nothing: a
-# gesture is its own authorisation, so no platform charges a permission
-# prompt for it. The privileged read above is the expensive door; this
-# is the free one.
+# A gesture is its own authorisation, so no platform charges a
+# permission prompt for it. The privileged read above is the expensive
+# door; this is the free one.
 clipboard_seed text "pasted by hand"
 
-# A widget that DECLARED what it accepts takes the content itself: the
-# paste hook fires and the app decides. entry#0 stays empty, which is
-# the proof that kaya delivered the content INSTEAD of letting the
-# platform insert it.
+# A widget that DECLARED what it accepts takes the content itself, so
+# entry#0 staying empty is the proof kaya delivered the content INSTEAD
+# of letting the platform insert it.
 click button#5
 expect_focused entry#0
 menu_activate "Edit>Paste"
@@ -102,49 +75,31 @@ expect label#0 "pasted pasted by hand"
 expect entry#0 ""
 
 # A widget that declared NOTHING gets the platform's own insertion, and
-# its ordinary change path reports the result — which is what a plain
-# text editor gets without writing a line of clipboard code.
+# its ordinary change path reports the result.
 click button#6
 expect_focused entry#1
 menu_activate "Edit>Paste"
 expect entry#1 "pasted by hand"
 
-# AND IT WENT WHERE IT WAS AIMED. entry#0 was focused a moment ago and
-# is an editable field like this one, so a paste that dispatches while
-# the platform's focus is still catching up with kaya's lands THERE — and
-# every other assertion in this scene reads the same either way: entry#1
-# stays empty (the symptom) with nothing saying where the content went.
-# Measured 2026-08-04, twice in one mac lane run. This line is what tells
-# "the paste reached nobody" from "the paste reached the wrong widget".
+# AND IT WENT WHERE IT WAS AIMED: entry#0 was focused a moment ago and
+# is an editable field too, so a paste dispatched while the platform's
+# focus is still catching up with kaya's lands THERE (measured
+# 2026-08-04, twice in one mac lane run). Every other assertion here
+# reads the same either way, so this line is what tells "the paste
+# reached nobody" from "the paste reached the wrong widget".
 expect entry#0 ""
 
-# One REAL-TREE read at the end: every assertion above reads kaya's own
-# model or the clipboard, and would pass for an arm that ran and drew
-# nothing.
+# One REAL-TREE read at the end: everything above reads kaya's own model
+# or the clipboard, and would pass for an arm that drew nothing.
 expect_ax entry#1 "field/pasted by hand"
 
 # ---- a STAMPED paste target ---------------------------------------
-#
-# The same two-door contract, one tier down: this entry is a COPY,
-# stamped from a collection row's template, and its accept list came
-# from the TEMPLATE (`accepts` on the node — the prop no binding could
-# spell until docs/tpl-props-plan.md P1). These steps are the first
-# time any backend's instance-paste arm has EVER fired: the registrar
-# existed in seven bindings and the dispatch in all of them, but a
-# paste is only delivered to a widget that declared an accept list,
-# and no stamped copy could — the hook was a silent registrar, kaya's
-# quietest defect class (a branch nobody has seen fire is a guess,
-# invariant 3). label#1 is the app's hook output, prefixed with the
-# copy's OWN KEY: the payload every node handler receives and the
-# proof the paste was delivered as an INSTANCE occurrence, not a live
-# one.
-# `click entry#2` is the first time any scene clicks a non-button, and
-# that is deliberate: clicking a field to focus it is the universal
-# gesture, a stamped copy has no live handle a guest could focus
-# programmatically (instance-addressed commands do not exist in the
-# protocol), and Stage::click is a NATIVE click on any target by
-# contract — a backend that can only click buttons fails here instead
-# of shipping that assumption.
+# The two-door contract on a COPY whose accept list came from the
+# TEMPLATE (docs/tpl-props-plan.md P1); label#1 carries the copy's OWN
+# KEY, the proof the paste arrived as an INSTANCE occurrence. `click
+# entry#2` is the only scene click on a non-button: a stamped copy
+# cannot be focused programmatically, and Stage::click is native on ANY
+# target by contract.
 click entry#2
 expect_focused entry#2
 menu_activate "Edit>Paste"

@@ -1,8 +1,5 @@
-// The styling conformance scene, Swift port — see guests/rust/styling.rs
-// and docs/styling-plan.md slice 1. The brand accent, the role tier and
-// the window inset in one scene, because they are one design. The
-// scene's point: a role changes a widget's chrome and NOT what pressing
-// it does. The byte-frozen contract is tools/scenes/styling.steps.
+// The styling scene, Swift port — guests/rust/styling.rs,
+// tools/scenes/styling.steps.
 
 import Foundation
 
@@ -30,9 +27,8 @@ app.build { tx in
             tx.write(status, .str("saved"))
         }
         tx.setA11yId(save, "save")
-        // Declared so every backend's caption arm runs, like the two
-        // button roles: no universal AX observable, so the walls are
-        // the arms' refusals plus this label's text.
+        // Declared so every backend's caption arm runs: no universal AX
+        // observable, so the walls are the arms' refusals.
         tx.caption("captioned")  // label#2
     }
     tx.mount(root)

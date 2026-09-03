@@ -1,9 +1,5 @@
-// The layout scene, JS port — the native-default observation vehicle;
-// see guests/rust/layout.rs for the axes it stresses. The two label
-// expects (KAYA_SELFTEST=layout) only prove the tree built; the scene
-// asserts no geometry — it has two columns and three rows, and container
-// targets index by creation order, which legitimately differs per
-// language. The grow contract is asserted in the grow scene instead.
+// The layout scene (tools/scenes/layout.steps). It asserts NO geometry:
+// container targets are ordinal, and that differs per language.
 
 import * as kaya from "kaya-gui";
 

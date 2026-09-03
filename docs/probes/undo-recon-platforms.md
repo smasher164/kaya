@@ -40,10 +40,10 @@ argue with or against. See §1.
 
 | backend | `entry` | `textarea` |
 | --- | --- | --- |
-| SwiftUI (mac + iOS) | `TextField` — swift/KayaSwiftUI.swift:7225 | `TextEditor` — swift/KayaSwiftUI.swift:7259 |
-| GTK4 | `gtk4::Entry::new()` — crates/kaya/src/gtk.rs:2505 | `gtk4::TextView::new()` — crates/kaya/src/gtk.rs:2623 |
-| WinUI 3 | `TextBox::new()` — crates/kaya/src/winui/mod.rs:3587 | `TextBox` + `SetAcceptsReturn(true)` — crates/kaya/src/winui/mod.rs:3780-3781 |
-| Compose | Material3 `TextField(value:onValueChange:)` — android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:4060 | same overload, `singleLine = false` — KayaCompose.kt:4031 |
+| SwiftUI (mac + iOS) | `TextField` — swift/KayaSwiftUI.swift:6545 | `TextEditor` — swift/KayaSwiftUI.swift:6572 |
+| GTK4 | `gtk4::Entry::new()` — crates/kaya/src/gtk.rs:2382 | `gtk4::TextView::new()` — crates/kaya/src/gtk.rs:2498 |
+| WinUI 3 | `TextBox::new()` — crates/kaya/src/winui/mod.rs:3067 | `TextBox` + `SetAcceptsReturn(true)` — crates/kaya/src/winui/mod.rs:3225-3226 |
+| Compose | Material3 `TextField(value:onValueChange:)` — android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:3616 | same overload, `singleLine = false` — KayaCompose.kt:4031 |
 
 Every one of them is the platform's real editing control. Nothing here
 is a custom-drawn text engine, so whatever undo the platform ships is
@@ -55,13 +55,13 @@ whole undo fork turns on.** The widget owns its text; each edit goes up
 as an occurrence carrying the widget's identity tag; the app folds it
 into its own model and kaya never reads it back:
 
-- swift/KayaSwiftUI.swift:7218-7224 — "Uncontrolled toward the app: the
+- swift/KayaSwiftUI.swift:6538-6544 — "Uncontrolled toward the app: the
   node mirrors what the user types (SwiftUI needs the binding), and
   every edit is emitted with the entry's identity tag for the app to
   fold into its own model — nothing here is read back."
-- crates/kaya/src/gtk.rs:2498-2504 — same sentence, plus the
+- crates/kaya/src/gtk.rs:2375-2381 — same sentence, plus the
   `apply_quiet` split that keeps programmatic writes from emitting.
-- crates/kaya/src/winui/mod.rs:3571-3575 — same, with the swallow
+- crates/kaya/src/winui/mod.rs:3051-3055 — same, with the swallow
   counter instead of a quiet flag.
 - KayaCompose.kt:4051-4058 — same.
 
@@ -79,18 +79,18 @@ the identical collision for cut/copy/paste: kaya has no selection API,
 so only the widget knows what is selected, so the gesture is a COMMAND
 that kaya routes to the focused native widget and the widget performs
 natively. Enablement is computed by kaya, never handed to the app
-(DESIGN.md:1815-1822; swift/KayaSwiftUI.swift:5728-5733). The five
+(DESIGN.md:1815-1822; swift/KayaSwiftUI.swift:5136-5141). The five
 routing implementations are worth reading as the exact template an undo
 role would reuse:
 
 - macOS/iOS: send the standard selector down the responder chain —
   `kayaSendToFocusedResponder(#selector(NSText.cut(_:)))`,
-  swift/KayaSwiftUI.swift:5919; helper at 5866-5904.
+  swift/KayaSwiftUI.swift:5316; helper at 5866-5904.
 - GTK4: activate the widget's own action —
   `f.activate_action("clipboard.cut", None)` on the toplevel's focus
-  widget, crates/kaya/src/gtk.rs:2236-2240.
+  widget, crates/kaya/src/gtk.rs:2123-2127.
 - WinUI: call the control's own method — `CutSelectionToClipboard()` /
-  `PasteFromClipboard()`, crates/kaya/src/winui/mod.rs:3512-3531.
+  `PasteFromClipboard()`, crates/kaya/src/winui/mod.rs:2992-3011.
 - Compose: invoke the field's own semantics action —
   `SemanticsActions.CutText`, KayaCompose.kt:2072-2081, explicitly
   described there as "this host's responder chain".
@@ -167,7 +167,7 @@ outright ([Apple, CommandGroupPlacement](https://developer.apple.com/documentati
 [SwiftUI menu-bar survey](https://danielsaidi.com/blog/2023/11/22/customizing-the-macos-menu-bar-in-swiftui)).
 kaya already reaches into the same main menu for its own catalog —
 `kayaSyncMacMenuBar()` inserts an owned NSMenu segment beside the dress
-(swift/KayaSwiftUI.swift:6383-6420) and moves the `settings` role into
+(swift/KayaSwiftUI.swift:5758-5794) and moves the `settings` role into
 the application menu (6421-6439) — so a second dress-relocation for an
 undo role would be a known move, not a new mechanism. Note
 DESIGN.md:1914 currently says "About, Quit, and the standard Edit menu
@@ -218,9 +218,9 @@ the field editor while a text control is focused, so the text control's
 undo wins by responder proximity. kaya's own chord dispatch on macOS is
 deliberately the same mechanism — "on macOS dispatch is the real
 `NSMenu` key-equivalent walk and the NSMenuItems carry the chords"
-(swift/KayaSwiftUI.swift:5706-5708), driven through
+(swift/KayaSwiftUI.swift:5118-5118), driven through
 `NSApp.mainMenu?.performKeyEquivalent(with: event)`
-(swift/KayaSwiftUI.swift:6651). A kaya undo item carrying Cmd-Z would
+(swift/KayaSwiftUI.swift:6012). A kaya undo item carrying Cmd-Z would
 therefore be walking the SAME table that already holds the dress Edit
 menu's Cmd-Z — two items, one chord, in one menu bar. That is a
 first-match-wins ambiguity kaya would be creating for itself, and it is
@@ -268,9 +268,9 @@ kaya's design has to answer all three or answer none.
    [UIMenuBuilder walkthrough](https://zachsim.one/blog/2019/8/4/customising-the-menu-bar-of-a-catalyst-app-using-uimenubuilder)).
    kaya already owns a `buildMenu(with:)` override — on the app
    delegate, subclassing `UIResponder` precisely so it gets asked
-   (swift/KayaSwiftUIEntry.swift:47-56) — and today it only ADDS
+   (swift/KayaSwiftUIEntry.swift:45-54) — and today it only ADDS
    (`builder.insertSibling(menu, afterMenu: .view)`,
-   swift/KayaSwiftUI.swift:6900). So the removal/replacement hook is
+   swift/KayaSwiftUI.swift:6247). So the removal/replacement hook is
    already in kaya's hands and costs one line.
 2. **Shake to undo.** Default-on, and it is an ALERT, not a menu:
    > "By default, users trigger an undo operation by shaking the
@@ -328,7 +328,7 @@ Catalyst defect where `setActionName:` is ignored
 Cmd-Z reaches the focused text input first (hardware keyboard on
 iPad/simulator). kaya's iOS chord dispatch is NOT the platform's — "on
 iOS the `shortcut` verb traverses THIS table (the one a hardware key
-event would feed)" (swift/KayaSwiftUI.swift:5704-5709,
+event would feed)" (swift/KayaSwiftUI.swift:5117-5118,
 `kayaShortcutItems`). That matters for the harness: on iOS a kaya undo
 role would be *dispatched by kaya's own table*, so a scene asserting
 "Cmd-Z undid the typing" would be asserting on kaya's dispatch, not on
@@ -344,7 +344,7 @@ names.
 This is the strongest finding in the whole recon, because it is
 default-on and already shipping in kaya today.
 
-- kaya's `entry` is `gtk4::Entry` (crates/kaya/src/gtk.rs:2505), which
+- kaya's `entry` is `gtk4::Entry` (crates/kaya/src/gtk.rs:2382), which
   implements `GtkEditable` and delegates to an internal `GtkText`
   (kaya's own comment at gtk.rs:4943 already knows this: "A focused
   GtkEntry delegates to its internal GtkText"). `GtkEditable:enable-undo`
@@ -430,7 +430,7 @@ kaya's programmatic text writes go straight into the widget:
   write, guarded only by `apply_quiet` — and that guard is explicitly
   about occurrences, not undo: "Quiet: a property write is
   configuration, not a user edit (see apply_quiet)"
-  (crates/kaya/src/gtk.rs:3481-3492).
+  (crates/kaya/src/gtk.rs:3319-3320).
 - `CommandKind::Clear` does the same with the guard deliberately OFF
   (gtk.rs:3920-3931).
 
@@ -448,7 +448,7 @@ design pass regardless of which fork is taken. **PROBE ITEM P3.**
 
 ### 5a. What our widgets already have
 
-Both kaya text kinds are `TextBox` (crates/kaya/src/winui/mod.rs:3587
+Both kaya text kinds are `TextBox` (crates/kaya/src/winui/mod.rs:3067
 and 3780). The undo surface is confirmed **in kaya's own generated
 metadata bindings**, which is stronger evidence than the docs site:
 `impl TextBox` (crates/kaya/src/winui/bindings.rs:106056) carries
@@ -488,14 +488,14 @@ with `ContextMenuOpening` as the documented interception point (same
 page). kaya's menu model on Windows is entirely app-owned: "The WINDOW
 anchor is a real in-window MenuBar in its own Auto row of the window
 shell Grid; the WIDGET/NODE anchor is a MenuFlyout set as the element's
-ContextFlyout" (crates/kaya/src/winui/mod.rs:1569-1572). So on Windows
+ContextFlyout" (crates/kaya/src/winui/mod.rs:1275-1275). So on Windows
 there is nothing to route TO — a kaya undo command would be a kaya menu
 item calling `TextBox::Undo()` directly, exactly as
 `perform_clipboard_role` calls `CutSelectionToClipboard()`.
 
 **Open question specific to kaya's build:** kaya replaces the TextBox
 style with a minimal template (`ENTRY_STYLE_XAML`,
-crates/kaya/src/winui/mod.rs:521-536) because "everything else of the
+crates/kaya/src/winui/mod.rs:447-460) because "everything else of the
 default chrome is styling this unpackaged app cannot resource-resolve",
 and the file records that the built-in template's deferred theme XAML is
 what needs the metadata provider to resolve `TextCommandBarFlyout`
@@ -534,7 +534,7 @@ not through accelerators:
 > — [microsoft-ui-xaml issue #1435](https://github.com/microsoft/microsoft-ui-xaml/issues/1435)
 
 kaya attaches real `KeyboardAccelerator`s to its menu items
-(`attach_accelerator`, crates/kaya/src/winui/mod.rs:2604-2654; the
+(`attach_accelerator`, crates/kaya/src/winui/mod.rs:2192-2224; the
 dispatch note at 1573). **So a kaya menu item spelling Ctrl+Z would very
 likely fire IN ADDITION to the focused TextBox's own undo — two undos
 per keypress.** That is a mechanically different failure from macOS's
@@ -586,7 +586,7 @@ Two things follow, and they are both important:
    other four; Compose is where it is provable from source.)
 
 **The version wall.** kaya pins `compose-bom:2024.10.01`
-(android/kaya/build.gradle.kts:53), which maps to foundation **1.7.8**
+(android/kaya/build.gradle.kts:49), which maps to foundation **1.7.8**
 and material3 **1.3.2**
 ([BOM mapping](https://developer.android.com/develop/ui/compose/bom/bom-mapping)).
 So:

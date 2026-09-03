@@ -11,31 +11,13 @@ import java.nio.file.Paths;
 import java.util.function.Supplier;
 
 /**
- * The save conformance scene from the JVM: the ROUND TRIP an editor
- * walks (docs/save-plan.md D5) — open a file, save back to it, save AS a
- * new destination, reopen both. See guests/rust/save.rs and
- * tools/scenes/save.steps.
- *
- * <p>EVERY ASSERTION IS A READ-BACK OFF THE DISK, through the HANDLE
- * and never through {@code localPath}, which is empty on both phones.
- *
- * <p>THE WORK RUNS OFF THE APP THREAD — open blocks. The workers MUST
- * be daemon threads: a parked non-daemon thread keeps the JVM alive,
- * which turns a FAILING run into a timeout instead of a report.
- *
- * <p>NO EXTENSIONS ON ANY NAME and NO FILTER ON EITHER REQUEST: a save
- * panel hides a known extension per the user's Finder preference, and
- * with {@code allowedContentTypes} set it APPENDS the first allowed
- * extension to an extension-less name.
+ * The save scene from the JVM — guests/rust/save.rs, tools/scenes/save.steps.
  */
 public final class Save {
     private Save() {}
 
-        /**
-         * The file the user OPENED and the destination they later NAMED,
-         * held as HANDLES: the phones have no re-openable path at all. In
-         * an object rather than two locals because a lambda captures values.
-         */
+    /** The file OPENED and the destination later NAMED, held as HANDLES: the
+     * phones have no re-openable path at all. */
     private static final class Handles {
         KayaApp.PickedFile source;
         KayaApp.PickedFile destination;
@@ -44,10 +26,8 @@ public final class Save {
     public static void app() {
         KayaApp app = new KayaApp();
 
-        // The decoy MUST sort before the file the scene opens
-        // (docs/traps.md, "Pressing Open with nothing selected still
-        // returns a file"), so a backend that skips selection gets the
-        // wrong one and fails the byte assertion too.
+        // The decoy MUST sort before the file the scene opens (docs/traps.md,
+        // "Pressing Open with nothing selected still returns a file").
         Path dir = sceneDir();
         try {
             Files.createDirectories(dir);
@@ -81,13 +61,8 @@ public final class Save {
                                 })
                                 .show());
                 tx.button("save", inner -> { // button#1
-                    // Save-back needs no dialog: the handle the user
-                    // chose the file with is writable. A null handle is
-                    // an open that never landed (cancelled, or the
-                    // dialog swallowed under load) — its OWN sentence,
-                    // never an NPE: the crash took the process and
-                    // masked the real failure for four sightings
-                    // (docs/deferred.md, save-jvm WATCH).
+                    // A missing handle gets its OWN sentence, never an NPE: the
+                    // crash masks the real failure (docs/deferred.md, save-jvm WATCH).
                     KayaApp.PickedFile file = held.source;
                     if (file == null) {
                         inner.write(status, "nothing open to save");
@@ -97,8 +72,7 @@ public final class Save {
                             () -> "saved " + writeBack(file, "second draft"));
                 });
                 tx.button("save as", inner -> // button#2
-                        // The suggested name the dialog OPENS with; the
-                        // scene types over it.
+                        // The name the dialog OPENS with; the scene types over it.
                         inner.saveFile("copy")
                                 .onResult((t, file) -> {
                                     if (file == null) {
@@ -112,9 +86,8 @@ public final class Save {
                                 })
                                 .show());
                 tx.button("reopen", inner -> { // button#3
-                    // BOTH, in order: a save that went to the wrong
-                    // handle passes every earlier step and fails here.
-                    // The null guard, same reason as button#1's.
+                    // BOTH, in order: a save-as that wrote to the wrong handle
+                    // passes every earlier step and fails here.
                     KayaApp.PickedFile first = held.source;
                     KayaApp.PickedFile second = held.destination;
                     if (first == null || second == null) {
@@ -151,33 +124,21 @@ public final class Save {
     }
 
     /** Write through a handle and report what the file says AFTERWARDS.
-     *
-     * <p>FILE_MODE_WRITE truncates, on a picked file and a save
-     * destination alike. The stream is closed before the reopen, so the
-     * bytes read back are the FILE's and not a buffer's. */
+     * FILE_MODE_WRITE truncates, and the stream closes before the reopen. */
     private static String writeBack(KayaApp.PickedFile file, String bytes) {
         try (KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_WRITE)) {
             opened.sink().write(bytes.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            // The message reaches the label verbatim: without the
-            // core's create, a save destination answers "No such file
-            // or directory" here (docs/save-plan.md D1).
+            // Verbatim to the label: without the core's create a destination
+            // answers ENOENT here (docs/save-plan.md D1).
             return "save failed: " + e.getMessage();
         }
         return readBack(file);
     }
 
-        /**
-         * Where the scene's files live: {@code <temp>/kaya-save-<pid>}, the
-         * same directory the interpreter expands {@code $TMP/kaya-save-$PID}
-         * to.
-         *
-         * <p>TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
-         * Java's java.io.tmpdir ignores TMPDIR on macOS (docs/traps.md,
-         * "java.io.tmpdir"). THE PHONES USE THE SHARED COLLECTION — a
-         * document provider cannot see an app's private storage — and a JVM
-         * guest has no cfg(), so Android is detected by the vendor string.
-         */
+    /** Where the scene's files live. TMPDIR FIRST (docs/traps.md,
+     * "java.io.tmpdir"); THE PHONES USE THE SHARED COLLECTION, detected by the
+     * vendor string since a JVM guest has no cfg(). */
     private static Path sceneDir() {
         String tmp = System.getenv("TMPDIR");
         if (tmp == null || tmp.isEmpty()) {

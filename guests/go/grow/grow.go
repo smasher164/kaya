@@ -1,6 +1,5 @@
-// The grow conformance scene, Go port — every child of the column and
-// of the row is a grower, so each split is exactly weight/Σweight.
-// See guests/rust/grow.rs and tools/scenes/grow.steps.
+// The grow conformance scene (tools/scenes/grow.steps). EVERY CHILD IS A
+// GROWER, or the split is no longer weight/Σweight.
 package grow
 
 import (

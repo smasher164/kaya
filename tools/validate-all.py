@@ -7,19 +7,13 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# The whole matrix, one invocation. The five lanes are independent, so
-# they run CONCURRENTLY by default; --serial for benchmarking a single
-# lane's honest numbers, debugging under contention, or recording mode
-# (one screen, one recorder).
+# The whole matrix, one invocation; the five lanes run CONCURRENTLY by
+# default. --serial is for single-lane benchmarking, debugging under
+# contention, and recording mode (one screen, one recorder).
 #
 # Usage: validate-all.py [--serial] [windows-host]
-#   windows-host defaults to akhil@192.168.64.2 (the UTM VM;
-#   deploy-win auto-starts it).
 #
-# tools/check-gates.py pins the parallel launch block: all five
-# platform lanes queued together with no barrier between them,
-# Android's exact lane process waited on, then the one gate sweep at
-# niceness 10.
+# tools/check-gates.py pins the parallel launch block.
 
 import atexit
 import os
@@ -95,9 +89,9 @@ def run_lane(name, argv, env=None):
     lf.close()
     t0 = time.monotonic()
 
-    # The lane's own duration, stamped WHEN IT EXITS — a collection
-    # that waited in queue order would bill an early finisher for its
-    # slower siblings' time (the shell measured inside each subshell).
+    # The lane's own duration, stamped WHEN IT EXITS: a collection that
+    # waited in queue order would bill an early finisher for its slower
+    # siblings' time.
     def _wait(name=name, proc=proc, t0=t0):
         rc = proc.wait()
         lane_done[name] = ("PASS" if rc == 0 else "FAIL",
@@ -111,15 +105,11 @@ def run_lane(name, argv, env=None):
 
 
 T0 = time.monotonic()
-# THE HOST'S LOAD RIDES THE RECORD (2026-09-01): three ceilings fired in
-# one evening on a host whose fifteen-minute load ran 143-189 beside the
-# lanes, and the cause was read by hand an hour later. Printed at launch
-# and again beside every anomaly WITH THE TOP CONSUMERS, because the
-# load figure alone cannot tell the host from the lanes — five lanes
-# and their warm pools put every quiet matrix's own fifteen-minute
-# figure at ~135 by its end (measured on three of them the same night).
-# A consumer at the top of the list that is not a lane's process is the
-# host; the pools are expected there.
+# THE HOST'S LOAD RIDES THE RECORD (2026-09-01: three ceilings fired in
+# one contended evening). WITH THE TOP CONSUMERS, because the load figure
+# alone cannot tell the host from the lanes — a quiet matrix's own
+# fifteen-minute figure reaches ~135 by its end. A top consumer that is
+# no lane's process is the host; the pools are expected there.
 LOAD_AT_LAUNCH = os.getloadavg()
 
 
@@ -144,27 +134,16 @@ print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
       f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); top consumers: "
       f"{top_consumers()}", flush=True)
 if MODE == "parallel":
-    # ALL FIVE PLATFORM LANES START TOGETHER. The one gate sweep waits
-    # for Android's recorded process, then runs at niceness 10.
-    # THE WALL IS THEREFORE ANDROID PLUS THE SWEEP, IN SERIES, and no
-    # longer the slowest lane: on the accepted 2026-08-24 run Android
-    # ended at 268s and the sweep took 348s more (619s wall), while
-    # the longest other lane — Windows, 533s — was already done, so
-    # the sweep's last ~83s ran with nothing beside it. docs/traps.md
-    # records the contention measurements; the gates ceiling below
-    # owns what that band means for the anomaly guard.
-    # The token is a t0 fingerprint of every keyed gate's inputs: it
-    # attests SAME-TREE, not swept-and-passed, so the mac lane can
-    # skip its own sweep while the matrix still owns the later
-    # sweep's rc. Nothing survives this invocation; a hand-run of
-    # validate-mac has no token and sweeps.
-    # BUILT BEFORE THE TOKEN IS TAKEN (2026-09-01): the keyed keys carry
-    # libkaya's and the interpreter's REAL BYTES, so a token taken over
-    # the previous build's artifacts mismatches the mac lane's own fresh
-    # build, and the lane then runs all 52 gates a second time under
-    # contention — measured as the mac lane's 791s against 620 on the
-    # day's fifth matrix, every leg green and the sum of leg times
-    # DOWN, with nothing amiss but a stale token.
+    # ALL FIVE PLATFORM LANES START TOGETHER; the gate sweep waits for
+    # Android's process, then runs niced. THE WALL IS ANDROID PLUS THE
+    # SWEEP, IN SERIES (619s, 2026-08-24).
+    #
+    # The token is a t0 fingerprint of every keyed gate's inputs, so the
+    # mac lane can skip its own sweep; a hand-run has none and sweeps.
+    # BUILT BEFORE THE TOKEN IS TAKEN, since the keys carry the
+    # artifacts' REAL BYTES — a token over the previous build's made the
+    # mac lane sweep twice (791s against 620, 2026-09-01).
+    # tools/check-gates.py holds the order.
     if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
         sys.exit(1)
     got = subprocess.run(["tools/gates.py", "--fingerprint"],
@@ -175,15 +154,12 @@ if MODE == "parallel":
         sys.exit(1)
     os.environ["KAYA_MATRIX_GATES_TOKEN"] = got.stdout.strip()
     run_lane("mac", ["tools/validate-mac.py"])
-    # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone
-    # — bare KAYA_JOBS would resize the mac pool too. Empty means the
-    # lane's own default (run-suites' ${KAYA_JOBS:-8} treats empty as
-    # unset). Measured under the full matrix 2026-08-20, and 8 stays:
-    # width 6 was 431s (narrower just serializes cheap legs), 8 was
-    # 401s, and 10 was 358s FOR THIS LANE but flaked a stall leg on
-    # android and a picker leg on iOS in the same run — the wall only
-    # moved 403 -> 394 while the extra host share destabilized the
-    # phone lanes, KAYA_WIN_JOBS' contention story one lane over.
+    # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
+    # bare KAYA_JOBS would resize the mac pool too. Empty means the
+    # lane's own default. Measured under the full matrix 2026-08-20 and 8
+    # STAYS: 6 was 431s, 8 was 401s, 10 was 358s for this lane but flaked
+    # an android stall leg and an iOS picker leg in the same run, moving
+    # the wall only 403 -> 394.
     run_lane("linux", ["tools/validate-linux.py"],
              env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", "")})
     run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
@@ -202,178 +178,42 @@ else:
 # DURATION IS A CORRECTNESS SIGNAL (CLAUDE.md invariant 8): a lane can
 # get six times slower and still report ALL PASS. Measured 2026-07-25:
 # exporting GTK_A11Y=atspi lane-wide took linux from 65s to 393s — a
-# change in blast radius, not in any assertion. A slower lane raises
-# its number in the same commit that makes it slower; each entry
-# carries that measurement.
+# change in blast radius, not in any assertion.
+#
+# EACH CEILING CARRIES THE MEASUREMENT THAT SET IT (docs/HACKING.md
+# delegates the live numbers to this table), and a lane that grows raises
+# its number in the SAME COMMIT that makes it bigger. The band each was
+# calibrated against, and the readings deliberately NOT covered — the
+# environmental windows — are docs/traps.md, "Per-lane duration ceilings,
+# and the measurements that set them".
 BUDGETS = {
-    # 900 since 2026-08-10, raised in the commit that makes the lane
-    # slower, as this block asks. The save scene brought NINE legs
-    # that must run ALONE BETWEEN DRAINS: macOS keeps a save panel's
-    # last directory as a user preference shared by every process, so
-    # pooled guests trample each other (measured — a leg asserting its
-    # own kaya-save-<pid> directory was shown a sibling's).
-    # Serialising ~18s x 9 costs about 170s that used to overlap: the
-    # lane measured 610s pooled and 778s serialised, same 267 legs.
-    # 900 keeps the ~1.25x headroom the other lanes have (the earlier
-    # 678s reading, which this block previously declined to raise for,
-    # was an environmental window and is NOT the reason for this one).
-    #
-    # LOWERED TO 560 on 2026-08-10, and lowering a ceiling is the
-    # rarer half of this block's job. The lane stopped running its
-    # guests out of `target/debug/examples`, a build directory that
-    # had reached 776,613 entries — macOS enumerates an unbundled
-    # executable's siblings on every launch, so all 32 rust legs
-    # walked it, and the resulting LaunchServices contention starved
-    # the ocaml, haskell and swift legs running beside them. All eight
-    # languages now measure 1.1-1.6s a leg where four of them were
-    # 8-31s (docs/deferred.md).
-    #
-    # Measured on the fixed tree: 431s contended at 268 legs, against
-    # 966s the run before. 560 is the same ~1.25x over the contended
-    # time the other lanes keep — and holding 900 here would let this
-    # lane double again before saying a word, which is exactly what
-    # let the old cost hide.
-    #
-    # 620 since 2026-09-01, raised in the commit that made the lane
-    # bigger, as this block asks: the ninth binding added 42 js legs
-    # (349 -> 391). STANDALONE the lane is unchanged in kind — 391
-    # green at legs 275s against 248s the day before, the 27s being
-    # the new legs' own cost at the python legs' per-leg rate. The
-    # first contended matrix after read 546s (under 560 by 14s, with
-    # the dialog legs failing fast on the host's Accessibility gate,
-    # so not a clean reading); the second read 621s under a host at
-    # load 75 from three simulators reseeding. 620 covers the roster
-    # at the ~1.25x-over-quiet-contended headroom this block keeps;
-    # the second reading is an environmental window, not the reason.
+    # 620 since 2026-09-01: the ninth binding took the roster 349 -> 391
+    # legs; quiet-contended matrices sit near 500 and this keeps the
+    # ~1.25x headroom the other lanes have.
     "mac": 620,
-    # 450 since 2026-08-20, raised in the commit that made the lane
-    # bigger, as this block asks: the panes scene added 14 legs (seven
-    # languages, both protocols), 550 -> 564. STANDALONE the lane is
-    # UNCHANGED in kind — 564 legs green in the runs that landed the
-    # slice, panes legs 2-3s each — and the first contended matrix
-    # after read 442s against the old 420, which is the ~28s the legs
-    # themselves cost. 450 keeps the same ~1.25x-over-contended
-    # headroom this block has always kept.
-    #
-    # The history it extends: 420 since 2026-08-07, when text-ranges
-    # added 16 legs (444 -> 460; contended 337s measured thrice
-    # against the old 300-at-~240s).
-    #
-    # 470 since 2026-08-21, raised in the commit that made the lane
-    # bigger, as this block asks: the tables scene added 14 legs
-    # (seven languages, both protocols), 564 -> 578. STANDALONE the
-    # lane is unchanged in kind — 578 green at 401s in the first quiet
-    # contended matrix after — and the two busy-host matrices the same
-    # day read 452s and 467s against video decode and a 46%
-    # WindowServer, tripping 450 by 2s and 17s with every leg green.
-    # 470 kept the ~1.25x-over-quiet-contended headroom.
-    #
-    # 530 since 2026-08-27, raised in the commit that made the lane
-    # bigger, as this block asks: canvas added 2 legs (584 -> 586),
-    # each wrapped in a11y-leg.sh's bus session (the ax-bus fix), and
-    # the disk sweep the same night reset every cache. The three
-    # post-sweep contended matrices read 796s (cold), 524s, 502s —
-    # monotone toward warm — with every leg green all three times; 502
-    # against the old 470 was the third consecutive trip, which is
-    # this block's own signal to recalibrate rather than re-annotate.
-    # 530 covers the warm-contended 502 with tight margin so a change
-    # in kind still trips it.
-    #
-    # 600 since 2026-09-01, raised in the commit that made the lane
-    # bigger, as this block asks: the ninth binding added 80 js legs
-    # (604 -> 684, one per python leg on both protocols). STANDALONE
-    # the lane is unchanged in kind — 683 green at legs 235s against
-    # 222s before. The first contended matrix read 459s (under 530);
-    # the second 663s under the same load-75 window as the mac
-    # reading above, with 682 legs green and one wayland table read
-    # a sighting. 600 keeps the ~1.25x-over-quiet-contended headroom
-    # over the roster's own growth; the 663 is not the reason.
+    # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
+    # legs (one js leg per python leg on both protocols); the first
+    # contended matrix after read 459s.
     "linux": 600,
-    # 480 since 2026-08-03, and the ceiling moved in the commit that
-    # made the lane slower, as this block asks. Two measured reasons,
-    # neither a change in kind: filedialog_java used to ABORT at 4s
-    # (the COM apartment defect) and now runs its scene to the end,
-    # and the lane's four contention-sensitive legs (stall_rust,
-    # panels_*) each take 20-26s longer under five concurrent lanes.
-    # Everything else is unchanged — the per-leg median delta against
-    # a standalone run is MINUS one second, which is the check that
-    # says no work was added to every leg.
-    # 520 since 2026-08-21: a run whose commit touches BINDING sources
-    # pays a full manifest re-ship plus the remote javac and dotnet
-    # rebuilds — measured 494s on the tables fan-out (the first
-    # eight-binding commit since the per-file deploy landed) against
-    # the 420-456 incremental band. The ceiling covers the
-    # deploy-heavy mode; an incremental run drifting past ~460 is
-    # still the signal the old 480 was for.
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
-    # column (2026-09-01) and the four quiet matrices since read 498,
-    # 442, 488 and 559 — 520 left 1.05x over that band's top where the
-    # other lanes keep ~1.2x, and the 559 fired on a run whose other
-    # lanes were 20-30% over their own quiet readings together (the
-    # host, per the anomaly's own consumer list). 600 is 1.2x over the
-    # band's top.
+    # column and the four quiet matrices since read 498, 442, 488 and
+    # 559s. 600 is 1.2x over that band's top.
     "windows": 600,
-    # 540 since 2026-08-10, raised in the commit that makes the lane
-    # slower, as this block asks. The save scene added a leg measured
-    # at 21s STANDALONE (the panel is typed into, so it is the slowest
-    # non-clipboard leg on this lane), taking the lane to 74 legs.
-    # Contended runs since: 401, 407, 409, 414, 416 and 446s against a
-    # 420 ceiling — one crossing and two within five seconds, which is
-    # a guard that fires on variance rather than on a change in kind.
-    # Standalone the lane is 294s (boot 7 + three build-and-leg
-    # phases), so the growth is contention amplifying real work, not
-    # work added to every leg. 540 restores the ~1.25x headroom the
-    # other lanes keep.
-    #
-    # MAC WAS DELIBERATELY NOT RAISED at the same time: it measured
-    # 678s against 680 once, but that run overlapped a ~20-minute
-    # window when every mac file-dialog leg failed for an
-    # environmental reason (proven by running two unrelated legs as
-    # controls); with the scene fully graduated it measures 610s at
-    # 267 legs. Raising a ceiling to fit an environmental anomaly is
-    # how a guard stops guarding.
-    #
-    # 600 since 2026-09-01: 540 was set against the 74-leg roster, and
-    # the lane has run 113 legs since 2026-08-31 — five accepted
-    # matrices measured 452, 460, 465, 475 and 491s under it, headroom
-    # of 1.10-1.19x where the other lanes keep ~1.25x. The fourth
-    # matrix of 2026-09-01 then measured 551s with every leg green:
-    # the windows lane, whose roster had not moved, was 7-20% over its
-    # own band on the same host, and the LocalStorage admission hit
-    # the slow-flow re-probe on two of three phones. 600 is 1.22x over
-    # the band's top; run-sim.py prints the admission's per-device
-    # time and the join's wait now, so the next anomaly says whether
-    # the admission reached the critical path.
+    # 600 since 2026-09-01: the lane has run 113 legs since 2026-08-31,
+    # five accepted matrices measuring 452-491s. 600 is 1.22x over that
+    # band's top. run-sim.py prints the LocalStorage admission's per-device
+    # time and the join's wait, so the next anomaly says whether the
+    # admission reached the critical path.
     "ios": 600,
-    # 310 since 2026-08-20: the pool-degradation trap's remedy is a
-    # COLD BOOT (docs/traps.md), and the reboot run then carries
-    # ~60-90s of emulator startup that the old 250 — set against a
-    # warm pool — read as an anomaly. 310 clears a measured cold-boot
-    # run (267s) with the usual headroom while still catching a change
-    # in kind on a warm one.
+    # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
+    # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
+    # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
+    # run is 267s.
     "android": 310,
-    # 490 since 2026-08-23: dynamic tables added 17 watched
-    # copy-target perturbations to check-steps and 12 surface/
-    # forcing-app perturbations to check-sugar-surface.
-    #
-    # THE 378/387/391s BAND IT WAS SET AGAINST IS NOT THIS SCHEDULE'S.
-    # Those three sweeps ran from t0 at ordinary priority, alongside
-    # all five lanes for their whole length (docs/tables-plan.md,
-    # docs/deferred.md). On the tree that changed the schedule, that
-    # same from-t0 shape measured 427s at ordinary priority and 467s
-    # niced (docs/traps.md) — so "1.25x over the band's top", which
-    # this arm used to claim, was never true of 490 here.
-    #
-    # What 490 guards is the DELAYED-plus-NICED band, which has one
-    # accepted sample: 348s (2026-08-24), with 218s and 208s from the
-    # barrier-only and delayed-only experiments beside it. That is
-    # ~1.4x. It deliberately does NOT cover 467: that reading is from
-    # a schedule this file no longer runs, and a ceiling raised to
-    # clear an abandoned schedule stops guarding the live one.
-    #
-    # The sweep is its own matrix unit AND half the wall (see the
-    # launch block above): it starts only after Android exits, so its
-    # tail runs at a host share no other reading has. A second
+    # 490 since 2026-08-23. What it guards is the DELAYED-plus-NICED band
+    # (the launch block above), which has ONE accepted sample: 348s
+    # (2026-08-24). It deliberately does not cover the 467s reading from
+    # the from-t0 schedule this file no longer runs. A second
     # delayed-and-niced sample is the number this arm most needs.
     "gates": 490,
 }

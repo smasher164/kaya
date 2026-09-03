@@ -16,20 +16,17 @@ import (
 	"strings"
 )
 
-// The environment READERS. Every one of them answers out of the Go
-// runtime's envs slice, which a c-shared library never fills. The
-// writers are not here on purpose: os.Setenv with cgo reaches libc's
-// setenv as well, so it is not part of this failure class.
+// The environment READERS, which answer out of the Go runtime's envs
+// slice — never filled in a c-shared library. The writers are not here on
+// purpose: os.Setenv with cgo reaches libc's setenv as well.
 var banned = map[string][]string{
 	"os":      {"Getenv", "LookupEnv", "Environ", "ExpandEnv"},
 	"syscall": {"Getenv", "Environ"},
 }
 
-// The LOCATION readers: "where is X" answered out of that same copy.
-// os.TempDir is Getenv("TMPDIR") with a hardcoded fallback; the three
-// User*Dir readers are Getenv("HOME") and its platform siblings. They
-// are not banned outright — see the header — but they may only appear
-// inside a function that branches on the platform and asks the host.
+// The LOCATION readers, answered out of that same copy (os.TempDir is
+// Getenv("TMPDIR") with a hardcoded fallback). Not banned outright, but
+// only inside a function that branches on the platform and asks the host.
 var locations = map[string][]string{
 	"os": {"TempDir", "UserHomeDir", "UserCacheDir", "UserConfigDir"},
 }
@@ -90,18 +87,12 @@ func branchesOnPlatform(fd *ast.FuncDecl, runtimeLocal string) bool {
 }
 
 // asksHost: does this function reach a location through the HOST's
-// environment rather than Go's copy? Three spellings, and all three are
-// the same channel:
-//
-//	kaya.Env / kaya.LookupEnv   what a guest uses (bindings/go/runtime.go)
-//	C.getenv                    what those two are, one layer down
-//	Env / LookupEnv (unqualified)  the binding calling its own
-//
-// THE UNQUALIFIED FORM IS ONLY ACCEPTED WHERE IT CAN ONLY MEAN THAT: in
-// a file that does not import the kaya binding, i.e. inside the binding
-// itself, which never imports itself. Accepted everywhere, a guest that
-// declared its own `func Env(string) string` reading os.Getenv would
-// satisfy this check with the very defect it exists to catch.
+// environment rather than Go's copy? Three spellings of one channel —
+// kaya.Env/kaya.LookupEnv, C.getenv, and the unqualified pair the binding
+// calls on itself. THE UNQUALIFIED FORM IS ONLY ACCEPTED WHERE IT CAN
+// ONLY MEAN THAT: in a file that does not import the kaya binding.
+// Accepted everywhere, a guest declaring its own `func Env(string) string`
+// over os.Getenv would satisfy this check with the defect it catches.
 func asksHost(fd *ast.FuncDecl, kayaLocal string) bool {
 	found := false
 	ast.Inspect(fd, func(n ast.Node) bool {
@@ -131,10 +122,9 @@ func asksHost(fd *ast.FuncDecl, kayaLocal string) bool {
 // checkFile parses one file and reports every banned read in it, and
 // every location reader that is not the fallback of a platform switch.
 // Comments are not nodes, so prose ABOUT the rules costs nothing.
-//
-// Findings are TAGGED with the rule they broke ("env:" / "loc:"),
-// because the two want different sentences from the caller and a
-// diagnostic that prints the wrong cause is worse than none.
+// Findings are TAGGED with the rule they broke ("env:" / "loc:"): the two
+// want different sentences, and a diagnostic printing the wrong cause is
+// worse than none.
 func checkFile(name string) ([]string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
@@ -175,9 +165,8 @@ func checkFile(name string) ([]string, error) {
 		case ".":
 			// A dot-import puts Getenv (and TempDir) in this file's own
 			// scope, where no selector expression names it. Refused
-			// rather than analysed: it is not a spelling anything in
-			// this tree uses, and a rule that quietly cannot see a
-			// construct is the failure this whole gate exists for.
+			// rather than analysed: a rule that quietly cannot see a
+			// construct is this gate's own failure class.
 			pos := fset.Position(imp.Pos())
 			found = append(found, fmt.Sprintf(
 				"env: %s:%d:%d: dot-import of %q hides the readers this gate looks for",
@@ -187,10 +176,9 @@ func checkFile(name string) ([]string, error) {
 		locals[local] = p
 	}
 
-	// Every location reference, with the function it sits in. Collected
-	// in one pass and matched to enclosing functions afterwards, so a
-	// reference at PACKAGE level — where nothing can have branched on
-	// the platform — is a case this rule sees rather than one it misses.
+	// Every location reference, with the function it sits in — matched to
+	// enclosing functions afterwards, so a reference at PACKAGE level
+	// (where nothing can have branched) is seen rather than missed.
 	type locRef struct {
 		pos  token.Position
 		text string
@@ -224,11 +212,10 @@ func checkFile(name string) ([]string, error) {
 		return true
 	})
 
-	// THE SHAPE THAT MAKES A LOCATION READER SAFE, checked per enclosing
-	// function: it branches on runtime.GOOS, and it reaches a location
-	// through the host. Each verdict names which half is missing —
-	// a diagnostic may only print what it measured, and "not the
-	// sceneRoot shape" is a sentence that fits every cause.
+	// THE SHAPE THAT MAKES A LOCATION READER SAFE, per enclosing function:
+	// it branches on runtime.GOOS and reaches a location through the host.
+	// Each verdict names which half is missing — a diagnostic may only
+	// print what it measured (invariant 3).
 	for _, ref := range locRefs {
 		var fd *ast.FuncDecl
 		for _, d := range f.Decls {

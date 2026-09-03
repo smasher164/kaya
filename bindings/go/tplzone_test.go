@@ -1,9 +1,5 @@
 package kaya
 
-// The template zone's two guards: the occurrence dispatch's live/node
-// PAIRING, and the claim that the new sugar emits exactly the floor it
-// replaces. Both run headless, like the rest of this package's tests.
-
 import (
 	"bytes"
 	"encoding/binary"
@@ -16,10 +12,7 @@ import (
 )
 
 // A live arm without a node arm is a SILENT DROP — the stamped copy's
-// occurrence matches no case at all (docs/sugar-pass-plan.md §D2). The
-// rule needs no list: whatever occurrence kinds the dispatch loop learns
-// to route, a live arm gated on an empty key path obliges a node arm on
-// the same kind.
+// occurrence matches no case at all (docs/sugar-pass-plan.md §D2).
 func armlessKinds(src string) []string {
 	live := regexp.MustCompile(`case kind == (occ[A-Za-z]+) && len\(keys\) == 0:`)
 	found := live.FindAllStringSubmatch(src, -1)
@@ -44,8 +37,6 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 	}
 	body := string(src)
 
-	// The reader is watched first: a pattern that stopped matching the
-	// switch would report no missing arms and agree with everything.
 	if n := liveArmCount(body); n < 4 {
 		t.Fatalf("found %d live dispatch arms in app.go, fewer than the 4 this "+
 			"loop is known to have — the pattern has stopped seeing the switch "+
@@ -59,8 +50,6 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 			missing)
 	}
 
-	// And the guard is watched FAILING, against a source with the
-	// value-changed node arm cut back out.
 	cut := "\t\tcase kind == occValueChanged:\n"
 	perturbed := strings.Replace(body, cut, "", 1)
 	if n := strings.Count(body, cut); n != 1 {
@@ -76,9 +65,6 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 	}
 }
 
-// The sugar is a spelling change and nothing else — a claim about bytes.
-// Two guests moved off `Widget(KindEntry)` onto `Entry()`, which is only
-// legal if the two record the same thing.
 func TestTemplateEntrySugarRecordsWhatTheFloorRecorded(t *testing.T) {
 	floor := templateRecords(t, func(t *Tpl) { t.Widget(KindEntry) })
 	sugar := templateRecords(t, func(t *Tpl) { t.Entry() })
@@ -99,11 +85,9 @@ func TestTemplateEntrySugarRecordsWhatTheFloorRecorded(t *testing.T) {
 	}
 }
 
-// ONE ID SPACE: a template node draws from the WIDGET counter, so an app
-// hands out one number sequence and the core's two "already exists" walls
-// can never fire on an id this binding minted (DESIGN.md, Binding
-// conventions). The CONTIGUOUS RUN is the assertion, not inequality — a
-// private node counter restarted at 1 sits under the live ids an app has
+// ONE ID SPACE: a template node draws from the WIDGET counter (DESIGN.md,
+// Binding conventions). The CONTIGUOUS RUN is the assertion, not inequality
+// — a private node counter restarted at 1 sits under the live ids an app has
 // already spent and passes a `!=` while being exactly the defect.
 func TestWidgetsAndTemplateNodesDrawFromOneCounter(t *testing.T) {
 	app := NewApp()
@@ -111,9 +95,8 @@ func TestWidgetsAndTemplateNodesDrawFromOneCounter(t *testing.T) {
 	app.Build(func(tx *Tx) {
 		live = tx.Widget(KindLabel).id
 		items := tx.Collection()
-		// The For's own container is a live widget; the node is inside
-		// it. The container's number is spent when the rows OPEN, which
-		// is where the callback form spent it too.
+		// The For's own container is a live widget, and its number is spent
+		// when the rows OPEN.
 		rows := tx.Rows(items)
 		site = rows.Widget().id
 		for row := range rows.All() {
@@ -127,11 +110,9 @@ func TestWidgetsAndTemplateNodesDrawFromOneCounter(t *testing.T) {
 	}
 }
 
-// A rows value traces ONE template. Ranging it twice would pop the
-// scope stacks twice, and every widget declared after the second loop
-// would land in whatever scope the underflow left behind — silently, in
-// the middle of a build. The guard is the panic; this is the negative
-// that has watched it fire.
+// Ranging one rows value twice pops the scope stacks twice, and every widget
+// declared after the second loop lands in whatever scope the underflow left
+// behind — silently, in the middle of a build.
 func TestARowsValueRefusesASecondTrace(t *testing.T) {
 	app := NewApp()
 	defer func() {
@@ -155,9 +136,8 @@ func TestARowsValueRefusesASecondTrace(t *testing.T) {
 	})
 }
 
-// templateRecords queues one collection and one For over it, runs body
-// as the template, and returns the frames. A FRESH App per call, so both
-// runs allocate from the same id counters.
+// templateRecords returns the frames body queues as a template. A FRESH App
+// per call, so both runs allocate from the same id counters.
 func templateRecords(t *testing.T, body func(*Tpl)) [][]byte {
 	t.Helper()
 	app := NewApp()
@@ -174,8 +154,6 @@ func templateRecords(t *testing.T, body func(*Tpl)) [][]byte {
 
 // --- the template-node props (docs/tpl-props-plan.md §1) ---------------
 
-// setProp is a decoded set_property record: the header every prop write
-// shares, plus whatever its source flavor puts after it.
 type setProp struct {
 	widget       uint64
 	prop, source uint32
@@ -187,9 +165,9 @@ type setProp struct {
 	level, field uint32  // element
 }
 
-// decodeSetProp reads the record rather than re-calling the helper that
-// wrote it: the defect it catches is a call to the WRONG helper, and
-// seven prop writes of one shape sit beside each other on *Tpl.
+// decodeSetProp reads the record rather than re-calling the helper that wrote
+// it: the defect it catches is a call to the WRONG helper, and seven prop
+// writes of one shape sit beside each other on *Tpl.
 func decodeSetProp(t *testing.T, rec []byte) setProp {
 	t.Helper()
 	if kind := binary.LittleEndian.Uint16(rec[4:]); kind != txSetProperty {
@@ -202,10 +180,9 @@ func decodeSetProp(t *testing.T, rec []byte) setProp {
 	}
 	switch p.source {
 	case SourceConst:
-		// The tag AND the value are part of the claim: a setter that
-		// reaches the right emitter but drops its argument is the
-		// failure the prop number cannot see, and role's whole
-		// vocabulary is three small integers where 0 means "no role".
+		// The tag AND the value are part of the claim: a setter that reaches
+		// the right emitter but drops its argument is invisible to the prop
+		// number alone.
 		p.tag = binary.LittleEndian.Uint32(rec[24:])
 		switch p.tag {
 		case ValueStr:
@@ -225,9 +202,8 @@ func decodeSetProp(t *testing.T, rec []byte) setProp {
 	return p
 }
 
-// propWrite runs write inside a template over a fresh entry node and
-// returns the ONE set_property record it queued. A case may queue other
-// records first (minting the signal it binds).
+// propWrite returns the ONE set_property record write queued; a case may
+// queue other records first (minting the signal it binds).
 func propWrite(t *testing.T, write func(*Tx, *Tpl, Node) setProp) (setProp, setProp) {
 	t.Helper()
 	app := NewApp()
@@ -339,9 +315,8 @@ func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
 	}
 }
 
-// The typed surface's third arm, the raw field PROJECTION: resolving to
-// the wrong field index binds a row's spoken name to a neighbouring
-// column, silently and per row.
+// The raw field PROJECTION: resolving to the wrong field index binds a row's
+// spoken name to a neighbouring column, silently and per row.
 type propRec struct {
 	Title string
 	Note  string
@@ -379,13 +354,12 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 
 // --- the props reach the two SEALED surfaces ---------------------------
 //
-// Two of the zone's five surfaces seal their *Tpl away — SumCase, and
-// the generated <name>Row — so on those a prop that is not forwarded
-// cannot be spelled at ANY tier, floor included.
+// SumCase and the generated <name>Row seal their *Tpl away, so on those a
+// prop that is not forwarded cannot be spelled at ANY tier, floor included.
 
-// Prop writes that a refined surface deliberately does not forward.
-// Each is the FLOOR spelling of a constructor's element binding, and a
-// refined surface offers the constructor instead.
+// Prop writes a refined surface deliberately does not forward: each is the
+// FLOOR spelling of a constructor's element binding, and a refined surface
+// offers the constructor instead.
 var notForwarded = map[string]string{
 	"TextElement":  "Tpl.BindTextElement, the floor under Label",
 	"TextField":    "Tpl.BindTextField, the floor under Label",
@@ -395,9 +369,8 @@ var notForwarded = map[string]string{
 }
 
 // props reads the prop writes a surface declares: a method whose FIRST
-// PARAMETER IS THE NODE it writes to. Each is filed under its prop AND
-// its flavor (Set is the constant, Bind is the source), because a prop
-// reachable in one flavor only is still a hole.
+// PARAMETER IS THE NODE it writes to, filed under its prop AND its flavor,
+// because a prop reachable in one flavor only is still a hole.
 func props(src, decl string) map[string]bool {
 	re := regexp.MustCompile(`(?m)^` + decl + `(?:\[[^()]*?\])?\(n (?:kaya\.)?Node[,)]`)
 	out := map[string]bool{}
@@ -415,8 +388,8 @@ func props(src, decl string) map[string]bool {
 	return out
 }
 
-// missingProps is the pairing itself, over sources rather than over the
-// package, so the negative test below can ask it about a doctored copy.
+// Over sources rather than over the package, so the negative test below can
+// ask it about a doctored copy.
 func missingProps(base, refined, decl string) []string {
 	var gap []string
 	for name := range props(base, baseDecl) {
@@ -428,15 +401,13 @@ func missingProps(base, refined, decl string) []string {
 	return gap
 }
 
-// The base surface and the two sealed ones, each with the declaration
-// it spells a prop write with. The generated one is read from the
-// EMITTER, the one place its checked-in outputs all agree.
+// The generated one is read from the EMITTER, the one place its checked-in
+// outputs all agree.
 const (
 	baseDecl    = `func \(t \*Tpl\) ((?:Set|Bind)[A-Za-z0-9]*)`
 	sumCaseDecl = `func \(sc SumCase\[K, V\]\) ((?:Set|Bind)[A-Za-z0-9]*)`
-	// The generated row drops the Bind prefix on its sourced flavors,
-	// as its constructors do (Label(f), not LabelBound), so a bare name
-	// there is read as the sourced one.
+	// The generated row drops the Bind prefix on its sourced flavors, as its
+	// constructors do (Label(f), not LabelBound), so a bare name is sourced.
 	genRowDecl = `\tw\("func \(r %sRow\) ((?:Set|Bind)?[A-Za-z0-9]*)`
 )
 
@@ -445,8 +416,6 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 	arm := readSource(t, "sums.go")
 	gen := readSource(t, "../../cmd/kaya-gen/main.go")
 
-	// The reader is watched first: a pattern that stopped matching the
-	// base surface would demand nothing of either sealed surface.
 	if n := len(props(base, baseDecl)); n < 10 {
 		t.Fatalf("found %d prop writes on *Tpl, fewer than the 10 the zone is "+
 			"known to carry (grow, accepts, role and inset as constants, the "+
@@ -466,16 +435,12 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 		}
 	}
 
-	// And the guard is watched FAILING, once per surface, against a copy
-	// with one forward cut back out.
 	for _, p := range []struct {
 		what, src, decl, cut, want string
 	}{
 		{"SumCase", arm, sumCaseDecl,
 			"func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }\n",
 			"Accepts (const)"},
-		// The SOURCED half alone, cut from the surface that keeps both
-		// under one name.
 		{"the generated row", gen, genRowDecl,
 			"\tw(\"func (r %sRow) A11yLabel(n kaya.Node, f kaya.Field[string]) { r.c.A11yLabel(r.t, n, f) }\", lowerFirst(name))\n",
 			"A11yLabel (sourced)"},

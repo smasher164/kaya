@@ -8,13 +8,12 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 # ONE MAC LEG BY HAND, THROUGH THE LANE'S OWN MAPPING, AFTER THE LANE'S
-# OWN VERIFICATION. A hand run that spelled its env line by line pointed
-# KAYA_SWIFTUI_LIB at an interpreter built from older sources and spent a
-# failure on "no such target" that was the stale dylib, not the arm
-# (2026-09-01, docs/traps.md): swift-typecheck compiles the interpreter
-# and builds nothing, so the dylib on disk is whatever last built it. This
-# refuses a stale libkaya or interpreter NAMING THE BUILD, or rebuilds
-# both with --build, and then runs the leg exactly as validate-mac would.
+# OWN VERIFICATION (docs/traps.md, 2026-09-01: a hand-spelled env line
+# pointed KAYA_SWIFTUI_LIB at an interpreter built from older sources and
+# spent a failure on "no such target"). swift-typecheck compiles the
+# interpreter and builds nothing, so the dylib on disk is whatever last
+# built it: this refuses a stale one NAMING THE BUILD, or rebuilds with
+# --build.
 #
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 

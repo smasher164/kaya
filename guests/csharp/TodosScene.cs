@@ -1,9 +1,4 @@
-// The todos scene from C#, on the construction sugar. Keys come from
-// InsertFresh rather than the app (docs/fresh-key-plan.md); undo is
-// docs/undo-plan.md.
-//
-//     KAYA_SELFTEST=todos KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project guests/csharp
+// The todos scene, C# port — guests/rust/todos.rs, tools/scenes/todos.steps.
 
 using System.Collections.Generic;
 
@@ -25,14 +20,10 @@ static class TodosScene
                 tx.Item("Undo", role: Tx.RoleUndo),
                 tx.Item("Redo", role: Tx.RoleRedo),
             });
-            // No onUndone and no onRedone, deliberately: everything this
-            // scene shows is core state, so there is no app model left
-            // over to fold a delta into.
+            // No onUndone and no onRedone, deliberately: this scene shows core
+            // state only.
             tx.Window(title: "todos", menus: new[] { edit });
             var todos = TodoKaya.Collection(tx);
-            // A derived signal: the binding recomputes it after every
-            // mutation and writes it INTO THAT MUTATION'S transaction, so
-            // it walks back and forward with an undone step.
             var itemsLeft = todos.Derive(tx, items =>
             {
                 int n = 0;
@@ -51,7 +42,6 @@ static class TodosScene
                         return;
                     t.Undoable($"add {draft}");
                     todos.InsertFresh(t, new Todo(draft, false));
-                    // Finishing the form is not part of the step, and
                     // Clear inside an undoable group is refused at apply
                     // (docs/undo-plan.md D4).
                     app.Post(after =>
@@ -61,8 +51,8 @@ static class TodosScene
                     });
                 });
                 tx.Label(bind: itemsLeft);
-                // The foreach IS the For: the body runs once, and the
-                // enumerator's Dispose closes the template even on break.
+                // The foreach IS the For: the enumerator's Dispose closes the
+                // template even on break.
                 foreach (var row in todos.Rows())
                 {
                     row.Row(() =>

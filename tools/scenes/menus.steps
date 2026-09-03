@@ -1,25 +1,20 @@
-# One command catalog, adapted by each host. The desktop backends expose
-# all three top-level groups in native menu chrome; phones put the same
-# catalog in overflow and initially promote File>Share into the top bar.
+# One command catalog, adapted by each host: native menu chrome on the
+# desktops, overflow plus one promoted item on the phones.
 expect label#0 "ready"
 expect_menus 3
 expect_menu "File>Save" disabled
 expect_menu "File>Export" disabled
-# THE SYMBOL VOCABULARY (docs/styling-plan.md D6): each name is read
-# off the REAL tree's accessible description of the item's icon — the
-# platform's own catalog glyph behind one semantic name, and the first
-# icon assertion kaya has ever had. Items only, never a top-level bar
-# grouping: Windows' MenuBarItem has no icon slot, so a top-level
-# symbol is not the 4/4 intersection.
+# THE SYMBOL VOCABULARY (docs/styling-plan.md D6), read off the REAL
+# tree. ITEMS ONLY, never a top-level grouping: Windows' MenuBarItem has
+# no icon slot, so a top-level symbol is not the 4/4 intersection.
 expect_menu_symbol "File>Save" "done"
 expect_menu_symbol "File>Export" "forward"
 expect_menu_symbol "View>Details" "info"
 expect_menu "View>Details" unchecked
 expect_menu "Sort" value 0
 
-# The two stateful contracts use one creator-scoped occurrence path
-# each. The Rust depth guest deliberately does not write their bound
-# signals back: the native control owns user state.
+# The depth guest deliberately does not write the bound signals back:
+# the native control owns user state.
 menu_activate "View>Details"
 expect_menu "View>Details" checked
 expect label#0 "details on"
@@ -27,40 +22,34 @@ menu_activate "Sort>Date"
 expect_menu "Sort" value 1
 expect label#0 "sorted date"
 
-# Enablement is a live bound property. File owns the same signal as its
-# Export leaf, so this unrelated prop mutation rebuilds the catalog.
-# The stateful controls must survive from the backend's user-state
-# mirror, and the inherited disabled state must lift from Save.
+# File owns the same signal as its Export leaf, so this unrelated prop
+# mutation REBUILDS the catalog: the stateful controls must survive from
+# the backend's user-state mirror.
 click button#0
 expect_menu "File>Save" enabled
 expect_menu "File>Export" enabled
 expect_menu "View>Details" checked
 expect_menu "Sort" value 1
 
-# Direct activation uses the action's creator-scoped occurrence.
 menu_activate "File>Save"
 expect label#0 "saved"
 
 # Programmatic checked/value writes are configuration and stay quiet.
-# This is the one deliberate absence-settle: the reset also writes the
-# frozen "ready" sentinel, which an illicit toggle/radio echo would
-# overwrite with "details off"/"sorted name".
+# The deliberate absence-settle: an illicit echo overwrites the "ready"
+# sentinel with "details off"/"sorted name".
 click button#1
 expect_menu "View>Details" unchecked
 expect_menu "Sort" value 0
 settle 700
 expect label#0 "ready"
 
-# The shortcut must traverse the platform dispatch table and land in
-# the exact same Save handler as menu activation. Starting from "ready"
-# makes this observation a delivery fence rather than a pre-satisfied
-# assertion that can let a late accelerator bleed into the next step.
+# Starting from "ready" makes this a delivery fence rather than a
+# pre-satisfied assertion a late accelerator could bleed through.
 shortcut "primary+s"
 expect label#0 "saved"
 
-# Context commands scope the same vocabulary to a noun. The second
-# target is a stamped row, so its occurrence carries both collection
-# keys.
+# The second context target is a STAMPED row, so its occurrence carries
+# both collection keys.
 context_open label#1
 menu_activate "Rename"
 expect label#0 "renamed"
@@ -68,10 +57,9 @@ context_open label#2
 menu_activate "Remove"
 expect label#0 "removed g2/a"
 
-# Label and topology mutate in a later transaction: File is renamed,
-# Publish appends to that retained parent, Tools becomes a fourth bar
-# root, and the primary hint moves from Share to Publish. This proves
-# every backend's live label/append path and promotion recomputation.
+# Label and topology mutate in a later transaction: File renamed,
+# Publish appended to that RETAINED parent, Tools a fourth root, and the
+# primary hint moved from Share to Publish.
 click button#2
 expect_menus 4
 expect_menu "Document>Publish" enabled
@@ -79,18 +67,14 @@ expect_menu "Tools>Inspect" enabled
 expect_menu_symbol "Document>Publish" "copy"
 expect_menu_symbol "Tools>Inspect" "search"
 
-# No More-open step precedes this: on phones the same helper consumed by
-# the rendered toolbar must now surface the late primary. Desktop
-# resolves the same semantic path through its full catalog.
+# No More-open step precedes this: on phones the helper the rendered
+# toolbar consumed must surface the late primary itself.
 menu_activate "Document>Publish"
 expect label#0 "shared"
 
-# The catalog's presentation must FIT the window's size class on every
-# host (DESIGN.md, "Form factor and adaptivity"). Bare form on purpose:
-# the exact literal differs per lane — regular/bar on desktops,
-# compact/overflow on phones — while the invariant holds everywhere, so
-# only the bare form can ride a scene shared verbatim. Asymmetric by
-# design: a compact window showing a bar is legitimate (a narrow GTK or
-# WinUI window keeps its menu bar); a REGULAR window hiding its catalog
-# behind the compact overflow is the iPadOS 26 defect this guards.
+# BARE on purpose: the literal differs per lane (regular/bar on
+# desktops, compact/overflow on phones) while the invariant holds
+# everywhere. ASYMMETRIC by design — a compact window showing a bar is
+# legitimate; a REGULAR window hiding its catalog behind the compact
+# overflow is the iPadOS 26 defect this guards.
 expect_menu_presentation

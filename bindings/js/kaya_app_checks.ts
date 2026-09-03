@@ -1,12 +1,9 @@
 // Tier-1 negative and bookkeeping checks against the real JS binding,
-// bindings/python/kaya_app_checks.py's twin. The core is never entered:
-// submits are routed into a list through runtime.hooks and the process
-// exits.
+// bindings/python/kaya_app_checks.py's twin. The core is never entered.
 //
 // RUN IN A WORKER, DELIBERATELY: importing kaya-gui on the main thread
 // surrenders it to kaya_run (runtime.ts), so this file spawns itself as
-// the app-thread worker and imports the binding there — the shape every
-// guest already has, minus the platform loop.
+// the app-thread worker and imports the binding there.
 
 import { Worker, isMainThread } from "node:worker_threads";
 
@@ -174,10 +171,8 @@ if (isMainThread) {
   }, /case arms/));
 
   // ----------------------------------------------------------- liveness
-  // THE IMPLICIT TRANSACTION (docs/js-plan.md §4): a declaration outside
-  // every scope is refused naming the scope; a mutation outside every
-  // handler opens a transaction that the microtask commits, one
-  // continuation one batch; app.commit() ends one early.
+  // THE IMPLICIT TRANSACTION (docs/js-plan.md §4): one continuation, one
+  // batch, committed by a microtask; app.commit() ends one early.
   check("a widget declared outside every scope is refused naming the scope", throws(() => kaya.label("x"), /scene scope.*container/s));
   shipped.length = 0;
   count.set(5);

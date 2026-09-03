@@ -7,22 +7,9 @@ package dev.kaya.undoprobe
 
 // P3-compose (docs/undo-plan.md §0, D7): does a programmatic write enter
 // the Compose text widgets' native undo history, and can it be cleared?
-//
-// Two fields side by side on the same pins kaya ships (compose-bom
-// 2024.10.01 => foundation 1.7.5, material3 1.3.1):
-//
-//   LEGACY  M3 TextField(value:String, onValueChange:) — the shape
-//           KayaCompose.kt's KIND_ENTRY/KIND_TEXTAREA used, mirror
-//           included.
-//   TFS     BasicTextField(state: TextFieldState) with M3 dressing via
-//           TextFieldDefaults.DecorationBox — the candidate shape, AND
-//           the compile-viability check for material3 1.3.1, which has
-//           no TextField(state:) overload.
-//
-// Driven and reported through ORDERED broadcasts, so there is no logcat
-// race. The receiver is dynamic (it must reach the composition's
-// state), goes async, and waits two frames before answering.
-//
+// Two fields side by side on the pins kaya ships — the legacy M3
+// TextField and BasicTextField(state:) — driven through ORDERED
+// broadcasts so there is no logcat race.
 // THROWAWAY. Nothing in the validation ladder calls this.
 
 import android.content.BroadcastReceiver

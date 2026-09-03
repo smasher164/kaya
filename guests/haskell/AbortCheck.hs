@@ -1,8 +1,4 @@
-{- The uniform-abort guard: a handler abort rolls the model mirror
-   back, ships nothing, and the app continues — the same observable
-   semantics as every other binding (the negative test each language
-   carries). Runs headless: the library loads (KAYA_LIB) but the core
-   loop is never entered; records queue and the process exits. -}
+-- The Haskell uniform-abort guard. Run headless by tools/check-abort.py.
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
@@ -29,10 +25,8 @@ main = do
     insert c (VStr "b") (VStr "two")
     return c
 
-  -- Abort mid-transaction after mutating: the boundary must restore the
-  -- mirror and rethrow. Rollback is by PURITY here — a throwing Build
-  -- trips buildTx's evaluate barrier before the store-back and submit
-  -- ever run.
+  -- Abort mid-transaction after mutating: rollback, then rethrow. Rollback
+  -- is by PURITY — a throwing Build trips buildTx's evaluate barrier.
   aborted <-
     try $ buildTx app $ do
       insert todos (VStr "c") (VStr "three")
@@ -43,8 +37,7 @@ main = do
     Left _ -> return ()
   expectKeys app todos ["a", "b"] "abort did not restore the mirror"
 
-  -- The dispatch discipline: a throwing handler is logged and the loop
-  -- continues, and the next transaction sees the restored model.
+  -- A throwing handler is logged and the loop continues.
   dispatch $ buildTx app $ do
     insert todos (VStr "d") (VStr "four")
     error "handler bug"
@@ -52,10 +45,8 @@ main = do
   buildTx app (insert todos (VStr "c") (VStr "three"))
   expectKeys app todos ["a", "b", "c"] "post-abort commit broken"
 
-  -- The menu surface. The record stream is internal to the Build monad,
-  -- so what the three clauses below pin is that the constructors run
-  -- through the emitter, that the ONE shortcut parser rejects aliases,
-  -- and that an aborted append leaves the app usable.
+  -- The menu surface: the constructors must reach the emitter, the ONE
+  -- shortcut parser must reject aliases, and an abort must leave the app usable.
   file <- buildTx app $ do
     f <- menu "File" [] [item "Save" [IShortcut "PRIMARY+S"]]
     window 0 [WMenus [pure f]]

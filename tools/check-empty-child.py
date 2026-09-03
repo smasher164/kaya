@@ -7,27 +7,16 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# ONE NODE IS ONE WIDGET, EVEN WHEN ITS CONTENT WILL NOT DECODE — and no
-# layout indexes a child it has not checked for.
-#
-# The two WIDGET backends have the first half by construction. The two
-# DECLARATIVE backends have to say it out loud, because "render nothing"
-# there means the node LEAVES THE TREE and everything above it that
-# counts children positionally reads the wrong child. The crash and the
-# fix: docs/deferred.md, "swiftui, KayaCell, Layout, subviews".
-#
-# THE CLAUSES:
-#
-#   A  RUNTIME, macOS only — tools/checks/swiftui-empty-child.swift
-#      compiled INTO the interpreter's own module and run in an
-#      NSHostingView. SKIPPED AND SAID SO on any other host.
-#   B  STATIC, all four backends: the image source's failure branch
-#      still produces a widget, and cannot panic.
-#   C  STATIC, SwiftUI only: KayaCell subscripts no subview collection
-#      it has not checked (`subviews.first`, never `subviews[0]`).
-#
-# Deliberately not one clause: A needs a GUI toolkit, B and C run
-# anywhere, and a lane that can only do B and C should still do them.
+# ONE NODE IS ONE WIDGET EVEN WHEN ITS CONTENT WILL NOT DECODE, and no
+# layout indexes an unchecked child (CLAUDE.md's gate list;
+# docs/deferred.md, "swiftui, KayaCell, Layout, subviews").
+#   A  RUNTIME, macOS only — the probe compiled INTO the interpreter's
+#      own module; SKIPPED AND SAID SO on any other host, since B and C
+#      still run there.
+#   B  STATIC, four backends: the image failure branch still produces a
+#      widget and cannot panic.
+#   C  STATIC, SwiftUI: KayaCell subscripts no subview collection it has
+#      not checked (`subviews.first`, never `subviews[0]`).
 
 import os
 import platform
@@ -82,12 +71,10 @@ def span(text, i, opener="{", closer="}"):
 
 def strip(text):
     """Code only: line comments, block comments and string literals
-    blanked out. Every search below runs on this, and the reason is
-    measured — the fix for the crash this gate guards DESCRIBES the
-    crash in a doc comment ("`subviews[0]` then traps"), and the first
-    run of clause C matched that sentence and failed the file that had
-    already been fixed. A gate that reads prose is a gate that fails on
-    documentation."""
+    blanked out. Every search below runs on this: the SwiftUI fix
+    DESCRIBES the crash in a doc comment ("`subviews[0]` then traps"),
+    and a gate that reads prose fails the file that was already
+    fixed."""
     out, i, n = [], 0, len(text)
     while i < n:
         c = text[i]
@@ -243,9 +230,9 @@ RAW = {p: gate.read(p) for p in (GTK, WINUI, SWIFTUI, COMPOSE)}
 
 
 # --- The self-test: every clause above WATCHED GOING RED. ------------
-# Perturbations run in memory through the prelude's doctor — the count
-# printed, an unapplied perturbation refused — because "the negative
-# test passed" and "it never touched the file" look identical otherwise.
+# In memory through the prelude's doctor, which refuses an unapplied
+# perturbation: "the negative passed" and "it never touched the file"
+# look identical otherwise.
 def refuses(raw, fragment, what):
     out = check(raw)
     if not out:
@@ -272,12 +259,9 @@ negative("the SwiftUI EmptyView perturbation", SWIFTUI,
          "renders `EmptyView()` when the decode fails",
          "a SwiftUI image arm that renders nothing", want=2)
 
-# The cell measures at the width it was GIVEN (the 2026-08-29 wrapping
-# ruling), so the line this perturbs is `sizeThatFits(probe)` — it used
-# to read `.unspecified`, and that string still occurs elsewhere in the
-# file, which is how this self-test went vacuous the day the cell
-# changed: the substitution applied somewhere OUTSIDE KayaCell and the
-# gate passed.
+# The pattern must stay anchored INSIDE KayaCell: this self-test went
+# vacuous once when the cell's own line changed and the substitution
+# landed on the same text elsewhere in the file.
 negative("the KayaCell subscript perturbation", SWIFTUI,
          r"let natural = subviews\.first\?\.sizeThatFits\(probe\) "
          r"\?\? \.zero",
@@ -312,10 +296,9 @@ if platform.system() == "Darwin":
               "builds what its gates read.", file=sys.stderr)
         sys.exit(1)
     with scratch_dir("check-empty-child-") as tmp:
-        # The probe compiles the interpreter's OWN source, so there is
-        # no interpreter artifact in this path to go stale. The
-        # toolchain resolution stays in tools/lib/swift-toolchain.sh —
-        # ONE copy; shell launches, python decides.
+        # The probe compiles the interpreter's OWN source, so no
+        # interpreter artifact in this path can go stale. Toolchain
+        # resolution stays in tools/lib/swift-toolchain.sh, one copy.
         build = subprocess.run(
             ["bash", "-c",
              'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '

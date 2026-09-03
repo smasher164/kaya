@@ -1,5 +1,5 @@
-(* The select conformance scene, OCaml port. See
-   guests/rust/select.rs and tools/scenes/select.steps. *)
+(* The select scene, OCaml port — guests/rust/select.rs,
+   tools/scenes/select.steps. *)
 
 open Kaya_wire
 open Kaya_app

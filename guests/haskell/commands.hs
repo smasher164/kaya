@@ -1,12 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
-{- The standard-commands scene, Haskell port: a chord on every leaf kind
-   (a checkable command, one option of a group, a plain command), the
-   punctuation keys those chords need, and the `settings` role — which
-   macOS shows in the application menu while the item stays addressable
-   where it was declared. Canonical semantics in
-   guests/rust/commands.rs; the byte-frozen contract in
-   tools/scenes/commands.steps. -}
+-- The commands scene, Haskell port — guests/rust/commands.rs,
+-- tools/scenes/commands.steps.
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
 

@@ -1,5 +1,5 @@
-// The textarea conformance scene, Swift port. See
-// guests/rust/textarea.rs and tools/scenes/textarea.steps.
+// The textarea scene, Swift port — guests/rust/textarea.rs,
+// tools/scenes/textarea.steps.
 
 import Foundation
 

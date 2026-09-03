@@ -1,5 +1,4 @@
-// The textarea conformance scene, JS port. See guests/rust/textarea.rs
-// and tools/scenes/textarea.steps.
+// The textarea conformance scene (tools/scenes/textarea.steps).
 
 import * as kaya from "kaya-gui";
 

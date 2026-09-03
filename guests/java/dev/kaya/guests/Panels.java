@@ -3,13 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The panels conformance scene from the JVM — see guests/rust/panels.rs
- * for the rationale. The inspector arms vetoClose, so its chrome close
- * emits close_requested and closes nothing; the guest records the
- * request and destroys the window itself.
- *
- * <p>DESKTOP ONLY: phone hosts reject createWindow at the root by
- * capability.
+ * The panels scene from the JVM — guests/rust/panels.rs,
+ * tools/scenes/panels.steps.
  */
 public final class Panels {
     public static void app() {

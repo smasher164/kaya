@@ -1,17 +1,5 @@
-// The text-ranges conformance scene, Go port: HIGHLIGHT a set of ranges,
-// SELECT one, REVEAL one. kaya ships no find engine and no dialect
-// (docs/ranges-plan.md §3).
-//
-// THE OFFSETS ARE GO STRING INDICES. strings.Index yields byte offsets
-// and that is what kaya.TextRange holds, so nothing converts anywhere in
-// this file. The document OPENS WITH A CJK WORD deliberately: every
-// match then sits SIX BYTES further along than it does in UTF-16, the
-// unit four of the five backends count, so a backend forwarding kaya's
-// byte offsets as its own unit decorates six characters early and the
-// frozen offsets say so.
-//
-// Canonical semantics in guests/rust/ranges.rs; the byte-frozen contract
-// in tools/scenes/ranges.steps.
+// The text-ranges scene (tools/scenes/ranges.steps). THE OFFSETS ARE GO
+// STRING INDICES; the CJK first line is what makes a UTF-16 reader fail.
 package ranges
 
 import (
@@ -21,12 +9,8 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// The document, frozen — byte-identical to the Rust guest's DOC (813
-// bytes). Three occurrences of `alpha`; forty short lines, so the last
-// match is far below a 240x96 viewport and REVEAL has something to do.
-//
-// A RAW STRING LITERAL, and the opening backtick is followed immediately
-// by `line 00:` — a newline there would be a byte of document.
+// Byte-identical to the Rust guest's DOC: the frozen offsets are of THESE
+// bytes, and a newline after the backtick would move every one.
 const document = `line 00: 日本語 preface
 line 01: gamma kappa
 line 02: alpha beta gamma
@@ -70,8 +54,7 @@ line 39: the last line`
 
 const needle = "alpha"
 
-// THE WHOLE SEARCH: literal, forward, non-overlapping. An editor that
-// wants case folding, word boundaries or a regex dialect writes it here.
+// kaya ships no find engine: this is the app's to write.
 func findAll(doc, needle string) []kaya.TextRange {
 	var hits []kaya.TextRange
 	for at := 0; ; {
@@ -87,8 +70,7 @@ func findAll(doc, needle string) []kaya.TextRange {
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// The app's OWN copy of the document, the only authority on what the
-	// offsets mean — kaya never reads text back.
+	// The only authority on an offset: kaya never reads text back.
 	doc := document
 
 	var status kaya.Signal[string]
@@ -99,14 +81,10 @@ func App() *kaya.App {
 		status = tx.Signal("0 matches")
 
 		tx.Mount(tx.Column(func() {
-			// The a11y id is not decoration: every range assertion reads
-			// the platform's accessibility tree and finds this control
-			// by it.
+			// Every range assertion finds this control by its authored id.
 			editor = tx.Textarea(func(tx *kaya.Tx, text string) {
 				doc = text
-				// THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO: kaya
-				// has already dropped the decorations, because a declared
-				// set is bound to the text it was declared against.
+				// kaya has already dropped the decorations on this edit.
 				tx.Write(status, "0 matches")
 			}).A11yID("doc").A11yLabel("Document")
 			tx.SetText(editor, document)
@@ -117,8 +95,7 @@ func App() *kaya.App {
 				tx.Button("find", func(tx *kaya.Tx) { // button#0
 					hits := findAll(doc, needle)
 					tx.HighlightRanges(editor, hits)
-					// The SECOND match, so a leg can tell the selection
-					// apart from "the first thing found".
+					// The SECOND match, so a leg can tell it from the first.
 					if len(hits) > 1 {
 						tx.SelectRange(editor, hits[1])
 					}

@@ -7,22 +7,13 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# The universal-props guard on the LOWERING side: every backend applies
-# a11y_id and a11y_label to every widget kind. (check-sugar-surface is
-# the same rule on the construction side.) The failure it catches is a
-# value applied to thirteen kinds and forgotten on the fourteenth, which
-# no compiler and no linter can see.
-#
-# Each backend is checked in the shape it uses:
-#
-#   Compose  per-kind: every `when (node.kind)` arm threads the modifier.
-#   SwiftUI  central: NO path around KayaRender.body's one wrapper.
-#   GTK      kind-agnostic: the apply arm matches the PROP alone, so
-#            nobody may narrow the binder to one NativeWidget variant.
-#   WinUI    kind-agnostic, same as GTK.
-#
-# Kinds come from the GENERATED python wire file, so the list tracks the
-# spec by construction.
+# The universal-props guard on the LOWERING side (check-sugar-surface is
+# the same rule on the construction side): a value applied to thirteen
+# kinds and forgotten on the fourteenth is invisible to every compiler.
+# Each backend is checked in the shape it uses — Compose per-kind arm,
+# SwiftUI's one central wrapper with no path around it, GTK and WinUI
+# kind-agnostic, so nobody may narrow the binder to one NativeWidget
+# variant. Kinds come from the GENERATED wire file.
 
 import re
 
@@ -87,13 +78,10 @@ def census(files):
             bad.append(f"{compose}: no render arm for KIND_{kind}")
             continue
         arm = arms[kind]
-        # A DEPTH-STUB ARM IS EXEMPT, AND ONLY BECAUSE IT CANNOT RETURN.
-        # check-verbs' `records_or_refuses` carries the same carve-out for
-        # the same reason: `depthStub` is `Nothing`, so there is no view for
-        # a modifier to reach and no way for the arm to pass vacuously. The
-        # exemption is read from the CALL, never from prose — without this
-        # the gate was satisfied by the identifier appearing in the arm's
-        # own pointer comment, which is a text match and not a rule.
+        # A DEPTH-STUB ARM IS EXEMPT ONLY BECAUSE IT CANNOT RETURN:
+        # `depthStub` is `Nothing`, so there is no view for a modifier to
+        # reach and no way to pass vacuously. Read from the CALL, never
+        # from prose — the identifier appears in the arm's own comment.
         if re.search(r'\bdepthStub\("[a-z_]+"\)', code_only(arm)):
             continue
         # `a11y` carries BOTH props. An arm may take the identity half
@@ -142,12 +130,9 @@ def census(files):
     return bad
 
 
-# Negative test against DOCTORED COPIES OF THE REAL FILES, not synthetic
-# samples: the patterns must still bite on the sources as written today.
-# In memory rather than in a mktemp dir — nothing is written to the tree,
-# so the EXIT trap the shell body carried has nothing left to clean up.
-# An unapplied perturbation cannot pass this: the copy would then equal
-# the real file, the census would accept it, and that IS the red below.
+# Negatives against DOCTORED COPIES OF THE REAL FILES, in memory: an
+# unapplied perturbation cannot pass, since the copy would then equal the
+# real file and the census's acceptance IS the red below.
 real = load()
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),

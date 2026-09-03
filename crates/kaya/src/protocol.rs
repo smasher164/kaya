@@ -211,18 +211,12 @@ impl PickedSource for PathSource {
     }
 }
 
-/// WHERE A SAVE DIALOG SAID TO WRITE — the same path, opened by a
-/// different rule, and the rule IS docs/save-plan.md D1. Three platforms
-/// answer a save dialog with a name for a file NOBODY HAS MADE and two
-/// with a document that already exists, so the destination's open
-/// CREATES and the guest sees one behaviour everywhere.
-///
-/// A SEPARATE SOURCE RATHER THAN A FOURTH FILE MODE: creation is a
-/// property of the DESTINATION, not of the caller's intent.
-///
-/// CREATE ON EVERY MODE, TRUNCATE ONLY ON `Write`. `Read` and
-/// `ReadWrite` coincide here — creating a file costs write access on
-/// every OS kaya targets, so there is no read-only way to make one.
+/// WHERE A SAVE DIALOG SAID TO WRITE — the same path, opened by a different
+/// rule, and the rule IS docs/save-plan.md D1: three platforms answer with a
+/// name for a file NOBODY HAS MADE and two with a document that exists, so
+/// the destination's open CREATES and the guest sees one behaviour.
+/// CREATE ON EVERY MODE, TRUNCATE ONLY ON `Write` — `Read` and `ReadWrite`
+/// coincide, since creating a file costs write access on every OS.
 pub struct SaveDestination {
     pub name: String,
     pub path: String,
@@ -329,15 +323,11 @@ impl TypefaceRequest {
     }
 }
 
-/// The app's declared identity, carried UNINSPECTED from the guest to
-/// every backend (docs/app-identity-plan.md). The core validates only
-/// the four walls the root enforces — set once, before the first mount,
-/// non-empty, not undoable: whether a blob is an image is a question
-/// only the platform's own decoder can answer.
-///
-/// ONE PICTURE, NOT FIVE, reaching every platform's identity sink.
-/// Per-platform artwork is refused for now: the divergences that matter
-/// are packaging-time transforms a runtime slot cannot serve.
+/// The app's declared identity, carried UNINSPECTED from the guest to every
+/// backend (docs/app-identity-plan.md). The core validates only the root's
+/// four walls — set once, before the first mount, non-empty, not undoable —
+/// because whether a blob is an image is the platform decoder's question.
+/// ONE PICTURE, NOT FIVE: per-platform artwork is refused.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppIdentity {
     pub name: String,
@@ -346,14 +336,11 @@ pub struct AppIdentity {
 
 /// One clip, offered in several representations at once.
 ///
-/// A RECORD AND NOT A LIST: every platform models the clipboard as one
-/// item available in several types, so at-most-one-per-kind is
-/// structural rather than a duplicate check. `custom` is the one plural
-/// field with names.
-///
-/// kaya DERIVES NOTHING. An app that wants plain text alongside html
-/// puts both in. The one exception is `files`, which also gets a text
-/// rendition of the paths — universal convention, no judgment in it.
+/// A RECORD AND NOT A LIST: every platform models the clipboard as one item
+/// available in several types, so at-most-one-per-kind is structural rather
+/// than a duplicate check; `custom` is the one plural field with names.
+/// kaya DERIVES NOTHING — the one exception is `files`, which also gets a
+/// text rendition of the paths.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Clip {
     pub text: Option<String>,
@@ -675,14 +662,11 @@ pub struct UndoDelta {
     pub orders: Vec<UndoOrder>,
 }
 
-/// One text field's restored text, named the way the edit that filled it
-/// was named.
-///
-/// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping: an
-/// empty `path` means `id` is a live [`WidgetId`], a non-empty one that
-/// `id` is the [`TemplateNodeId`] of a stamped copy addressed by that
-/// path. The core's internal widget id for a copy never leaves the core
-/// — an app could not resolve it, and it changes on every restamp.
+/// One text field's restored text, named the way the edit that filled it was
+/// named. THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping: an
+/// empty `path` means `id` is a live [`WidgetId`], a non-empty one that `id`
+/// is the [`TemplateNodeId`] of a stamped copy. The core's internal widget id
+/// for a copy never leaves the core — it changes on every restamp.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoText {
     /// A widget id when `path` is empty, a template node id otherwise.
@@ -815,34 +799,21 @@ pub enum WidgetKind {
     /// Spacing/Align are container-of-many concerns. Virtualization is
     /// out (docs/deferred.md).
     Scroll,
-    /// A drawing surface whose content is a PIXEL BUFFER THE CORE
-    /// PRODUCED (docs/canvas-plan.md). The guest declares an op list
-    /// through `set_drawing`; the core validates, shapes, rasterizes and
-    /// emits ApplyOp::SetDrawing; every backend's arm is a raw-pixel
-    /// blit. Display-only, like Image: no occurrence, no tag, and
-    /// pointer events stay deferred. Its VIEWBOX is its natural size —
-    /// the one widget whose content size is app-decided, which is why
-    /// kaya has no width/height prop (§3.2).
+    /// A drawing surface whose content is a PIXEL BUFFER THE CORE PRODUCED
+    /// (docs/canvas-plan.md): the guest declares an op list through
+    /// `set_drawing` and every backend's arm is a raw-pixel blit.
+    /// Display-only, like Image. Its VIEWBOX is its natural size — the one
+    /// widget whose content size is app-decided, hence no width/height prop.
     Canvas,
 }
 
 impl WidgetKind {
-    /// Every kind, for the sweeps that must not miss one — the tag
-    /// agreement between the live and stamped paths walks this rather
-    /// than repeating a list. Pinned to the spec's own `kind` enum by
+    /// Every kind, for the sweeps that must not miss one. Pinned to the
+    /// spec's own `kind` enum by
     /// `spec::tests::all_widget_kinds_are_the_spec_s_kinds` (invariant 7).
-    ///
     /// `pub(crate)`, not `pub`: a `pub` associated const makes cbindgen
-    /// treat `WidgetKind` as a type the C ABI exports, and it emitted
-    /// `typedef struct WidgetKind WidgetKind;` into the public header —
-    /// an opaque handle to a Rust enum that no C caller can do anything
-    /// with. The stale-header gate caught it on the first build. Guests
-    /// still name the enum's variants; nothing outside this crate needs
-    /// to walk them.
-    ///
-    /// `cfg(test)` because the sweeps that walk it ARE tests, and an
-    /// unconditional copy is a dead_code warning that trains the next
-    /// reader to ignore dead_code warnings.
+    /// export `WidgetKind` into the public header as an opaque handle no C
+    /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
     pub(crate) const ALL: [WidgetKind; 15] = [
         WidgetKind::Column,
@@ -867,9 +838,8 @@ impl WidgetKind {
     /// control reports. THE INTERACTIVE KINDS DO; the display and
     /// container kinds have nothing to report.
     ///
-    /// ONE predicate, read by both the live and the stamped callsite: as
-    /// two matches they drifted, and only the raw floor could reach the
-    /// difference (docs/sugar-pass-plan.md D1).
+    /// ONE predicate, read by both the live and the stamped callsite —
+    /// as two matches they drifted (docs/sugar-pass-plan.md D1).
     pub(crate) fn carries_tag(self) -> bool {
         match self {
             WidgetKind::Button
@@ -1058,13 +1028,10 @@ pub enum Prop {
     /// A child's flex-grow weight within its row/column (F64-valued; 0 =
     /// natural size, the default). Kind-agnostic.
     ///
-    /// The normalized semantics, uniform on every backend: weight-0
-    /// children are laid out at their natural main-axis size, and the
-    /// growers divide the LEFTOVER in proportion to their weights — a
-    /// grower's own natural size does not enter the division. This is
-    /// CSS `flex-basis: 0`, Compose's `Modifier.weight` and XAML star
-    /// sizing; backends with no native weight construct it explicitly
-    /// rather than approximating it with an ordinal priority.
+    /// Weight-0 children take their natural main-axis size and the growers
+    /// divide the LEFTOVER in proportion to their weights, a grower's own
+    /// natural size not entering it — CSS `flex-basis: 0`, uniform on every
+    /// backend, constructed explicitly where there is no native weight.
     Grow,
     /// Progress-only (Bool): the bar shows activity without a
     /// fraction — the platform's pulse/animation mode; Value is
@@ -1113,19 +1080,10 @@ pub enum Prop {
 }
 
 /// The leading pane's width for a list-detail split: a FRACTION of the
-/// window, clamped.
-///
-/// Not half. No platform splits a list-detail in half — the list is a
-/// navigation affordance and the detail is the content. libadwaita
-/// states the rule outright for AdwNavigationSplitView (25% of the
-/// total, min 180, max 280), Apple's NavigationSplitView behaves the
-/// same way, and Material gives the list a preferred width with the
-/// detail taking the rest. Those numbers are adopted rather than
-/// invented, so swapping in each platform's own wrapper later is a
-/// change of DRESSING.
-///
-/// One place, because three backends picking independently is how a
-/// lowering starts disagreeing with itself across platforms.
+/// window, clamped. Not half, and the numbers are adopted rather than
+/// invented — libadwaita states the rule for AdwNavigationSplitView (25% of
+/// the total, min 180, max 280), Apple's NavigationSplitView behaves the same
+/// way, and Material gives the list a preferred width.
 #[cfg_attr(
     // WinUI only: libadwaita sizes its own sidebar from the rule this
     // function encodes, while TwoPaneView's default is two EQUAL panes.
@@ -1174,16 +1132,11 @@ pub enum WindowProp {
     /// threshold or for WHICH panes survive: the stack order is the
     /// priority.
     Panes,
-    /// Whether this surface holds UNSAVED WORK (Bool-valued; default
-    /// false; docs/dirty-plan.md D1). State, never chrome: each backend
-    /// spells its platform's own affordance (D2) and the app's title
-    /// string is untouched everywhere.
-    ///
-    /// It arms nothing (D3). The "unsaved changes, close anyway?" flow
-    /// is `veto_close` plus the dialog machinery, which apps compose
-    /// for themselves; macOS attaches no behavior to the flag either
-    /// (measured: Cmd+W on an edited window calls windowShouldClose
-    /// once and closes, with no save sheet).
+    /// Whether this surface holds UNSAVED WORK (Bool-valued; default false;
+    /// docs/dirty-plan.md D1). State, never chrome: each backend spells its
+    /// platform's own affordance (D2) and the title string is untouched.
+    /// It arms nothing (D3), and macOS attaches no behavior to the flag
+    /// either (docs/probes/dirty-probe-mac.md).
     Dirty,
     /// The window CONTENT INSET in layout units (F64-valued) — LAYOUT,
     /// not appearance (docs/styling-plan.md D3): the space kaya's own
@@ -1258,16 +1211,12 @@ pub enum CommandKind {
     Focus,
 }
 
-/// A span of a text widget's content, in UTF-8 BYTE offsets into the
-/// widget's current guest-visible text — the unit the guest speaks and
-/// the only one with an O(1) validity predicate. `start <= end`;
-/// `start == end` is a caret.
-///
-/// THE SIBLING TYPE [`NativeRange`] IS THE POINT OF BOTH OF THEM. Every
-/// backend counts something else — UTF-16 code units on mac, iOS,
-/// Windows and Android, code points on GTK — and the core converts
-/// before it lowers. Two types make that conversion impossible to skip:
-/// an [`ApplyOp`] cannot be built out of a `TextRange`.
+/// A span of a text widget's content, in UTF-8 BYTE offsets into the widget's
+/// current guest-visible text — the unit the guest speaks. `start <= end`;
+/// `start == end` is a caret. THE SIBLING TYPE [`NativeRange`] IS THE POINT
+/// OF BOTH: every backend counts something else (UTF-16 code units, code
+/// points on GTK) and the core converts before it lowers, so two types make
+/// that conversion impossible to skip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
     pub start: u64,
@@ -1475,27 +1424,23 @@ pub enum TxOp {
     /// Scroll a range into the textarea's viewport. A pure effect:
     /// undo does not restore it (docs/undo-plan.md A2).
     RevealRange { widget: WidgetId, range: TextRange },
-    /// DECLARE the column header bar on a For's container, replacing the
-    /// previous declaration; `sorted` is a 0-based index or
-    /// SORT_NONE, `direction` 0 asc / 1 desc (docs/tables-plan.md).
-    /// `widget` is a live For's container (path empty), or a nested
-    /// For's TEMPLATE NODE — path empty declares every copy's bar,
-    /// keys outermost-first re-declare ONE stamped copy's (the
-    /// per-copy sort indicator; the dynamic-tables section).
-    /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3; size
-    /// classes ruled 2026-08-31): while the window's SIZE CLASS equals
-    /// `when` (wire::SIZE_CLASS_COMPACT alone today), the setters apply;
-    /// leaving the class, they auto-revert to the guest-authored value or
-    /// the kind's own default — the diff-against-base rule. THE CORE
-    /// EVALUATES (kaya_window_metrics reports width and platform class),
-    /// never a platform's breakpoint machinery and never a guest-side
-    /// lambda. Setters are limited to the ruled list (axis alone today;
-    /// the root refuses others until D6 widens it).
+    /// A DECLARED BREAKPOINT (docs/adaptive-layout-plan.md D3; size classes
+    /// ruled 2026-08-31): while the window's SIZE CLASS equals `when`
+    /// (wire::SIZE_CLASS_COMPACT alone today) the setters apply, and leaving
+    /// the class they auto-revert to the guest-authored value or the kind's
+    /// default. THE CORE EVALUATES, never a platform's breakpoint machinery;
+    /// setters are limited to the ruled list (axis alone today).
     CreateBreakpoint {
         window: WindowId,
         when: i64,
         setters: Vec<(WidgetId, Prop, Value)>,
     },
+    /// DECLARE the column header bar on a For's container, replacing the
+    /// previous declaration; `sorted` is a 0-based index or SORT_NONE,
+    /// `direction` 0 asc / 1 desc (docs/tables-plan.md). `widget` is a live
+    /// For's container (path empty) or a nested For's TEMPLATE NODE — path
+    /// empty declares every copy's bar, keys outermost-first re-declare ONE
+    /// stamped copy's.
     SetColumnHeaders {
         widget: WidgetId,
         sorted: u32,
@@ -1504,13 +1449,11 @@ pub enum TxOp {
         titles: Vec<String>,
     },
     /// DECLARE the whole drawing on a canvas, replacing the previous
-    /// declaration (docs/canvas-plan.md §3.1). `viewbox` is the
-    /// coordinate system the ops are written in AND the canvas's natural
-    /// size in points; `ops` is the flat opcode-then-operands run.
-    /// `widget` is a live canvas (path empty), or a canvas TEMPLATE NODE
-    /// — path empty declares every stamped copy's drawing, keys
-    /// outermost-first re-declare ONE copy's (set_column_headers'
-    /// addressing verbatim).
+    /// declaration (docs/canvas-plan.md §3.1). `viewbox` is the coordinate
+    /// system the ops are written in AND the canvas's natural size in points;
+    /// `ops` is the flat opcode-then-operands run. `widget` is a live canvas
+    /// (path empty) or a canvas TEMPLATE NODE, addressed exactly as
+    /// set_column_headers is.
     SetDrawing {
         widget: WidgetId,
         viewbox: (f64, f64),
@@ -1633,15 +1576,12 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
-    /// The column header bar on the For's live container — titles in
-    /// visual order, the indicator on `sorted` (SORT_NONE for none),
-    /// `direction` 0 asc / 1 desc. Table presentation where the size
-    /// class and platform have the idiom; a synthesized header or, on
-    /// compact, none, where they do not. Header clicks hand `tag` to
-    /// kaya_emit_sort_requested verbatim with the column index — the
-    /// click-tag mechanism, because a stamped copy's identity is a
-    /// node id plus key path no backend can compute. Nothing here
-    /// reorders (docs/tables-plan.md).
+    /// The column header bar on the For's live container — titles in visual
+    /// order, the indicator on `sorted` (SORT_NONE for none), `direction` 0
+    /// asc / 1 desc. Table presentation where the size class and platform
+    /// have the idiom; a synthesized header or, on compact, none, where they
+    /// do not. Header clicks hand `tag` to kaya_emit_sort_requested verbatim
+    /// with the column index. Nothing here reorders (docs/tables-plan.md).
     SetColumnHeaders { id: WidgetId, sorted: u32, direction: u32, titles: Vec<String>, tag: Vec<u8> },
     /// THE RASTER a canvas's declaration produced (docs/canvas-plan.md
     /// §1.1): `width` x `height` PREMULTIPLIED RGBA8 device pixels at

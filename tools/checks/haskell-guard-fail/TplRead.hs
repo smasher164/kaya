@@ -1,10 +1,8 @@
 -- MUST NOT COMPILE — the fixture is compiled expecting FAILURE.
---
--- The record-time mirror-read guard, Haskell arm: where the other
--- bindings guard at run time, here the wall is the type system (reads
--- are Build-typed, a template body is Tpl-typed, and Tpl has no lift
--- from Build). If this ever compiles, that wall has fallen and the
--- Haskell binding needs the runtime guard the others carry.
+-- The record-time mirror-read guard, Haskell arm: the wall here is the
+-- type system (reads are Build-typed, a template body is Tpl-typed, and
+-- Tpl has no lift from Build). If this compiles, that wall has fallen and
+-- the binding needs the runtime guard the others carry.
 module TplRead where
 
 import KayaApp

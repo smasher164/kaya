@@ -19,14 +19,10 @@ object KayaPresent {
     @JvmStatic external fun stalledMs(): Long
 
     /**
-     * The core's latched fault as UTF-8, or null for none — a guard that
-     * caught an app misuse, or a transaction that died inside
-     * Scene::apply. Both used to ABORT this process, taking the harness's
-     * failure list with them (crates/kaya/src/fault.rs).
-     *
-     * A PEEK, never a take: the run asks again after its last step, and a
-     * consuming read would let that look report a green leg.
-     * kaya_fault's JNI spelling.
+     * The core's latched fault as UTF-8, or null for none
+     * (crates/kaya/src/fault.rs). A PEEK, never a take: the run asks
+     * again after its last step, and a consuming read would let that
+     * look report a green leg. kaya_fault's JNI spelling.
      */
     @JvmStatic external fun fault(): ByteArray?
 
@@ -38,15 +34,11 @@ object KayaPresent {
     @JvmStatic external fun faultWatch()
 
     /**
-     * Emit an entry edit: [tag] is the tag bytes delivered with the
-     * entry's CREATE record, [text] the field's current content.
-     *
-     * [focused] and [quiet] are the undo ledger's (docs/undo-plan.md
-     * §3). [focused] says whether the field this event names holds
-     * focus — an event on an unfocused field closes the typing episode
-     * as it stands. [quiet] is LEDGER-QUIET: it marks the ordinary
-     * report a routed native undo also provokes, so the change is not
-     * banked twice. The app hears the edit either way.
+     * Emit an entry edit. [focused] and [quiet] are the undo ledger's
+     * (docs/undo-plan.md §3): an event on an UNFOCUSED field closes the
+     * typing episode as it stands, and LEDGER-QUIET marks the ordinary
+     * report a routed native undo also provokes. The app hears the edit
+     * either way.
      */
     @JvmStatic external fun emitTextChanged(
         tag: ByteArray,
@@ -81,18 +73,11 @@ object KayaPresent {
     )
 
     /**
-     * The SAVE dialog's one answer: the `content://` URI of the document
-     * `ACTION_CREATE_DOCUMENT` made, and its display name. NULL IS
-     * CANCEL — the picker spells the same thing as an empty array,
-     * because it may answer with many and this may not.
-     *
-     * ITS OWN ENTRY RATHER THAN [emitFileDialogResult] WITH A LIST OF
-     * ONE: the core decides what a handle IS from which entry it
-     * arrives on, and a save destination opens with create where a
-     * picked file must not (docs/save-plan.md D1). Android's two
-     * sources coincide today, so answering on the picker's entry would
-     * be a mistake that works. kaya_emit_save_dialog_result's JNI
-     * spelling.
+     * The SAVE dialog's one answer, and NULL IS CANCEL (the picker
+     * spells that as an empty array). ITS OWN ENTRY RATHER THAN
+     * [emitFileDialogResult] WITH A LIST OF ONE: the core decides what a
+     * handle IS from which entry it arrives on (docs/save-plan.md D1).
+     * kaya_emit_save_dialog_result's JNI spelling.
      */
     @JvmStatic external fun emitSaveDialogResult(
         dialog: Long,
@@ -101,20 +86,11 @@ object KayaPresent {
     )
 
     /**
-     * The privileged read's one answer, FLATTENED into scalars.
-     *
-     * [clip] is ONE of the wire's CLIP_* values, never a mask; 0 is the
-     * universal no (denied, unfocused, empty, or nothing the request
-     * accepted). [clip] alone decides which argument carries the
-     * payload: text and html ride [text], an image rides [bytes], a
-     * custom format rides its id in [text] and its bytes in [bytes],
-     * and files ride parallel [locators] (`content://` URI strings) and
-     * [names]. The arguments the kind does not name pass "" and empty
-     * arrays.
-     *
-     * ANSWER EXACTLY ONCE — the request retires here — and answering
-     * empty is always correct. kaya_emit_clipboard_result's JNI
-     * spelling.
+     * The privileged read's one answer, FLATTENED into scalars and
+     * ANSWERED EXACTLY ONCE (empty is always correct).
+     * kaya_emit_clipboard_result's JNI spelling. [clip] is ONE wire
+     * CLIP_* value, never a mask, and it alone says which argument
+     * carries the payload; the rest pass "" and empty arrays.
      */
     @JvmStatic external fun emitClipboardResult(
         request: Long,
@@ -126,14 +102,11 @@ object KayaPresent {
     )
 
     /**
-     * Content arriving at a widget because the USER pasted. [tag] is
-     * the widget's own click-tag bytes, handed back verbatim.
-     *
-     * The payload flattens as [emitClipboardResult]'s does, with one
-     * difference: A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE,
-     * so [clip] is never 0 here and the core refuses a 0.
-     *
-     * kaya_emit_pasted's JNI spelling.
+     * Content arriving at a widget because the USER pasted; [tag] is the
+     * widget's click-tag bytes, verbatim. The payload flattens as
+     * [emitClipboardResult]'s does, except that A PASTE THAT DELIVERED
+     * NOTHING IS NOT AN OCCURRENCE: [clip] is never 0 and the core
+     * refuses a 0. kaya_emit_pasted's JNI spelling.
      */
     @JvmStatic external fun emitPasted(
         tag: ByteArray,
@@ -146,20 +119,10 @@ object KayaPresent {
 
     /**
      * Redeem a picked URI: `openFileDescriptor(uri, mode)` then
-     * `detachFd`, returning the descriptor the guest now owns.
-     *
-     * CALLED FROM THE CORE, not from Kotlin. A handle is redeemable
-     * more than once by design, so every `open` is a real open through
-     * the resolver. A pasted file comes through here too.
-     *
-     * The mode is the ContentResolver's spelling and the core decides
-     * it (see `android_open_mode`) — in particular Write arrives as
-     * `wt`, because a bare `w` does not truncate.
-     *
-     * RUNS ON WHATEVER THREAD THE GUEST CALLED `open` FROM:
-     * `openFileDescriptor` blocks, and a provider may download the file
-     * before it returns. Throws rather than returning -1 where the
-     * platform gives a reason.
+     * `detachFd`. CALLED FROM THE CORE, and a handle is redeemable more
+     * than once. The mode is `android_open_mode`'s — Write arrives as
+     * `wt`, a bare `w` not truncating. RUNS ON WHATEVER THREAD THE GUEST
+     * CALLED `open` FROM, and blocks.
      */
     @JvmStatic
     fun openPickedUri(uri: String, mode: String): Int {
@@ -231,14 +194,11 @@ object KayaPresent {
     @JvmStatic external fun scrollToRow(container: Long, key: String): Long
 
     /**
-     * One windowed For's geometry, written into [out] — which must hold
-     * at least [GEOMETRY_SLOTS] doubles, in the order the GEOMETRY_*
-     * constants name.
-     *
-     * FILLED IN PLACE rather than returned: this is read on the layout
-     * path of every frame a table scrolls, and a fresh array per frame
-     * is garbage the OOM this milestone exists to fix would rather not
-     * have. kaya_window_geometry's JNI spelling.
+     * One windowed For's geometry, written into [out] — at least
+     * [GEOMETRY_SLOTS] doubles, in the GEOMETRY_* order. FILLED IN PLACE
+     * rather than returned: read on the layout path of every frame a
+     * table scrolls, where a fresh array per frame is garbage.
+     * kaya_window_geometry's JNI spelling.
      */
     @JvmStatic external fun windowGeometry(container: Long, out: DoubleArray)
 
@@ -258,12 +218,10 @@ object KayaPresent {
     @JvmStatic external fun presentation(scale: Double, dark: Boolean)
 
     /**
-     * One canvas's CANONICAL raster, read back out of the core:
-     * `"<16 hex> <ops>/<l>,<t>,<r>,<b>"`, or `""` when the id names no
-     * canvas that has been drawn (docs/canvas-plan.md §7.1). Canonical
-     * means scale 1.0 and the light palette, pinned by the core rather
-     * than read from this device — which is what lets ONE frozen string
-     * hold on five platforms. kaya_canvas_probe's JNI spelling.
+     * One canvas's CANONICAL raster: `"<16 hex> <ops>/<l>,<t>,<r>,<b>"`,
+     * or `""` for an id no drawn canvas has (docs/canvas-plan.md §7.1).
+     * Canonical is scale 1.0 and the light palette, pinned by the core
+     * rather than this device. kaya_canvas_probe's JNI spelling.
      */
     @JvmStatic external fun canvasProbe(widget: Long): String
 
@@ -330,11 +288,10 @@ object KayaPresent {
 
     /**
      * Block until the next transaction resolves and return that batch's
-     * apply-op records (KAYA_APPLY_*) — null when the core has shut down.
-     *
-     * THE CORE SIZES THE ARRAY. A pump that sized its own aborted the
-     * process at 157 rows in one transaction (docs/deferred.md, the
-     * 64 KiB pump wall); a batch is one recomposition and cannot be split.
+     * apply-op records (KAYA_APPLY_*) — null once the core has shut
+     * down. THE CORE SIZES THE ARRAY: a pump that sized its own aborted
+     * at 157 rows in one transaction (docs/deferred.md, the 64 KiB pump
+     * wall), and a batch cannot be split.
      */
     @JvmStatic external fun nextCommands(): ByteArray?
 
@@ -352,15 +309,11 @@ object KayaPresent {
     // straight to the C entries.
 
     /**
-     * Where an undo would go RIGHT NOW: 0 nowhere (the command is inert
-     * and reads disabled), 1 the focused field's own stack, 2 the core's
-     * ledger.
-     *
-     * [focused] is the widget the backend has focus on, 0 for none;
-     * [canUndo] is A4's one named query in this platform's vocabulary
+     * Where an undo would go RIGHT NOW: 0 nowhere (inert, reads
+     * disabled), 1 the focused field's own stack, 2 the core's ledger.
+     * [focused] is 0 for none; [canUndo] is A4's named query
      * (`TextUndoManager.canUndo`). ENABLEMENT AND ACTIVATION ARE THE
-     * SAME CALL, so the two cannot drift. kaya_undo_route's JNI
-     * spelling.
+     * SAME CALL, so the two cannot drift. kaya_undo_route's JNI spelling.
      */
     @JvmStatic external fun undoRoute(window: Long, focused: Long, canUndo: Boolean): Int
 
@@ -377,22 +330,11 @@ object KayaPresent {
     @JvmStatic external fun redo(window: Long)
 
     /**
-     * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3):
-     * the [field] the backend sent the platform's own undo to, the
-     * [text] the walk landed on, and whether that field can still undo.
-     * The core walks its frontier episode from those three facts.
-     *
-     * [canUndo] IN BOTH DIRECTIONS, deliberately — a redo reports it
-     * too. It is not "did this walk have more to give"; it is the
-     * core's test for the one case A1's clear is meant to make
-     * unreachable, a platform that coalesced across the episode's start.
-     *
-     * The ordinary [emitTextChanged] the same undo provokes carries
-     * `quiet = true`, so the change is banked once no matter which of
-     * the two the platform delivers first — and on this backend BOTH
-     * arrive (measured: a routed `undoState.undo()` moves the snapshot
-     * the field's collector observes, docs/probes/undo-fan-compose.md
-     * §1 Q-a and §3 point 6). kaya_note_native_undo's JNI spelling.
+     * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3).
+     * [canUndo] IN BOTH DIRECTIONS, deliberately — the core's test for a
+     * platform that coalesced across the episode's start. The ordinary
+     * [emitTextChanged] carries `quiet = true`, and BOTH arrive here
+     * (docs/probes/undo-fan-compose.md §1 Q-a).
      */
     @JvmStatic external fun noteNativeUndo(
         window: Long,

@@ -921,12 +921,10 @@ _SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", 
 def canonicalize_shortcut(spelling):
     """Canonicalize a shortcut spelling to the wire form: lowercase
     '+'-joined tokens, modifiers ordered primary, shift, alt, then one
-    key (a-z, 0-9, or the closed named set). Accepts ASCII case
-    variants and any modifier order; rejects whitespace, empty tokens,
-    repeated modifiers, aliases (ctrl/cmd/option), and unknown or
-    multiple or missing keys. POLICY stays at the core: escape,
-    shift-only and bare alphanumerics, and the reserved floor are
-    validated there, on the canonical spelling, never rewritten."""
+    key (a-z, 0-9, or the closed named set). Rejects whitespace, empty
+    tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown
+    or multiple or missing keys. POLICY stays at the core, validated
+    on the canonical spelling and never rewritten."""
     if not spelling:
         raise ValueError("kaya: shortcut is empty")
     if any(ch in spelling for ch in " \t\n\v\f\r"):

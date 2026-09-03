@@ -1,5 +1,4 @@
-// The radio conformance scene, C# port. See
-// guests/rust/radio.rs and tools/scenes/radio.steps.
+// The radio scene, C# port — guests/rust/radio.rs, tools/scenes/radio.steps.
 
 static class RadioScene
 {

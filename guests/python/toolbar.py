@@ -1,12 +1,5 @@
-"""The toolbar conformance scene, Python port: the `primary` bit as real
-window chrome (docs/chrome-plan.md C2). The app declares ONE catalog and
-marks two actions primary; every host promotes the same first two in
-catalog preorder, and the rest of the catalog stays reachable where that
-host keeps it. There is no toolbar vocabulary to spell.
-
-Canonical semantics in guests/rust/toolbar.rs; the byte-frozen contract
-in tools/scenes/toolbar.steps.
-"""
+"""The toolbar scene (tools/scenes/toolbar.steps): the `primary` bit as
+window chrome, with no toolbar vocabulary to spell."""
 
 import sys
 
@@ -37,18 +30,12 @@ def on_export():
 
 with app.window(title="toolbar"):
     status = kaya.signal("ready")
-    # The app writes this against the MENU ITEM and says nothing about
-    # any button: the promoted button IS that item, so it follows or the
-    # lowering kept a copy.
+    # Written against the MENU ITEM: the promoted button IS that item.
     can_save = kaya.signal(True)
 
-    # CATALOG PREORDER DECIDES PROMOTION — top-level groupings in
-    # menubar-append order, then each node's children in append order,
-    # depth-first. Save is the first primary and Find the second, so
-    # every host's promoted set is [Save, Find] whatever its own k is.
+    # CATALOG PREORDER DECIDES PROMOTION.
     with app.menu("File"):
-        # The vocabulary has no save-specific glyph, so `done` — the
-        # checkmark idiom — is the spelling (docs/styling-plan.md D6).
+        # The vocabulary has no save glyph, so `done` is the spelling.
         kaya.item("Save", symbol=kaya.Symbol.DONE, primary=True,
                   enabled=can_save, shortcut="primary+s", on_activate=on_save)
         kaya.item("Export", symbol=kaya.Symbol.FORWARD, on_activate=on_export)

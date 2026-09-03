@@ -80,11 +80,9 @@ let kaya_occurrence_blob =
 let kaya_occurrence_blob_release =
   foreign ~from:lib "kaya_occurrence_blob_release" (uint64_t @-> returning void)
 
-(* Redeem an occurrence blob for its bytes, and release it. Installed
-   into the generated wire module, which opens no library of its own.
-
-   COPY THEN RELEASE, in that order: the pointer borrows core memory
-   that the release frees. *)
+(* Redeem an occurrence blob for its bytes, and release it. COPY THEN
+   RELEASE, in that order: the pointer borrows core memory that the
+   release frees. *)
 let occurrence_blob handle =
   let len = allocate size_t (Unsigned.Size_t.of_int 0) in
   let data = kaya_occurrence_blob (Unsigned.UInt64.of_int64 handle) len in
@@ -139,8 +137,7 @@ let kaya_spec_hash = foreign ~from:lib "kaya_spec_hash" (void @-> returning int6
 (* The host capability word; Kaya_app.capabilities is the surface.
    cap_aux_windows is the core's KAYA_CAP_AUX_WINDOWS written again —
    ctypes has no header to read it from — and
-   tools/check-sugar-surface.py fails if it disagrees with
-   crates/kaya/src/scene.rs. *)
+   tools/check-sugar-surface.py fails if it disagrees with the core. *)
 let kaya_capabilities =
   foreign ~from:lib "kaya_capabilities" (void @-> returning int64_t)
 
@@ -182,12 +179,10 @@ type asset = { handle : int64; mutable live : bool }
 
 let release_handle handle = kaya_asset_release (Unsigned.UInt64.of_int64 handle)
 
-(* The core's sentence for why a name would miss, fetched whole. The
-   sentence's one author is [asset_why_not] in
-   crates/kaya/src/assets.rs; this only carries it.
-
-   SIZED, THEN READ: the C entry returns the sentence's TRUE length, so
-   the first call measures and the second fills. *)
+(* The core's sentence for why a name would miss, fetched whole; its one
+   author is [asset_why_not] in crates/kaya/src/assets.rs. SIZED, THEN
+   READ: the C entry returns the sentence's TRUE length, so the first
+   call measures and the second fills. *)
 let asset_miss_sentence name =
   let n = Unsigned.Size_t.of_int (String.length name) in
   let len =

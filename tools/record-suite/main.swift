@@ -1,16 +1,13 @@
 // record-suite: one suite-long recording of every registered guest
-// window, via a single ScreenCaptureKit stream. The recording-mode
-// capturer for macOS.
+// window, via a single ScreenCaptureKit stream.
 //
 //   record-suite <output.mov> <pidfile>
 //   record-suite --probe
 //
 // ONE STREAM on purpose: concurrent SCK window streams starve and die
-// ("connection interrupted", frameless legs) where a single stream is
-// reliable, so parallel legs share this one and become crops. The filter
-// is display-scoped but INCLUDE-LISTED — only windows owned by pids in
-// <pidfile> (runner-appended, polled live) are composited. Guests tile
-// themselves into slots (KAYA_WIN_SLOT) so crops never overlap.
+// where a single stream is reliable, so parallel legs share this one and
+// become crops (they tile into KAYA_WIN_SLOT slots so crops never
+// overlap). The filter is display-scoped but INCLUDE-LISTED.
 //
 // Protocol on stdout, consumed by tools/validate-mac.py:
 //   RECORDING_START <epoch_ms>    wall time of video t=0 (the anchor)
@@ -18,17 +15,13 @@
 //   TRACKING <pid>                the pid's window has joined the filter
 //   WINDOW <pid> <x> <y> <w> <h>  its frame, display points, top-left
 //
-// Frames are written with AVAssetWriter (SCRecordingOutput flushes in
-// ~2s chunks and drops the buffered tail at stop). Frame 0 is seeded
-// from an explicit screenshot: SCK streams only deliver on content
-// change, and a leg gated on "recording started" holds still — the
-// seed breaks that deadlock, guarantees the initial state is in the
-// film, and stamps the anchor. On SIGINT/SIGTERM the recorder drains
-// until frames go idle, then finalizes — no fixed grace anywhere.
+// AVAssetWriter rather than SCRecordingOutput, which flushes in ~2s
+// chunks and drops the buffered tail at stop. Frame 0 is seeded from an
+// explicit screenshot, because SCK delivers only on content change and a
+// leg gated on "recording started" holds still.
 //
-// Never rebuild this binary in place — it poisons the TCC identity, and
-// the damage survives reboots (docs/traps.md). The runner builds it to a
-// content-hashed path.
+// NEVER REBUILD THIS BINARY IN PLACE — it poisons the TCC identity and
+// the damage survives reboots (docs/traps.md).
 
 import AppKit
 import AVFoundation

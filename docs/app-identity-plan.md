@@ -88,7 +88,7 @@ raise the policy at that moment rather than at launch. Nobody has
 measured whether a policy raised late puts the tile up, so the macOS
 work measures it before depending on it. If a late change turns out not
 to take, the fallback exists already and costs one line:
-`swift/KayaSwiftUIEntry.swift:49` runs a leg as `regular` when
+`swift/KayaSwiftUIEntry.swift:47` runs a leg as `regular` when
 `KAYA_ACTIVATE=1` is set, and the identity scene's macOS legs can set
 it.
 
@@ -102,9 +102,9 @@ draft could find no runtime call that takes picture bytes. But kaya
 already builds both packages:
 
 - the Android lane builds an installable APK with gradle
-  (`tools/android/run-emulator.py:1756`), and
+  (`tools/android/run-emulator.py:1677`), and
 - the iOS lane assembles a real `.app` bundle with a real `Info.plist`
-  (`tools/ios/run-sim.py:219`, the `make_bundle` function, filling in
+  (`tools/ios/run-sim.py:198`, the `make_bundle` function, filling in
   `tools/ios/Info.plist.in`).
 
 So those two steps become **the first two readers of the declared
@@ -214,13 +214,13 @@ The vendored typeface works this way today: one file in the tree
 (`guests/assets/fonts/sora-wght.ttf`), a default path relative to the
 repo root that every guest knows, and a `KAYA_FONT_FILE` environment
 variable that overrides it for a runner whose guest cannot see the repo
-(`guests/python/typeface.py:55` is one of the eight). Three staging
+(`guests/python/typeface.py:30` is one of the eight). Three staging
 lines carry that file to the three places that are not the repo: pushed
-to each Android device (`tools/android/run-emulator.py:712`), copied to
+to each Android device (`tools/android/run-emulator.py:662`), copied to
 the Windows machine at the mirrored path
-(`tools/deploy-win.py:484`), and left at its default inside the Linux
+(`tools/deploy-win.py:450`), and left at its default inside the Linux
 container because the container mounts the repo
-(`tools/linux/run-suites.sh:736`). The identity icon takes exactly this
+(`tools/linux/run-suites.sh:606`). The identity icon takes exactly this
 shape, with its own `KAYA_*` variable and the same three staging lines.
 
 **A gate makes the two readers agree.** The bytes packaged into an
@@ -332,7 +332,7 @@ failure the typeface slice exists to prevent, one tier up.
 |---|---|---|---|
 | **macOS** | `NSApp.applicationIconImage = NSImage(data: pngBytes)` replaces the **Dock tile and the Cmd-Tab switcher tile**, verbatim, from a plain PNG. No `.icns`, no multi-representation set, no `setName:`. | Anything before launch (Finder, Spotlight, Launchpad), measured from a separate process with nothing running. The switcher *label* and the Dock tile's AX title, which no route moved. All bundle identity. And **the tile only exists under `.regular`**: see I2. | **[MEASURED]** macOS 26.5.2 (25F84), unbundled probe reproducing kaya's dlopen+`@_cdecl` entry shape. Under `.accessory` the Dock strip was pixel-identical to baseline while the setter succeeded and read back 512x512. Under `.regular` the tile appeared as the generic black `exec` icon, then became the probe's magenta PNG; a real Cmd-Tab driven with synthetic events showed the same art in the switcher. It is **re-settable live** (a second icon installed at +9 s took effect in both places). The tile is **unmasked**: hard-edged square beside thirteen rounded system icons, so the blob owns its own shape — the bundled control with the same art in an `.icns` *is* rounded. |
 | **Windows** | **Both sinks, from bytes, with nothing on disk.** The caption via `TitleBar.IconSource` ← `ImageIconSource` ← `BitmapImage.SetSource(InMemoryRandomAccessStream)`; the taskbar and alt-tab via `AppWindow.SetTaskbarIcon(IconId)` / `SetIcon(IconId)`, fed by PNG bytes straight through `CreateIconFromResourceEx`. | The AUMID display name and the relaunch icon, which are `"path,-resourceId"` strings pointing into a file on disk. `BitmapIconSource` is **URI-only**; `SetIcon(String)` is an **.ico file path**. Caption slot exists only on promoted windows: see I3. | **[MEASURED]** ECMA-335 table walk of the pinned winmd (Windows App SDK 2.2.0): `TitleBar.IconSource` typed `Microsoft.UI.Xaml.Controls.IconSource` on `ITitleBar` v1; `AppWindow` carries `SetIcon`, `SetTaskbarIcon` and `SetTitleBarIcon` in **both** String and `IconId` overloads. Of the seven `IconSource` subclasses only `ImageIconSource` reaches a stream-accepting type. **[DOC]** `CreateIconFromResourceEx` takes a memory pointer, and a PNG may be passed to it unmodified (Raymond Chen, "The format of icon resources, revisited"). |
-| **Linux/GTK** (the SECOND of Linux's two surfaces; ruling 5 separates them, and the first surface is the row below) | **X11: real pixels, today.** `gdk_toplevel_set_icon_list()` is public API taking `GdkTexture`s, and a blob decoded in-process lands as `_NET_WM_ICON` with no theme, no name and no file. **Wayland: nothing on this lane** — see I4a for why that is version-shaped rather than permanent. This surface is what an UNINSTALLED binary has, which is what the lane runs. | Everything the first surface owns: see the row below. | **[MEASURED: GTK 4.18.6 in the lane container]** a 226-byte PNG → `gdk_texture_new_from_bytes` → `gdk_toplevel_set_icon_list` → `xprop` reads `_NET_WM_ICON(CARDINAL) = Icon (64 x 64)`. `gtk_window_set_icon` is gone in GTK4; the four surviving calls are name-only and resolve through `GtkIconTheme` **into that same GDK function**. Wayland's backend answers `GDK_TOPLEVEL_PROP_ICON_LIST` with a literal `break;`, and headless sway 1.10.1 advertises no `xdg_toplevel_icon_manager_v1` (full 53-global list read). Pins: `gtk4 0.11.4`/`v4_10`, libadwaita `0.9.2`/`v1_4` **[REPO: crates/kaya/Cargo.toml:151,175]**; the lane runs both protocols per leg **[REPO: tools/linux/run-suites.sh]**; there is **no .desktop file anywhere in the tree**. |
+| **Linux/GTK** (the SECOND of Linux's two surfaces; ruling 5 separates them, and the first surface is the row below) | **X11: real pixels, today.** `gdk_toplevel_set_icon_list()` is public API taking `GdkTexture`s, and a blob decoded in-process lands as `_NET_WM_ICON` with no theme, no name and no file. **Wayland: nothing on this lane** — see I4a for why that is version-shaped rather than permanent. This surface is what an UNINSTALLED binary has, which is what the lane runs. | Everything the first surface owns: see the row below. | **[MEASURED: GTK 4.18.6 in the lane container]** a 226-byte PNG → `gdk_texture_new_from_bytes` → `gdk_toplevel_set_icon_list` → `xprop` reads `_NET_WM_ICON(CARDINAL) = Icon (64 x 64)`. `gtk_window_set_icon` is gone in GTK4; the four surviving calls are name-only and resolve through `GtkIconTheme` **into that same GDK function**. Wayland's backend answers `GDK_TOPLEVEL_PROP_ICON_LIST` with a literal `break;`, and headless sway 1.10.1 advertises no `xdg_toplevel_icon_manager_v1` (full 53-global list read). Pins: `gtk4 0.11.4`/`v4_10`, libadwaita `0.9.2`/`v1_4` **[REPO: crates/kaya/Cargo.toml:87,175]**; the lane runs both protocols per leg **[REPO: tools/linux/run-suites.sh]**; there is **no .desktop file anywhere in the tree**. |
 | **Linux desktop** (the FIRST of Linux's two surfaces: launcher, dock, alt-tab, on X11 AND Wayland alike) | Nothing, and nothing is meant to. This surface is a `.desktop` file plus the PNG installed in the `hicolor` icon directories, read by the SHELL's process before and around the app's own, and it is the PRIMARY route for any installed kaya app. It carries no GTK version condition: the 4.20 note belongs to the row above. | Everything, from a running program's point of view. A blob cannot write it, because the file must be on disk before the shell matches a window to it. | **[DOC]** freedesktop Desktop Entry Spec, `Icon=` and `StartupWMClass=`; **[MEASURED]** the shell matches a window to a `.desktop` by `app_id` (Wayland) or `WM_CLASS` (X11), and kaya sets neither today, so its windows advertise their launcher binary's name (`python3`, `dotnet`, `java`, `milestone2`, `kaya-go`) and no `.desktop` could ever match them. **[REPO]** there is no `.desktop` file in the tree. |
 | **iOS** | Nothing. | The app icon is asset-catalog packaging; `setAlternateIconName` selects among **pre-declared** icons in `CFBundleAlternateIcons`, never bytes, and the system decides whether the user is prompted. The app-switcher card is a snapshot of the app's own UI, not an icon; any icon around it comes from the bundle. | **[MEASURED]** the full iOS 26.5 SDK header census of the app-icon surface is three symbols, typed `BOOL` and `NSString *` — no `NSData`, no `UIImage`, no `CGImage`. **[REPO]** tools/ios/Info.plist.in declares `CFBundleName` and no icon keys at all. iOS 18's Light/Dark/Tinted variants triple the *packaging* surface and add nothing runtime-settable. |
 | **Android** | `ActivityManager.TaskDescription`'s **Bitmap** reaches the Recents card's icon — **and the arm recommends refusing to wire it anyway**, see I4 and I6. | The launcher icon (manifest-only, a compiled drawable). The Recents **label** is invisible to sighted users. | **[MEASURED]** against the pinned SDK's `api-versions.xml` and stubs, plus the actual consumer's source: see I4, the sharpest finding in this pass. |
@@ -412,7 +412,7 @@ one marked:
 
 ## I3 — the Windows caption slot is not reachable on every window
 
-`crates/kaya/src/winui/mod.rs:581` states the rule for
+`crates/kaya/src/winui/mod.rs:503` states the rule for
 `window_titlebars`: the custom `TitleBar` control is "Minted by the SAME
 first promotion that mints the CommandBar and by nothing else: extended
 is DERIVED from toolbar presence, so a window whose catalog promotes
@@ -497,7 +497,7 @@ has already paid for once.
 
 The good news beside it: **kaya already ships the bytes-to-BitmapImage
 code one layer over.** The `Image` widget's blob arm in
-crates/kaya/src/winui/mod.rs:10450 already does
+crates/kaya/src/winui/mod.rs:8383 already does
 `InMemoryRandomAccessStream` → `DataWriter` → `BitmapImage::SetSource`
 on the UI thread. The caption lowering is that block with two lines
 changed at the end. **[REPO]**
@@ -588,7 +588,7 @@ the GApplication id, so the lane's legs advertise `python3`, `dotnet`,
 `java`, `milestone2`, `kaya-go` — one per launcher binary. The lane was
 unaffected only because its rule is `app_id=".*"`. The comment now says
 so, with the measurement beside it
-(tools/linux/run-suites.sh:165) **[MEASURED: same binary under three
+(tools/linux/run-suites.sh:122) **[MEASURED: same binary under three
 argv[0]s gave three sway app_ids; and, on the identity leg, a primary
 window reading `WM_CLASS = "identity"` beside a later window reading
 `WM_CLASS = "Aurora Notes"`]**. What the correction exposed is a real
@@ -602,7 +602,7 @@ needs `gdk4-x11`/`gdk4-wayland` (docs/deferred.md).
 the mask-plus-slot convention and all five walls ship as written here.
 
 **One record, the `set_brand_typeface` shape verbatim.** A transaction
-verb, not a window prop: WINDOW_PROPS (crates/kaya/src/spec.rs:219) is
+verb, not a window prop: WINDOW_PROPS (crates/kaya/src/spec.rs:176) is
 per-window and identity is per-app. `title` already exists there and is
 the *window's* title; the identity name is a different thing and the
 vocabulary must not conflate them.
@@ -620,7 +620,7 @@ The mask-plus-always-written-slot convention, and the should_panic test
 for "carries a blob but its mask says otherwise", are copied from
 `set_brand_typeface` (spec.rs:1190) rather than reinvented.
 
-**The walls, copied from crates/kaya/src/scene.rs:1663 with their
+**The walls, copied from crates/kaya/src/scene.rs:1582 with their
 reasons intact:**
 
 1. **Set once.** A second write dies in the root, in every language at
@@ -710,8 +710,8 @@ it.
   ground that no phone has a runtime call taking picture bytes. That is
   true and it is the wrong conclusion, because the phones are the two
   platforms whose packaging the repo ALREADY builds: gradle makes an
-  installable APK (tools/android/run-emulator.py:1756) and the iOS lane
-  assembles a real bundle (tools/ios/run-sim.py:219). Both become
+  installable APK (tools/android/run-emulator.py:1677) and the iOS lane
+  assembles a real bundle (tools/ios/run-sim.py:198). Both become
   readers of the declared identity now, which is what puts a real
   launcher icon on both phones. The rest of this bullet is the reasoning
   for the half that stays refused, the Android-only Recents card, and it
@@ -1055,9 +1055,9 @@ unchanged.
 6. The phones' packaging readers, per ruling 3, which are the first two
    build-time consumers of the asset: the APK gains an icon resource
    plus `android:icon` and `android:label`
-   (tools/android/run-emulator.py:1756 builds it), and the iOS bundle
+   (tools/android/run-emulator.py:1677 builds it), and the iOS bundle
    gains the icon plus `CFBundleDisplayName` and the icon keys
-   (tools/ios/run-sim.py:219 assembles it, from
+   (tools/ios/run-sim.py:198 assembles it, from
    tools/ios/Info.plist.in). Android's runtime Recents route stays
    refused (I6).
 7. Gates: one `check_styling_point` row, one `VERB_FEATURE` row in
@@ -1104,7 +1104,7 @@ are in the record below.
    RATIFIED as proposed.
 7. **Two findings that stand on their own**, whether or not this slice
    proceeds, and which the maintainer may want handled separately: the
-   inaccurate comment at tools/linux/run-suites.sh:165 about where the
+   inaccurate comment at tools/linux/run-suites.sh:122 about where the
    Wayland `app_id` comes from (I4a), and the fact that kaya's Python,
    Java and dotnet guests currently group under the **host executable's**
    taskbar button on Windows for want of an AUMID (I3).

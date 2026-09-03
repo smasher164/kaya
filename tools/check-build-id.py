@@ -7,11 +7,9 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The gate for the stale-artifact guard (tools/build-id.py). Two
-# questions: does a BUILT artifact carry the current id and does the
-# verifier reject one that does not, and does every lane verify what it
-# runs or ships? The verify call is one somebody has to write, so a new
-# lane starts out unguarded.
+# The gate for the stale-artifact guard (tools/build-id.py; CLAUDE.md's
+# gate list). The verify call is one somebody has to write, so a new
+# lane starts out unguarded — hence the explicit lane list in clause 2.
 
 import subprocess
 
@@ -59,8 +57,7 @@ with scratch_dir("check-build-id-") as tmp:
         fail("a freshly built libkaya does not carry this tree's id")
         sys.stderr.write(err)
 
-    # 1b. Doctor the marker in a COPY — one hex digit — and the verifier
-    # must reject it.
+    # 1b. One doctored hex digit in a COPY must be rejected.
     stale = tmp / "stale.dylib"
     if not doctored_marker(LIB, stale):
         fail("could not produce a doctored library for the self-test")
@@ -78,12 +75,9 @@ with scratch_dir("check-build-id-") as tmp:
         fail("self-test failed: a missing artifact verified clean")
 
     # 2. Coverage. The list is explicit: a runner that silently stopped
-    # verifying looks exactly like one that never needed to. The windows
-    # runner is python since the runner conversion, and its argv spelling
-    # (["…/build-id.py", "--verify", …]) matched NEITHER of the two shell
-    # substrings this clause used to hold — so the call is read as a
-    # non-comment LINE naming build-id and --verify together, which both
-    # languages spell.
+    # verifying looks exactly like one that never needed to. Read
+    # LINE-wise, since shell and python spell the call differently and a
+    # substring pattern went quiet at that crossing once.
     def lane_verifies(text):
         for line in text.splitlines():
             s = line.strip()
@@ -100,10 +94,9 @@ with scratch_dir("check-build-id-") as tmp:
             fail(f"{lane_rel} builds the core but never verifies what it "
                  f"runs (build-id.py --verify)")
 
-    # The clause's own negative, watched because this parse already
-    # drifted once (the argv spelling above): the windows runner with
-    # its one verify flag doctored away must fail the clause, and the
-    # perturbation count is printed by the prelude.
+    # The clause's own negative, watched because this parse has drifted
+    # once: the windows runner with its verify flag doctored away must
+    # fail the clause.
     g = Gate("check-build-id")
     win_text = (ROOT / "tools/deploy-win.py").read_text(encoding="utf-8")
     unverified = g.doctor("2's verify call deleted from the windows runner",
@@ -118,9 +111,7 @@ with scratch_dir("check-build-id-") as tmp:
     # 2b. The SwiftUI interpreter is a SECOND artifact with its own id;
     # both places that compile one must bake it in and check it. swiftc
     # failing leaves the previous dylib where a cargo failure leaves the
-    # previous libkaya. Line-wise like clause 2: the shell spells
-    # `--component swiftui` and the python runner spells the argv pair
-    # on one line, and both name the two tokens together.
+    # previous libkaya. Line-wise, like clause 2.
     def verifies_swiftui(text):
         for line in text.splitlines():
             s = line.strip()
@@ -141,9 +132,6 @@ with scratch_dir("check-build-id-") as tmp:
     # The mac lane VERIFIES the interpreter without compiling it (the
     # matrix-handshake skip path builds via build-dylib.sh and must
     # still ask the dylib for this tree's id) — verify only, no bake.
-    # This clause had no owner while the runner was shell: the lane's
-    # second-artifact verify was asserted by nobody (found by stage
-    # 4's enumeration).
     mac_lane_text = (ROOT / "tools/validate-mac.py").read_text(
         encoding="utf-8")
     if not verifies_swiftui(mac_lane_text):
@@ -159,11 +147,8 @@ with scratch_dir("check-build-id-") as tmp:
              "passed the clause")
 
     # 2b-android. The Compose interpreter, same contract: the lane must
-    # WRITE the marker before gradle and ASK the apk afterwards. The
-    # runner is python since the runner conversion; the verify is read
-    # line-wise like clause 2, and both halves are watched red below —
-    # this pair had no negative while it read the shell body, and the
-    # crossing is exactly when a bare-substring clause goes quiet.
+    # WRITE the marker before gradle and ASK the apk afterwards. Both
+    # halves are watched red below.
     def verifies_compose(text):
         for line in text.splitlines():
             s = line.strip()

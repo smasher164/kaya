@@ -10,23 +10,14 @@ dev_shell_or_die()
 # Build, install, and self-test the scenes in the iOS Simulator.
 # Usage: tools/ios/run-sim.py [swift|go|python|rust-swiftui|all]
 #
-# rust-swiftui - the Rust examples with the SwiftUI backend selected at
-#                runtime (dylib embedded in the bundle)
-# swift        - Swift over the C ABI function floor
-# go           - Go over the same floor, cross-built with GOOS=ios and
-#                owning the process main thread
-# python       - CPython embedded in one bundle carrying every python
-#                scene (docs/python-mobile-plan.md)
-#
 # The scene lists, declared-off lists and per-leg modifiers are DATA:
 # tools/lib/lanes/ios.py, the one source the gates import too
 # (docs/runner-conversion-plan.md §2, stage 2).
 #
-# The split/panels scenes are desktop-only BY DESIGN and deliberately
-# not legs here: split drives resize_window, and a phone or tablet host
-# does not command its own window size (the system owns surfaces;
-# DESIGN.md, Windows); panels' create_window is capability-rejected on
-# this host. The declared-off lists carry both.
+# split/panels are desktop-only BY DESIGN: split drives resize_window and
+# a phone does not command its own window size, and panels'
+# create_window is capability-rejected on this host (DESIGN.md, Windows).
+# The declared-off lists carry both.
 #
 # Requires full Xcode (simctl, the iOS SDK, and a downloaded simulator
 # runtime); simulator builds are unsigned, so no developer account is
@@ -61,8 +52,7 @@ def run(argv, **kw):
 
 
 def out_of(argv, timeout_s=None, env=None, stdin_text=None):
-    """Captured stdout of a command (stderr dropped, as the shell's
-    2>/dev/null captures were), decoded permissively — guest-origin
+    """Captured stdout of a command, decoded permissively — guest-origin
     text is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
 
     INTO A FILE, NEVER A PIPE: `simctl spawn` hands the child's stdout
@@ -112,10 +102,7 @@ if run(["xcrun", "simctl", "help"], stdout=subprocess.DEVNULL,
 
 TARGET_DIR = ROOT / "target/aarch64-apple-ios-sim/debug"
 BUNDLES = ROOT / "target/ios-bundles"
-# THE RESIDENT XCUITEST DRIVER (tools/ios/xcuidrive/KayaDrive.swift says
-# what it is and why it is a test): built once per run into BUNDLES,
-# started once per pool device right after the boot, proven before the
-# first leg by xcuidrive_proof, stopped in cleanup.
+# THE RESIDENT XCUITEST DRIVER (tools/ios/xcuidrive/KayaDrive.swift).
 XCUIDRIVE_SRC = ROOT / "tools/ios/xcuidrive"
 XCUIDRIVE_BUILD = ROOT / "target/ios-xcuidrive"
 # NOT under dev.kaya.: device preparation uninstalls every dev.kaya. app
@@ -143,12 +130,9 @@ def built_tool(rel):
     return path
 
 
-# The admission probe's app, built ONCE per run and before any leg. It
-# exercises the LocalStorage export path itself (docs/traps.md records
-# why a live FileProvider pid is not enough); the hands that drive its
-# sheet are the resident xcui driver's (xcuidrive_build, below), which
-# replaced the host-side simdrive walker and the spawned clipctl
-# process on 2026-09-02 (docs/xcuidrive-plan.md).
+# The admission probe's app: it exercises the LocalStorage export path
+# itself, because a live FileProvider pid is not enough (docs/traps.md,
+# "A live iOS FileProvider can have a stale LocalStorage item index").
 EXPORT_PROBE_APP = built_tool("tools/ios/exportprobe/build.sh")
 EXPORT_PROBE_BUNDLE = "dev.kaya.exportpreflight"
 KAYA_BUNDLE_PREFIX = "dev.kaya."
@@ -187,17 +171,12 @@ if not ICON_SRC.is_file():
     die(f"run-sim: the declared app mark {ICON_REL} is missing from this "
         f"tree")
 
-# THE ASSET ROOT, INTO EVERY BUNDLE. This is the one lane where staging
-# and PACKAGING are the same act: an iOS app resolves its resources out
-# of its own bundle (docs/assets-plan.md A4's iOS row and A5.3).
-#
-# NO KAYA_ASSET_DIR HERE, AND THAT IS THE POINT: the core asks
-# `Bundle.main` for its resource directory before it falls back to
-# anything (crates/kaya/src/assets.rs, route 2). If the bundle copy
-# stops happening the guest gets the core's miss sentence, not a stale
-# file. THE WHOLE ROOT, not the files a scene happens to want (A5.1).
-# AND ONE FILE UNDER IT IS DERIVED, never committed
-# (guests/assets/market/README.md).
+# THE ASSET ROOT, INTO EVERY BUNDLE: staging and PACKAGING are the same
+# act here (docs/assets-plan.md A4's iOS row and A5.3). NO
+# KAYA_ASSET_DIR: the core asks `Bundle.main` first
+# (crates/kaya/src/assets.rs, route 2), so a bundle copy that stops
+# happening gets the core's miss sentence rather than a stale file. THE
+# WHOLE ROOT (A5.1), and ONE FILE UNDER IT IS DERIVED, never committed.
 if run([sys.executable, str(ROOT / "tools/gen-market.py"),
         "--ensure"]).returncode != 0:
     print("run-sim: python3 tools/gen-market.py --ensure failed — the "
@@ -255,9 +234,8 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
         icon_keys = ICON_IN_BUNDLE
     tpl = (ROOT / "tools/ios/Info.plist.in").read_text(encoding="utf-8")
     # The icon file name carries its extension in the bundle and NOT in
-    # CFBundleIconFiles: iOS matches the entry against the bundle root
-    # by base name, which is what lets one entry stand for the @2x/@3x
-    # family an asset catalog would emit.
+    # CFBundleIconFiles: iOS matches the entry by BASE NAME, which lets
+    # one entry stand for the @2x/@3x family.
     block = "" if not icon_keys else (
         "<key>CFBundleDisplayName</key>\n"
         f"    <string>{IDENTITY_NAME}</string>\n"
@@ -281,13 +259,11 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
     return app
 
 
-# A pool of dedicated simulators (kaya-sim-0..N-1, KAYA_IOS_SIMS wide)
-# runs the legs in parallel; devices are created on first use, stay
-# booted across runs, and never touch the user's own simulators. One
-# iPad alongside, for one reason: the phone pool is ALWAYS a compact
-# horizontal size class, so nothing else in this lane observes the
-# regular-width lowering. Form-factor coverage, not device-matrix
-# breadth.
+# A pool of dedicated simulators (kaya-sim-0..N-1, KAYA_IOS_SIMS wide);
+# devices are created on first use, stay booted across runs, and never
+# touch the user's own. One iPad alongside for one reason: the phone
+# pool is ALWAYS a compact horizontal size class, so nothing else in
+# this lane observes the regular-width lowering.
 POOL = int(os.environ.get("KAYA_IOS_SIMS", "3"))
 UDIDS = []
 PAD_UDID = ""
@@ -372,16 +348,13 @@ def boot_pool():
 
 # ------------------------------------------------------------ recording
 # Recording mode (KAYA_RECORD=1): ONE suite-long recording per
-# simulator contains every leg in sequence — per-leg start/stop WEDGES
-# (the device-side session of a stopped recording lingers and later
-# recorders fail with "Host recording is already in progress"). Each
-# leg notes its launch anchor; extraction happens after the recorder
-# stops. recordVideo's own clock is unrecoverable from either end, so a
-# per-device FIDUCIAL (an appearance flip, stamped when the flip is
-# VISIBLE) anchors film time to wall time. The flip is an EDGE, never
-# an absolute level: the home screen's icon tiles held "dark" at YAVG
-# ~107, so an absolute test concluded the flip never rendered while
-# staring at it (measured delta 68; threshold 25).
+# simulator — per-leg start/stop WEDGES, because a stopped recording's
+# device-side session lingers and later recorders fail with "Host
+# recording is already in progress". recordVideo's own clock is
+# unrecoverable from either end, so a per-device FIDUCIAL (an appearance
+# flip, stamped when the flip is VISIBLE) anchors film time to wall
+# time, and the flip is read as an EDGE, never an absolute level
+# (docs/traps.md's recording-mode entry carries the YAVG numbers).
 REC_ROOT = ROOT / "target/recordings/ios"
 REC_RUN = ""
 REC_PIDS = []
@@ -425,8 +398,7 @@ def rec_suite_start(retry=False):
         sys.exit(1)
     REC_ROOT.mkdir(parents=True, exist_ok=True)
     # A STAMP rather than a wipe: `run-sim.py swift` must not delete
-    # the rust-swiftui suite's films; this run's legs carry its id and
-    # extraction ignores everything else.
+    # the rust-swiftui suite's films.
     REC_RUN = f"{os.getpid()}-{int(time.time())}"
     for stale in REC_ROOT.iterdir():
         if stale.is_dir() and not (stale / "run").is_file():
@@ -446,9 +418,7 @@ def rec_suite_start(retry=False):
                  for i in range(len(UDIDS))
                  if (REC_ROOT / f"rec-{i}.log").is_file())
     if wedged and not retry:
-        # A killed prior run orphans host-side recording sessions; the
-        # remedy is known and mechanical: reset the simulator service,
-        # reboot the pool, try once more.
+        # A killed prior run orphans host-side recording sessions.
         print("recording: stale simctl sessions; resetting "
               "CoreSimulatorService and retrying")
         for p in REC_PIDS:
@@ -514,8 +484,7 @@ def rec_suite_start(retry=False):
 
 def _film_edge_ms(movie, down):
     """The first frame whose average luma steps by 25 in the wanted
-    direction; its presentation time in ms is the fiducial edge. The
-    whole stream is read (the shell drained it for pipefail's sake)."""
+    direction; its presentation time in ms is the fiducial edge."""
     got = out_of(["ffprobe", "-v", "quiet", "-f", "lavfi",
                   f"movie={movie},select=gt(scene\\,0.3),signalstats",
                   "-show_entries",
@@ -568,7 +537,6 @@ def rec_suite_stop():
             anchors[i] = L_MARKS[i] - t_flip
         (REC_ROOT / f"anchor-{i}").write_text(f"{anchors[i]}\n",
                                               encoding="utf-8")
-    # Each leg extracts from the film of the simulator it ran on.
     failed = False
     threads = []
     results = {}
@@ -611,13 +579,11 @@ def rec_suite_stop():
 
 def rec_start(name, slot):
     # The pad is NOT filmed: the fiducial scheme indexes films by
-    # phone-pool slot and the pad has none — a pad leg is a state gate,
-    # not a visual record (the shell body unset KAYA_RECORD there).
+    # phone-pool slot and the pad has none.
     if not os.environ.get("KAYA_RECORD") or slot == "pad":
         return
     rec_dir = REC_ROOT / name
     rec_dir.mkdir(parents=True, exist_ok=True)
-    # Which simulator's film covers this leg, and which run recorded it.
     (rec_dir / "sim").write_text(f"{slot}\n", encoding="utf-8")
     (rec_dir / "run").write_text(f"{REC_RUN}\n", encoding="utf-8")
     REC_DIRS[name] = rec_dir
@@ -626,17 +592,14 @@ def rec_start(name, slot):
 def rec_finish(name, out):
     if not os.environ.get("KAYA_RECORD") or name not in REC_DIRS:
         return
-    # The transcript's own epoch line anchors the leg inside its
-    # simulator's recording; nothing to measure here.
     (REC_DIRS[name] / "leg.log").write_text(out + "\n", encoding="utf-8")
 
 
 # ------------------------------------------------------------ clipboard
 # THE CLIPBOARD SCENE'S FOREIGN SIDE, ON THE HOST: iOS has no child
-# processes, so the interpreter cannot run the foreign tools the mac
-# arm runs. Both directions are a SPAWNED PROCESS on the device
-# (tools/ios/clipctl), never a simctl pasteboard tool, and the macOS
-# pasteboard is never in the path — every rule here was measured
+# processes, so the interpreter cannot run the foreign tools the mac arm
+# runs. Both directions are a SPAWNED PROCESS on the device, never a
+# simctl pasteboard tool, and the macOS pasteboard is never in the path
 # (docs/clipboard-plan.md §8).
 
 
@@ -959,10 +922,8 @@ def picker_export_probe(udid):
              EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
         return 76
-    # THE SHEET IS DRIVEN BY THE RESIDENT DRIVER, attached to the probe
-    # app: the name typed and read back, Save pressed and the sheet
-    # required gone — the verbs the legs use, so admission is the
-    # driver's first proof on every run.
+    # THE SHEET IS DRIVEN BY THE RESIDENT DRIVER, using the verbs the
+    # legs use, so admission is the driver's first proof on every run.
     ok, drive_out = xcuidrive(udid, f"attach {EXPORT_PROBE_BUNDLE}")
     if ok:
         ok, drive_out = xcuidrive(udid, f"savename {probe_name}", timeout=90)
@@ -971,8 +932,8 @@ def picker_export_probe(udid):
     drive_rc = 0 if ok else 1
     result = ""
     # A drive that failed cannot finish the flow: a short grace for a
-    # late result, not the full minute — two slow phones held the
-    # admission join 99s past the builds on 2026-09-01's fifth matrix.
+    # late result, not the full minute (two slow phones held the
+    # admission join 99s past the builds, 2026-09-01).
     for _ in range(240 if drive_rc == 0 else 20):
         if result_file.is_file() and result_file.stat().st_size:
             result = result_file.read_text(
@@ -985,14 +946,13 @@ def picker_export_probe(udid):
     if result == "ok":
         return 0
     if not result and drive_rc != 0:
-        # What the drive said, since its log dies with the run.
         print(f"run-sim: the drive's last words on {udid}: "
               + " | ".join(drive_out.strip().splitlines()[-3:]),
               file=sys.stderr)
         # The flow never finished: nothing here says the export is
-        # stale, only that the host was slow. The log below may well
-        # carry an FP -1005 from the Files app's own warm-up, which is
-        # what made this read as 75 and erase a healthy device.
+        # STALE, only that the host was slow. The log below may carry an
+        # FP -1005 from the Files app's own warm-up, which is what made
+        # this read as 75 and erase a healthy device.
         print(f"run-sim: the LocalStorage export probe did not finish on "
               f"{udid} (drive rc={drive_rc}); a slow host, not a verdict",
               file=sys.stderr)
@@ -1038,7 +998,6 @@ def picker_reseed(udid):
         if run(["timeout", t, *argv], stdout=subprocess.DEVNULL,
                stderr=subprocess.DEVNULL).returncode != 0:
             return False
-    # The device is new; so is its driver.
     xcuidrive_start(udid)
     return _drive_results.get(udid, "").startswith("ready in")
 
@@ -1051,16 +1010,14 @@ def picker_prepare(udid):
     rc = picker_export_probe(udid)
     if rc == 76:
         # Once more before any verdict: the first attempt's slowness is
-        # the host's, and the second reads the device it left warm
-        # (check-steps holds this to ONE re-run on that code alone).
+        # the host's (check-steps holds this to ONE re-run on that code).
         print(f"run-sim: re-probing {udid} after a slow export flow",
               file=sys.stderr)
         rc = picker_export_probe(udid)
     if rc == 0 and os.environ.get("KAYA_IOS_RESEED_TEST") == udid:
-        # FAULT INJECTION, by hand only: a healthy device is put through
-        # the recovery path anyway — erase, boot, driver restart, warm,
-        # probe — so the path that fires once a month is exercised on
-        # demand rather than trusted (docs/xcuidrive-plan.md §5 step 6).
+        # FAULT INJECTION, by hand only, so the recovery path that fires
+        # once a month is exercised rather than trusted
+        # (docs/xcuidrive-plan.md §5 step 6).
         print(f"run-sim: KAYA_IOS_RESEED_TEST — reseeding healthy {udid} "
               f"to exercise the recovery path", file=sys.stderr)
         rc = 75
@@ -1303,8 +1260,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     watcher_stop = None
     watcher = None
     simdrive_log = None
-    # The host bridge serves the picker, the clipboard AND, since
-    # 2026-09-02, the `type` verb's keys — so every scene that types.
+    # The host bridge serves the picker, the clipboard AND the `type`
+    # verb's keys — so every scene that types.
     if scene in ("filedialog", "clipboard", "save", "editor", "undo", "ranges"):
         data_container = out_of(["xcrun", "simctl", "get_app_container",
                                  udid, bundle_id, "data"]).strip()
@@ -1316,20 +1273,16 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
             args=(udid, bundle_id, f"{data_container}/Documents",
                   simdrive_log, watcher_stop))
         watcher.start()
-    # NO MARK IS STAGED FOR THE GUEST: the identity guest names the mark
-    # as an asset and the core resolves it out of THIS BUNDLE'S OWN
-    # Resources; `expect_app_icon` decodes the icon-keys copy
-    # make_bundle wrote from the manifest — two files, two steps, held
-    # equal by the interpreter (ruling 4).
+    # NO MARK IS STAGED FOR THE GUEST: the core resolves it out of THIS
+    # BUNDLE'S OWN Resources, and `expect_app_icon` decodes the
+    # icon-keys copy make_bundle wrote from the manifest — two files,
+    # held equal by the interpreter (docs/app-identity-plan.md ruling 4).
     env = dict(os.environ,
                SIMCTL_CHILD_KAYA_SELFTEST=selftest,
                SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT=script,
                SIMCTL_CHILD_KAYA_SWIFTUI_LIB=(
                    f"{container}/libkaya_swiftui.dylib"))
-    # THE HARNESS APPEARANCE, when the leg asks for one: a simulator
-    # child sees only SIMCTL_CHILD_-prefixed variables. Unset adds no
-    # variable at all, which is what keeps every other leg
-    # byte-identical to before.
+    # A simulator child sees only SIMCTL_CHILD_-prefixed variables.
     if appearance:
         env["SIMCTL_CHILD_KAYA_APPEARANCE"] = appearance
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
@@ -1352,16 +1305,12 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         watcher.join()
     print(out, file=log)
     rec_finish(name, out)
-    # (NO PER-LEG SCREENSHOT: `--console-pty` returns only when the
-    # guest EXITS, so any capture here photographs the home screen.
-    # KAYA_RECORD=1 is the visual record.)
+    # NO PER-LEG SCREENSHOT: `--console-pty` returns only when the guest
+    # EXITS, so any capture here photographs the home screen.
     ok = "KAYA_SELFTEST: OK" in out
     if not ok:
         pull_container_files(udid, bundle_id, name, log)
     if simdrive_log is not None:
-        # THE NUMBERS GO WHERE THE LANE'S OTHER FAILURE EVIDENCE GOES:
-        # target/ios-simdrive-logs is cleared by the NEXT run, and the
-        # sighting this family needs is a rerun away.
         lines = (len(simdrive_log.read_text(
             encoding="utf-8", errors="replace").splitlines())
             if simdrive_log.is_file() else 0)
@@ -1487,12 +1436,9 @@ def xcuidrive_build():
     shutil.copytree(xctest, runner / "PlugIns/KayaDrive.xctest")
     fw = runner / "Frameworks"
     fw.mkdir()
-    # The whole Testing stack, not a hand-picked few: libXCTestSwiftSupport
-    # reexports XCTest and links Testing and _Testing_Foundation, Testing
-    # links lib_TestingInterop, and a member missing from THIS bundle is
-    # resolved from the runtime root by luck on some devices and not
-    # others — a driver that loaded standalone died in the pool
-    # (measured 2026-09-02). Copying the family closes that.
+    # The whole Testing stack, not a hand-picked few (docs/traps.md:
+    # "The XCUITest runner dies at load without the whole Testing
+    # framework family beside it").
     for name in ("XCTest", "XCUIAutomation", "Testing",
                  "_Testing_Foundation", "_Testing_CoreGraphics",
                  "_Testing_CoreImage", "_Testing_UIKit"):
@@ -1685,9 +1631,8 @@ def xcuidrive_proof(udid, log, app, bundle_id):
     run(["xcrun", "simctl", "terminate", udid, bundle_id],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # LIVE, not a self-test: no KAYA_SELFTEST, so the interpreter shows
-    # the scene and stays up for the driver to touch. The interpreter
-    # dylib is found by absolute path, exactly as a leg's launch does it
-    # (run_swiftui_on) — the default leaf-name dlopen does not search the
+    # the scene and stays up for the driver to touch. The dylib is found
+    # by ABSOLUTE path — the default leaf-name dlopen does not search the
     # bundle root, so an unset lib is an app that exits at once.
     container = out_of(["xcrun", "simctl", "get_app_container", udid,
                         bundle_id]).strip()
@@ -1702,8 +1647,6 @@ def xcuidrive_proof(udid, log, app, bundle_id):
         print(f"xcuidrive-proof: attach -> {ok} {body}", file=log)
         if not ok:
             return False
-        # The button, by label; retried, since the app was launched a
-        # moment ago.
         button = None
         for _ in range(50):
             ok, body = xcuidrive(udid, "find step")
@@ -1719,8 +1662,7 @@ def xcuidrive_proof(udid, log, app, bundle_id):
         if not ok:
             print(f"xcuidrive-proof: tap -> {body}", file=log)
             return False
-        # The two model changes the click makes: the status label and the
-        # inserted group. Read back, retried for the transaction to apply.
+        # Retried, for the transaction to apply.
         for want in ("step 1", "Work"):
             found = False
             for _ in range(30):
@@ -1761,19 +1703,15 @@ def xcuidrive_stop_all():
 
 
 # ------------------------------------------------------------- the pool
-# Legs run in a pool as wide as the simulator pool: each claims a
-# device, runs against it, and reports through a verdict file; drain()
-# prints in submission order. The iPad's legs are tracked apart from
-# the phone pool's — a running pad leg must not count against the
-# phone pool's saturation gate.
+# The iPad's legs are tracked apart from the phone pool's: a running pad
+# leg must not count against the phone pool's saturation gate.
 LEGS_DIR = pathlib.Path(tempfile.mkdtemp())
 PREP_DIR = pathlib.Path(tempfile.mkdtemp())
 DRIVE_DIR = pathlib.Path(tempfile.mkdtemp())
 
-# THE FLIGHT RECORDER. This lane had none while it was the lane with
-# the intermittent legs, so every rerun erased the only evidence; the
-# recorder stays (docs/deferred.md's ios-flaky entry). Its python half
-# is tools/lib/flightrec_lane.py since the runner conversion.
+# THE FLIGHT RECORDER (tools/lib/flightrec_lane.py). This lane had none
+# while it was the lane with the intermittent legs, so every rerun
+# erased the only evidence (docs/deferred.md's ios-flaky entry).
 FR = flightrec_lane.IosRecorder(ROOT)
 
 _dev_slots = list(range(POOL))
@@ -1980,12 +1918,7 @@ def queue_leg(name, *args, pad=False, **kwargs):
     prep_join()
     _leg_names.append(name)
     # Recording is suppressed on the pad: the fiducial scheme indexes
-    # films by phone-pool slot and the pad has none — the pad leg is a
-    # state gate, not a visual record. (rec_start is a no-op there
-    # because KAYA_RECORD rides the env; the shell unset it in the pad
-    # subshell — here the pad's rec_start writes sim="pad" which no
-    # extraction slot matches, and leg.log is keyed by the same run, so
-    # the extraction skip is by slot. Suppress explicitly instead.)
+    # films by phone-pool slot and the pad has none.
     if pad:
         t = threading.Thread(target=_leg_worker,
                              args=(name, args, kwargs, True))
@@ -1996,10 +1929,9 @@ def queue_leg(name, *args, pad=False, **kwargs):
                          args=(name, args, kwargs, False))
     t.start()
     _leg_threads.append(t)
-    # Watchdog: a wedged pool must die loudly in minutes, not silently
-    # absorb tens of legs (the deadlock class this gate once had). No
-    # slot freeing for 3 minutes is never legitimate — legs are bounded
-    # far tighter.
+    # Watchdog: no slot freeing for 3 minutes is never legitimate — legs
+    # are bounded far tighter — and a wedged pool must die loudly rather
+    # than silently absorb tens of legs.
     spins = 0
     while sum(t.is_alive() for t in _leg_threads) >= len(UDIDS):
         spins += 1
@@ -2032,8 +1964,7 @@ def drain():
                 if sfile.is_file() else "?")
         print(f"{name}: {verdict} ({secs}s)", flush=True)
         # THE JOURNAL TAKES EVERY LEG, pass or fail: an intermittent
-        # leg is only legible against its own history. The BUNDLE is
-        # collected on a failure alone.
+        # leg is only legible against its own history.
         FR.ios_leg(name, verdict, 0 if secs == "?" else int(secs),
                    LEGS_DIR / f"{name}.log")
     _leg_names.clear()
@@ -2055,16 +1986,16 @@ if os.environ.get("KAYA_RECORD"):
     os.environ["SIMCTL_CHILD_KAYA_RECORD"] = "1"
 boot_pool()
 xcuidrive_launch_all()
-# BEFORE ANY LEG, and on every run: can each phone export and reopen a
-# file through LocalStorage? BACKGROUNDED here and JOINED IN queue_leg
-# (prep_join): this needs only booted devices, while the build phase
-# that follows needs no devices.
+# BEFORE ANY LEG: can each phone export and reopen a file through
+# LocalStorage? BACKGROUNDED here and JOINED IN queue_leg (prep_join),
+# because this needs only booted devices while the build phase that
+# follows needs no devices.
 for _udid in UDIDS:
     def _prep(u=None):
         # Timed per device: the admission is off the critical path only
         # while it finishes under the swift build it overlaps, and a
-        # slow-flow re-probe (76) costs a minute — the 551s iOS lane of
-        # 2026-09-01's fourth matrix carried two of them.
+        # slow-flow re-probe (76) costs a minute (the 551s iOS lane of
+        # 2026-09-01 carried two).
         xcuidrive_wait(u)
         _prep_started = time.monotonic()
         _prep_results[u] = picker_prepare(u)
@@ -2084,8 +2015,7 @@ timing("boot")
 SDKROOT_SIM = out_of(["xcrun", "-sdk", "iphonesimulator",
                       "--show-sdk-path"]).strip()
 
-# Clean slate: bundles are derived artifacts with no history worth
-# keeping, and a stale main.swift once put the LAYOUT guest inside the
+# Clean slate: a stale main.swift once put the LAYOUT guest inside the
 # milestone2 bundle.
 shutil.rmtree(BUNDLES, ignore_errors=True)
 
@@ -2168,14 +2098,11 @@ def suite_end(phase):
 if SUITE in ("swift", "all"):
     cargo_ios(["build", "--locked", "--target", "aarch64-apple-ios-sim",
                "--lib"])
-    # Every app bundle below links this archive; verify it once, here,
-    # rather than trusting the copies downstream.
+    # Every app bundle below links this archive; verify it once, here.
     verify_built(TARGET_DIR / "libkaya.a")
     build_swiftui_dylib()
     # With more than one input file, swiftc only allows top-level code
-    # in a file named main.swift — each scene stages its own. The
-    # per-scene compiles are INDEPENDENT so they pool; legs queue only
-    # after every binary exists.
+    # in a file named main.swift — each scene stages its own.
     builds = []
     for entry in lane.SWIFT_ENTRIES:
         guest, src = lane.swift_scene(entry)
@@ -2241,7 +2168,7 @@ if SUITE in ("swift", "all"):
         elif guest == "canvas":
             # BOTH APPEARANCES, one bundle: every simulator this lane
             # boots is light, so the dark half of expect_ink's frozen
-            # string was never evaluated here without the dark leg
+            # string is never evaluated without the dark leg
             # (docs/canvas-plan.md phase 4).
             queue_scene_leg("swift", guest, "canvas-swift", app,
                             "dev.kaya.canvasswift", guest, guest)
@@ -2253,13 +2180,11 @@ if SUITE in ("swift", "all"):
                             f"dev.kaya.{guest}swift", guest, guest)
     suite_end("swift")
 
-# The Go guest suite: the same C ABI floor the swift suite reaches,
-# THE SCENE LIST THE SWIFT SUITE'S ENTRY FOR ENTRY (minus the rust-only
-# canvas scenes) — same bundle, same embedded interpreter, same verdict
-# grep, so the two are comparable leg for leg (invariant 1). NOT
-# NARROWER, and nothing enforces this: check-steps' wired() keys on
-# scene x runner and never on language, so any future divergence has to
-# be written down in the module.
+# The Go guest suite: THE SCENE LIST THE SWIFT SUITE'S ENTRY FOR ENTRY
+# (minus the rust-only canvas scenes), so the two are comparable leg for
+# leg (invariant 1). NOT NARROWER, and nothing enforces it: check-steps'
+# wired() keys on scene x runner and never on language, so any future
+# divergence has to be written down in the module.
 if SUITE in ("go", "all"):
     cargo_ios(["build", "--locked", "--target", "aarch64-apple-ios-sim",
                "--lib"])
@@ -2271,9 +2196,8 @@ if SUITE in ("go", "all"):
                     "clang"]).strip()
     go_cc = (f"{clang} -target arm64-apple-ios{IOS_MIN}-simulator "
              f"-isysroot {SDKROOT_SIM}")
-    # ONE CROSS-BUILD FOR THE WHOLE SUITE: guests/go/cmd is the guest
-    # tree's only main package; it imports every scene library and
-    # picks one from KAYA_SELFTEST.
+    # ONE CROSS-BUILD FOR THE WHOLE SUITE: guests/go/cmd imports every
+    # scene library and picks one from KAYA_SELFTEST.
     if run(["go", "build", "-o", str(BUNDLES / "go-bin"),
             "dev.kaya/guests/go/cmd"],
            env=dict(os.environ, CGO_ENABLED="1", GOOS="ios",
@@ -2292,9 +2216,8 @@ if SUITE in ("go", "all"):
         else:
             queue_scene_leg("go", guest, f"{guest}-go", app,
                             f"dev.kaya.{guest}go", guest, guest)
-    # THE TEXT EDITOR — the only script on this lane that drives an APP
-    # rather than a feature, Go with no swift guest to mirror
-    # (docs/editor-plan.md); its cut and keep ride the module's MODS.
+    # THE TEXT EDITOR (docs/editor-plan.md): Go with no swift guest to
+    # mirror; its cut and keep ride the module's MODS.
     app = with_dylib(make_bundle("editorgo", "dev.kaya.editorgo",
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "editor", "editor-go", app, "dev.kaya.editorgo",
@@ -2302,10 +2225,9 @@ if SUITE in ("go", "all"):
     suite_end("go")
 
 # THE PYTHON GUEST SUITE (docs/python-mobile-plan.md): CPython embedded
-# in ONE bundle carrying every python scene, booted by a C host
-# (pyhost.c) whose main thread enters kaya_run exactly as every iOS
-# guest does. The framework comes off the flake's pin
-# (KAYA_CPYTHON_IOS); the stdlib stages as plain directories (§D5's
+# in ONE bundle, booted by a C host (pyhost.c) whose main thread enters
+# kaya_run as every iOS guest does. The framework comes off the flake's
+# pin (KAYA_CPYTHON_IOS); the stdlib stages as plain directories (§D5's
 # simulator exemption).
 if SUITE in ("python", "all"):
     cpython = os.environ.get("KAYA_CPYTHON_IOS", "")
@@ -2385,11 +2307,9 @@ if SUITE in ("python", "all"):
 
 if SUITE in ("rust-swiftui", "all"):
     # Rust entrypoints + SwiftUI backend: one cargo example per scene,
-    # the bundle executable is the example's main, kaya::run dlopens
-    # the embedded dylib. The scene order, the per-leg cuts and the
-    # iPad siblings all come off the module's tables; the leg comments
-    # the shell body carried per scene live in the plans each MODS
-    # entry names.
+    # the bundle executable is the example's main, kaya::run dlopens the
+    # embedded dylib. The scene order, per-leg cuts and iPad siblings
+    # come off the module's tables, and each MODS entry names its plan.
     build_swiftui_dylib()
     for scene in lane.RUST_SCENES:
         example = lane.rust_example(scene)
@@ -2403,9 +2323,8 @@ if SUITE in ("rust-swiftui", "all"):
                             "dev.kaya.rustswiftui", "1", "milestone2")
             continue
         # THE DECLARED IDENTITY GOES INTO ONE BUNDLE, the one whose
-        # guest declares an identity — make_bundle's opt-in, and
-        # exactly what expect_app_icon reads (the leg went red the one
-        # time this argument was dropped in conversion).
+        # guest declares an identity — make_bundle's opt-in, and exactly
+        # what expect_app_icon reads.
         ident = "identity" if scene == "identity" else ""
         app = with_dylib(make_bundle(
             f"{scene}rs-swiftui", f"dev.kaya.{scene}swiftui",
@@ -2423,8 +2342,7 @@ if SUITE in ("rust-swiftui", "all"):
                             pad=True)
     suite_end("swiftui")
 
-# The interleaved pool's one collection point (empty lists no-op for
-# the serial shapes, which drained inside their phases).
+# The interleaved pool's one collection point.
 drain()
 if SUITE == "all" and not os.environ.get("KAYA_RECORD"):
     timing("all-legs-drained")
@@ -2434,12 +2352,11 @@ if not rec_suite_stop():
 timing("stills-extraction")
 if not xcuidrive_census():
     status = 1
-# The one-line verdict (run-suites.sh's rule): suites accumulate
-# failures rather than abort, so a truncated log must still end with
-# the answer — a killed lane or a lost pipe otherwise reads exactly
-# like a complete one, which is how an ios run that reached no leg at
-# all was read as a pass (2026-08-29). tools/check-gates.py holds all
-# five runners to this.
+# Suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer: a killed lane otherwise reads exactly like
+# a complete one, which is how an ios run that reached no leg at all was
+# read as a pass (2026-08-29). tools/check-gates.py holds all five
+# runners to this.
 if status == 0:
     print("run-sim: ALL PASS")
 else:

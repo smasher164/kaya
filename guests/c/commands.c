@@ -1,9 +1,5 @@
-/* The standard-commands scene from C, at the explicit wire floor. Each
- * chord is in the CANONICAL wire spelling ("primary+comma": lowercase,
- * '+'-joined, primary/shift/alt order, punctuation NAMED) and the role
- * is the canonical wire string — the core REJECTS non-canonical
- * spellings, so no canonicalizer runs here. Semantics:
- * guests/rust/commands.rs. Contract: tools/scenes/commands.steps. */
+/* The standard-commands scene (tools/scenes/commands.steps). Chords and
+ * roles are CANONICAL wire spellings; the core rejects any other. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -12,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids; tools/check-c-ids.py holds the one id space. */
 #define SIG_STATUS 1
 #define SIG_DETAILS 2
 #define SIG_SORT 3
@@ -41,8 +37,7 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_SORT, kaya_f64(0.0));
 
     {
-        /* Packed by hand: the generated kaya_tx_set_window_prop closes
-         * the record BEFORE the value. */
+        /* Packed by hand: the generated setter closes the record first. */
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
         kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
@@ -51,9 +46,7 @@ static void build_scene(void) {
         kaya_wire_end(&tx, start);
     }
 
-    /* An ordinary command sits beside the settings command so the menu
-     * that declared it keeps a visible item once the platform MOVES the
-     * other one. */
+    /* Keeps the menu non-empty once the platform MOVES Settings away. */
     kaya_tx_menu_item_create(&tx, M_FILE, KAYA_MENU_KIND_MENU);
     kaya_tx_set_menu_label(&tx, M_FILE, "File");
     kaya_tx_menu_item_create(&tx, M_RELOAD, KAYA_MENU_KIND_ACTION);
@@ -66,8 +59,7 @@ static void build_scene(void) {
     kaya_tx_menu_item_append(&tx, M_FILE, M_SETTINGS);
     kaya_tx_menubar_append(&tx, 0, M_FILE);
 
-    /* Option order IS the index (Name = 0, Date = 1); value binds AFTER
-     * the options exist. */
+    /* Option order IS the index; value binds AFTER the options exist. */
     kaya_tx_menu_item_create(&tx, M_VIEW, KAYA_MENU_KIND_MENU);
     kaya_tx_set_menu_label(&tx, M_VIEW, "View");
     kaya_tx_menu_item_create(&tx, M_DETAILS, KAYA_MENU_KIND_TOGGLE);
@@ -120,8 +112,7 @@ static void *app(void *arg) {
         uint32_t n_keys;
         if (kaya_parse_menu_activated(rec, &id, keys, 2, &n_keys)) {
             if (n_keys == 0 && id == M_SETTINGS) {
-                /* Fires TWICE on purpose: once by the chord, once by
-                 * activating the item at its declared path. */
+                /* Fires TWICE on purpose: the chord, then the item. */
                 char status[64];
                 settings_count++;
                 snprintf(status, sizeof status, "settings %d", settings_count);

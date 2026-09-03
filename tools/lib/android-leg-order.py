@@ -24,7 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "tools" / "android" / "run-emulator.py"
 LANE = ROOT / "tools" / "lib" / "lanes" / "android.py"
 # The probe keeps the same order for the same reasons, and is where two
-# of these constraints were MEASURED. It is still shell.
+# of these constraints were MEASURED.
 PROBE = ROOT / "tools" / "android" / "pickerprobe" / "run.sh"
 SCENES = ROOT / "tools" / "scenes"
 PICKER_VERB = re.compile(
@@ -470,8 +470,8 @@ def main() -> int:
                                   PROBE.read_text(encoding="utf-8"),
                                   FORBIDDEN_START_SH)
 
-    # ---- the gate guards itself: every clause watched red, counts
-    # ---- printed, an unchanged text is a failed test.
+    # ---- every clause watched red, counts printed, an unchanged text
+    # ---- a failed test.
     def doctor(label, source, pattern, repl, count=1):
         doctored, n = re.subn(pattern, repl, source, count=count)
         print(f"android-leg-order: {label} self-test applied {n} "

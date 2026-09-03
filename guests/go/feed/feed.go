@@ -1,8 +1,3 @@
-// The feed scene from Go: sum-typed elements, end to end. The sealed
-// marker interface is the sum, the structs its constructors, and
-// handlers type-switch on the model's current value — a refinement the
-// witnessed UpdateField checks rather than trusts, so a stale occurrence
-// folds into nothing.
 package feed
 
 import (
@@ -11,8 +6,8 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// Post is the sum. kaya-gen reads this declaration — the implementing
-// structs, IN DECLARATION ORDER — and emits post_kaya.go.
+// Post is the sum. kaya-gen reads the implementing structs IN
+// DECLARATION ORDER and emits post_kaya.go.
 //
 //go:generate go run dev.kaya/cmd/kaya-gen -type Post -key string
 type Post interface{ isPost() }
@@ -60,9 +55,6 @@ func App() *kaya.App {
 					todo.Row(func() {
 						todo.Checkbox(func(td *Todo) *bool { return &td.Done },
 							func(tx *kaya.Tx, key string, checked bool) {
-								// The generated refined patch: the
-								// comma-ok re-eliminates at write
-								// time.
 								if todo, ok := PostAsTodo(tx, feed, key); ok {
 									todo.Done(checked)
 								}

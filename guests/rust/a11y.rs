@@ -1,12 +1,5 @@
-//! The accessibility conformance scene: the universal props read back
-//! out of the PLATFORM'S OWN tree rather than kaya's model. The
-//! byte-frozen contract is tools/scenes/a11y.steps.
-//!
-//! Two rules any edit here must keep. EVERY WIDGET KIND appears, or a
-//! universal prop is proven only by grep. And there is exactly ONE
-//! container of each container kind: creation order legitimately
-//! differs per language, so `row#0` names the same widget everywhere
-//! only while there is one row (tools/check-steps.py).
+//! The a11y conformance scene (tools/scenes/a11y.steps): EVERY WIDGET KIND
+//! appears, and exactly ONE container of each kind, which is ordinal.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
@@ -20,21 +13,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let cell_name = tx.signal("Name");
         let cell_value = tx.signal("Ada");
         let feed_item = tx.signal("Item");
-        // A spoken name that FOLLOWS A SIGNAL: the live trio takes a
-        // source, as the template zone's always did.
         let spoken_caption = tx.signal("Spoken");
         let spoken = tx.signal("Before");
 
         let root = tx.column(|tx| {
-            // Caption-bearing controls: identified, deliberately NOT
-            // labelled, so the platform must speak the caption. The hint
-            // is a verb phrase (VoiceOver speaks it as written; TalkBack
-            // prefixes "double tap to").
+            // Deliberately NOT labelled: the platform speaks the caption.
+            // A hint is a verb phrase; TalkBack prefixes "double tap to".
             tx.button("Save").a11y_id("save").a11y_hint("save the draft");
             tx.checkbox("Details").a11y_id("details").a11y_hint("show more detail");
             tx.button("Reset").a11y_id("reset");
             tx.label(status).a11y_id("status");
-            // Caption-less controls: an app MUST name these.
             tx.entry().a11y_id("name").a11y_label("Full name");
             tx.textarea().a11y_id("notes").a11y_label("Notes");
             tx.slider(0.0, 1.0, 0.5).a11y_id("volume").a11y_label("Volume");
@@ -43,10 +31,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.image(&logo).a11y_id("logo").a11y_label("Logo");
             tx.select(&["Red", "Green"], 0).a11y_id("color").a11y_label("Color");
             tx.radio(&["Small", "Large"], 0).a11y_id("size").a11y_label("Size");
-            // NAMING a container declares it a group, and its children
-            // must stay individually reachable — one semantics, four
-            // very different backend spellings (DESIGN.md; the SwiftUI
-            // trap is docs/traps.md's `children: .contain`).
+            // NAMING a container declares it a group, and its children must
+            // stay reachable (docs/traps.md, `children: .contain`).
             tx.grid(2, |tx| {
                 tx.label(cell_name);
                 tx.label(cell_value);

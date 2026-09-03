@@ -1,7 +1,5 @@
-(* The window conformance scene, OCaml port — see guests/rust/window.rs
-   and tools/scenes/window.steps. The primary surface's props as
-   assertions: the title must materialize in the real title bar, the
-   advisory 640x400 request must be honored on a desktop. *)
+(* The window scene, OCaml port — guests/rust/window.rs,
+   tools/scenes/window.steps. *)
 
 open Kaya_wire
 open Kaya_app

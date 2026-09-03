@@ -1,31 +1,17 @@
-# The sections scene: the presentation context. Two peer roots inside
-# the primary window; switching is SELECTION, not lifecycle. The
-# archive pane counts how often the USER surfaces it — which pins the
-# echo doctrine both ways: driving the real switcher emits
-# section_selected (visits rise), while the guest's own programmatic
-# select_section (button#0) moves the selection WITHOUT an echo
-# (visits hold). The count surviving round trips is the retention
-# proof: covered roots stay alive.
+# The visit counts pin the echo doctrine both ways: driving the real
+# switcher emits section_selected (visits rise) while the guest's own
+# programmatic select_section (button#0) does not (visits hold).
 expect_sections 2
 # THE ARM THAT RENDERED, never the declared prop (the expect_split
-# rule): the primary declares `bar`, and every lane asserts the arm its
-# backend actually took — the desktops' horizontal spelling and the
-# phones' bottom bar are one "bar" answer, so this line runs everywhere.
+# rule): the desktops' horizontal spelling and the phones' bottom bar
+# are one "bar" answer, so this line runs everywhere.
 expect_sections_presentation "bar"
-# THE SYMBOLS THE ROWS REALLY DRAW, not the ones the guest declared.
-# This is the assertion whose absence let the SwiftUI decode read the
-# I64 at body+20 (alignment padding) instead of +24: `section.symbol`
-# was garbage, no glyph rendered, and all five lanes stayed green until
-# a capture caught it. Each backend reads its own switcher's row — the
-# GtkImage the StackSwitcher built, the NavigationViewItem's icon, the
-# tab item's rendered glyph — and answers in the ONE shared vocabulary,
-# so these two lines are byte-identical everywhere.
-#
-# ABOVE THE PHONE CUT, deliberately: a symbol is what a bottom bar is
-# made of, so the two mobile lanes assert it too. The sidebar rows below
-# carry symbols the desktops draw and GTK's GtkStackSidebar does not
-# (measured — it binds only the page title), so asserting them would
-# text-only on the linux sidebar: a RATIFIED platform divergence (DESIGN.md, Stated platform divergences).
+# THE SYMBOLS THE ROWS REALLY DRAW, not the ones the guest declared —
+# the assertion whose absence let a garbage decode ship green on five
+# lanes (docs/chrome/sections-symbol.md). Above the phone cut
+# deliberately, since a symbol is what a bottom bar is made of; the
+# SIDEBAR rows below carry none, because GTK's GtkStackSidebar binds
+# only the page title (DESIGN.md, Stated platform divergences).
 expect_section_symbol "Feed" "home"
 expect_section_symbol "Archive" "star"
 expect_section "Feed"
@@ -41,12 +27,9 @@ expect label#1 "archive: 1 visits"
 select_section 0
 select_section 1
 expect label#1 "archive: 2 visits"
-# THE SIDEBAR ARM, in an aux window, so ONE scene covers BOTH values of
-# the presentation enum (flipping the primary would only relocate the
-# coverage hole). The window opens from a handler only this tail's
-# click reaches: the phone runners cut here (their host rejects
-# create_window by capability, and reachability is the gate — the guest
-# reads no capability), so everything below is the desktops' tail.
+# THE SIDEBAR ARM, in an aux window, so one scene covers BOTH values of
+# the presentation enum. The phone runners cut here: their host rejects
+# create_window by capability.
 expect_windows 1
 click button#1
 expect_windows 2

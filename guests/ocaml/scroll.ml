@@ -1,8 +1,5 @@
-(* The scroll conformance scene, OCaml port — the viewport grows so
-   the enclosing track constrains it (an unconstrained viewport hugs
-   its content and nothing overflows); the bottom button, reachable
-   only by scrolling, proves the scrolled-to content is live. See
-   guests/rust/scroll.rs and tools/scenes/scroll.steps. *)
+(* The scroll scene, OCaml port — guests/rust/scroll.rs,
+   tools/scenes/scroll.steps. *)
 
 open Kaya_wire
 open Kaya_app

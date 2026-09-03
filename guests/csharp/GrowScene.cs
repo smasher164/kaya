@@ -1,7 +1,4 @@
-// The grow conformance scene, C# port — see guests/rust/grow.rs. EVERY
-// child is a grower, so each split is exactly weight/Σweight: 1,2,1
-// divide the column 25/50/25 and the row's 1,3 divide its width 25/75.
-// A non-growing child changes the numbers KAYA_SELFTEST=grow asserts.
+// The grow scene, C# port — guests/rust/grow.rs, tools/scenes/grow.steps.
 
 static class GrowScene
 {

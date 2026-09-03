@@ -293,7 +293,7 @@ have been a failed test rather than a passed one.
 it named what it MEASURED rather than what it assumed:
 
 ```
-thread 'main' (4024) panicked at crates/kaya/src/winui/mod.rs:3592:9:
+thread 'main' (4024) panicked at crates/kaya/src/winui/mod.rs:3072:9:
 kaya: winui: window 0 declared an app identity with a picture, and its promoted
 caption's far-left container holds 1 element(s), none of which is the Image that
 carries the mark (a MenuBar was found among them). …
@@ -589,4 +589,4 @@ This arm's instruments (scratch, not the tree):
 tree dump, band metrics, system-menu facts, the hit-test discrimination,
 the width sweep, the captures), `ip/marklocate.py`, `ip/cornerscan.py`,
 `ip/inkscan.py` (a dependency-free PNG reader), and the run logs
-`ip/{base2,new2,hit,old,inset,lane,lane2,gates,gates2,neg-a,neg-b}.log`.
+`ip/{base2, new2, hit, old, inset, lane, lane2, gates, gates2, neg-a, neg-b}.log`.

@@ -1,9 +1,7 @@
 //! OCaml emitter: module Kaya_wire — a value variant, constants,
 //! Buffer-based packers returning packed record strings, and the
 //! occurrence parser over a byte accessor (transport-agnostic: the
-//! runtime bakes in the Bigarray). Module scope namespaces everything;
-//! OCaml's separate type and value namespaces mean a parameter named
-//! `value` coexists with the `value` type.
+//! runtime bakes in the Bigarray).
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
@@ -118,9 +116,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
-        // Blob setters take the u64 kaya_blob_register handle (Blob).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::Bool => ("Bool", *prop),
@@ -156,8 +153,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int32_le b (Int32.of_int field))");
     }
 
-    // The window-prop duos: const + signal, element sources being
-    // rejected by the wire.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
@@ -184,8 +180,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int64_le b signal_id)");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
@@ -210,8 +206,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int64_le b signal_id)");
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
@@ -238,10 +234,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
 
     // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
-    // only, policy being the core's and validated on the canonical form.
-    // tx_set_menu_shortcut routes through it, so no call site can
-    // bypass canonicalization. Emitted BEFORE the menu duos: OCaml
-    // resolves let-bindings in order.
+    // only, policy being the core's. tx_set_menu_shortcut routes through
+    // it, so no call site can bypass canonicalization. Emitted BEFORE
+    // the menu duos: OCaml resolves let-bindings in order.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
         .iter()
         .map(|k| format!("\"{k}\""))
@@ -252,13 +247,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("(* Canonicalize a shortcut spelling to the wire form: lowercase");
     c.line("   '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
-    c.line("   key (a-z, 0-9, or the closed named set). Accepts ASCII case");
-    c.line("   variants and any modifier order; raises Invalid_argument on");
+    c.line("   key (a-z, 0-9, or the closed named set). Raises Invalid_argument on");
     c.line("   whitespace, empty tokens, repeated modifiers, aliases");
-    c.line("   (ctrl/cmd/option), and unknown or multiple or missing keys.");
-    c.line("   POLICY stays at the core: escape, shift-only and bare");
-    c.line("   alphanumerics, and the reserved floor are validated there, on the");
-    c.line("   canonical spelling, never rewritten. *)");
+    c.line("   (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY");
+    c.line("   stays at the core, validated on the canonical spelling. *)");
     c.line("let canonicalize_shortcut spelling =");
     c.line("  if String.length spelling = 0 then invalid_arg \"kaya: shortcut is empty\";");
     c.line("  String.iter");
@@ -307,9 +299,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  ^ (if !has_alt then \"alt+\" else \"\")");
     c.line("  ^ key");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root).
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let (ctor_expr, param) = match kind {
             crate::PropKind::Str if *prop == "shortcut" => {
@@ -373,10 +364,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  in");
     c.line("  (v, next)");
     c.line("");
-    // The occurrence blob table. A blob in an OCCURRENCE is a table
-    // handle, not the apply channel's batch-local index, and nothing
-    // retires one here — so the decoder redeems and releases it, which
-    // is what keeps a handle from ever reaching an app.
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index, and nothing retires one here — so the
+    // decoder redeems and releases it, which keeps a handle from ever
+    // reaching an app.
     c.line("(* Redeem-and-release for occurrence blobs, installed by the runtime");
     c.line("   at load (this module opens no library of its own). *)");
     c.line("let occurrence_blob : (int64 -> string) ref =");
@@ -421,11 +412,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
     c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, [])");
-    // The picker's answer is a LIST OF RECORDS, and no single `value`
-    // can carry one — so the three values per file ride the VALUES
-    // slot, flattened, and kaya_app regroups them in threes. The
-    // generic tail below would read that slot as a key path and take
-    // the file count as its length, starting eight bytes early.
+    // The picker's answer is a LIST OF RECORDS and no single `value`
+    // can carry one, so the three values per file ride the VALUES slot
+    // flattened and kaya_app regroups them in threes. Its own arm: the
+    // generic tail would take the file count for a key-path length.
     c.line("    else if kind = occ_kind_file_dialog_result");
     c.line("    then begin");
     c.line("      (* id, a count, then three Values per file (handle, name,");
@@ -441,9 +431,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      done;");
     c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None, [])");
     c.line("    end");
-    // The privileged read's one answer, in its own arm: the generic
-    // tail would take the CLIP KIND for a path length, so a text answer
-    // would read the values header as a key.
+    // Its own arm: the generic tail would take the CLIP KIND for a path
+    // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("    else if kind = occ_kind_{name}"));
         c.line("    then begin");
@@ -487,7 +476,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    done;");
     c.line("    let payload =");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read from its fixed offset.
+    // these — read from its fixed offset.
     let u32_slot = crate::u32_slot_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))
@@ -508,8 +497,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      else None");
     c.line("    in");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     c.line("    let clip =");
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()
@@ -525,10 +513,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      else None");
     }
     c.line("    in");
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1). Its own
-    // slot because the run is 2 values for a redraw and 3 for a tick,
-    // and `payload` is one.
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
+    // Its own slot because the run is 2 values for a redraw and 3 for a
+    // tick, and `payload` is one.
     c.line("    let tail =");
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()

@@ -1,11 +1,5 @@
-//! The confirm conformance scene: the modal-alert grammar as
-//! assertions (DESIGN.md, Presentation contexts). The byte-frozen
-//! contract is tools/scenes/confirm.steps.
-//!
-//! Each dialog is bound to its own handler AT SHOW TIME, so no guest
-//! inspects an alert id; registrations retire with their one result.
-//! Cancel is the uniform dismissal slot (Esc, back, outside tap, the
-//! cancel button itself).
+//! The confirm conformance scene (tools/scenes/confirm.steps): each dialog
+//! binds to its own handler AT SHOW TIME, and Cancel is every dismissal.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::AlertChoice;

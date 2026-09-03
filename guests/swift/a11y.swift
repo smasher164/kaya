@@ -1,23 +1,15 @@
-// The accessibility conformance scene from Swift: setA11yId/setA11yLabel
-// read back out of the PLATFORM'S OWN accessibility tree, not kaya's
-// model. See guests/rust/a11y.rs and tools/scenes/a11y.steps.
-//
-// EXACTLY ONE CONTAINER OF EACH KIND: container targets are ordinal, so
-// a second row or column here renames every later one.
+// The a11y scene, Swift port — guests/rust/a11y.rs, tools/scenes/a11y.steps.
 
 import Foundation
 
 let app = KayaApp()
 
 try app.build { tx in
-    // THE MARK THE APP'S OWN BUILD SHIPPED, opened OUT HERE because a
-    // container's builder closure does not throw. `try` and no `catch`,
-    // as in identity.swift — a mark the build did not ship is a wall at
-    // startup, and the assets scene is where the catch is exercised.
+    // Opened OUT HERE because a container's builder closure does not throw;
+    // `try` and no `catch`, as in identity.swift.
     let mark = try KayaAsset("images/a11y-logo.png")
     let form = tx.column {
-        // Caption-bearing controls: identified, but deliberately NOT
-        // labelled. The platform must speak the caption.
+        // Deliberately not labelled: the platform must speak the caption.
         let save = tx.button("Save")
         tx.setA11yId(save, "save")
         tx.setA11yHint(save, "save the draft")
@@ -26,8 +18,6 @@ try app.build { tx in
         tx.setA11yHint(details, "show more detail")
         tx.setA11yId(tx.button("Reset"), "reset")
         tx.setA11yId(tx.label("Ready"), "status")
-        // Caption-less controls: an app MUST name these, and the tree
-        // must report the authored name.
         let name = tx.entry()
         tx.setA11yId(name, "name")
         tx.setA11yLabel(name, "Full name")
@@ -40,8 +30,6 @@ try app.build { tx in
         let loading = tx.progress(value: 0.25)
         tx.setA11yId(loading, "loading")
         tx.setA11yLabel(loading, "Loading")
-        // The bytes never enter this guest's heap — the handle goes
-        // straight to the blob channel.
         let logo = tx.image(mark)
         tx.setA11yId(logo, "logo")
         tx.setA11yLabel(logo, "Logo")
@@ -68,8 +56,6 @@ try app.build { tx in
         }
         tx.setA11yId(actions, "actions")
         tx.setA11yLabel(actions, "Actions")
-        // A spoken name that FOLLOWS A SIGNAL: the live trio's KayaSignal
-        // overloads, the template zone's shape live.
         let spoken = tx.signal(.str("Before"))
         let spokenLabel = tx.label("Spoken")
         tx.setA11yId(spokenLabel, "spoken")
@@ -78,7 +64,7 @@ try app.build { tx in
             tx.button("Rename", onClick: { inner in inner.write(spoken, .str("After")) }),
             "rename")
     }
-    // Safe here: the blob table already holds its own reference.
+    // Safe: the blob table already holds its own reference.
     mark.close()
     tx.setA11yId(form, "form")
     tx.setA11yLabel(form, "Form")

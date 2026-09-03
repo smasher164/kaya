@@ -1,15 +1,8 @@
-//! The milestone-2 scene: the structural operators live. The
-//! byte-frozen contract is tools/scenes/milestone2.steps.
-//!
-//! ONE OF TWO RUST GUESTS ON THE RAW EVENT SURFACE (entry.rs is the
-//! other): this matches `ctx.next()` directly instead of folding
-//! through `kaya::Messages`. Construction is the ordinary sugar either
-//! way — the carve-out is the event mechanism, not the tree (DESIGN.md,
-//! scope ratified 2026-08-05).
+//! The milestone-2 scene (tools/scenes/milestone2.steps). ONE OF TWO RUST
+//! GUESTS ON THE RAW EVENT SURFACE: it matches `ctx.next()` directly.
 
 use kaya::{Occurrence, Value};
 
-/// A group is a name; an item is a line of text.
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Group {
     name: String,
@@ -33,11 +26,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.when(extras, |t| {
                     t.label("extras on");
                 });
-                // The tracing tier: each `for` statement IS a For, its
-                // body runs ONCE authoring the blueprint, and the row's
-                // Drop closes the template. Being a statement it yields
-                // nothing, so handles leave through slots the bodies
-                // fill — filled exactly once, which no compiler can see.
+                // A `for` statement yields nothing, so handles leave through
+                // slots its body fills.
                 let mut items = None;
                 let mut remove_button = None;
                 for mut group in groups.rows(tx) {
@@ -124,8 +114,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceMenuValueChanged { .. } => {}
             Occurrence::Undone { .. } | Occurrence::Redone { .. } => {}
             Occurrence::SortRequested { .. } | Occurrence::InstanceSortRequested { .. } => {}
-            // This scene's canvases are `scale`, which asks for nothing
-            // (docs/canvas-plan.md §3.2.1) — in fact it has none.
+            // This scene has no canvas.
             Occurrence::DrawRequested { .. }
             | Occurrence::InstanceDrawRequested { .. }
             | Occurrence::Tick { .. }

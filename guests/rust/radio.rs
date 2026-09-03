@@ -1,5 +1,5 @@
-//! The radio conformance scene: the choice contract (see select.rs) in
-//! its inline presentation. The contract is tools/scenes/radio.steps.
+//! The radio conformance scene (tools/scenes/radio.steps): select.rs's
+//! choice contract in its inline presentation.
 
 const OPTIONS: [&str; 3] = ["Small", "Medium", "Large"];
 

@@ -7,36 +7,30 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# Deploy milestone-0 artifacts to the Windows VM and run the validations.
+# Deploy to the Windows VM and run the validations.
 #
 # Usage: tools/deploy-win.py user@host [--provision] [<leg>|all]
 #        tools/deploy-win.py user@host <scene>_<lang>  # ONE leg
 #        tools/deploy-win.py user@host probe=<exe>     # aliveness probe
 #
 # The roster, its order and the drain barriers are DATA:
-# tools/lib/lanes/win.py, the one source the gates import too
-# (docs/runner-conversion-plan.md §2). The shell body's two hand-written
-# lists of one thing — the case arms and the run_suite calls — are gone
-# by construction: any leg in the module is runnable alone.
+# tools/lib/lanes/win.py, the one source the gates import too.
 #
-# Convention: everything that lands on the VM as a FILE is shipped with
-# scp from this repo — never constructed remotely by echoing escaped
-# text over ssh, which two escaping layers (bash quoting, then cmd.exe
-# carets) mangle reliably. New guest-side scripts go in tools/guest/,
-# where the deploy's glob ships them automatically.
+# EVERYTHING THAT LANDS ON THE VM AS A FILE IS SHIPPED WITH scp, never
+# constructed remotely by echoing escaped text over ssh: two escaping
+# layers (bash quoting, then cmd.exe carets) mangle it reliably. New
+# guest-side scripts go in tools/guest/, where the deploy's glob ships
+# them.
 #
-# Requirements in the guest (one-time; snapshot afterward):
-#   - OpenSSH server with key auth, sshd start type Automatic
-#   - a logged-in console session (WinUI cannot run in the SSH service
-#     session; tests run via scheduled tasks with /it)
-#   - for the python/go/csharp suites: winget install Python.Python.3.13 /
-#     GoLang.Go / Microsoft.DotNet.SDK.10, and an llvm-mingw ucrt-aarch64
-#     release unpacked under C:\kaya (cgo needs a C compiler)
+# Guest requirements (one-time; snapshot afterward): OpenSSH with key
+# auth and sshd Automatic; a LOGGED-IN console session, since WinUI
+# cannot run in the SSH service session; and, for the python/go/csharp
+# suites, winget Python.Python.3.13 / GoLang.Go / Microsoft.DotNet.SDK.10
+# plus an llvm-mingw ucrt-aarch64 release under C:\kaya (cgo needs a C
+# compiler).
 #
-# Builds before deploying (release: the hybrid CRT policy in build.rs
-# makes release artifacts self-contained; debug builds still import
-# vcruntime), so the VM can never run yesterday's artifacts against
-# today's sources.
+# Builds RELEASE: build.rs's hybrid CRT policy makes release artifacts
+# self-contained, while a debug build still imports vcruntime.
 
 import atexit
 import hashlib
@@ -56,14 +50,11 @@ import flightrec_lane
 SELF = pathlib.Path(__file__).resolve()
 LANE_MODULE = ROOT / "tools/lib/lanes/win.py"
 
-# THE SSH MUX SOCKET, COMPUTED AND REFUSED BEFORE ANYTHING IS BUILT.
-# sun_path is 104 bytes INCLUDING the terminator, so 103 is the longest
-# path ssh will bind (docs/traps.md, "A deep worktree makes
-# deploy-win.py unreachable"). ssh_config(5)'s advice for staying inside
-# the cap is a short directory plus a hashed name, so the length no
-# longer depends on where this checkout sits. NOT $TMPDIR: `nix develop`
-# overwrites it with a per-invocation dir it deletes on exit (measured
-# 2026-08-27), so ControlPersist would have nothing to persist in.
+# THE SSH MUX SOCKET, COMPUTED AND REFUSED BEFORE ANYTHING IS BUILT:
+# sun_path is 104 bytes INCLUDING the terminator. NOT $TMPDIR — `nix
+# develop` deletes it on exit, so ControlPersist would have nothing to
+# persist in (docs/traps.md, "A deep worktree MADE deploy-win.py
+# unreachable, and the error named ssh").
 KAYA_SOCK_MAX = 103
 MUX_DIR = pathlib.Path(os.environ.get("KAYA_SSH_MUX_DIR",
                                       os.path.expanduser("~/.ssh/kaya-mux")))
@@ -71,10 +62,8 @@ _mux_key = hashlib.sha256(
     f"{ROOT}\n{sys.argv[1] if len(sys.argv) > 1 else ''}\n".encode()
 ).hexdigest()[:16]
 CONTROL_PATH = str(MUX_DIR) + f"/m-{_mux_key}"
-# NO ssh TOKENS, or the measurement below is a lie: ssh expands %r/%h/%C
-# when it binds, so a literal length is only a lower bound. The shipped
-# $ROOT/target/.ssh-mux-%r@%h measured 97 from an agent worktree and
-# bound 110 (measured 2026-08-27, the watched negative that found it).
+# NO ssh TOKENS, or the length clause below is a lie: ssh expands
+# %r/%h/%C when it binds, so a literal length is only a lower bound.
 if "%" in CONTROL_PATH:
     print("deploy-win: the ssh ControlPath carries a % token, which expands "
           "when ssh binds:", file=sys.stderr)
@@ -98,7 +87,6 @@ if _sock_len > KAYA_SOCK_MAX:
 MUX_DIR.mkdir(parents=True, exist_ok=True)
 MUX_DIR.chmod(0o700)
 
-# Phase timing: greppable "TIMING <phase> <n>s" lines.
 _t0 = time.monotonic()
 
 
@@ -131,10 +119,8 @@ for arg in sys.argv[2:]:
     elif arg == "all" or arg in PHASES or arg.startswith("probe="):
         SUITE = arg
     elif arg in lane.legs():
-        # EVERY LEG CAN BE RUN ON ITS OWN, by construction: the roster
-        # is the argument grammar. The one-leg-repeatedly loop is how a
-        # flake gets characterised, and it is available exactly when it
-        # is needed.
+        # EVERY LEG CAN BE RUN ON ITS OWN: the roster is the argument
+        # grammar.
         SUITE = arg
     else:
         print(f"unknown argument: {arg}", file=sys.stderr)
@@ -145,24 +131,20 @@ SDK = ROOT / "third_party/winappsdk"
 BOOTSTRAP = (SDK / "Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/"
              "runtimes/win-arm64/native/Microsoft.WindowsAppRuntime."
              "Bootstrap.dll")
-# NAMED BEFORE IT IS MISSED. Without the unpacked SDK this run says
-# nothing but two bare `shasum: ... No such file` lines, minutes apart —
-# measured 2026-08-28 from a fresh worktree, which is exactly where it
-# bites: third_party/ is gitignored, so a worktree is born without it.
+# NAMED BEFORE IT IS MISSED: third_party/ is gitignored, so a worktree
+# is born without the SDK, and the failure without this is two bare
+# `shasum: ... No such file` lines minutes apart (measured 2026-08-28).
 if not BOOTSTRAP.is_file():
     die(f"deploy-win: the Windows App SDK is not unpacked under {SDK} — run "
         f"tools/fetch-winappsdk.sh first (it fetches the five pinned "
         f"packages and verifies each one's sha256). A worktree needs its own "
         f"copy, or a symlink to one.")
 
-# Connection multiplexing: ONE master TCP/auth handshake, every
-# subsequent ssh/scp rides it (~1.4s per round trip before).
-# ConnectTimeout rides every call: when the guest OS wedges mid-run
-# (observed 2026-07-22 — UTM "started", sshd gone), each poll would
-# otherwise hang the full TCP timeout (~75s). ServerAlive rides the
-# master: the leg waiter BLOCKS in one mux channel for up to ~5
-# minutes, and without keepalives a guest-OS wedge would hang it for
-# the full deadline instead of breaking the master in ~60s.
+# ONE master TCP/auth handshake, every subsequent ssh/scp rides it
+# (~1.4s per round trip before). ConnectTimeout rides every call and
+# ServerAlive the master, because a guest OS that wedges mid-run leaves
+# UTM saying "started" and sshd gone (docs/traps.md, "The wedged-VM
+# class"): without them the blocked leg waiter hangs its full deadline.
 SSH_MUX = ["-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=15",
            "-o", "ServerAliveCountMax=4", "-o", "ControlMaster=auto",
            "-o", f"ControlPath={CONTROL_PATH}", "-o", "ControlPersist=120"]
@@ -225,10 +207,8 @@ def ssh_probe():
         check=False).returncode == 0
 
 
-# The VM must be up before anything else: check reachability, and if the
-# guest is down, boot it through UTM and wait for sshd. The trailing
-# grace period lets the console session finish logging in — the suites
-# run as scheduled tasks with /it, which need it.
+# The trailing grace period lets the console session finish logging in —
+# the suites run as scheduled tasks with /it, which need it.
 VM_NAME = os.environ.get("KAYA_WIN_VM", "Windows")
 
 
@@ -252,7 +232,7 @@ def vm_boot():
         # hung. Killing it there costs twice — the crash dump converts
         # to C:\Windows\Minidump only on the NEXT boot (7 of 12 crashes
         # left no dump that way), and a power cut mid-boot corrupted
-        # this VM's boot volume on 2026-08-04. A reboot takes a minute.
+        # this VM's boot volume on 2026-08-04.
         print(f'== {HOST} unreachable; giving "{VM_NAME}" 3 minutes to '
               f'finish a possible bugcheck reboot ==')
         waited = 0
@@ -284,12 +264,11 @@ def vm_boot():
             die(f'VM "{VM_NAME}" did not become reachable')
         time.sleep(5)
     time.sleep(30)
-    # AND SAY WHETHER THE GUEST CRASHED, because "the VM was unreachable"
-    # reads as host contention and was recorded as such in docs/traps.md
-    # for two weeks while the guest was really BUGCHECKING — twelve
-    # times, all viogpudo.sys+0xB52C. A dump written to the pagefile only
-    # becomes a file on the boot AFTER the crash, so this is the first
-    # moment it can be seen.
+    # AND SAY WHETHER THE GUEST CRASHED: "the VM was unreachable" reads
+    # as host contention and was recorded as such while the guest was
+    # really BUGCHECKING (docs/traps.md, "The wedge is a BSOD in
+    # viogpudo.sys"). A dump written to the pagefile only becomes a file
+    # on the boot AFTER the crash, so this is the first moment it shows.
     out = subprocess.run(
         ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", HOST,
          'powershell -NoProfile -Command "Get-ChildItem '
@@ -310,7 +289,6 @@ if not ssh_probe():
     vm_boot()
 timing("vm-ready")
 
-# The scene lists are tools/lib/lanes/win.py's — the ONE registration.
 SCENES = lane.SCENES
 DEPTH_SCENES = lane.depth_scenes()
 GO_ONLY_SCENES = lane.GO_ONLY_SCENES
@@ -321,15 +299,14 @@ SCENE_PYS = ([ROOT / f"guests/python/{s}.py" for s in SCENES]
              + [ROOT / f"guests/python/{s}.py" for s in PY_ONLY_SCENES])
 # The JS guests ship FLAT beside the python ones (C:\kaya\<scene>.ts) and
 # import the binding from C:\kaya\node_modules\kaya-gui, which is where
-# node's bare-specifier resolution looks from a flat file (docs/js-plan.md
-# §5). One node, pinned by version AND bytes below, the docker image's rule
-# on the VM.
+# node's bare-specifier resolution looks from a flat file
+# (docs/js-plan.md §5).
 SCENE_TSS = [ROOT / f"guests/js/{s}.ts" for s in SCENES]
 NODE_VERSION = "24.19.0"
 NODE_WIN_ARM64_SHA256 = "8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c157f"
 NODE_DIR = f"C:\\kaya\\node24\\node-v{NODE_VERSION}-win-arm64"
-# The Go toolchain the go legs build with, the same rule: go.dev's
-# published sha256 for the windows-arm64 zip, verified before expansion.
+# The Go toolchain, the same rule: go.dev's published sha256, verified
+# before expansion.
 GO_VERSION = "1.27.0"
 GO_WIN_ARM64_SHA256 = "6e0156b9788209931dd340fadc04171ce15063c17b51c92e7b86b51109626e90"
 BUILD_EXAMPLES = []
@@ -337,16 +314,12 @@ for _s in SCENES + DEPTH_SCENES:
     BUILD_EXAMPLES += ["--example", _s]
 
 
-# ONE CAPTION WRITER, enforced before anything is built.
-#
-# Windows publishes no document-modified affordance at any layer, so the
-# `dirty` prop lowers to TEXT — a leading `*` composed into the rendered
-# caption, which every caption write would have to apply or the mark
-# blinks out on a push, a pop, or a split-mode change. There were five
-# such writes; the backend has one, `refresh_caption`, and this refuses
-# a sixth. A text check because the type system cannot help —
-# `Window::SetTitle` is a WinRT projection method and is always callable
-# — and it lives HERE, in the deploy every Windows change goes through.
+# ONE CAPTION WRITER, enforced before anything is built. The `dirty`
+# prop lowers to TEXT on Windows — a leading `*` composed into the
+# caption — so a second caption writer blinks the mark out on a push, a
+# pop or a split-mode change (docs/dirty-plan.md D2). A text check
+# because `Window::SetTitle` is a WinRT projection method and is always
+# callable; HERE because every Windows change goes through this deploy.
 NOT_A_CAPTION = {"bar_item", "dialog"}
 CAPTION_CALL = re.compile(r"(\w+)\.SetTitle\(")
 # ANY indent, so a method inside an impl block resets the tracker too —
@@ -431,7 +404,7 @@ for gen in ("gen-header", "gen-bindings"):
 
 # Every kaya_* function declared in kaya.h must be exported by the DLL;
 # a missing export would otherwise surface as a remote link or load
-# error, or worse, pass by resolving against a stale deployed copy.
+# error, or pass by resolving against a stale deployed copy.
 _decl_pat = re.compile(r"^[A-Za-z_].*[ *](kaya_[a-z0-9_]+)\(")
 declared = set()
 for _line in (ROOT / "crates/kaya/include/kaya.h").read_text(
@@ -464,8 +437,6 @@ must_ssh("cmd /c if not exist C:\\kaya\\bindings\\python mkdir "
          "C:\\kaya\\bindings\\python")
 must_ssh("cmd /c if not exist C:\\kaya\\bindings\\go mkdir "
          "C:\\kaya\\bindings\\go")
-# The scenes: the Rust backends resolve a scene NAME to
-# <KAYA_SCENES_DIR>/<name>.steps, so the .steps files must reach the VM.
 # EVERY run, not the --provision block: a provisioning-only ship means a
 # scene edit never arrives.
 must_ssh("cmd /c if not exist C:\\kaya\\scenes mkdir C:\\kaya\\scenes")
@@ -476,16 +447,13 @@ if scp_to(sorted((ROOT / "tools/scenes").glob("*.steps")),
 # every leg runs through schtasks, which inherits the user environment.
 must_ssh("setx KAYA_SCENES_DIR C:\\kaya\\scenes >nul")
 
-# THE ASSET ROOT, AS A UNIT (docs/assets-plan.md A2, A5.2): `scp -r` of
-# the root is one paragraph for every asset there will ever be, and a
-# file that fails to arrive fails the hash below rather than one scene
-# on one lane. SHIPPED EVERY RUN, OUTSIDE THE DEPLOY STAMP, exactly like
-# the .steps above. KAYA_ASSET_DIR is set absolutely, machine-wide,
-# because the C# leg's cwd is C:\kaya\cs where a relative default would
-# miss. AND ONE FILE UNDER IT IS DERIVED, never committed
-# (guests/assets/market/README.md), so a fresh clone would ship a root
-# without it and the hash check below would agree, both sides missing
-# the same file.
+# THE ASSET ROOT, AS A UNIT (docs/assets-plan.md A2, A5.2). SHIPPED
+# EVERY RUN, OUTSIDE THE DEPLOY STAMP, like the .steps above.
+# KAYA_ASSET_DIR is absolute and machine-wide because the C# leg's cwd
+# is C:\kaya\cs, where a relative default would miss. AND ONE FILE
+# UNDER IT IS DERIVED, never committed, so a fresh clone would ship a
+# root without it and the hash check below would agree, both sides
+# missing the same file.
 if subprocess.run([sys.executable, str(ROOT / "tools/gen-market.py"),
                    "--ensure"], check=False).returncode != 0:
     print("deploy-win: python3 tools/gen-market.py --ensure failed — the "
@@ -501,10 +469,9 @@ if scp_dir_to(ROOT / "guests/assets", "C:/kaya/guests/") != 0:
     die("deploy-win: could not ship the asset root")
 must_ssh("setx KAYA_ASSET_DIR C:\\kaya\\guests\\assets >nul")
 
-# AND THE INDEX GOES BESIDE THE EXE, from the copy that just arrived:
-# every kaya host on Windows needs an MRT resources.pri in the PROCESS
-# executable's directory or the XAML parser fail-fasts at 0xC000027B
-# (docs/traps.md).
+# AND THE INDEX GOES BESIDE THE EXE: every kaya host on Windows needs an
+# MRT resources.pri in the PROCESS executable's directory or the XAML
+# parser fail-fasts at 0xC000027B (docs/traps.md).
 if run_ssh("cmd /c copy /y C:\\kaya\\guests\\assets\\win\\"
            "minimal-resources.pri C:\\kaya\\resources.pri >nul") != 0:
     print("deploy-win: could not place C:\\kaya\\resources.pri — every WinUI "
@@ -534,9 +501,7 @@ def verify_staged_assets():
         digest, full = line.split(" ", 1)
         if len(digest) != 64:
             continue
-        # The VM answers in its own spelling; the tree speaks `/`. One
-        # normalisation, here, so neither side has to know about the
-        # other.
+        # The VM answers in its own spelling; the tree speaks `/`.
         if not full.strip().lower().startswith(prefix):
             continue
         rel = full.strip()[len(prefix):].replace("\\", "/")
@@ -569,13 +534,12 @@ def verify_staged_assets():
 
 verify_staged_assets()
 
-# EXTENSIONS MUST BE VISIBLE, and this is not cosmetic: Explorer ships
-# with HideFileExt=1, so the picker's rows publish "picked" where mac
-# and GTK publish "picked.txt" — and tools/scenes/*.steps are compared
-# BYTE-FOR-BYTE across every platform (CLAUDE.md, invariant 6). Set
-# every deploy: it is a per-user registry value any Explorer settings
-# change can put back. Verified after setting, because a write that did
-# not take is the kind of thing that reads as success.
+# EXTENSIONS MUST BE VISIBLE: Explorer ships with HideFileExt=1, so the
+# picker's rows publish "picked" where mac and GTK publish "picked.txt"
+# (docs/traps.md, "What the Windows file dialog publishes, and the
+# setting that changes it"). Set every deploy — any Explorer settings
+# visit puts it back — and verified, because a write that did not take
+# reads as success.
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'Explorer\\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f >nul')
 _hide = run_ssh_out('reg query "HKCU\\Software\\Microsoft\\Windows\\'
@@ -587,14 +551,11 @@ if "0x0" not in (_hide or ""):
           "fail", file=sys.stderr)
     print(f"  as though the backend were wrong. Got: {_hide}", file=sys.stderr)
     sys.exit(1)
-# AND NO NOTIFICATION TOASTS, for a sharper version of the same reason:
-# a toast is a foreground window owned by the shell, and while one is up
-# SetForegroundWindow FAILS for everything else — so every leg that
-# injects a real keyboard chord dies with "could not foreground the
-# guest window", which reads exactly like a WinUI bug. Measured
-# 2026-07-31: a OneDrive SUGGESTION toast took out all ten, twice, while
-# the other 121 legs passed. Three values, because the shell has three
-# places to say it.
+# AND NO NOTIFICATION TOASTS: while one is up SetForegroundWindow FAILS
+# for everything else, so every shortcut-injection leg dies looking like
+# a WinUI bug (docs/traps.md, "A shell toast holds the foreground, and
+# ten legs die of it"). Three values, because the shell has three places
+# to say it.
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'PushNotifications" /v ToastEnabled /t REG_DWORD /d 0 /f >nul')
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
@@ -613,18 +574,11 @@ if "0x0" not in (_toasts or ""):
     print(f"  as though WinUI could not raise its own window. Got: {_toasts}",
           file=sys.stderr)
     sys.exit(1)
-# THE FOREGROUND LOCK MUST BE OFF: Windows denies SetForegroundWindow to
-# a process that has not received the last input event, and waits
-# ForegroundLockTimeout (200000 ms default) before letting anyone else
-# in — so with the default the ONLY reason the shortcut-injection legs
-# pass is input some earlier leg happened to deliver. A REBOOT REMOVES
-# IT: measured 2026-07-31, after restarting the VM every menus and
-# commands leg failed, reproducibly. Zero means SetForegroundWindow
-# always succeeds. The registry write seeds the NEXT logon; the live
-# session is done by the desktop warm-up below, from INSIDE that session
-# — a call from here cannot work, because an ssh session is session 0
-# with its own window station and SPI applies per window station
-# (measured 2026-08-04).
+# THE FOREGROUND LOCK MUST BE OFF (docs/traps.md, "A rebooted Windows VM
+# refuses every shortcut-injection leg"). This write seeds the NEXT
+# logon; the LIVE session is done by the desktop warm-up below, from
+# INSIDE it — an ssh session is session 0 with its own window station,
+# and SPI applies per window station.
 must_ssh('reg add "HKCU\\Control Panel\\Desktop" /v ForegroundLockTimeout '
          '/t REG_DWORD /d 0 /f >nul')
 _fglock = run_ssh_out('reg query "HKCU\\Control Panel\\Desktop" '
@@ -640,12 +594,11 @@ if "0x0" not in (_fglock or ""):
     sys.exit(1)
 
 # WIPED AND RECREATED, NOT COPIED OVER: scp deletes nothing, so a source
-# file that leaves the repo lives on in C:\kaya forever — and Go
-# compiles a directory, not a file list, so one leftover is a compile
-# error in a package that is correct in the tree (measured 2026-08-07:
-# the VM's stale todo_kaya.go failed the build after the scene-library
-# split moved it). ONE RECURSIVE COPY OF THE WHOLE GO TREE, not a loop
-# over SCENES: the guests are ONE PROGRAM.
+# file that leaves the repo lives on in C:\kaya forever — and Go compiles
+# a DIRECTORY, so one leftover is a compile error in a package that is
+# correct in the tree (measured 2026-08-07, a stale todo_kaya.go after
+# the scene-library split). ONE RECURSIVE COPY OF THE WHOLE GO TREE, not
+# a loop over SCENES: the guests are ONE PROGRAM.
 must_ssh('cmd /c "if exist C:\\kaya\\guests\\go rmdir /s /q '
          'C:\\kaya\\guests\\go"')
 must_ssh('cmd /c "mkdir C:\\kaya\\guests\\go"')
@@ -659,28 +612,20 @@ if PROVISION:
         die("deploy-win: could not ship the App Runtime installer")
     must_ssh("C:\\kaya\\WindowsAppRuntimeInstall-arm64.exe --quiet --force")
 
-# The ARM64 JDK for the java legs: fetched once, idempotently, via
-# winget. --architecture arm64 is LOAD-BEARING: winget under the
-# emulated x64 shell defaults to the x64 build, whose JVM cannot load
-# the aarch64 kaya.dll; zulu ships no arm64 winget package, Microsoft's
-# OpenJDK does.
+# --architecture arm64 MUST STAY: winget under the emulated x64 shell
+# defaults to the x64 build, whose JVM cannot load the aarch64 kaya.dll.
+# zulu ships no arm64 winget package; Microsoft's OpenJDK does.
 must_ssh("cmd /c java -version >nul 2>&1 && echo jdk present || winget "
          "install --id Microsoft.OpenJDK.17 --architecture arm64 --silent "
          "--accept-package-agreements --accept-source-agreements "
          "--scope machine")
 
-# Go 1.27.0 stable on the VM (generic methods); the go guest scripts
-# prepend C:\kaya\go127\go\bin so it wins over any stable install — the
-# check is VERSION-KEYED, not exists-keyed: an exists check kept the VM
-# on rc2 through a pin bump forever, since the cached tree satisfied it.
 # GO AND NODE, BY VERSION AND BY BYTES, THROUGH A SHIPPED SCRIPT: an
 # inline `powershell -Command \"...\"` through ssh and cmd arrives as one
-# quoted string that PowerShell PRINTS instead of running — the go1.27.0
-# "install" echoed its own text and returned 0 for weeks while the go legs
-# built with the VM's system Go 1.26.5 (measured 2026-09-01, docs/traps.md).
-# tools/guest/fetch-zip.ps1 downloads, compares the sha256 recorded beside
-# the version here, and expands only on a match; tools/check-pins.py holds
-# the shape. A present toolchain of the pinned version is left alone.
+# quoted string PowerShell PRINTS instead of running (docs/traps.md,
+# measured 2026-09-01). The check is VERSION-KEYED, not exists-keyed: an
+# exists check kept the VM on rc2 through a pin bump forever.
+# tools/check-pins.py holds the shape.
 if scp_to([ROOT / "tools/guest/fetch-zip.ps1"], "C:/kaya/") != 0:
     die("deploy-win: could not ship fetch-zip.ps1")
 
@@ -701,20 +646,17 @@ must_ssh('cmd /c "' + NODE_PRESENT + f' && echo node{NODE_VERSION} present || '
          + fetch_zip(f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-arm64.zip",
                      NODE_WIN_ARM64_SHA256, "C:\\kaya\\node24") + '"')
 # VERIFIED AFTER THE FETCH, not only before it: a provisioning step that
-# "succeeded" without producing the toolchain is exactly how the Go pin
-# went uninstalled for weeks (docs/traps.md) — the lane refuses here,
-# naming the version the launchers will not find.
+# "succeeded" without producing the toolchain is how the Go pin went
+# uninstalled for weeks.
 must_ssh('cmd /c "' + GO_PRESENT + f' || (echo deploy-win: go{GO_VERSION} is not '
          'at C:\\kaya\\go127 after provisioning & exit /b 1)"')
 must_ssh('cmd /c "' + NODE_PRESENT + f' || (echo deploy-win: node v{NODE_VERSION} '
          'is not at C:\\kaya\\node24 after provisioning & exit /b 1)"')
 
 
-# A hung or leftover guest keeps kaya.dll locked: the next deploy's copy
-# fails, or a fresh suite runs beside a zombie. This is a dedicated test
-# VM — python/go/dotnet processes are always kaya guests — so killing by
-# image name is safe. Swept before deploying, after any suite timeout,
-# and on every exit path.
+# A hung or leftover guest keeps kaya.dll locked. This is a dedicated
+# test VM — python/go/dotnet processes are always kaya guests — so
+# killing by image name is safe.
 def kill_guests(log=None):
     # Two name families beyond <scene>.exe: the go legs build
     # <scene>_go.exe (the pri-adjacency arrangement), and the C# legs
@@ -754,8 +696,7 @@ def guests_wedged(log=None):
 
 def vm_restart(log=None):
     """Force the VM down and back up, then wait for sshd. The ONLY
-    escape from the wedged state above. Output rides the calling leg's
-    log on the pool path, as the shell subshell's redirect had it."""
+    escape from the wedged state above."""
     err = log if log is not None else sys.stderr
     print(f'== force-restarting VM "{VM_NAME}" ==', file=err)
     subprocess.run([utmctl_bin(), "stop", "--kill", VM_NAME],
@@ -783,13 +724,11 @@ def vm_restart(log=None):
 
 LEGS_DIR = pathlib.Path(tempfile.mkdtemp())
 
-# The flight recorder: one journal outside the build tree for every leg,
-# and a capture bundle for every FAIL. tools/lib/flightrec_lane.py holds
-# the rules; the guest half is tools/guest/flightrec.ps1. A runner that
-# cannot open the journal prints the miss once and still runs every leg.
+# The flight recorder: tools/lib/flightrec_lane.py holds the rules; the
+# guest half is tools/guest/flightrec.ps1.
 FR = flightrec_lane.WinRecorder(ROOT)
-# Quiet transports, as the shell half's >/dev/null 2>&1 had: the
-# recorder may never write into the runner's verdict surface.
+# Quiet transports: the recorder may never write into the runner's
+# verdict surface.
 FR.bind(lambda cmd: run_ssh(cmd, log=subprocess.DEVNULL),
         lambda cmd: run_ssh_out(cmd, log=subprocess.DEVNULL),
         scp_from)
@@ -811,27 +750,20 @@ def cleanup():
 
 
 atexit.register(cleanup)
-# The shell's EXIT trap ran on TERM too; python's atexit does not, so
-# TERM is converted into the exit path it expects.
+# atexit does not run on TERM, so TERM is converted into the exit path.
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 kill_guests()
 
-# Skip-unchanged deploy: the scp+javac block cost ~20s per run and
-# usually ships IDENTICAL bytes. The stamp is the content hash of
-# everything the deploy ships; the VM holds the stamp of its last
-# successful deploy, and a match skips the whole block. All-or-nothing
-# on purpose: the cs/python/java trees are recreated from scratch on
-# every real deploy, and a per-file diff would reintroduce the stale-mix
-# class those recreations kill. The kaya.dll remote-hash verify below
-# runs EITHER WAY.
+# Skip-unchanged deploy. The stamp is the content hash of everything the
+# deploy ships; a match against the VM's stamp skips the whole block.
+# All-or-nothing on purpose: the cs/python/java trees are recreated from
+# scratch on every real deploy, and a per-file diff would reintroduce
+# the stale-mix class those recreations kill. The kaya.dll remote-hash
+# verify below runs EITHER WAY.
 #
-# ONE LIST feeds both the flat-artifact manifest and the stamp: the
-# shell body kept two hand-written copies and check-staging held the
-# .ps1 names present in BOTH — shot-window.ps1 shipped for a day with
-# its .cmd riding the glob beside it and the .ps1 in neither list. A
-# .ps1 is still NAMED individually (the .cmd/.vbs globs ship
-# themselves), and check-staging now censuses this one list against
-# tools/guest/*.ps1 on disk.
+# ONE LIST feeds both the flat-artifact manifest and the stamp. A .ps1
+# is NAMED individually (the .cmd/.vbs globs ship themselves), and
+# check-staging censuses this list against tools/guest/*.ps1 on disk.
 def deploy_artifacts():
     return (SCENE_EXES
             + [TARGET / "kaya.dll", BOOTSTRAP]
@@ -849,12 +781,11 @@ def deploy_artifacts():
 
 
 def deploy_stamp():
-    # THIS SCRIPT and the lane module are part of the stamp: the shipped
-    # bytes are not the whole deploy — the remote javac/dotnet command
-    # lines live here — and a flag change with unchanged sources would
-    # otherwise reuse stale classes (caught 2026-07-24: adding `javac
-    # -encoding UTF-8` fixed nothing until the stamp was cleared by
-    # hand).
+    # THIS SCRIPT and the lane module are part of the stamp: the remote
+    # javac/dotnet command lines live here, so a flag change with
+    # unchanged sources would otherwise reuse stale classes (caught
+    # 2026-07-24: adding `javac -encoding UTF-8` fixed nothing until the
+    # stamp was cleared by hand).
     inputs = ([SELF, LANE_MODULE]
               + deploy_artifacts()
               + sorted((ROOT / "bindings/go").glob("*.go"))
@@ -878,18 +809,13 @@ def deploy_stamp():
 
 
 def ship_flat_artifacts():
-    """The manifest diff: the ~40 exes and dlls are flat
-    content-addressed files, and a binding-source iteration used to
-    re-ship every byte of them. The manifest names what the VM already
-    holds and only the difference rides the wire; it is written remotely
-    ONLY after the whole deploy succeeds, exactly like the stamp, so a
+    """The manifest diff: only files whose hash differs ride the wire,
+    written remotely ONLY after the whole deploy succeeds so a
     half-shipped set re-diffs honestly next run.
 
-    THE MANIFEST MAY ONLY VOUCH FOR FILES THE GUEST STILL LISTS: it is a
-    cache of guest state, and a file deleted guest-side left every later
-    deploy skipping the ship — run-hidden-args.vbs was missing for a day
-    while the manifest said it was held, and the flight recorder's lane
-    sampler silently never ran (2026-08-27)."""
+    THE MANIFEST MAY ONLY VOUCH FOR FILES THE GUEST STILL LISTS: a file
+    deleted guest-side left every later deploy skipping the ship, and the
+    flight recorder's lane sampler silently never ran (2026-08-27)."""
     artifacts = deploy_artifacts()
     remote_manifest = run_ssh_out("cmd /c type C:\\kaya\\deploy.manifest") or ""
     listing = run_ssh_out("cmd /c dir /b C:\\kaya") or ""
@@ -917,10 +843,7 @@ def ship_flat_artifacts():
           f"match the VM's manifest)")
     if ship and scp_to(ship, "C:/kaya/") != 0:
         # WHAT TO DO NEXT, because scp's own message names neither the
-        # cause nor the fix. A copy of kaya.dll fails for exactly one
-        # reason in practice: a guest from an earlier run is still alive
-        # and holding it — the alternative is a lane that runs every leg
-        # against the PREVIOUS dll.
+        # cause nor the fix.
         print("deploy-win: could not overwrite the deployed artifacts.",
               file=sys.stderr)
         print("  A guest process from an earlier run is almost certainly "
@@ -947,11 +870,9 @@ if _remote_stamp == STAMP:
 else:
     print("== deploying artifacts ==", flush=True)
     _manifest = ship_flat_artifacts()
-    # Recreated from scratch every deploy: dotnet run picks up whatever
-    # sources and project files are in the directory, so a leftover from
-    # a renamed example would poison the build; a stale flat-module
-    # kaya_app.py beside the kaya/ package would be a second import
-    # mechanism.
+    # Recreated from scratch every deploy: dotnet picks up whatever
+    # sources are in the directory, so a leftover from a renamed example
+    # poisons the build.
     # A `rmdir` and a `mkdir` are two commands, never `if exist X rmdir
     # X & mkdir Y` in one: cmd runs the mkdir INSIDE the if, so a path
     # that never existed is never created (tools/check-steps.py holds it).
@@ -963,20 +884,16 @@ else:
     if scp_dir_to(ROOT / "bindings/python/kaya",
                   "C:/kaya/bindings/python/") != 0:
         die("deploy-win: could not ship the python binding")
-    # The JS binding as the package node resolves from C:\kaya\<scene>.ts:
-    # package.json (exports ./kaya/index.ts) plus the three sources, staged
-    # at C:\kaya\kaya-gui BEHIND A JUNCTION from node_modules — node
-    # refuses to strip types for a file whose real path is under
-    # node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING, measured
-    # on the first deploy), and resolves a link to its target, which is
-    # how the workspace symlink works on the other two desktops.
-    # Separate commands, deliberately: in cmd an `if exist X rmdir X &
-    # mkdir Y` runs the mkdir INSIDE the if, so a directory that never
-    # existed is never created (the first JS deploy died on that too).
-    # The junction goes first and on its own (a bare rmdir unlinks a
-    # junction without touching its target; a leftover REAL directory
+    # The JS binding staged at C:\kaya\kaya-gui BEHIND A JUNCTION from
+    # node_modules: node refuses to strip types for a file whose real
+    # path is under node_modules
+    # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) and resolves a link
+    # to its target, which is how the workspace symlink works on the
+    # other two desktops (docs/traps.md).
+    # The junction goes first and on its own: a bare rmdir unlinks a
+    # junction without touching its target, and a leftover REAL directory
     # from an older deploy makes that rmdir fail, which the exit /b 0
-    # tolerates and the /s below then removes).
+    # tolerates and the /s below then removes.
     must_ssh('cmd /c "rmdir C:\\kaya\\node_modules\\kaya-gui 2>nul & exit /b 0"')
     must_ssh('cmd /c "if exist C:\\kaya\\node_modules rmdir /s /q '
              'C:\\kaya\\node_modules"')
@@ -999,27 +916,22 @@ else:
               + sorted((ROOT / "bindings/csharp").glob("*.cs")),
               "C:/kaya/cs/") != 0:
         die("deploy-win: could not ship the C# sources")
-    # Built ONCE here (the javac precedent below); the legs run `dotnet
-    # exec` on the produced dll. When every leg ran `dotnet run`,
-    # four-wide suites raced the shared obj/bin and VBCSCompiler held
-    # kaya-guests.dll against a concurrent rebuild (CS2012, observed
-    # 2026-07-22).
+    # Built ONCE here; the legs run `dotnet exec` on the produced dll.
+    # Per-leg `dotnet run` raced the shared obj/bin (CS2012 — see
+    # docs/traps.md, "Shared build directories cannot be built per-leg").
     if run_ssh('cmd /c "cd /d C:\\kaya\\cs && dotnet build -v q '
                '--nologo"') != 0:
         die("dotnet build failed on the VM")
     # Second output for the pri-adjacency legs: the apphost exe with
     # resources.pri beside it (ms-appx resolves against the PROCESS
-    # exe's directory). Also built once — the five pri legs used to each
-    # build into the SAME cs-out and raced.
+    # exe's directory). Also built once, for the same race.
     if run_ssh('cmd /c "cd /d C:\\kaya\\cs && dotnet build -v q --nologo '
                "-o C:\\kaya\\cs-out && copy /y C:\\kaya\\resources.pri "
                'C:\\kaya\\cs-out\\resources.pri >nul"') != 0:
         die("dotnet build (cs-out) failed on the VM")
-    # The java guests: sources shipped flat (every basename is unique
-    # and javac takes explicit files) and compiled IN PLACE. Quote-free
-    # on purpose: Windows sshd re-wraps the command in its own
-    # cmd /c "...", and interior double quotes re-pair across the line
-    # (docs/traps.md).
+    # Quote-free on purpose: Windows sshd re-wraps the command in its
+    # own cmd /c "...", and interior double quotes re-pair across the
+    # line (docs/traps.md).
     must_ssh("cmd /c if exist C:\\kaya\\java rmdir /s /q C:\\kaya\\java")
     must_ssh("cmd /c mkdir C:\\kaya\\java\\src")
     if scp_to(sorted((ROOT / "bindings/java/dev/kaya").glob("*.java"))
@@ -1041,11 +953,10 @@ else:
 
 def verify_deployed():
     """What landed must be what was built: Windows keeps loaded DLLs
-    locked, so an overwrite can fail while everything else copies fine,
-    and the suites would then run against the previous deploy. One
-    Get-FileHash round trip for the whole set (each individual one cost
-    ~1.4s). Order is the contract: the remote list and the local list
-    are compared line-by-line."""
+    locked, so an overwrite can fail while everything else copies fine
+    and the suites then run against the previous deploy. Order is the
+    contract: the remote list and the local list are compared
+    line-by-line."""
     locals_ = [TARGET / "kaya.dll"] + [
         TARGET / f"examples/{s}.exe"
         for s in ("milestone2", "entry", "gallery", "todos", "reorder",
@@ -1072,15 +983,10 @@ verify_deployed()
 timing("deploy")
 
 
-# THE CORE'S UNIT TESTS, EXECUTED ON WINDOWS — where they never had
-# been. Rung 1 of the ladder runs on the machine you type it on, so the
-# Windows half of the core had no unit coverage at all and the one test
-# of the handle-redemption path said so in its own attribute:
-# `#[cfg(all(test, unix))]`. On Windows the redeemed handle is a Win32
-# HANDLE and not a descriptor, so protocol.rs's raw_handle/file_from_raw
-# take their OTHER arm — code no unix run compiles. Proven by
-# construction 2026-08-09: breaking the windows arm of raw_handle alone
-# turned this phase red while `cargo test` on mac stayed green.
+# THE CORE'S UNIT TESTS, EXECUTED ON WINDOWS: rung 1 of the ladder runs
+# on the machine you type it on, so protocol.rs's HANDLE arms have
+# coverage only here (CLAUDE.md's ladder rung 1). Proven 2026-08-09:
+# breaking the windows arm of raw_handle reddened this phase alone.
 def declared_tests(file, module):
     """THE COUNT COMES OUT OF THE SOURCE: a filter that matches nothing
     exits 0 with "0 passed", so the number of `#[test]`s in the module
@@ -1182,12 +1088,9 @@ def unit_tests_on_windows():
         "not there is Windows-only code — the HANDLE arms of protocol.rs's "
         "raw_handle/file_from_raw, or an OpenOptions combination that means "
         "something else on this OS.")
-    # THE WINUI BACKEND'S OWN TESTS, which nothing ran ANYWHERE until
-    # 2026-08-16: they were built by the --no-run above and then filtered
-    # out of the only invocation that runs anything. They need this
-    # machine because they measure this machine: DirectWrite's system
-    # font collection, and a font file written under the app root and
-    # read back through its own name table.
+    # THE WINUI BACKEND'S OWN TESTS need this machine because they
+    # measure it: DirectWrite's system font collection, and a font file
+    # written under the app root and read back through its name table.
     ok &= guest_unit_module(
         ROOT / "crates/kaya/src/winui/mod.rs", "tests", "winui::tests",
         "the brand dictionary's crossed stops, the a11y role ladder, and "
@@ -1197,9 +1100,9 @@ def unit_tests_on_windows():
         "read back through its name table, the system font collection's "
         "answer for a bare family, and the pure lowerings beside them.")
     # THE EXIT GRACE IS FINAL ON THIS OS: harness_exit must end a
-    # process whose CRT teardown is wedged, and the primitive it
-    # replaced must still be measured hostage (harness.rs's
-    # win_exit_tests; the 64s dialog legs of 2026-08-27, docs/traps.md).
+    # process whose CRT teardown is wedged, and the primitive it replaced
+    # must still be measured hostage (docs/traps.md, the 64s dialog legs
+    # of 2026-08-27).
     ok &= guest_unit_module(
         ROOT / "crates/kaya/src/harness.rs", "win_exit_tests",
         "harness::win_exit_tests",
@@ -1211,9 +1114,8 @@ def unit_tests_on_windows():
         "captor held it ~40s past the grace, and TerminateProcess is what "
         "makes the invariant true. (atexit is NOT the hook: ExitProcess "
         "never runs it — the guest falsified that draft.)")
-    # The binary goes whatever the verdict is: it is a transient of this
-    # phase, and one left behind would be the next run's stale exe
-    # waiting for a build that failed.
+    # The binary goes whatever the verdict is: one left behind would be
+    # the next run's stale exe waiting for a build that failed.
     run_ssh('cmd /c "del C:\\kaya\\kaya-unittests.exe 2>nul & exit /b 0"')
     if not ok:
         sys.exit(1)
@@ -1222,17 +1124,10 @@ def unit_tests_on_windows():
 unit_tests_on_windows()
 timing("unit-tests")
 
-# THE CAPTION TITLE'S AIM, measured on this guest, on every full lane.
-# A promoted window's caption title is aimed at the WINDOW's centre,
-# clamped when a header would collide, and NO SCENE CAN SEE THAT — every
-# harness read of a title goes through the string, which is the same
-# whether the TextBlock sits on the centre line or 63 DIP left of it.
-# Only an outside observer with UIA and the window's visible frame can
-# say by how many physical pixels, at widths a scene never drives.
-#
-# THE COUNT RULES, because a probe that measures nothing reports no
-# drift, which reads exactly like reporting no drift because there is
-# none.
+# THE CAPTION TITLE'S AIM. NO SCENE CAN SEE IT: every harness read of a
+# title goes through the string, the same whether the TextBlock sits on
+# the centre line or 63 DIP left of it. THE COUNT RULES, because a probe
+# that measures nothing reports no drift, which reads like finding none.
 CAPTION_CENTRE_MIN_CLEAR = 6
 
 
@@ -1320,11 +1215,11 @@ def caption_centre_probe():
 
 
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/record-win,
-# built on the VM) films kaya windows for the whole run, saving frames
-# named by VM-clock epoch ms. GDI-family capture shows WinUI's
-# DirectComposition content as blank; WGC reads the compositor and is
-# window-scoped. Anchoring never crosses machines: frame names and
-# harness epochs share the VM clock.
+# built on the VM) films kaya windows, saving frames named by VM-clock
+# epoch ms. GDI-family capture shows WinUI's DirectComposition content
+# as BLANK; WGC reads the compositor and is window-scoped. Anchoring
+# never crosses machines: frame names and harness epochs share the VM
+# clock.
 SUITES_RUN = []
 
 
@@ -1336,8 +1231,7 @@ def rec_suite_start():
     if subprocess.run([str(ROOT / "tools/harness-extract.sh"), "--selftest"],
                       check=False).returncode != 0:
         sys.exit(1)
-    # Build the capturer on the VM, once per source version (the marker
-    # carries the content hash).
+    # Built once per source version (the marker carries the hash).
     h = hashlib.sha1()
     h.update((ROOT / "tools/guest/record-win/Program.cs").read_bytes())
     h.update((ROOT / "tools/guest/record-win/record-win.csproj").read_bytes())
@@ -1358,8 +1252,7 @@ def rec_suite_start():
                 f"echo built > C:\\kaya\\record-win\\.built-{rw_hash}")
     # The guest display must never sleep: a slept display stops DWM
     # composition and every window is GENUINELY white on screen — the
-    # stills pass the count guard while showing nothing. The fix lives
-    # in VM state, so assert it here rather than remember it.
+    # stills pass the count guard while showing nothing.
     powercfg = run_ssh_out("powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE")
     if "AC Power Setting Index: 0x00000000" not in (powercfg or ""):
         print("recording: the VM display can sleep, which blanks every "
@@ -1373,8 +1266,7 @@ def rec_suite_start():
     must_ssh('schtasks /create /tn kaya_record /tr "wscript '
              'C:\\kaya\\run-hidden.vbs record.cmd" /sc once /st 00:00 /it '
              "/rl highest /f >nul && schtasks /run /tn kaya_record >nul")
-    # Hold the suites until the capturer is up; per-window capture
-    # attaches in well under the scenes' opening settle.
+    # Hold the suites until the capturer is up.
     for _ in range(60):
         out = run_ssh_out("type C:\\kaya\\out_record.txt")
         if out and "RECORDER_READY" in out:
@@ -1407,8 +1299,7 @@ def _extract_leg_recording(name, recdir):
                 if slot_file.is_file() else "0")
         (dirp / "slot").write_text(f"{slot}\n", encoding="utf-8")
         lo, hi = epoch - 1500, epoch + last_off + 2000
-        # Frame files are <slot>-<epoch-ms>.png; keep the ones inside
-        # the leg's window, sorted by time.
+        # Frame files are <slot>-<epoch-ms>.png.
         stamps = []
         for f in (recdir / "frames").glob(f"{slot}-*.png"):
             ts = f.stem.rsplit("-", 1)[-1]
@@ -1537,16 +1428,12 @@ def run_probe(spec):
     return False
 
 
-# Suites run in a pool KAYA_WIN_JOBS wide (default 6, the VM's -smp —
-# measured TWICE because the answer flipped with the wait shape
-# (2026-08-20): under the old host-driven poll, width 6 lost to 4 in
-# contended matrices — every worker's poll paid a cmd.exe spawn on the
-# oversubscribed vCPUs. The resident waiter removed the storm, and width
-# 6 then beat 4 contended, 420 against 434). Each leg claims a tile
-# slot, launches its scheduled task through the hidden-window shim with
-# the slot argument, and blocks on the waiter for its output file.
-# Verdicts print in submission order at drain. Note: a timed-out leg's
-# kill_guests sweep is VM-wide and takes concurrent legs with it.
+# Suites run in a pool KAYA_WIN_JOBS wide (default 6, the VM's -smp;
+# the width was measured twice, 420 contended against 434 at width 4 —
+# docs/deferred.md). Each leg claims a tile slot, launches its scheduled
+# task through the hidden-window shim with the slot argument, and blocks
+# on the waiter for its output file. A timed-out leg's kill_guests sweep
+# is VM-WIDE and takes concurrent legs with it.
 WIDTH = int(os.environ.get("KAYA_WIN_JOBS", "6"))
 _slots = list(range(WIDTH))
 _slots_lock = threading.Condition()
@@ -1571,11 +1458,9 @@ def _release_slot(slot):
 
 
 def run_one_suite(name, slot, log):
-    # A LANE THAT DECLARED ITS VM DEAD STAYS DEAD: the unreachable
-    # diagnosis below used to return from ONE leg while the lane walked
-    # every remaining leg into its own 300-try timeout — 96 minutes of
-    # burning after the lane had already printed "this lane is over"
-    # (measured 2026-08-03).
+    # A LANE THAT DECLARED ITS VM DEAD STAYS DEAD: without this every
+    # remaining leg walks into its own 300-try timeout — 96 minutes of
+    # burning after the lane printed "this lane is over" (2026-08-03).
     if (LEGS_DIR / ".vm-dead").exists():
         print(f"{name}: skipped — the VM was declared unreachable earlier "
               f"in this lane", file=log)
@@ -1586,14 +1471,12 @@ def run_one_suite(name, slot, log):
             f">nul && schtasks /run /tn kaya_{name} >nul", log=log)
     # ONE RESIDENT WAITER ON THE VM in place of a host-driven poll
     # (2026-08-20): at any host cadence each round paid a cmd.exe spawn
-    # on vCPUs that are themselves oversubscribed under the matrix.
-    # wait-exit.ps1 polls the file LOCALLY at 150ms and prints it the
-    # moment EXIT= lands, charging one blocked mux channel instead; its
-    # 290s deadline is the old poll cap's ceiling, and a guest-OS wedge
-    # breaks the call at the master's keepalive rather than hanging it.
-    # Stdout is kept even when ssh exits nonzero (a keepalive break mid
-    # print): wait-exit.ps1 itself always exits 0, so a nonzero rc is
-    # the transport's, and the shell body used whatever text arrived.
+    # on vCPUs already oversubscribed under the matrix. wait-exit.ps1
+    # polls LOCALLY at 150ms and charges one blocked mux channel; a
+    # guest-OS wedge breaks the call at the master's keepalive rather
+    # than hanging it. Stdout is kept even when ssh exits nonzero:
+    # wait-exit.ps1 itself always exits 0, so a nonzero rc is the
+    # transport's.
     out = subprocess.run(
         ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST,
          f"powershell -NoProfile -ExecutionPolicy Bypass -File "
@@ -1602,19 +1485,17 @@ def run_one_suite(name, slot, log):
         encoding="utf-8", errors="replace", check=False).stdout
     # KAYA_LINGER is liveness, not a hang: the verdict is out and only
     # the kernel-held termination is pending (wait-exit.ps1). Reading it
-    # as a timeout killed a leg that had already passed.
+    # as a timeout kills a leg that has already passed.
     if "EXIT=" not in out and "KAYA_LINGER:" not in out:
         # A guest that never writes EXIT= is hung: kill it so it cannot
-        # hold kaya.dll into the next suite or deploy, and fail loudly.
+        # hold kaya.dll into the next suite or deploy.
         print(f"{name}: timed out waiting for output; killing guests",
               file=log)
         # IS THE VM EVEN ALIVE? The startup check runs ONCE, so an OS
-        # hang mid-lane is invisible: every remaining leg waits out its
-        # own 300s in silence while UTM still reports "started".
-        # Measured 2026-07-25 — a 14-minute stall with zero verdicts and
-        # no guests in tasklist, because the guest OS had died, not the
-        # guests. Checked FIRST, because "the VM is gone" makes every
-        # other diagnosis wrong.
+        # hang mid-lane is otherwise invisible — every remaining leg
+        # waits out its own 300s while UTM still reports "started"
+        # (docs/traps.md, "The wedged-VM class"). Checked FIRST, because
+        # "the VM is gone" makes every other diagnosis wrong.
         if not ssh_probe():
             print(f"{name}: THE VM IS UNREACHABLE mid-lane — the guest OS "
                   f'hung, not the guests (utmctl will still say "started"; '
@@ -1627,19 +1508,15 @@ def run_one_suite(name, slot, log):
             (LEGS_DIR / ".vm-dead").touch()
             return False
         # THE ONLY MOMENT A FAILING GUEST IS STILL ALIVE: every other
-        # failure path reaches this function after the guest has written
-        # EXIT= and gone, so a window, a live dialog and a stack exist
-        # here and nowhere else. Collected BEFORE kill_guests, which is
-        # what destroys the evidence.
+        # failure path arrives after the guest wrote EXIT= and went.
+        # Collected BEFORE kill_guests, which destroys the evidence.
         FR.collect(name)
         (LEGS_DIR / f"{name}.collected").touch()
         kill_guests(log=log)
         # A plain timeout is recoverable; the WEDGED state is not, and
-        # taskkill cannot tell you which you have. Fingerprint it,
-        # because otherwise EVERY remaining leg pays this same 300s (110
-        # legs of that is an hours-long silent stall, measured
-        # 2026-07-25). Restart once per run: a wedge that recurs after a
-        # restart is not this class.
+        # taskkill cannot tell you which you have (docs/traps.md,
+        # "Windows guests wedge UNKILLABLY"). Restart once per run: a
+        # wedge that recurs after a restart is not this class.
         if guests_wedged(log=log):
             global _restarted
             with _restart_lock:
@@ -1658,11 +1535,9 @@ def run_one_suite(name, slot, log):
                       f"than retrying", file=log)
         return False
     print(out, file=log)
-    # The suite's verdict lives in the output file, not in any ssh exit
-    # code. The verdict TEXT is the authority and the exit code only
-    # corroborates it: WinUI's window-Closed handler used to overwrite a
-    # failing run's exit code with 0, so a scene that printed FAILED
-    # still exited 0 and the leg reported PASS.
+    # The verdict TEXT is the authority and the exit code only
+    # corroborates it: WinUI's window-Closed handler overwrote a failing
+    # run's exit code with 0, so a scene that printed FAILED exited 0.
     if "KAYA_SELFTEST: FAILED" in out:
         return False
     # KAYA_LINGER: the guest published its verdict and its process is
@@ -1675,16 +1550,11 @@ def run_one_suite(name, slot, log):
 
 
 def _leg_worker(name):
-    # Line-buffered, as the shell subshell's redirect effectively was: a
-    # lane killed mid-leg keeps the evidence written so far.
+    # Line-buffered: a lane killed mid-leg keeps the evidence so far.
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
         slot = _claim_slot()
         (LEGS_DIR / f"{name}.slot").write_text(f"{slot}\n", encoding="utf-8")
-        # Per-leg wall time rides the verdict (the bottleneck-hunt
-        # instrumentation, uniform across runners). THE FLIGHT RECORDER
-        # ADDS NOTHING on a pass: the sampler is one lane-wide process,
-        # and a passing leg's whole recorder cost is one spool append.
         t0 = time.monotonic()
         leg_epoch = int(time.time())
         ok = run_one_suite(name, slot, log)
@@ -1695,11 +1565,9 @@ def _leg_worker(name):
         (LEGS_DIR / f"{name}.verdict").write_text(f"{verdict}\n",
                                                   encoding="utf-8")
         log.flush()
-        # The recorder's failure-path prints (the bundle report) belong
-        # to THIS leg's log, exactly where the shell subshell's redirect
-        # put them — passed as a stream, because sys.stdout is
-        # process-global and a redirect would cross two concurrently
-        # failing legs' logs.
+        # The recorder's failure-path prints belong to THIS leg's log,
+        # passed as a stream: sys.stdout is process-global and a redirect
+        # would cross two concurrently failing legs' logs.
         FR.win_leg(name, verdict, secs, LEGS_DIR / f"{name}.log",
                    (LEGS_DIR / f"{name}.collected").exists(), leg_epoch,
                    out=log)
@@ -1738,10 +1606,9 @@ def drain_suites():
 
 def desk_warm():
     """WILL THIS DESKTOP HAND A WINDOW THE FOREGROUND? Asked once,
-    before any leg, because ten legs per lane bet on the answer. THE
-    STATE IS INVISIBLE FROM SSH: an ssh session has its own window
-    station (session 0) and cannot see the input desktop, so the
-    question is asked from where the legs ask it — an interactive
+    before any leg. THE STATE IS INVISIBLE FROM SSH: an ssh session has
+    its own window station (session 0) and cannot see the input desktop,
+    so the question is asked from where the legs ask it — an interactive
     scheduled task — and answered the way they answer it: a real window
     and a real SetForegroundWindow (tools/guest/desk-warm.ps1 carries
     the measurements; docs/traps.md carries the class)."""
@@ -1829,9 +1696,8 @@ def desk_warm():
     return False
 
 
-# The diagnostic verbs are exempt: they exist to interrogate a VM that
-# is already sick, and a warm-up refusing to start one of them would
-# take away the tool you reach for when this fails.
+# The diagnostic verbs are exempt: they interrogate a VM that is already
+# sick, and a warm-up refusing them takes away the tool you reach for.
 if not (SUITE.startswith("probe=")
         or SUITE in ("enable-dumps", "crash-report", "analyze-dump")):
     if not desk_warm():
@@ -1842,8 +1708,7 @@ rec_suite_start()
 if SUITE == "all":
     # FIRST, AND ALONE: the probe drives a real border drag and a width
     # sweep on the one window it can find by class, so it needs the
-    # desktop to itself — the same reason the menus legs sit between
-    # drains. Nothing has been submitted to the pool yet here.
+    # desktop to itself.
     if not caption_centre_probe():
         status = 1
     timing("caption-centre")
@@ -1878,12 +1743,11 @@ if not rec_suite_stop():
     status = 1
 if os.environ.get("KAYA_RECORD"):
     timing("recording-pull+stills")
-# The one-line verdict (run-suites.sh's rule, and the reason it exists):
-# suites accumulate failures rather than abort, so a truncated log must
-# still end with the answer. Without it a log that stops early — a
-# killed lane, a lost pipe — reads exactly like a complete one, which is
-# how an ios run that reached no leg at all was read as a pass
-# (2026-08-29). tools/check-gates.py holds all five runners to this.
+# Suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer: a log that stops early reads exactly like a
+# complete one, which is how an ios run that reached no leg at all was
+# read as a pass (2026-08-29). tools/check-gates.py holds all five
+# runners to this.
 if status == 0:
     print("deploy-win: ALL PASS")
 else:

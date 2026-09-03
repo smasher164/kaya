@@ -1,39 +1,16 @@
-"""The assets conformance scene, Python port (docs/assets-plan.md,
-ratified 2026-08-18). The byte-frozen contract is
-tools/scenes/assets.steps.
-
-THIS ONE PROVES THE BYTES. `asset(name)` has two redemptions and the
-typeface scene already covers the other: a font whose bytes go from the
-core's read straight to the platform and never touch Python. Here the
-guest IS the consumer — it copies the mark out with `bytes()` and hands
-them to an Image, and the platform's own decoder answers 64x64 off the
-real view.
-
-THE MISS IS A QUESTION, NOT A `try`. `asset_miss_sentence` answers the
-same sentence a miss would raise, without raising, and that is the only
-shape all nine share — the C floor catches nothing at all
-(docs/deferred.md, the assets entry).
-
-LINE 1 ONLY. The sentence's second line names the place the core
-resolved and the route that chose it, which a bundle, a device
-directory and a repo checkout spell three different ways; the first
-line is the same everywhere, so it is the one a scene can freeze.
-"""
+"""The assets conformance scene (tools/scenes/assets.steps). THE MISS IS A
+QUESTION, NOT A `try`, and LINE 1 ONLY: line 2 differs per host."""
 
 import sys
 
 import kaya
 
-# The asset that is deliberately not there. A LEGAL name — relative,
-# `/`-spelled, one component deep — so what comes back is the census
-# sentence and not a name-fault one.
+# Absent, and deliberately LEGAL, so the miss is the census sentence.
 MISSING = "icons/nope.png"
 
-# The one the mark is under, and the one the census must list.
 MARK = "icons/kaya-mark.png"
 
-# The large asset: 111400 bytes, so a reader that truncated into a fixed
-# buffer shows up here rather than passing quietly.
+# 111400 bytes: a reader that truncated into a fixed buffer shows here.
 FONT = "fonts/sora-wght.ttf"
 
 app = kaya.App()
@@ -50,22 +27,17 @@ with app.window(title="assets", width=480.0, height=360.0):
 
         complaint = kaya.asset_miss_sentence(FONT)
         if complaint:
-            # Never reached on a healthy lane, and it shows the sentence
-            # rather than a word about it: a failure here has to say
-            # what was measured.
+            # Shows the sentence: a failure must say what was measured.
             verdict = first_line(complaint)
         else:
             verdict = "no complaint"
 
         with kaya.column():
             kaya.label("assets")  # label#0
-            # THE BYTES, not the blob handle: this scene is the
-            # consumer, so what reaches the decoder is what `bytes()`
-            # handed back.
+            # THE BYTES, not the blob handle.
             kaya.image(mark.bytes())  # image#0
             kaya.label(census)  # label#1
-            # `len(font)` is the core's byte count, and Python renders an
-            # int with no separator and no padding anywhere.
+            # An int renders with no separator and no padding, everywhere.
             kaya.label(f"{FONT}: {len(font)} bytes, {verdict}")  # label#2
 
 sys.exit(app.run())

@@ -88,8 +88,7 @@ def dev_shell_or_die():
 
 
 # Directories no census wants and every walk pays for: tools/ alone walks
-# to 323,273 entries because of the bindgen build trees under it, against
-# ~213 tracked files (measured 2026-08-27).
+# to 323,273 entries against ~213 tracked files (measured 2026-08-27).
 PRUNE = {
     ".git", "target", "target-linux", "build", "__pycache__", ".gradle",
     "node_modules", ".venv", "DerivedData", "Pods", ".mypy_cache",

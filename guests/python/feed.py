@@ -1,11 +1,5 @@
-"""The feed scene: sum-typed elements, end to end. The union IS the sum
-— `kaya.collection(Note | Todo)` declares one variant per member, in the
-union's order — and for_each yields the eliminator, one
-`with cases.case(Cls) as el:` block per constructor, held to totality at
-declaration. A patch witnesses the entry's current constructor, and a
-kwarg the constructor lacks raises at the call site.
+"""The feed scene, sum-typed elements (tools/scenes/feed.steps).
 
-Build the library first (cargo build), then:
     KAYA_SELFTEST=feed python3 guests/python/feed.py
 """
 
@@ -35,8 +29,7 @@ def done_count_text(items):
 
 
 def on_promote():
-    # The MODEL is asked which entry is a Note — never the widgets — and
-    # the update's new constructor restamps that key's copy in place.
+    # The MODEL says which entry is a Note; the update restamps in place.
     for key, post in feed.items():
         if isinstance(post, Note):
             feed.update(key, Todo(title=post.text, done=True))
@@ -44,8 +37,7 @@ def on_promote():
 
 
 def on_toggle(key, checked):
-    # The match arm as a guard: a stale occurrence lands in the else and
-    # folds into nothing.
+    # A stale occurrence lands in the else and folds into nothing.
     if isinstance(feed.get(key), Todo):
         feed.patch(key, done=checked)
 

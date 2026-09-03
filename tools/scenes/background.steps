@@ -1,56 +1,37 @@
-# The background scene: work off the app thread, posted back
-# (DESIGN.md's threading model; docs/background-work-plan.md).
+# DESIGN.md's threading model; docs/background-work-plan.md.
 #
-# THE DESIGN PRINCIPLE, and why the script looks like this: the worker
-# parks until a CLICK releases it, and only a live app thread can
-# process a click — so a binding that let background work occupy the app
-# thread WEDGES, and every assertion below the park fails at once.
-#
-# IT DOES NOT DEADLOCK, which this comment claimed until someone built
-# that guest and ran it (2026-07-29). Every expect here is a bounded
-# retry with its own deadline, so the scene always reaches the end and
-# always reports; the wrong implementation exits 1 with six failures
-# rather than hanging. That is a better outcome than a hang — a precise
-# message in twenty seconds instead of a timeout — but it is not what
-# the words said, and a discriminator nobody has fired is a hope. The
-# CASCADE is the real signature: an implementation that is merely slow
-# fails one assertion, while a wedged app thread fails all of them.
-#
-# NO NEW VERBS, deliberately: `click` and `expect` carry all of it, and
-# every new verb costs an arm in BOTH interpreters.
+# THE WORKER PARKS UNTIL A CLICK RELEASES IT, and only a live app thread
+# can process a click, so a binding that let background work occupy the
+# app thread fails every assertion below the park at once. It does NOT
+# hang (every expect is a bounded retry), so THE CASCADE is the
+# signature: merely slow fails one assertion, wedged fails all of them.
 expect label#0 "idle"
 click button#0
-# The worker has started and PARKED. Nothing is posted yet.
 expect label#0 "working"
 
-# THE CLAIM. The worker is parked with nothing posted, and the app
-# thread must still be serving input. On a binding that blocked, this
-# click is never processed and the scene dies here instead of later.
+# THE CLAIM: the worker is parked and the app thread must still serve
+# input, so a binding that blocked dies here instead of later.
 click button#1
 expect label#1 "alive"
 
-# And the posts have NOT landed yet. This separates a real background
-# post from a guest that computed everything eagerly on the app thread
-# and only pretended to park — that guest arrives here already showing
-# the final value.
+# The posts have NOT landed yet: a guest that computed eagerly on the
+# app thread and only pretended to park shows the final value here.
 expect label#0 "working"
 
-# Release. Three posts, and the accumulator makes this a test of ORDER
-# rather than of which one happened to run last: a stack instead of a
-# queue reads "321", not "123".
+# Three posts, accumulated, so this is a test of ORDER: a stack instead
+# of a queue reads "321".
 click button#2
 expect label#0 "123"
 
-# A post from INSIDE a transaction QUEUES for after; it never nests.
-# The handler appends a, posts a closure appending b, appends c — so it
-# commits "ac" and the posted closure then commits "acb". Nesting runs
-# the closure between them and can only ever produce "abc". The two
-# strings are unreachable from each other, which makes this the one
-# discriminator a scene can express: thread identity is not observable
-# from here, so "did the post run inline" has to be asked this way.
+# A post from INSIDE a transaction QUEUES for after and never nests: the
+# handler appends a, posts a closure appending b, appends c, so it
+# commits "ac" and the closure then "acb". Nesting could only ever
+# produce "abc", and the two strings are unreachable from each other —
+# thread identity is not observable from a scene, so this is the one
+# discriminator available.
 click button#3
 expect label#2 "acb"
 
-# One REAL-TREE read at the end. Every assertion above reads kaya's own
-# model and would pass for an arm that ran and drew nothing.
+# One REAL-TREE read at the end: everything above reads kaya's own model
+# and would pass for an arm that drew nothing.
 expect_ax label#2 "label/acb"

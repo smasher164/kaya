@@ -3,12 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The entry scene from the JVM: the uncontrolled contract end to end.
- *
- * <p>This is the scene that spells CENTRAL handler registration — after
- * the build, against the handles the build body handed back. The
- * co-located spelling ({@code tx.button("add", t -> ...)}) is in Todos,
- * Undo and Menus; the binding offers both.
+ * The entry scene from the JVM — guests/rust/entry.rs, tools/scenes/entry.steps.
  */
 public final class Entry {
     private static final class Scene {
@@ -35,9 +30,7 @@ public final class Entry {
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Collection todos = tx.collection();
 
-            // Java lambdas cannot assign captured locals, so handles
-            // declared inside a container body come back out through
-            // one-slot arrays.
+            // Java lambdas cannot assign captured locals.
             KayaApp.Widget[] field = new KayaApp.Widget[1];
             KayaApp.Widget[] add = new KayaApp.Widget[1];
             tx.mount(tx.column(() -> {
@@ -57,13 +50,11 @@ public final class Entry {
                 tx.write(scene.status, "nothing to add, " + tx.count(scene.todos) + " total");
                 return;
             }
-            // The binding mints the key (docs/fresh-key-plan.md); this
-            // app has no use for the one it hands back.
+            // The binding mints the key (docs/fresh-key-plan.md).
             tx.insertFresh(scene.todos, draft);
             int total = tx.count(scene.todos);
             tx.write(scene.status, "added " + draft + ", " + total + " total");
-            // The field answers the clear with text_changed("") through
-            // its normal edit path, so onChange empties the draft.
+            // The clear comes back as text_changed(""), so onChange empties draft.
             tx.clear(scene.field);
             tx.focus(scene.field);
         });

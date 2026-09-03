@@ -1,11 +1,8 @@
-//! The Android packaging: ONE APK hosts every scene, so this file is a
-//! `mod` per scene plus a match on KAYA_SELFTEST. Android has no native
-//! process entry, so this builds as a cdylib whose one exported symbol
-//! is the JNI entry behind dev.kaya.Kaya.nativeStart.
+//! The Android packaging: ONE APK hosts every scene, as a cdylib whose one
+//! exported symbol is the JNI entry behind dev.kaya.Kaya.nativeStart.
 #![allow(dead_code)]
 
-// Empty on other targets so `cargo test` on the host still builds every
-// example.
+// Empty off Android so `cargo test` still builds every example.
 #[cfg(target_os = "android")]
 #[path = "milestone2.rs"]
 mod milestone2;
@@ -114,7 +111,6 @@ mod sizepolicy;
 #[path = "adaptive.rs"]
 mod adaptive;
 
-/// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
 #[cfg(target_os = "android")]
@@ -132,9 +128,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("stall") => stall::app(ctx),
         Ok("nav") => nav::app(ctx),
         Ok("split") => split::app(ctx),
-        // Two SCRIPTS, one app: `split` drives resizes this host cannot
-        // perform, `listdetail` asserts the bare invariant at the width
-        // the device picked.
+        // Two SCRIPTS, one app: this host cannot perform a resize.
         Ok("listdetail") => split::app(ctx),
         Ok("scroll") => scroll::app(ctx),
         Ok("progress") => progress::app(ctx),
@@ -157,57 +151,23 @@ fn app(ctx: kaya::AppCtx) {
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),
         Ok("table") => table::app(ctx),
-        // The windowed scene (docs/virtualization-plan.md §6.3): the
-        // COMPILED conformance guest, which is what carries
-        // expect_window and scroll_to_row to the phones at all —
-        // ledger and varied are Python and stop at the desktops.
+        // The COMPILED windowed guest: ledger and varied are Python and
+        // stop at the desktops.
         Ok("windowed") => windowed::app(ctx),
-        // The canvas scene (docs/canvas-plan.md): the core rasterizes
-        // and Compose blits. The op stream is written in VIEWBOX units,
-        // so this guest is byte-for-byte the one the mac runs and the
-        // frozen hash is the same string here.
         Ok("canvas") => canvas::app(ctx),
-        // The size-policy scene (docs/canvas-plan.md §3.2.1): four grown
-        // canvases whose tracks are this device's, which is why every
-        // figure is drawn in fractions of the box it is handed and the
-        // redraw canvas has no frozen hash.
         Ok("sizepolicy") => sizepolicy::app(ctx),
-        // The adaptive scene (docs/adaptive-layout-plan.md): the
-        // handler flip, plus the breakpoint's first-report arm — this
-        // emulator is narrower than the threshold and never resizes.
+        // Narrower than the breakpoint and never resized: first-report arm.
         Ok("adaptive") => adaptive::app(ctx),
-        // The typeface scene asks for the vendored font BY ASSET NAME
-        // and does not read a path or an environment variable at all
-        // (docs/assets-plan.md). WHICH ROUTE THE CORE THEN TAKES IS THE
-        // RUNNER'S CHOICE, not this file's: the emulator lane hands this
-        // leg a KAYA_ASSET_DIR naming the root it pushed, so it resolves
-        // through a directory. The APK's own packaged assets/ — which is
-        // not a directory and has no path, so the core reads it through
-        // the AssetManager — is what the `assets` legs below take, by
-        // arriving with no such variable.
+        // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
+        // arrives with a KAYA_ASSET_DIR and resolves through a directory.
         Ok("typeface") => typeface::app(ctx),
-        // The identity scene asks for the vendored MARK BY ASSET NAME,
-        // the typeface's story one asset over, and takes whichever route
-        // the runner's KAYA_ASSET_DIR leaves it on. Its default path used
-        // to be guests/assets/icons/kaya-mark.png, which no device has.
-        // THE SCENE'S OTHER HALF DOES NOT COME THROUGH THE ASSET ROOT AT
-        // ALL: the launcher icon and android:label are baked by the
-        // BUILD, which reads guests/assets/identity.toml before any
-        // program runs. One declaration, two consumers, and on this
-        // platform they are the two most different ones there are
-        // (docs/app-identity-plan.md ruling 4).
+        // THE OTHER HALF DOES NOT COME THROUGH THE ASSET ROOT: the launcher
+        // icon and android:label are baked by the BUILD.
         Ok("identity") => identity::app(ctx),
-        // THE ONE LEG ON THIS PLATFORM THAT RESOLVES OUT OF ITS OWN
-        // PACKAGE. `assets-compose` arrives with no KAYA_ASSET_DIR, so
-        // the core takes its Android route and reads every asset through
-        // the AssetManager — the only route a shipped app has, because a
-        // phone cannot see the repo and there is no runner beside it to
-        // push a directory. The scene freezes the census of what the
-        // package carries, which is what makes that route's correctness
-        // observable rather than assumed.
+        // THE ONE LEG THAT RESOLVES OUT OF ITS OWN PACKAGE: no
+        // KAYA_ASSET_DIR, so the core reads through the AssetManager.
         Ok("assets") => assets::app(ctx),
-        // "1" is the selftest flag's original spelling, from before the
-        // value doubled as a scene selector.
+        // "1" is the selftest flag's original spelling.
         Ok("1") | Err(_) => milestone2::app(ctx),
         Ok(other) => panic!(
             "kaya: no scene named {other:?} in this APK — the runner asked for a leg \

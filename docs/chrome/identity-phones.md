@@ -31,9 +31,9 @@ Pins, read from the module build files:
   what the nix SDK provides).
 - **NAME**: each app manifest carries a hard-coded `android:label` on
   `<application>` and nothing else:
-  - `android/rusthost/src/main/AndroidManifest.xml:25` —
+  - `android/rusthost/src/main/AndroidManifest.xml:14` —
     `android:label="kaya milestone 0"`
-  - `android/javahost/src/main/AndroidManifest.xml:11` —
+  - `android/javahost/src/main/AndroidManifest.xml:10` —
     `android:label="kaya milestone 0 (jvm ring)"`
   - `android/gohost/src/main/AndroidManifest.xml:4` —
     `android:label="kaya milestone 0 (go)"`
@@ -86,7 +86,7 @@ the lane script rather than by Xcode:
   `UILaunchScreen {}`.
   **No `CFBundleDisplayName`. No `CFBundleIconName`. No
   `CFBundleIcons`. No `CFBundleAlternateIcons`.** [REPO]
-- `tools/check-steps.py:2274-2277 (gone)` already gates two of those keys
+- `tools/check-steps.py:2134-2137 (gone)` already gates two of those keys
   (`UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`) —
   i.e. there is a precedent in this tree for a gate that reads
   `Info.plist.in` and refuses on a missing key.
@@ -94,7 +94,7 @@ the lane script rather than by Xcode:
 ### macOS, for contrast [REPO]
 
 macOS guests run as **bare executables with no bundle at all** —
-`tools/validate-mac.py:99-108` stages the Rust guests out of
+`tools/validate-mac.py:89-98` stages the Rust guests out of
 `target/debug/examples` and runs them directly, and its comment
 describes LaunchServices treating the *containing directory* as the
 bundle. So mac has no `Info.plist` and therefore no
@@ -624,9 +624,9 @@ has no `android:icon` and no launcher resource at all, and iOS's
 generated `Info.plist` has no `CFBundleIconName`, no `CFBundleIcons`, and
 not even `CFBundleDisplayName`. If kaya is to have a declared identity at
 all, the work is in `tools/ios/Info.plist.in` + an `actool` step in
-`tools/ios/run-sim.py:219` (`make_bundle`), and in the android module
+`tools/ios/run-sim.py:198` (`make_bundle`), and in the android module
 manifests + a generated resource — and the guard belongs where invariant
-3 wants it: `tools/check-steps.py:2274 (gone)` already refuses on a missing
+3 wants it: `tools/check-steps.py:2134 (gone)` already refuses on a missing
 `Info.plist.in` key, so the same clause extends to the identity keys for
 free.
 
@@ -687,7 +687,7 @@ this session:
 ```
 
 22 days and 1 day of elapsed time against a session minutes old. These
-are the lane's persistent pools — `tools/ios/run-sim.py:261-268`
+are the lane's persistent pools — `tools/ios/run-sim.py:239-246`
 documents the iOS pool as deliberately staying booted across runs, and
 the `-avd kaya … -read-only` emulators are the android lane's. **I did
 not start them and I am deliberately NOT stopping them**, since killing

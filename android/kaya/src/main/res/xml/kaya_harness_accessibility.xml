@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The harness's accessibility service config. canRetrieveWindowContent
-  and flagRetrieveInteractiveWindows are what let it read DocumentsUI,
-  which is a different app: without them getWindows() returns nothing and
-  the failure looks like the picker never appeared.
-
-  No packageNames filter, deliberately — the whole point is to see a
-  window this app does not own.
+  canRetrieveWindowContent and flagRetrieveInteractiveWindows are what
+  let the harness read DocumentsUI, a different app: without them
+  getWindows() returns nothing and the failure looks like the picker
+  never appeared. No packageNames filter, deliberately, for the same
+  reason.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"

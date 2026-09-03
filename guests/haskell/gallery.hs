@@ -1,9 +1,5 @@
-{- The gallery scene from Haskell: a checkbox and a slider, each owning
-   its state and reporting each change while the app answers by writing
-   the paired signal — the uncontrolled contract with a Bool and a
-   Double.
-
-   Build like milestone2.hs, then run with KAYA_SELFTEST=gallery. -}
+-- The gallery scene, Haskell port — guests/rust/gallery.rs,
+-- tools/scenes/gallery.steps.
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -11,8 +7,7 @@ import qualified Data.ByteString.Char8 as BC
 import KayaApp
 import KayaWire (Value (..))
 
-{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
-   source. -}
+{- A 2x2 RGB PNG, 75 bytes, embedded as source. -}
 testPng :: BS.ByteString
 testPng =
   BS.pack
@@ -49,8 +44,7 @@ main = kayaMain $ \app -> do
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],
-          {- Deliberately invalid bytes read 0x0: decode failure is the
-             placeholder class, never a crash, on every backend. -}
+          {- Deliberately invalid bytes: a decode failure reads 0x0. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")]
         ]
     mount root

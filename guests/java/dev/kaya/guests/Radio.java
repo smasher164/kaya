@@ -3,8 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The radio conformance scene from the JVM. See
- * guests/rust/radio.rs and tools/scenes/radio.steps.
+ * The radio scene from the JVM — guests/rust/radio.rs, tools/scenes/radio.steps.
  */
 public final class Radio {
     private static final String[] OPTIONS = {"Small", "Medium", "Large"};

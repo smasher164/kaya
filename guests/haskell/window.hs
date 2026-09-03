@@ -1,8 +1,5 @@
--- The window conformance scene, Haskell port — see
--- guests/rust/window.rs and tools/scenes/window.steps. The primary
--- surface's props as assertions: the title must materialize in the
--- real title bar, the advisory 640x400 request must be honored on a
--- desktop.
+-- The window scene, Haskell port — guests/rust/window.rs,
+-- tools/scenes/window.steps.
 
 import KayaApp
 import KayaWire (Value (..))

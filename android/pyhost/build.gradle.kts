@@ -39,19 +39,11 @@ android {
 }
 
 // THE GUEST SOURCES ARE STAGED BY THE BUILD, not by whoever last ran the
-// lane. `src/main/assets/python/app/` used to be filled only by
-// tools/android/run-emulator.py, so a hand-built APK packaged the file
-// that runner last copied — and `--rerun-tasks` did not help, because the
-// staged copy IS the packaging task's input and it was unchanged. A
-// three-state bisect over one guest then returned identical results for
-// all three states (docs/traps.md). Everything in this task is in-tree
-// and cheap; the CPython stdlib beside it stays with the runner, since it
-// comes from a nix store path and its absence fails loudly at first
-// launch rather than silently.
-//
-// THE SCENE LIST IS THE RUNNER'S — keep it equal to the tuple in
-// run-emulator.py's python staging block, or the APK carries a scene the
-// lane does not expect and apk_assets_verify says so.
+// lane (docs/traps.md: "The android guest is staged, so a hand-built APK
+// packages the LAST LANE RUN's copy"). The CPython stdlib stays with the
+// runner, where its absence fails loudly at first launch.
+// THE SCENE LIST IS THE RUNNER'S — keep it equal to run-emulator.py's
+// python staging tuple, or apk_assets_verify says so.
 val kayaRepoRoot = rootProject.projectDir.parentFile
 val kayaPythonScenes = listOf("portfolio", "varied")
 
@@ -76,13 +68,12 @@ val stageGuestPython by tasks.registering {
             into(app.dir("kaya"))
             exclude("__pycache__/**")
         }
-        // AND THE STAMP, or the staging is invisible to the DEVICE.
-        // MainActivity extracts assets/python once and skips the whole
-        // walk when `kaya-stamp` matches what it already unpacked — so a
-        // rebuilt APK carrying a new guest runs the OLD one, silently and
-        // for as long as the stamp is unchanged. That cost four wrong
-        // conclusions in one session (docs/traps.md); the copy above is
-        // worthless without this.
+        // AND THE STAMP, or the staging is invisible to the DEVICE:
+        // MainActivity skips the whole extraction while `kaya-stamp`
+        // matches what it already unpacked, so a rebuilt APK carrying a
+        // new guest runs the OLD one (docs/traps.md: "The android guest
+        // is staged, so a hand-built APK packages the LAST LANE RUN's
+        // copy", the stamp half).
         val pythonDir = layout.projectDirectory.dir("src/main/assets/python").asFile
         val digest = MessageDigest.getInstance("SHA-256")
         pythonDir.walkTopDown()

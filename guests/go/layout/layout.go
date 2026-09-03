@@ -1,8 +1,5 @@
-// The layout scene, Go port — the native-default observation vehicle
-// (guests/rust/layout.rs). The two label expects only prove the tree
-// built: this scene asserts NO geometry, because container targets
-// index by creation order and that legitimately differs per language.
-// The grow contract is asserted in the grow scene instead.
+// The layout scene (tools/scenes/layout.steps). It asserts NO geometry:
+// container targets are ordinal, and that differs per language.
 package layout
 
 import (

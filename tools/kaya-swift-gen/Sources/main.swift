@@ -1,8 +1,7 @@
 // The Swift arm of the generator family. Reads a guest source file for
 // types conforming to KayaGen and writes <file>+Kaya.swift beside it;
-// the DECLARATION'S SHAPE decides what comes out — an enum is a sum, a
-// struct is a record. Generated files are checked in;
-// tools/gen-guests.py regenerates and diffs.
+// the DECLARATION'S SHAPE decides what comes out. Generated files are
+// checked in; tools/gen-guests.py regenerates and diffs.
 //
 //     swift run --package-path tools/kaya-swift-gen kaya-swift-gen <guest.swift>
 

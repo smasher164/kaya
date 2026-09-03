@@ -10,41 +10,18 @@ from kaya_gate import Gate, dev_shell_or_die
 dev_shell_or_die()
 
 
-# THE APPEARANCE OVERRIDE IS INERT UNLESS ASKED FOR, AND HONEST WHEN IT IS.
-#
-# `KAYA_APPEARANCE=light|dark` makes ONE PROCESS adopt an appearance
-# through each platform's own supported override, so the dark half of
-# `expect_ink`'s frozen string can be a leg on a light desk instead of a
-# whole lane re-run with the machine's own setting flipped
-# (docs/measurements/canvas-palette-look-2026-08-27.txt, whose
+# THE APPEARANCE OVERRIDE IS INERT UNLESS ASKED FOR, AND HONEST WHEN IT
+# IS (CLAUDE.md's gate list;
+# docs/measurements/canvas-palette-look-2026-08-27.txt, whose
 # `-AppleInterfaceStyle Dark` attempt is what this replaces).
-#
-# TWO PROPERTIES, AND THE SECOND IS THE ONE THAT COULD ROT QUIETLY.
-#
-#   A. INERT WHEN UNSET. Every install site sits behind a reader that
-#      answers "nothing" for an absent variable, so an ordinary leg is
-#      byte-identical to before the knob existed. There are five such
-#      sites and no lane can tell you one of them stopped being guarded:
-#      an override installed unconditionally would move every leg on that
-#      platform to the host's-mode-ignored default and the lanes would
-#      still be green, because every lane machine is light and light is
-#      what an unguarded light default would also produce.
-#
-#   B. THE BACKEND STILL READS THE PLATFORM BACK. The knob moves the
-#      TOOLKIT; the presentation report then reads the toolkit exactly as
-#      it always did. A backend that shortcut that — reporting the
-#      environment variable straight into `set_presentation` — would make
-#      the dark leg SELF-FULFILLING: it would pass with the override
-#      doing nothing at all to the actual window, which is precisely the
-#      bug the dark leg exists to catch (the canvas rendering light in a
-#      dark window, docs/traps.md). So no file that reports a
-#      presentation may name the variable or its reader.
-#
-# The RUNTIME halves are the legs themselves, and they are a pair: the
-# light `canvas-*` leg is the unset proof (its verdict is byte-identical
-# to before this knob landed), and `canvasdark-*` is the set proof — it
-# asserts the dark half of a string the light leg cannot reach. Both run
-# on all five lanes.
+#   A. INERT WHEN UNSET: every install site sits behind a reader that
+#      answers "nothing" for an absent variable. NO LANE can see one
+#      stop being guarded — every lane machine is light, which is what
+#      an unguarded default also produces.
+#   B. THE BACKEND STILL READS THE PLATFORM BACK: reporting the variable
+#      straight into `set_presentation` makes the dark leg
+#      SELF-FULFILLING, the exact bug it exists to catch. So no file
+#      that reports a presentation may name the variable or its reader.
 
 MAC = "swift/KayaSwiftUI.swift"
 ENTRY = "swift/KayaSwiftUIEntry.swift"
@@ -59,18 +36,18 @@ FILES = [MAC, ENTRY, CANVAS, GTK, WINUI, COMPOSE]
 # lane's own name for the leg. A runner missing from this table is a lane
 # whose dark arm nobody asserts.
 LEGS = [
-    # The mac roster is DATA (tools/lib/lanes/mac.py) since the runner
-    # conversion; the dark leg's spelling there is its quoted name.
+    # The mac roster is DATA (tools/lib/lanes/mac.py); the dark leg's
+    # spelling there is its quoted name.
     ("tools/lib/lanes/mac.py", '"canvasdark-rust-swiftui"', "mac"),
     ("tools/linux/run-suites.sh", "canvasdark-rust", "linux"),
-    # The ios roster is DATA (tools/lib/lanes/ios.py) since the runner
-    # conversion; the dark leg's spelling there is its quoted name.
+    # The ios roster is DATA (tools/lib/lanes/ios.py); the dark leg's
+    # spelling there is its quoted name.
     ("tools/lib/lanes/ios.py", '"canvasdark-swift"', "ios"),
-    # The android roster is DATA (tools/lib/lanes/android.py) since the
-    # runner conversion; the dark leg's spelling there is its quoted name.
+    # The android roster is DATA (tools/lib/lanes/android.py); the dark
+    # leg's spelling there is its quoted name.
     ("tools/lib/lanes/android.py", '"canvasdark-compose"', "android"),
-    # The windows roster is DATA (tools/lib/lanes/win.py) since the
-    # runner conversion; the leg's spelling there is its quoted name.
+    # The windows roster is DATA (tools/lib/lanes/win.py); the leg's
+    # spelling there is its quoted name.
     ("tools/lib/lanes/win.py", '"canvasdark_rust"', "windows"),
 ]
 
@@ -268,17 +245,12 @@ def census(src):
         )
 
     # --- A5. The ink verb reads the SURFACE's mode, never the ambient. ---
-    # `UITraitCollection.current` is defined only inside a UIKit trait
-    # callback or a view update; kayaCanvasAppearance runs on the HARNESS
-    # thread with no view in hand, so what it reads there is whatever
-    # traits UIKit last pushed on the main thread — with a WINDOW-scoped
-    # override that is the SYSTEM's appearance, not the app's. Measured on
-    # the ios lane 2026-08-27: the raster was dark and the verb compared
-    # against the light half, per-boot stable.
-    # The other two ambient reads in this file are LEGITIMATE and
-    # deliberately not covered: kayaBrandTint and kayaPlatformFont are
-    # reached only from view bodies, where `.current` is exactly what
-    # SwiftUI has set.
+    # `UITraitCollection.current` is defined only inside a trait callback
+    # or a view update, and kayaCanvasAppearance runs on the HARNESS
+    # thread: measured on the ios lane 2026-08-27 it read the SYSTEM's
+    # light while the raster was dark, per-boot stable. The file's two
+    # other ambient reads are legitimate and deliberately not covered —
+    # kayaBrandTint and kayaPlatformFont run only from view bodies.
     start = swift.find("func kayaCanvasAppearance()")
     if start < 0:
         out.append(

@@ -1,8 +1,7 @@
 package kaya
 
-// The uniform-abort guard: a handler abort rolls the model mirror back,
-// ships nothing, and the app continues. Runs headless — the library
-// loads (KAYA_LIB) but the core loop is never entered.
+// Runs headless: the library loads (KAYA_LIB) but the core loop is never
+// entered.
 
 import (
 	"encoding/binary"
@@ -44,8 +43,6 @@ func TestAbortRestoresModelShipsNothingAndContinues(t *testing.T) {
 		tx.Insert(todos, "b", "two")
 	})
 
-	// Abort mid-transaction after mutating: the boundary restores the
-	// mirror and re-panics; surviving is the dispatch loop's job.
 	func() {
 		defer func() {
 			if recover() == nil {
@@ -64,7 +61,6 @@ func TestAbortRestoresModelShipsNothingAndContinues(t *testing.T) {
 		}
 	})
 
-	// A panicking handler is logged and the loop continues.
 	app.dispatch(func(tx *Tx) {
 		tx.Insert(todos, "d", "four")
 		panic("handler bug")
@@ -81,8 +77,6 @@ func TestAbortRestoresModelShipsNothingAndContinues(t *testing.T) {
 		}
 	})
 
-	// An aborted transaction abandons its derived registrations with its
-	// records: the pending list promotes only on commit.
 	var rc RecordCollection[string, checkTodo]
 	app.dispatch(func(tx *Tx) {
 		rc = CollectionOf[string, checkTodo](tx)
@@ -100,9 +94,8 @@ type checkTodo struct {
 	Title string
 }
 
-// A []byte field maps to ValueBlob, and every encode registers the
-// bytes right then: handles are single-submit, so insert, update and
-// update_field each produce a fresh one.
+// Blob handles are single-submit, so every encode must register fresh
+// bytes: insert, update and update_field each produce their own.
 type blobRec struct {
 	Name string
 	Pic  []byte
@@ -119,15 +112,12 @@ func TestBlobFieldsMapAndRegisterAtEncodeTime(t *testing.T) {
 		if _, ok := vals[1].(BlobHandle); !ok {
 			t.Fatalf("blob field encoded as %T, not BlobHandle", vals[1])
 		}
-		// The whole mutation surface goes through the same encoder.
 		c.Insert(tx, "a", blobRec{"a", []byte{1, 2, 3}})
 		c.Update(tx, "a", blobRec{"a", []byte{4, 5}})
 		c.UpdateField(tx, "a", func(r *blobRec) *[]byte { return &r.Pic }, []byte{6})
 	})
 }
 
-// Anything but a byte slice in a blob position fails by name here,
-// instead of deep in the wire encoder.
 func TestBlobGuardRejectsNonBytes(t *testing.T) {
 	defer func() {
 		if recover() == nil {
@@ -137,9 +127,9 @@ func TestBlobGuardRejectsNonBytes(t *testing.T) {
 	blobWire("not bytes")
 }
 
-// A model read inside a template body panics: the template records once
-// and replays, so the read would bake today's value into the blueprint.
-// The final Build pins the abort path's zone-state reset.
+// A template records once and replays, so a model read inside one would
+// bake today's value into the blueprint. The final Build pins the abort
+// path's zone-state reset.
 func TestMirrorReadsPoisonInsideTemplateBodies(t *testing.T) {
 	app := NewApp()
 	cases := []struct {
@@ -155,8 +145,7 @@ func TestMirrorReadsPoisonInsideTemplateBodies(t *testing.T) {
 			s := tx.Signal(true)
 			tx.When(s, func(*Tpl) { tx.Len(c) })
 		}},
-		// Opening the rows is what enters the zone: the trace has not
-		// begun and the read is already poisoned.
+		// Opening the rows is what enters the zone, before any trace begins.
 		{"opened rows", func(tx *Tx, c Collection) {
 			tx.Rows(c)
 			tx.Items(c)
@@ -238,8 +227,6 @@ func TestMenuConstructionEmitsAndAbortsWithTheTx(t *testing.T) {
 		}
 	})
 
-	// Append-at-any-time: the retained handle reopens in a later
-	// transaction, under the RETAINED parent and never a new bar anchor.
 	app.Build(func(tx *Tx) {
 		before := len(tx.records)
 		tx.Menu(file).Item("Publish")
@@ -264,7 +251,6 @@ func TestMenuConstructionEmitsAndAbortsWithTheTx(t *testing.T) {
 		}
 	})
 
-	// An aborted append drops its menu records with everything else.
 	func() {
 		defer func() {
 			if recover() == nil {
@@ -281,10 +267,8 @@ func TestMenuConstructionEmitsAndAbortsWithTheTx(t *testing.T) {
 	})
 }
 
-// A Tx is only valid inside the Build or handler that made it, and a
-// captured one must die LOUDLY — the failure it replaces was silent.
-// Two chokepoints (Tx.emit for writes, Tx.mirror for model reads), and
-// this proves both fire.
+// Two chokepoints refuse a closed Tx: Tx.emit for writes, Tx.mirror for
+// model reads (tools/check-tx-liveness.py). This proves both fire.
 func TestAClosedTransactionRefusesLoudly(t *testing.T) {
 	app := NewApp()
 	var escaped *Tx
@@ -312,20 +296,16 @@ func TestAClosedTransactionRefusesLoudly(t *testing.T) {
 	panics("a model read", func() { escaped.Items(c) })
 	panics("a model length read", func() { escaped.Len(c) })
 
-	// And the app survives all of it.
 	app.Build(func(tx *Tx) { tx.Write(s, "after all") })
 }
 
-// OPEN IS NOT ENOUGH: a transaction is the app goroutine's. `closed`
-// cannot see a goroutine spawned inside a handler writing through the
-// transaction the handler still holds, nor a background goroutine
-// opening a Build of its own — both race the app goroutine's model and
-// its record list, silently (docs/deferred.md).
+// OPEN IS NOT ENOUGH: `closed` sees neither a goroutine spawned inside a
+// handler writing through the transaction it still holds, nor a background
+// Build — both race the app goroutine silently (tools/check-tx-liveness.py).
 func TestATransactionRefusesAnotherGoroutine(t *testing.T) {
 	app := NewApp()
-	// Serve makes this claim in production. The claim is a package
-	// global, so it is handed back before returning: the package's other
-	// tests build on whatever goroutine `go test` gave them.
+	// The claim is a package global: hand it back, or the package's other
+	// tests run against a thread rule nothing else set.
 	claimAppThread()
 	defer func() {
 		appThread.Store(0)
@@ -352,8 +332,6 @@ func TestATransactionRefusesAnotherGoroutine(t *testing.T) {
 		return msg
 	}
 
-	// A live transaction, written from a goroutine the handler spawned:
-	// still OPEN, so only the thread rule can refuse it.
 	var live string
 	app.Build(func(tx *Tx) {
 		live = elsewhere(func() { tx.Write(s, "from elsewhere") })
@@ -367,16 +345,12 @@ func TestATransactionRefusesAnotherGoroutine(t *testing.T) {
 		t.Fatalf("the wrong-thread refusal must name the way out: %q", live)
 	}
 
-	// And a background Build, which reaches no chokepoint at all when
-	// its body writes nothing.
 	empty := elsewhere(func() { app.Build(func(*Tx) {}) })
 	if !strings.Contains(empty, "belongs to the app thread") {
 		t.Fatalf("Build from another goroutine was answered with %q — an empty "+
 			"body emits no record, so only Build's own check can see it", empty)
 	}
 
-	// The way out the message names actually works, and the app thread
-	// still builds.
 	ran := ""
 	done := make(chan struct{})
 	go func() {
@@ -391,11 +365,10 @@ func TestATransactionRefusesAnotherGoroutine(t *testing.T) {
 	app.Build(func(tx *Tx) { tx.Write(s, "after all") })
 }
 
-// The chokepoint must STAY a chokepoint: Tx.emit is the only place that
-// appends to a transaction's records, which is what makes the liveness
-// check impossible to forget at a new callsite. Scanned over EVERY
-// source file of the package, not a list — the file a future surface
-// lands in is exactly the one nobody adds.
+// Tx.emit is the only place that appends to a transaction's records, which
+// is what makes the liveness check impossible to forget at a new callsite.
+// Scanned over EVERY source file, not a list — the file a future surface
+// lands in is exactly the one nobody adds to a list.
 func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 	direct := regexp.MustCompile(`\.records = append\(`)
 	found := map[string]int{}
@@ -419,13 +392,10 @@ func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 			found[name] = n
 		}
 	}
-	// A directory read that found nothing would pass while checking
-	// nothing at all.
 	if scanned < 4 {
 		t.Fatalf("scanned %d package sources — the walk stopped finding the "+
 			"package, so this test proves nothing", scanned)
 	}
-	// Exactly one, and it is emit's own body.
 	if len(found) != 1 || found["app.go"] != 1 {
 		t.Fatalf("direct appends to a transaction's records: %v — want exactly "+
 			"one, in Tx.emit. A callsite that appends directly skips the "+
@@ -446,9 +416,8 @@ func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 	}
 }
 
-// Post is the one method safe from another goroutine, and it must QUEUE
-// rather than run. The join before the first assertion is what makes
-// "did not run inline" a fact rather than a timing accident.
+// The join before the first assertion is what makes "did not run inline" a
+// fact rather than a timing accident.
 func TestPostQueuesForTheAppGoroutineInOrder(t *testing.T) {
 	app := NewApp()
 	var s Signal[string]
@@ -478,9 +447,8 @@ func TestPostQueuesForTheAppGoroutineInOrder(t *testing.T) {
 	}
 }
 
-// A post from inside a handler queues for AFTER; it never nests.
-// Queued reads "acb", nested reads "abc" — the discriminator the scene
-// uses too (docs/background-work-plan.md §5).
+// Queued reads "acb", nested reads "abc" — the discriminator the scene uses
+// too (docs/background-work-plan.md §5).
 func TestPostFromInsideAHandlerQueuesForAfter(t *testing.T) {
 	app := NewApp()
 	seq := ""
@@ -498,9 +466,8 @@ func TestPostFromInsideAHandlerQueuesForAfter(t *testing.T) {
 	}
 }
 
-// A closure that posts again lands in the NEXT batch: drainPosted takes
-// the queue and drops the lock before running any of it, so a re-posting
-// loop cannot starve the occurrence ring.
+// drainPosted takes the queue and drops the lock before running any of it,
+// so a re-posting loop cannot starve the occurrence ring.
 func TestASelfPostWaitsForTheNextDrain(t *testing.T) {
 	app := NewApp()
 	ran := 0
@@ -526,9 +493,9 @@ func TestASelfPostWaitsForTheNextDrain(t *testing.T) {
 
 // --- Undo (docs/undo-plan.md D2, D5) --------------------------------
 
-// The wire admits the group marker only as the FIRST record of a batch,
-// so Undoable rotates rather than appends and nothing else may move.
-// Getting it wrong ships a group that silently covers the wrong ops.
+// The wire admits the group marker only as the FIRST record of a batch, so
+// Undoable rotates rather than appends; a group at the wrong place silently
+// covers the wrong ops.
 func TestUndoableLeadsTheBatchWhereverItIsCalled(t *testing.T) {
 	app := NewApp()
 	var s Signal[string]
@@ -551,13 +518,11 @@ func TestUndoableLeadsTheBatchWhereverItIsCalled(t *testing.T) {
 		if window := binary.LittleEndian.Uint64(tx.records[0][8:16]); window != 0 {
 			t.Fatalf("Undoable named window %d, want the primary (0)", window)
 		}
-		// The rotate must not disturb the rest.
 		rest := []uint16{recKind(tx.records[1]), recKind(tx.records[2])}
 		if rest[0] != txWriteSignal || rest[1] != txCollectionInsert {
 			t.Fatalf("the rotate reordered the batch: kinds after the marker %v", rest)
 		}
 	})
-	// The aux-window spelling names its own ledger.
 	app.Build(func(tx *Tx) {
 		tx.Write(s, "c")
 		tx.UndoableIn(7, "in seven")
@@ -567,8 +532,6 @@ func TestUndoableLeadsTheBatchWhereverItIsCalled(t *testing.T) {
 	})
 }
 
-// One name per step: the wire carries one marker per batch, so the
-// alternative to the panic is a name silently ignored.
 func TestASecondUndoableNameIsRefused(t *testing.T) {
 	app := NewApp()
 	defer func() {
@@ -587,9 +550,9 @@ func TestASecondUndoableNameIsRefused(t *testing.T) {
 	})
 }
 
-// An undo moves core state WITHOUT a transaction, so the mirror follows
-// the payload or every read-back is stale. Entries arrive as statements
-// (present or gone), orders as one instance's whole key list.
+// An undo moves core state WITHOUT a transaction, so the mirror follows the
+// payload or every read-back is stale. Entries arrive as statements (present
+// or gone), orders as one instance's whole key list.
 func TestAnUndoneDeltaReconcilesTheModelMirror(t *testing.T) {
 	app := NewApp()
 	var c Collection
@@ -599,8 +562,6 @@ func TestAnUndoneDeltaReconcilesTheModelMirror(t *testing.T) {
 		tx.Insert(c, "b", "two")
 		tx.Insert(c, "c", "three")
 	})
-	// What the core would send after undoing "insert c, retitle a" and
-	// putting the order back to c, b, a.
 	app.absorbUndo(UndoDelta{
 		Entries: []UndoEntry{
 			{Collection: c.id, Key: "c"},
@@ -623,9 +584,8 @@ func TestAnUndoneDeltaReconcilesTheModelMirror(t *testing.T) {
 	})
 }
 
-// A record collection gets its RECORDS back, not the wire's fields: the
-// mirror holds T values and Items type-asserts them, so folding the
-// payload verbatim would panic on the next read rather than at the fold.
+// The mirror holds T values and Items type-asserts them: folding an undo
+// payload's wire fields verbatim panics on the next READ, not at the fold.
 func TestAnUndoneDeltaRestoresRecordsNotWireFields(t *testing.T) {
 	app := NewApp()
 	var todos RecordCollection[string, checkTodo]
@@ -644,9 +604,8 @@ func TestAnUndoneDeltaRestoresRecordsNotWireFields(t *testing.T) {
 	})
 }
 
-// The fresh-key minter: one counter per collection INSTANCE, mint is
-// counter+1, and nothing writes it downwards (docs/fresh-key-plan.md).
-// No scene observes the RETURN VALUE, so it is pinned here.
+// One counter per collection INSTANCE (docs/fresh-key-plan.md). No scene
+// observes the RETURN VALUE, so it is pinned here.
 func TestFreshKeysAreMintedPerInstanceAndNeverRewind(t *testing.T) {
 	app := NewApp()
 	var groups, todos Collection
@@ -659,8 +618,6 @@ func TestFreshKeysAreMintedPerInstanceAndNeverRewind(t *testing.T) {
 		if k := tx.InsertFresh(groups, "Home"); k != int64(2) {
 			t.Fatalf("the second mint is %v, want 2", k)
 		}
-		// A counter per INSTANCE, not per collection: keys are unique
-		// within a table, so two groups' todos both start at 1.
 		g1, g2 := todos.At(int64(1)), todos.At(int64(2))
 		if k := tx.InsertFresh(g1, "send report"); k != int64(1) {
 			t.Fatalf("the first mint of instance g1 is %v, want 1", k)
@@ -672,8 +629,8 @@ func TestFreshKeysAreMintedPerInstanceAndNeverRewind(t *testing.T) {
 			t.Fatalf("the first mint of instance g2 is %v, want 1", k)
 		}
 	})
-	// An abandoned transaction does not hand the key back: the rollback
-	// journal restores the model, not the counter.
+	// The rollback journal restores the model, not the counter, so an
+	// abandoned transaction does not hand its key back.
 	func() {
 		defer func() { _ = recover() }()
 		app.Build(func(tx *Tx) {
@@ -694,8 +651,8 @@ func TestFreshKeysAreMintedPerInstanceAndNeverRewind(t *testing.T) {
 }
 
 // A numeric key at or above the counter carries it up, so a later mint
-// cannot collide with a hand-chosen number. All three insert surfaces
-// absorb, because there is one insert underneath (Tx.insertEntry).
+// cannot collide with a hand-chosen number. All three insert surfaces absorb
+// because there is one insert underneath (Tx.insertEntry).
 func TestAnExplicitI64KeyCarriesTheMinterPastIt(t *testing.T) {
 	app := NewApp()
 	var todos Collection
@@ -706,22 +663,18 @@ func TestAnExplicitI64KeyCarriesTheMinterPastIt(t *testing.T) {
 		if k := tx.InsertFresh(todos, "typed"); k != int64(8) {
 			t.Fatalf("the mint after an explicit 7 is %v, want 8 (past the explicit key)", k)
 		}
-		// BELOW the counter moves nothing.
 		tx.Insert(todos, int64(3), "older")
 		if k := tx.InsertFresh(todos, "typed again"); k != int64(9) {
 			t.Fatalf("a key below the counter moved it: the mint is %v, want 9", k)
 		}
-		// AT the counter still carries it past: 9 is spent.
 		tx.Insert(todos, int64(9), "collides with the last mint")
 		if k := tx.InsertFresh(todos, "and again"); k != int64(10) {
 			t.Fatalf("a key at the counter did not carry it: the mint is %v, want 10", k)
 		}
-		// A NON-NUMERIC KEY MOVES NOTHING, having no way to collide.
 		tx.Insert(todos, "t99", "named")
 		if k := tx.InsertFresh(todos, "last"); k != int64(11) {
 			t.Fatalf("a string key moved the counter: the mint is %v, want 11", k)
 		}
-		// The typed surface absorbs through the same path.
 		records = CollectionOf[int64, checkTodo](tx)
 		records.Insert(tx, int64(4), checkTodo{Title: "hand-chosen"})
 		if k := InsertFresh(tx, records, checkTodo{Title: "minted"}); k != int64(5) {
@@ -730,9 +683,8 @@ func TestAnExplicitI64KeyCarriesTheMinterPastIt(t *testing.T) {
 	})
 }
 
-// A fresh key is fresh FOREVER: undo and redo replay captured keys
-// inside the core and never re-enter the guest insert path, so a history
-// walk moves no counter.
+// Undo and redo replay captured keys inside the core and never re-enter the
+// guest insert path, so a history walk moves no counter.
 func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
 	app := NewApp()
 	var todos Collection
@@ -742,7 +694,6 @@ func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
 			t.Fatalf("the first mint is %v, want 1", k)
 		}
 	})
-	// The undo empties the table (the core's own replay, not an insert).
 	app.absorbUndo(UndoDelta{Entries: []UndoEntry{{Collection: todos.id, Key: int64(1)}}})
 	app.Build(func(tx *Tx) {
 		if n := tx.Len(todos); n != 0 {
@@ -752,7 +703,6 @@ func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
 			t.Fatalf("the undo moved the counter: the mint is %v, want 2", k)
 		}
 	})
-	// The redo puts key 1 back on top of a table that now holds 2.
 	app.absorbUndo(UndoDelta{
 		Entries: []UndoEntry{{Collection: todos.id, Key: int64(1), Present: true, Record: []any{"milk"}}},
 		Orders:  []UndoOrder{{Collection: todos.id, Keys: []any{int64(1), int64(2)}}},
@@ -767,17 +717,12 @@ func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
 	})
 }
 
-// Go's int is SIGNED and the wire's offset is not: strings.Index answers
-// -1, and select_range/reveal_range carry offsets as bare u64 fields, so
+// Go's int is SIGNED and select_range/reveal_range carry offsets as bare u64:
 // an unguarded -1 reaches the core as 18446744073709551615.
 //
-// THE TWO u64 VERBS MUST BE DRIVEN FIRST — do not reorder.
-// HighlightRanges has a second wall behind this one (its offsets ride as
-// I64 Values, and the core ABORTS the process while decoding), so
-// driving it first would kill the test binary before the other two were
-// driven at all.
-//
-// The accepting half is here so the guard cannot be over-broad.
+// THOSE TWO MUST BE DRIVEN FIRST — do not reorder. HighlightRanges' offsets
+// ride as I64 Values and the core ABORTS the process while decoding, killing
+// the binary before the other two run.
 func TestANegativeRangeOffsetIsRefusedByEveryRangeVerb(t *testing.T) {
 	app := NewApp()
 	var editor Widget

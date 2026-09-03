@@ -65,17 +65,11 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python"}
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
 #   ("drain",)              the pool barrier
-#   ("panel_mode", n, name) rotate the machine-wide file-panel view
-#                           mode before the group that follows
-#   ("panel_check",)        the modes-run census + restore, after the
-#                           last filedialog group
+#   ("panel_mode", n, name) rotate the machine-wide file-panel view mode
+#   ("panel_check",)        the modes-run census + restore
 #   ("dark_leg",)           the canvasdark leg (DARK_LEG above)
-#
-# The single-language groups between drains ARE the serial families;
-# the measured reasons live at the runner's sites (the save panel's
-# machine-wide last-directory preference, 2026-08-10; the one system
-# clipboard; the undo scene's real keystrokes; the editor's chrome
-# plus keys).
+# The single-language groups between drains ARE the serial families, each
+# with its reason at the group.
 ORDER = [
     ("milestone2", LANGS),
     ("entry", LANGS),
@@ -280,10 +274,9 @@ def wired_scenes():
     return {scene for _name, scene, _lang in legs()}
 
 
-# THE LEG'S COMMAND AND SCRIPT, one copy: tools/validate-mac.py runs the
-# roster through these, and tools/run-leg.py runs ONE leg by hand through
-# the same two — a hand run that spelled its own env once ran a stale
-# interpreter for a whole failure (2026-09-01, docs/traps.md).
+# THE LEG'S COMMAND AND SCRIPT, one copy: validate-mac.py runs the roster
+# through these and run-leg.py runs ONE leg by hand through the same two
+# (docs/traps.md, 2026-09-01 — a hand-spelled env ran a stale interpreter).
 KAYA_LIB_LANGS = ("csharp", "ocaml", "java")
 RUST_GUESTS = "target/rust-guests"
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"

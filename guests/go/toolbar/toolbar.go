@@ -1,8 +1,5 @@
-// The toolbar conformance scene, Go port: the `primary` bit as real
-// window chrome (docs/chrome-plan.md C2). The app declares ONE catalog
-// and marks two actions primary; every host promotes the same first two
-// in catalog preorder. Canonical semantics in guests/rust/toolbar.rs;
-// the contract in tools/scenes/toolbar.steps.
+// The toolbar scene (tools/scenes/toolbar.steps): the `primary` bit as
+// window chrome, with no toolbar vocabulary to spell.
 package toolbar
 
 import (
@@ -16,20 +13,13 @@ func App() *kaya.App {
 
 	app.Build(func(tx *kaya.Tx) {
 		status := tx.Signal("ready")
-		// Written against the MENU ITEM and saying nothing about any
-		// button: the promoted button is that same item, so it follows or
-		// the lowering kept a copy.
+		// Written against the MENU ITEM: the promoted button IS that item.
 		canSave := tx.Signal(true)
 
-		// CATALOG PREORDER DECIDES PROMOTION: top-level groupings in
-		// menubar-append order, then each node's children depth-first.
-		// Save is the first primary and Find the second, however large a
-		// host's k is.
+		// CATALOG PREORDER DECIDES PROMOTION.
 		win := tx.Window(0).Title("toolbar")
 		file := win.Menu("File")
-		// SymbolDone is the checkmark idiom: the vocabulary has no
-		// save-specific glyph, and neither does Apple's own catalog
-		// (docs/styling-plan.md D6).
+		// The vocabulary has no save glyph, so `done` is the spelling.
 		file.Item("Save").Symbol(kaya.SymbolDone).Primary(true).
 			BindEnabled(canSave).Shortcut("primary+s").
 			OnActivate(func(tx *kaya.Tx) {

@@ -8,39 +8,22 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # A GO GUEST READS THE HOST'S ENVIRONMENT, NEVER GO'S COPY OF IT
-# (docs/go-mobile-plan.md D2). In a `-buildmode=c-shared` .so Go's view
-# of the environment is empty forever while C's getenv(3) reads the
-# live `environ`, and the failure is SILENT: an empty KAYA_SELFTEST is
-# not an unknown scene name, it is the default arm.
-#
-# NOTHING AT COMPILE TIME OR RUN TIME CAN TELL THE TWO SPELLINGS APART:
-# both compile everywhere, both RETURN on Android, and an empty
-# environment is Android's normal state for a c-shared library. That
-# leaves the static text. BOTH ROOTS are scanned — guests/go is where
-# the defect would be written, bindings/go is where it would be written
-# a second time by whoever "fixes" kaya.Env to call os.Getenv.
+# (CLAUDE.md's gate list, docs/go-mobile-plan.md D2). BOTH roots are
+# scanned: guests/go is where the defect would be written, bindings/go
+# is where whoever "fixes" kaya.Env would write it again.
 #
 # THE SECOND RULE: A GUEST ASKS KAYA FOR PLATFORM LOCATIONS, NEVER THE
-# LANGUAGE RUNTIME'S SNAPSHOT. `os.TempDir` is the same defect wearing
-# a different name — on unix it IS `Getenv("TMPDIR")` with a "/tmp"
-# fallback, so it answers CONFIDENTLY out of the same empty map with a
-# path an Android app may not write. UserHomeDir, UserCacheDir and
-# UserConfigDir are here for the same reason.
-#
-# NOT A FLAT BAN: the desktop arm of a platform switch is the one
-# place the call is right. So the rule is STRUCTURAL — a location
-# reader must sit inside a function that both branches on runtime.GOOS
-# and reaches a location through kaya.Env. A name rule ("call it
-# sceneRoot") would be satisfied by renaming; a flat ban would push
-# guests toward hardcoding "/tmp".
-#
-# THE SCAN IS A PARSER, NOT A GREP (tools/checks/goenv.go — an
-# in-toolchain Go payload, built and run rather than paraphrased), and
-# that is load-bearing: every file this rule protects DOCUMENTS the
-# rule, so bindings/go/runtime.go says "os.Getenv" six times in prose.
-# go/parser also resolves whatever local name the `os` import was given
-# and answers "which function is this call in", which the second rule
-# needs.
+# LANGUAGE RUNTIME'S SNAPSHOT (ratified 2026-08-17). `os.TempDir` is the
+# same defect renamed — on unix it IS `Getenv("TMPDIR")` with a "/tmp"
+# fallback, answering CONFIDENTLY out of the same empty map with a path
+# an Android app may not write; UserHomeDir, UserCacheDir and
+# UserConfigDir likewise. NOT A FLAT BAN, since the desktop arm of a
+# platform switch is the one place the call is right: a location reader
+# sits inside a function that both branches on runtime.GOOS and reaches
+# a location through kaya.Env. A name rule would be satisfied by
+# renaming, a flat ban would push guests toward "/tmp", and the parser
+# (tools/checks/goenv.go) is what can answer "which function is this
+# call in".
 
 import re
 import shutil
@@ -76,12 +59,16 @@ def scan(*args):
                           check=False)
 
 
-# doctor: FROM replaced by TO across a real file's bytes, written to
-# scratch, THE COUNT PRINTED AND DEMANDED — every self-test below reads
-# that number and a zero is a broken test, not a passed one.
+# FROM replaced by TO across a real file's bytes, written to scratch,
+# the count printed and DEMANDED: a zero is a broken test, not a passed
+# one.
 def doctor_copy(label, rel, frm, to, out_name, want):
-    text = g.doctor(label, (ROOT / rel).read_text(encoding="utf-8"),
-                    re.escape(frm), to.replace("\\", "\\\\"), want=want)
+    # Line comments come off the copy first: a doc comment naming the call
+    # counted as a site, and the 2026-09-02 comments pass had to word
+    # around it. The scanner parses Go, so the copy still means the same.
+    src = "\n".join(line for line in (ROOT / rel).read_text(encoding="utf-8").splitlines()
+                    if not line.lstrip().startswith("//"))
+    text = g.doctor(label, src, re.escape(frm), to.replace("\\", "\\\\"), want=want)
     out = T / out_name
     out.write_text(text, encoding="utf-8")
     return out
@@ -98,17 +85,15 @@ def selftest_fail(msg):
 
 # ---------------------------------------------------------- self-tests
 #
-# All of these run against the REAL BYTES of REAL FILES, doctored in
-# memory, with the substitution count printed. A clause that parsed
-# nothing agrees with everything, and this gate's whole job is to
-# disagree.
+# All against the REAL BYTES of REAL FILES, doctored in memory, counts
+# printed: a clause that parsed nothing agrees with everything.
 
 # 1. The scan sees the defect in the BINDING. runtime.go's C.getenv is
 #    the one correct spelling in the tree; turned into os.Getenv it is
 #    the defect exactly. TWO SITES (Env and LookupEnv), both doctored.
 s1 = doctor_copy("1 planted the defect in bindings/go/runtime.go",
                  "bindings/go/runtime.go", "C.getenv(", "os.Getenv(",
-                 "s1.go", want=2)
+                 "s1.go", want=1)
 if scan("-file", s1).returncode == 0:
     selftest_fail("the scan passed a file that calls os.Getenv.")
 
@@ -123,13 +108,11 @@ if scan("-file", s2).returncode == 0:
     selftest_fail("the scan passed a guest that calls os.Getenv.")
 
 # 2b. AND IT READS A FILE NO MAC EVER COMPILES: the Android arm is
-#    behind `//go:build android`, so a scanner honouring build
-#    constraints would be blind exactly where the defect can happen.
-#    go/parser does not evaluate them.
-#
-#    THE PLANT CARRIES ITS OWN IMPORT, under an ALIAS, so the scanner
-#    must resolve the local name rather than match the text "os.".
-#    Keyed on `package main`, the one token every Go file has once.
+#    behind `//go:build android`, which go/parser does not evaluate, so
+#    a scanner honouring build constraints would be blind exactly where
+#    the defect happens. THE PLANT CARRIES ITS OWN IMPORT under an
+#    ALIAS, so the scanner must resolve the local name; keyed on
+#    `package main`, the one token every Go file has once.
 s2b = doctor_copy("2b planted an aliased-import defect in "
                   "guests/go/cmd/main_android.go",
                   "guests/go/cmd/main_android.go", "package main",
@@ -149,14 +132,11 @@ elif scan("-file", s2b).returncode == 0:
                   "os.Getenv under an aliased import. The scanner is "
                   "blind exactly where this rule matters.")
 
-# 3. PROSE IS NOT CODE: every file the rule protects explains the
-#    rule, so runtime.go names os.Getenv in its own comments.
-#
-#    ISOLATED RATHER THAN READ OFF THE REAL FILE: scanning the
-#    undoctored runtime.go would MISDIAGNOSE a real defect as "you
-#    flagged a comment". The clause is built from the real comment
-#    lines alone, lifted into a file that has nothing else in it, so
-#    the only thing that can fail it is the property it names.
+# 3. PROSE IS NOT CODE: every file the rule protects explains the rule,
+#    so runtime.go names os.Getenv in its own comments. The clause is
+#    built from those comment lines ALONE, in a file with nothing else
+#    in it — scanning the undoctored runtime.go would misdiagnose a real
+#    defect as "you flagged a comment".
 runtime_text = (ROOT / "bindings" / "go" / "runtime.go").read_text(
     encoding="utf-8")
 prose = [ln for ln in runtime_text.splitlines()
@@ -251,7 +231,7 @@ loc_says(s5b, "reaches no location through kaya.Env",
 #     TWO SITES, both doctored.
 s5c = doctor_copy("5c planted unbranched location reads",
                   "guests/go/filedialog/filedialog.go", "runtime.GOOS",
-                  "platformName", "s5c.go", want=2)
+                  "platformName", "s5c.go", want=1)
 loc_says(s5c, "never reads runtime.GOOS",
          "a fallback reached on every platform")
 

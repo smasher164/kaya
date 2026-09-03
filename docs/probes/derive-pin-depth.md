@@ -37,7 +37,7 @@ add), `tools/scenes/undo.steps`, `crates/kaya/src/app.rs`
 `close_episodes_on`, `note_text_changed`, `route_undo`, `route_redo`,
 `apply_delta`), `crates/kaya/src/harness.rs` (`SetText`, the `poll`
 wrapper), `swift/KayaSwiftUI.swift` (the `set_text` verb),
-`bindings/csharp/KayaApp.cs:468-482` (the comment to adapt),
+`bindings/csharp/KayaApp.cs:423-437` (the comment to adapt),
 `docs/deferred.md` (the retracted entry),
 `scratchpad/fresh-key-depth.md (gone)` §3 (the moved-expectation precedent).
 
@@ -73,7 +73,7 @@ naming the step, and the derived label still comes back.
 
 **The undo routes to the ledger, not to the field's native stack.**
 `set_text` is a programmatic write that emits a text event
-(`KayaHost.emitText`, swift/KayaSwiftUI.swift:3729), so it opens a
+(`KayaHost.emitText`, swift/KayaSwiftUI.swift:3351), so it opens a
 typing Episode. `bank_group` closes the frontier episode when it pushes
 the group (scene.rs:2145) and emits `ApplyOp::ClearUndo`, and
 `route_undo` (scene.rs:2404) reads `done.last()` — the Group — so
@@ -153,7 +153,7 @@ transaction 2 (the form):   clear(field)  +  focus(field)
 - **Ambient bindings** (Python, and any other where a handler IS one
   transaction): name the group in the handler and POST the finishing
   work — `app.post(field.clear)` then `app.post(field.focus)`, or one
-  posted callable doing both. `guests/python/undo.py:128` is the
+  posted callable doing both. `guests/python/undo.py:110` is the
   precedent. `tools/check-ambient-tx.py` forbids opening a second
   scope inside a handler, so posting is the only spelling.
 - Keep `clear` BEFORE `focus`, as every todos guest has today: the
@@ -165,7 +165,7 @@ transaction 2 (the form):   clear(field)  +  focus(field)
 ### 2f. The C floor is in scope
 
 `guests/c/todos.c` runs as `todos-c` on the Linux lane
-(tools/linux/run-suites.sh:488) and `tools/check-steps.py` is blind to
+(tools/linux/run-suites.sh:383) and `tools/check-steps.py` is blind to
 it (a known gap in docs/deferred.md). It has no `derive` — it writes
 `SIG_LEFT` by hand in `write_items_left`. That is not an exemption, it
 is the thesis at the floor: because the hand-written signal write rides
@@ -290,7 +290,7 @@ restored  939cf9537965d7e9e6f6e40258b969d0df3f8465cb07d877e9dfbd3988cb03a8  MATC
 ## 6. crates/kaya/src/app.rs — the deliberate-stance comment
 
 `AppCtx::absorb_undo`'s doc gains two paragraphs, adapted from
-`bindings/csharp/KayaApp.cs:477-481` and made specific to Rust:
+`bindings/csharp/KayaApp.cs:432-436` and made specific to Rust:
 
 - WHY none happens: the derived write rode the same transaction as its
   mutation, so a named transaction banked it in both directions and the
@@ -370,7 +370,7 @@ backend refuses it.** The Android lane runs the todos scene on Compose
 (`todos-compose`, tools/lib/lanes/android.py:44, and `todos-jvm`,
 :61) with this same shared script.
 
-- `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:4167-4222` —
+- `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:3723-3774` —
   five `depthStub("undo")` bodies: `kayaUndoRoute`, `kayaRedoRoute`,
   `kayaNoteNativeUndo`, `kayaCoreUndo`, `kayaCoreRedo`. The five JNI
   entries the arm is waiting on are listed in the file at 4136-4141.
@@ -384,7 +384,7 @@ backend refuses it.** The Android lane runs the todos scene on Compose
 - The other four backends are clear. `depth_stub(` has NO callers in
   any Rust backend and `kayaDepthStub(` none in Swift; GTK and WinUI
   both carry `undo` in their lane's SCENES; the iOS lane queues
-  `undo-swiftui` explicitly (tools/lib/lanes/ios.py:66). Compose is the
+  `undo-swiftui` explicitly (tools/lib/lanes/ios.py:64). Compose is the
   only hole, and mac is proven green above.
 
 **Why no gate caught it, which is the part worth fixing.**

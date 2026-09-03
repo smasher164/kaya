@@ -1,5 +1,5 @@
-// The radio conformance scene, Swift port. See
-// guests/rust/radio.rs and tools/scenes/radio.steps.
+// The radio scene, Swift port — guests/rust/radio.rs,
+// tools/scenes/radio.steps.
 
 import Foundation
 

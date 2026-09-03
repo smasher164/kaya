@@ -1,22 +1,13 @@
-//! Which children each container holds, in order — and which containers
-//! that order has left stale.
+//! Which children each container holds, in order — and which containers that
+//! order has left stale.
 //!
 //! A Grid places by attached Row/Column index rather than by child order
-//! (docs/traps.md), so `reindex` in the parent module re-stamps the whole
-//! set after any structural change: it clears the container's
-//! RowDefinitions, rebuilds one per child and writes `Grid::SetRow` on
-//! every sibling. Run once per append that is N^2/2 WinRT round trips —
-//! 77s for a 10,000-row table, and why this platform's choke sat at
-//! 12,000 rows (docs/deferred.md "WinUI's child append is quadratic";
-//! docs/measurements/choke-windows-2026-08-24.txt). So a change MARKS its
-//! container here and the re-stamp happens once at the batch boundary.
-//!
-//! THE PRIVATE FIELDS ARE THE GUARD. The order used to be a bare
-//! `HashMap` on `CoreState`, and every arm that pushed to it also had to
-//! remember the rebuild; here there is no way to reach the vector at all
-//! except through a method that marks. `winui::tests`'
-//! `the_deferred_rebuild_places_every_child_where_the_eager_one_did`
-//! is what watches the methods themselves keep that promise.
+//! (docs/traps.md), so the parent module's `reindex` re-stamps the whole set
+//! after any structural change: N^2/2 WinRT round trips if run per append
+//! (docs/deferred.md "WinUI's child append is quadratic"). A change MARKS
+//! its container here and the re-stamp happens once at the batch boundary.
+//! THE PRIVATE FIELDS ARE THE GUARD: the vector is reachable only through a
+//! method that marks, and `winui::tests` watches the methods keep it.
 
 use crate::protocol::WidgetId;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,9 +15,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Default)]
 pub(super) struct ChildOrder {
     order: HashMap<WidgetId, Vec<WidgetId>>,
-    /// Which container each child sits in. `Destroy` and the `grow` prop
-    /// both need to name a child's parent, and the scan they used to do
-    /// over every container was the same N^2 one surface over.
+    /// Which container each child sits in — `Destroy` and the `grow` prop
+    /// both need to name a child's parent without scanning every container.
     of: HashMap<WidgetId, WidgetId>,
     /// Containers due a re-stamp, in first-marked order.
     due: VecDeque<WidgetId>,
@@ -59,8 +49,7 @@ impl ChildOrder {
     }
 
     /// Move `child` within `parent`, in front of `before` or to the end.
-    /// Panics on an anchor that is not a sibling, which is what the
-    /// MoveChild arm did before this type existed.
+    /// Panics on an anchor that is not a sibling.
     pub(super) fn place(&mut self, parent: WidgetId, child: WidgetId, before: Option<WidgetId>) {
         let order = self.order.entry(parent).or_default();
         order.retain(|&id| id != child);

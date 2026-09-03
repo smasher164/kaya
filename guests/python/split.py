@@ -1,17 +1,5 @@
-"""The split conformance scene, Python port — adaptive panes as
-assertions (DESIGN.md; docs/multicolumn-plan.md).
-
-The guest asks for the presentation ONCE — `panes=2` on the window —
-and does nothing adaptive after that; the platform re-decides as the
-size class changes, and there is no prop for WHICH entries present. The
-stack is the ordinary navigation stack: nothing here is split-specific
-except that one prop.
-
-TWO scripts drive this ONE app: `split` resizes and names the
-presentation on each side, `listdetail` asserts the bare invariant at
-whatever width its host gives. See guests/rust/split.rs,
-tools/scenes/split.steps and tools/scenes/listdetail.steps.
-"""
+"""The split scene, driven by TWO scripts (tools/scenes/split.steps and
+listdetail.steps): the presentation is asked for ONCE and never again."""
 
 import sys
 
@@ -23,8 +11,7 @@ DETAIL = 7
 
 
 def popped_detail():
-    # Retention: the base root took this write while the detail was up,
-    # on a regular window where it was VISIBLE the whole time.
+    # Retention: the base root took this write while the detail was up.
     status.set("popped detail")
 
 
@@ -38,10 +25,7 @@ def open_detail():
 with app.window(title="split", panes=2):
     status = kaya.signal("list pane")
     with kaya.column():
-        # Authored ids so the REAL-TREE read can address these:
-        # `expect label#N` reads kaya's own model and passes whether or
-        # not anything reached the screen — the gap that let a
-        # non-rendering split arm look green.
+        # Authored ids: an index read passes for an empty arm.
         kaya.label(bind=status).a11y_id("list")  # label#0
         kaya.button("open detail", on_click=open_detail)  # button#0
 

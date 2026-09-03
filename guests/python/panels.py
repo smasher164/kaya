@@ -1,7 +1,5 @@
-"""The panels conformance scene, Python port — the north-star
-spelling for the auxiliary-window grammar: the inspector is one
-`create_window` scope, its veto class one handler. See
-guests/rust/panels.rs and tools/scenes/panels.steps."""
+"""The panels conformance scene (tools/scenes/panels.steps): the inspector
+is one create_window scope, its veto class one handler."""
 
 import sys
 
@@ -18,8 +16,7 @@ INSPECTOR = 1
 
 
 def close_asked():
-    # Bound to the inspector at its declaration, so it can only ever mean
-    # THIS window's close was vetoed.
+    # Bound at the inspector's declaration: only THIS window's close.
     status.set("close requested")
     kaya.destroy_window(INSPECTOR)
 

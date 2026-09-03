@@ -1,20 +1,15 @@
-(* The undo scene, OCaml port: two tiers of undo behind one Edit menu.
-   The design decisions (D1-D8) live in docs/undo-plan.md, the canonical
-   semantics in guests/rust/undo.rs, and the byte-frozen contract in
-   tools/scenes/undo.steps. *)
+(* The undo scene, OCaml port — guests/rust/undo.rs, tools/scenes/undo.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
 type todo = { title : string } [@@deriving kaya_gen]
 
-(* A typing episode carries no authored name and kaya invents none
-   (docs/undo-plan.md D8), so the empty label is the app's to spell. *)
+(* kaya invents no name for a typing episode (docs/undo-plan.md D8). *)
 let what label = if label = "" then "typing" else label
 
-(* Keyed by the todo's minted name. A [Map], because [note_list] renders
-   ASCENDING BY KEY and one script is compared byte-for-byte across
-   every lane. *)
+(* A [Map], because [note_list] renders ASCENDING BY KEY and one script is
+   compared byte-for-byte across every lane. *)
 module Notes = Map.Make (Int64)
 
 let row_key path =
@@ -33,9 +28,8 @@ let note_list notes =
       ^ String.concat ","
           (List.map (fun (key, text) -> Printf.sprintf "%Ld=%s" key text) ns)
 
-(* One texts run of a delta, folded into the app's two mirrors of
-   widget-owned text. AN EMPTY PATH IS THE DRAFT; a path names a ROW,
-   whose field has no id an app could hold. *)
+(* AN EMPTY PATH IS THE DRAFT; a path names a ROW, whose field has no id an
+   app could hold. *)
 let fold_texts draft notes texts =
   List.iter
     (fun (t : undo_text) ->
@@ -84,11 +78,9 @@ let () =
           write status (Str (Printf.sprintf "added %s, %d total" d total));
           write keys (Str (key_list ()));
           focus field;
-          (* Emptying the form is NOT part of the step, so it needs its
-             own transaction — and [clear] inside an undoable group is
-             refused at apply anyway (docs/undo-plan.md D4). [post], not
-             a nested [build]: a handler already is a transaction
-             (tools/check-ambient-tx.py). *)
+          (* [clear] inside an undoable group is refused at apply
+             (docs/undo-plan.md D4). [post], not a nested [build]: a handler
+             already is a transaction (tools/check-ambient-tx.py). *)
           post app (fun () -> clear field)
         end
       in
@@ -115,8 +107,6 @@ let () =
 
       let on_focus () = focus field in
 
-      (* A note typed into a ROW's field: the copy's key path says which row
-         it was. *)
       let on_note path text =
         row_notes := put_note !row_notes (row_key path) text;
         write notes (Str (note_list !row_notes))
@@ -124,7 +114,7 @@ let () =
 
       let took_back verb step delta =
         (* A programmatic write never echoes, so the delta is the ONLY
-           notification an app gets for text an undo restored. *)
+           notification for text an undo restored. *)
         fold_texts draft row_notes delta.ud_texts;
         let total = count (record_handle todos) in
         write history
@@ -161,18 +151,15 @@ let () =
                   row
                     [
                       label ~bind_field:todo_title;
-                      (* UNBOUND ON PURPOSE: each copy owns its text and
-                         [on_note] folds the edits into the guest's own
-                         map; a bound field would push that same text
-                         back at the widget it came from. *)
+                      (* UNBOUND ON PURPOSE: a bound field would push the
+                         copy's own text back at the widget it came from. *)
                       entry ~on_change:on_note;
                     ]
                     ()));
           ]
           ()
       in
-      (* The scene types with real keystrokes, so something has to hold
-         focus before it starts. *)
+      (* The scene types with real keystrokes, so something must hold focus. *)
       focus field;
       mount root);
 

@@ -1,16 +1,11 @@
 // ClipProbe (Windows) — what the classic Win32 clipboard charges for
-// kaya's five representations, measured ON THE PATH THE ARM WILL USE,
-// in the interactive session, with a FOREIGN PowerShell process on the
+// kaya's five representations, with a FOREIGN PowerShell process on the
 // other side of every assertion. Why classic Win32 and not WinRT
-// DataTransfer, and what each question found, is docs/clipboard-plan.md
-// §6.
+// DataTransfer, and what each question found: docs/clipboard-plan.md §6.
 //
-// Throwaway; nothing builds or runs this but a human, via build.sh,
-// which runs everything in ONE interactive-session scheduled task —
-// every ssh connection gets its OWN window station and therefore its
-// OWN CLIPBOARD (measured 2026-08-03: a value written in one ssh
-// connection reads back null in the next), so nothing here may touch
-// the clipboard from the ssh session itself.
+// THROWAWAY; run via build.sh, which puts everything in ONE
+// interactive-session scheduled task — every ssh connection gets its OWN
+// window station and therefore its OWN CLIPBOARD (measured 2026-08-03).
 
 use windows::Win32::Foundation::{HANDLE, HGLOBAL};
 use windows::Win32::System::DataExchange::{

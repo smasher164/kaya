@@ -6,7 +6,7 @@ arm64, console session active. Nothing shipped, nothing committed.
 
 SDK under measurement is the one kaya actually builds against:
 `Microsoft.WindowsAppSDK.WinUI 2.2.1` + `Foundation 2.1.0` +
-`InteractiveExperiences 2.0.15` (tools/fetch-winappsdk.sh:89-98). That is
+`InteractiveExperiences 2.0.15` (tools/fetch-winappsdk.sh:86-95). That is
 App SDK **2.x**, the current generation, so "modern App SDK additions"
 are inside every answer below rather than outside it.
 
@@ -396,7 +396,7 @@ into the scratchpad with RichEditBox and the text object model added:
 
 - Needs a **new `--in`**: `Microsoft.UI.Text.winmd`. It ships inside the
   WinUI 2.2.1 package kaya already fetches but is **not** in the
-  bindgen's input list today (tools/winui-bindgen/src/main.rs:13-21).
+  bindgen's input list today (tools/winui-bindgen/src/main.rs:14-20).
 - 22 new filter entries. **No transitivity trap** — it generated clean
   on the first attempt, which is not the usual experience with this
   filter list.

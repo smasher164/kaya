@@ -1,23 +1,13 @@
 // PickerProbe — what the harness can SEE and DO to the iOS document
-// picker, measured in the SIMULATOR, which is where the lane runs.
+// picker, measured in the SIMULATOR, which is where the lane runs. NOT
+// tools/ios/scopeprobe's question: that one needs HARDWARE, because the
+// simulator enforces no sandbox (docs/traps.md).
 //
-// Not the same question tools/ios/scopeprobe answers. That one needs
-// HARDWARE, because it asks what the sandbox DENIES and the simulator
-// enforces nothing (docs/traps.md). This one asks what the picker's UI
-// looks like from inside the app, which the simulator answers honestly
-// because it is the same UIKit.
-//
-// THE QUESTION THAT DECIDES THE WHOLE ARM, because iOS has no
-// accessibility-service escape hatch the way Android does: is
-// UIDocumentPickerViewController's content REACHABLE IN-PROCESS? The
-// rest of the cells — where a guest can write that the picker will
-// browse, whether `directoryURL` aims it, whether the DocumentManager
-// service exists in the simulator — and every answer are in
-// docs/file-dialogs-plan.md §6e and docs/traps.md. The Q-labels below
-// mark which reading is which.
-//
-// Answers land in the log under "PROBE". Not a lane; nothing builds it
-// but build.sh beside it.
+// The deciding question, since iOS has no accessibility-service escape
+// hatch: is UIDocumentPickerViewController's content REACHABLE
+// IN-PROCESS? Cells and answers: docs/file-dialogs-plan.md §6e and
+// docs/traps.md; the Q-labels are in the log lines below.
+// THROWAWAY; nothing builds it but build.sh beside it.
 import UIKit
 import UniformTypeIdentifiers
 

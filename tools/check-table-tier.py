@@ -7,36 +7,19 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE TABLE TIER ROUTING (docs/tables-plan.md decision 5, revised
-# 2026-08-21; docs/traps.md, "An observable with no discriminator
-# cannot be asserted onto a device").
-#
-# A table's two tiers present IDENTICAL BYTES to every harness verb —
-# the size class came out of expect_columns on purpose — so no scene,
-# on any device, can name the tier that drew it. Before this gate the
-# only proof was a one-arm perturbation with the other device's leg
-# watched staying green, redone by hand whenever the routing moved. The
-# routing is a pure function now, and this is where it is held:
-#
+# THE TABLE TIER ROUTING (docs/tables-plan.md decision 5; docs/traps.md,
+# "An observable with no discriminator cannot be asserted onto a
+# device"). The two tiers present IDENTICAL BYTES to every harness verb,
+# so no scene on any device can name the tier that drew it.
 #   A  STATIC, any host: KayaTableSurface is the ONLY caller of the
-#      native/synthesized split — both tier views are constructed
-#      inside its body and nowhere else — and that body decides by
-#      calling kayaTableTier, which reads its parameters and nothing
-#      else (no environment, no #if; the mac probe below could not
-#      drive the iOS arms of a rule compiled per platform). The
-#      environment reaches the rule down ONE path, `widthClass`, whose
-#      two one-line arms are both read here — the iOS arm most of all,
-#      since it is the line no host running this gate executes.
-#   B  RUNTIME, macOS only — tools/checks/swiftui-table-tier.swift
-#      compiled INTO the interpreter's own module and run: the whole
-#      truth table (four widths x both availabilities), the mapping
-#      from the environment's own size-class type, this host's own
-#      branch, and a REAL KayaTableSurface in an NSWindow with the
-#      NSTableView the native tier is made of found in the view tree.
-#      SKIPPED AND SAID SO on any other host.
-#
-# WHAT NEITHER CLAUSE HOLDS: which size class a PHYSICAL device
-# reports. The simulator's answer is the only one this repo can read.
+#      split, and it decides by calling kayaTableTier, which reads its
+#      parameters and nothing else (no environment, no #if — the mac
+#      probe cannot drive the iOS arms of a rule compiled per platform).
+#      The environment reaches the rule down ONE path, `widthClass`.
+#   B  RUNTIME, macOS only, SKIPPED AND SAID SO elsewhere:
+#      tools/checks/swiftui-table-tier.swift compiled into the
+#      interpreter's own module and run.
+# WHAT NEITHER CLAUSE HOLDS: which size class a PHYSICAL device reports.
 
 import os
 import platform
@@ -206,11 +189,10 @@ def check(source_text, path=SWIFTUI):
                        f"change and after a sibling-only transaction, "
                        f"neither of which touches the table's own "
                        f"subtree.")
-        # …and it must be that READ, not a walk that happens to
-        # include it. The walk this replaces was 41% of the mac main
-        # thread at 100k rows
-        # (docs/measurements/choke-macos-2026-08-24.txt note 2) and it
-        # is a SwiftUI body, so it ran per evaluation.
+        # …and it must be that READ, not a walk that happens to include
+        # it: the walk it replaces was 41% of the mac main thread at 100k
+        # rows (docs/measurements/choke-macos-2026-08-24.txt note 2), in
+        # a SwiftUI body, so it ran per evaluation.
         for hazard in ("Hasher", "for ", "func ", "while ", "map(",
                        "reduce("):
             if hazard in generation:
@@ -359,12 +341,10 @@ def check(source_text, path=SWIFTUI):
                    f"found {track_handoff_count}. Both flex "
                    f"orientations must tag the same observation.")
 
-    # THE OBSERVATION FUNNEL, and the reason it is a clause: the mac
-    # native tier reports NSTableView's own frames while the
-    # synthesized one reports SwiftUI's, so the displaced-cells
-    # negative below can only move BOTH with one perturbation while
-    # both go through one recorder. A second writer would leave that
-    # negative proving one tier and reporting the other.
+    # THE OBSERVATION FUNNEL: the mac native tier reports NSTableView's
+    # frames and the synthesized one SwiftUI's, so a second writer would
+    # leave the displaced-cells negative below proving one tier and
+    # reporting the other.
     for field, writer in (
         ("tableCellFrames", "kayaRecordTableCell"),
         ("tableViewport", "kayaRecordTableViewport"),
@@ -393,18 +373,12 @@ def check(source_text, path=SWIFTUI):
                        f"moves both; a second one is a tier whose "
                        f"geometry no negative here can perturb.")
 
-    # THE WINDOW LOOP IS WIRED (docs/virtualization-plan.md §3-§4).
-    # The mac native tier drives three links and only ONE of them has
-    # a scene observable. MEASURED 2026-08-25, each removed in turn
-    # with the probe scene watched: without the RANGE report the band
-    # never narrows and expect_window reddens ("windows \"0 3 3\",
-    # wanted \"1 2 3\"); without the HEIGHT report the core's
-    # arithmetic is simply empty — extent 0.0, corrected 0 — and every
-    # scene stays green, because a height moves the arithmetic and
-    # never the band; without the row-height READ every row draws at
-    # the tier's floor and the taller ones clip, which is pixels and
-    # no assertion. So the two silent links are held here, statically,
-    # the way check-native-undo holds the pair no scene can fail.
+    # THE WINDOW LOOP IS WIRED (docs/virtualization-plan.md §3-§4). The
+    # mac native tier drives three links and only ONE has a scene
+    # observable: MEASURED 2026-08-25, removing the HEIGHT report leaves
+    # the core's arithmetic empty with every scene still green, and
+    # removing the row-height READ clips the taller rows, which is
+    # pixels. So the two silent links are held here statically.
     loop = braced(text, r"final class KayaTableDriver\s*:")
     if loop is None:
         bad.append(f"{path}: no `final class KayaTableDriver:` — the "
@@ -440,19 +414,13 @@ def check(source_text, path=SWIFTUI):
                 bad.append(f"{path}: KayaTableDriver never calls "
                            f"`{call}` — {why}.")
 
-    # THE SYNTHESIZED TIER'S WINDOW, held the same way and for a
-    # STRONGER reason: here not ONE of the links has a scene
-    # observable. MEASURED 2026-08-25 on the iOS-compact tier with
-    # windowed.steps watched — take the RANGE report away and the band
-    # never narrows, every row of the collection stays realized, and
-    # the scene stays GREEN, because expect_window reads the viewport
-    # and a viewport scrolling over a fully realized list answers
-    # exactly what a windowed one does. The difference is memory, and
-    # no verb reads memory. Take the HEIGHT report away and the core's
-    # arithmetic stays empty (offset 0, extent 0) with the scene still
-    # green. Compute the spacers HERE instead of reading the core's,
-    # and the rows land in the same places until the two arithmetics
-    # disagree, which is the divergence §2 exists to make impossible.
+    # THE SYNTHESIZED TIER'S WINDOW, for a STRONGER reason: here not ONE
+    # link has a scene observable. MEASURED 2026-08-25 on the iOS-compact
+    # tier with windowed.steps watched — with the RANGE report gone every
+    # row stays realized and the scene stays GREEN, because expect_window
+    # reads the viewport and a viewport over a fully realized list
+    # answers what a windowed one does. The difference is memory, and no
+    # verb reads memory.
     band = braced(text,
                   r"@Observable final class KayaSynthesizedWindow\s*\{")
     if band is None:
@@ -687,8 +655,9 @@ def check(source_text, path=SWIFTUI):
                            f"ONE caller by design — the switch on "
                            f"kayaTableTier in that body — because a "
                            f"second one takes a tier nothing tested "
-                           f"and no scene can see (docs/traps.md: "
-                           f"both tiers present identical bytes).")
+                           f"and no scene can see (docs/traps.md: An observable "
+                           f"with no discriminator cannot be asserted onto a "
+                           f"device).")
 
     # A2 — and that body decides by calling the rule, rather than
     # re-deriving it. A body that stops consulting kayaTableTier
@@ -761,12 +730,10 @@ def check(source_text, path=SWIFTUI):
                        f"exist.")
 
     # A4 — the environment reaches the rule down ONE path: widthClass,
-    # whose two arms are each a single line. The mac arm the runtime
-    # clause reads for real; the iOS arm is the one no host here can
-    # execute, and it is exactly where the traps entry's failure lives
-    # — a phone routed to the native tier presents the same bytes as
-    # one routed to kaya's header, so no leg on any device would say a
-    # word.
+    # whose two arms are each a single line. The iOS arm is the one no
+    # host here executes, and where the traps entry's failure lives — a
+    # phone routed to the native tier presents the same bytes as one
+    # routed to kaya's header.
     MAC_ARM = "return .noSizeClass"
     IOS_ARM = "return kayaTableWidth(sizeClass: horizontalSizeClass)"
     prop = None
@@ -809,8 +776,9 @@ def check(source_text, path=SWIFTUI):
                             f"clause drives, and an arm that derives a "
                             f"width for itself is a second rule no "
                             f"device could ever contradict "
-                            f"(docs/traps.md: both tiers present "
-                            f"identical bytes).")
+                            f"(docs/traps.md: An observable with no "
+                            f"discriminator cannot be asserted onto a "
+                            f"device).")
         # …and it is read there ONCE. A second reading anywhere in the
         # surface is a second rule, and the compact phone is the leg
         # that cannot see it.
@@ -827,16 +795,12 @@ def check(source_text, path=SWIFTUI):
                        f"kayaTableWidth; a second one decides a tier "
                        f"the gate's truth table never saw.")
 
-    # A5 — CONTENT IS THE FLOOR, the pairing half (ruled 2026-08-26).
-    # The runtime clauses below drive the two halves the ruling names —
-    # the measured minimum and the width handed upward — but the THIRD
-    # edit they forced has no observable at all: a column that widens
-    # must re-present its cells, because AppKit resizes the cell view
-    # while the SwiftUI content inside it keeps the truncation it
-    # chose at the old width, and that difference is INK. Nothing the
-    # interpreter exposes tells a stale cell from a fresh one
-    # (contentWidth reads the same either way), so this is the
-    # native-undo shape: a static pairing is the only wall available.
+    # A5 — CONTENT IS THE FLOOR, the pairing half (ruled 2026-08-26). A
+    # column that widens must re-present its cells: AppKit resizes the
+    # cell view while the SwiftUI content keeps the truncation it chose
+    # at the old width, and that difference is INK. Nothing the
+    # interpreter exposes tells a stale cell from a fresh one, so a
+    # static pairing is the only wall available.
     columns_block = braced(text, r"private func layoutColumns\s*\(")
     if columns_block is None:
         bad.append(f"{path}: no `private func layoutColumns(` block — "
@@ -873,19 +837,12 @@ def check(source_text, path=SWIFTUI):
 
 
 # --- The self-test: every clause above WATCHED GOING RED. -------------
-# Perturbations are applied to COPIES; the substitution count AND THE
-# SITE are printed, and every negative NAMES the declaration it must
-# land in. A count alone cannot tell two perturbations apart: the
-# chained shadow's "stale cell generations" negative spent a milestone
-# re-hitting kayaCurrentTableTrackWidth — the same line the standalone
-# unversioned-track negative already perturbs — because its pattern had
-# no trailing comma and re.subn(count=1) takes the first match. It
-# printed "1", the honesty check passed, and the cell filter it was
-# named for was never touched (the review of 01dd633).
-#
-# FIRST-MATCH-ONLY BY CONSTRUCTION: the replacement splices the first
-# match literally, which is what the shell's count=1 subn did — and
-# what makes the site check meaningful.
+# Perturbations are applied to COPIES; the count AND THE SITE are
+# printed, and every negative NAMES the declaration it must land in. A
+# count alone cannot tell two perturbations apart — one negative spent a
+# milestone re-hitting the line another already perturbed, printing "1"
+# with the filter it was named for untouched (docs/traps.md: "A
+# substitution count of 1 does not say WHERE it applied").
 DECLS = (
     re.compile(r"^(\s*)(?:@[\w.]+(?:\([^)]*\))?\s+)*"
                r"(?:(?:public|private|internal|fileprivate|open|static"
@@ -1467,13 +1424,10 @@ chained("unordered-columns",
         "descending column representatives accepted",
         "func kayaTableColumnRepresentativesIncrease",
         "unkeyed-columns")
-# THE RECORDER, not either tier's reader: the mac native tier reports
-# NSTableView's own cell rects and the synthesized one SwiftUI's
-# frames, so a perturbation inside KayaEdgeReporter — where this one
-# used to sit — displaces the synthesized tier alone and leaves the
-# probe's live NATIVE clauses green about an unperturbed path
-# (measured 2026-08-25, when the mac tier stopped being a SwiftUI
-# Table).
+# THE RECORDER, not either tier's reader: a perturbation inside
+# KayaEdgeReporter displaces the synthesized tier alone and leaves the
+# probe's live NATIVE clauses green about an unperturbed path (measured
+# 2026-08-25).
 chained("displaced-cells",
         r"node\.tableCellFrames\[key\] = KayaTableCellObservation\(\n"
         r"        generation: generation, frame: frame\)",
@@ -1609,5 +1563,52 @@ doctored["unrepresented-widening"] = perturb(
 refuses(doctored["unrepresented-widening"],
         "does not call `represent(visible)`",
         "a widened column that never re-presents its cells")
+
+# REGISTRY READS HOP TO THE MAIN THREAD (docs/traps.md: A registry
+# subscript on the harness thread races the main thread's write). The
+# three table registries are main-thread state; inside the harness-side
+# readers a bare subscript is refused — only `kayaOnMain({ ... })` may
+# hold one.
+REGISTRY = re.compile(r"kaya(?:TableDrivers|TableColumnAxes|TableWindows)\[")
+HARNESS_READERS = ("func kayaRunScript", "func kayaTableHorizontal",
+                   "func kayaTableTrailing")
+
+
+def bare_registry_reads(text):
+    """(function, line, text) for every bare registry subscript inside a
+    harness-side reader; a subscript wrapped in kayaOnMain({ ... }) is not
+    bare, and an assignment is a main-thread write."""
+    out = []
+    lines = text.split("\n")
+    func = None
+    for n, line in enumerate(lines, 1):
+        m = re.match(r"\s*(?:private |fileprivate |@MainActor )*func (\w+)", line)
+        if m:
+            func = "func " + m.group(1)
+        if func not in HARNESS_READERS or not REGISTRY.search(line):
+            continue
+        if "kayaOnMain({" in line or re.search(REGISTRY.pattern + r"[^\]]+\]\s*=[^=]", line):
+            continue
+        out.append((func, n, line.strip()))
+    return out
+
+
+# The same driver lookup stands at four sites (three verbs and
+# kayaTableHorizontal); all four are unwrapped and all four must be named.
+bare_doctored = g.doctor("the driver lookups unwrapped inside the harness readers", REAL,
+                         r"if let driver = kayaOnMain\(\{ kayaTableDrivers\[node\.id\] \}\) \{",
+                         "if let driver = kayaTableDrivers[node.id] {", want=4, flags=0)
+g.negative("a bare registry read on the harness thread",
+           lambda: [f"{f}:{n}" for f, n, _ in bare_registry_reads(bare_doctored)],
+           want="kayaRunScript")
+g.negatives_ran(1)
+for func, n, line in bare_registry_reads(REAL):
+    g.finding(f"swift/KayaSwiftUI.swift:{n} ({func}) subscripts a table registry bare "
+              f"on the harness thread: `{line}`. Wrap it in kayaOnMain({{ ... }}) — the "
+              f"main thread writes these as tables appear and leave.")
+hopped = sum(1 for line in REAL.split("\n")
+             if "kayaOnMain({" in line and REGISTRY.search(line))
+print(f"check-table-tier: registry reads inside the harness-side readers: "
+      f"{hopped} hopped, {len(bare_registry_reads(REAL))} bare")
 
 g.verdict()

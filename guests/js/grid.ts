@@ -1,5 +1,4 @@
-// The grid conformance scene, JS port. See guests/rust/grid.rs and
-// tools/scenes/grid.steps.
+// The grid conformance scene (tools/scenes/grid.steps).
 
 import * as kaya from "kaya-gui";
 

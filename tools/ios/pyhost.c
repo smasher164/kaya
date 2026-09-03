@@ -1,9 +1,7 @@
-/* The iOS python-host main (docs/python-mobile-plan.md §D4, hand-proof
- * draft): a C guest whose scene is built by an embedded CPython. The
- * process main thread enters kaya_run exactly as every iOS guest does;
- * CPython boots on a worker pthread with signal handlers off, imports
- * the bundled guest, and the guest's app.run() parks that thread as
- * the occurrence consumer (the binding's HOSTED_ENTRY arm). */
+/* The iOS python-host main (docs/python-mobile-plan.md §D4): the process
+ * main thread enters kaya_run as every iOS guest does, while CPython
+ * boots on a worker pthread with signal handlers off and the guest's
+ * app.run() parks that thread as the occurrence consumer. */
 #include <Python.h>
 #include <libgen.h>
 #include <limits.h>

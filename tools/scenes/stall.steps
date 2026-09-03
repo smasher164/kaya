@@ -1,67 +1,34 @@
-# The stall diagnostic: an app thread that stops taking its occurrences
-# is REPORTED, not merely survived.
-#
-# This is the one scene that deliberately misuses kaya. Every other
-# guest is careful to keep blocking work off the app thread — the
-# filedialog guests each carry a paragraph explaining why they hand the
-# read to a worker — and nothing proved that kaya would notice a guest
-# that did not. DESIGN's threading section promised it would.
-#
-# WHY TWO CLICKS. The consumer cursor advances BEFORE a record reaches
-# the guest, so a handler blocking on an empty ring is indistinguishable
-# from an idle app, and rightly so: nothing is waiting on it. The second
-# click is what makes work PENDING while the app thread is gone, which
-# is both what the watchdog can see and what a person actually reports —
-# they click, and click again, and nothing happens.
-#
-# AND THE REPORT IS ASSERTED ONLY OF AN ABSENCE THAT NEVER ENDS. A
-# BOUNDED absence — the guests' 2500ms `block` — can be caught only
-# while it lasts, so asserting it needs the second click to land at
-# least KAYA_STALL_MS (1000ms) before the handler returns. That margin
-# is the harness's own two round trips through the UI thread, and IT
-# GROWS WITH THE MACHINE: measured 2026-08-21 on a loaded emulator it
-# reached 2542ms, past the whole block, and the leg failed saying the
-# app thread was keeping up — a race against the machine rather than a
-# check of the code, and a red nobody believes (docs/traps.md,
-# docs/deferred.md). The wedge below has no such margin to lose: the
-# click it strands is pending for as long as the assertion needs.
+# The one scene that deliberately misuses kaya: an app thread that stops
+# taking its occurrences must be REPORTED (DESIGN.md's threading model).
+# WHY TWO CLICKS: the consumer cursor advances BEFORE a record reaches
+# the guest, so a handler blocking on an empty ring looks idle, and the
+# second click is what makes work PENDING. THE REPORT IS ASSERTED ONLY
+# OF AN ABSENCE THAT NEVER ENDS, because the margin for a bounded one
+# GROWS WITH THE MACHINE (docs/traps.md, 2542ms on a loaded emulator).
 expect label#0 "ready"
 
-# IT GOES AWAY AND IT COMES BACK. The blocked handler returns, the click
-# that queued behind it is taken, and the app carries on — so the stall
-# the watchdog sees here is a stall and not a death, and nothing was
-# dropped while the thread was gone.
+# IT GOES AWAY AND IT COMES BACK: the queued click is taken, so this is
+# a stall and not a death and nothing was dropped.
 click button#0
 click button#1
 expect label#0 "pinged"
 
-# AND THE WATCHDOG TAKES IT BACK. This is the half nothing asserted for
-# four milestones, and its absence shipped a diagnostic that LIED in
-# five of the eight languages: the watchdog counted occurrences into the
-# transport and counted the ones the CORE handed over, so every guest
-# that reads the occurrence ring directly (go, csharp, ocaml, haskell,
-# java) reported a stall on every healthy run. A matrix failure then
-# arrived carrying "THE APP THREAD IS STALLED" about an app thread that
-# was fine, and the session it misdirected is the cost. A diagnostic
-# that fires when it should not is worse than none, because it is read
-# as evidence — so the scene asserts BOTH directions, and this line is
-# the one that fails for a watchdog blind to a transport.
+# AND THE WATCHDOG TAKES IT BACK. Without this line the watchdog
+# reported a stall on every healthy run in five of the languages — it
+# counted occurrences into the transport against those the CORE handed
+# over, so every guest reading the ring directly looked stalled
+# (docs/traps.md). A diagnostic that fires when it should not is read as
+# evidence, so both directions are asserted.
 expect_no_stall
 
-# THEN THE ONE THAT NEVER COMES BACK, which is the shape a real deadlock
-# has: a handler that blocks for a day. This is where the report is
-# asserted, because here the pending click stays pending — the
-# assertion can take as long as it likes and still be asking about an
-# app thread that is gone.
-#
-# THE PAUSE KEEPS THE TWO HALVES APART, so the reading this half
-# produces is unambiguously its own; expect_no_stall above is what
-# actually proves the first one cleared.
+# THEN THE ONE THAT NEVER COMES BACK: the pending click stays pending,
+# so the assertion can take as long as it likes. THE PAUSE KEEPS THE TWO
+# HALVES APART, and expect_no_stall above is what proves the first
+# cleared.
 settle 300
 click button#2
 click button#1
 expect_stall
 # NOTHING FOLLOWS, and nothing can: the app thread never returns. That
-# the leg still reports a verdict at all is the other half of what this
-# proves — the harness runs on its own thread and asks the MAIN thread
-# to exit, so neither path needs the app thread that is wedged.
+# the leg still reports a verdict is the other half — the harness runs
+# on its own thread and asks the MAIN thread to exit.

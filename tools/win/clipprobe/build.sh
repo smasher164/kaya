@@ -10,13 +10,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build clipprobe and run it on the Windows VM (see src/main.rs).
+# Usage: build.sh <user@host>
 #
 # ONE INTERACTIVE-SESSION TASK RUNS EVERYTHING: each ssh connection has
 # its own window station and therefore its own clipboard (docs/traps.md),
-# so neither the seeds nor the reads may run over ssh directly. The ps1
-# orchestrates both halves inside the one schtasks /it task.
-#
-# Usage: build.sh <user@host>
+# so neither the seeds nor the reads may run over ssh directly.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

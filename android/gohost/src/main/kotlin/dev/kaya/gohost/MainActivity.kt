@@ -9,14 +9,10 @@ import dev.kaya.KayaGo
 import dev.kaya.KayaRing
 
 /**
- * The Go guest's shell. The JVM cannot call a Go function, so the
- * guest's own library is asked to start its thread ([KayaGo.attach])
- * where a JVM shell calls [KayaRing.startGuest]. Every tier's app
- * thread is kaya's, started once per process.
- *
- * [KayaRing.attach] and not `Kaya.attach`: Go consumes the occurrence
- * ring directly through the C ABI, and `Kaya.attach` would replace the
- * ring sink with a channel into a Rust AppCtx.
+ * The Go guest's shell: the guest's own library starts the app thread
+ * ([KayaGo.attach]) where a JVM shell calls [KayaRing.startGuest], and
+ * [KayaRing.attach] is used rather than `Kaya.attach`, which would
+ * replace the ring sink with a channel into a Rust AppCtx.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

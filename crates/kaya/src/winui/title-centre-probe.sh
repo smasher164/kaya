@@ -1,24 +1,15 @@
 #!/usr/bin/env bash
-# Drive title-centre-probe.ps1 against a live guest on the Windows VM.
-#
-# The probe must run in the VM's INTERACTIVE session — an ssh session has
-# its own window station and can neither see the window nor synthesize
-# input into it (docs/traps.md) — so the guest and the probe are two
-# scheduled tasks created with `schtasks /it`. The guest runs the shipped
-# toolbar scene with a trailing `settle` appended through KAYA_SCENES_DIR;
-# the shipped scene file is never written, and that settle is the window in
-# which the probe measures.
-#
+# Drive title-centre-probe.ps1 against a live guest on the Windows VM:
 #   crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
 #   tools/deploy-win.py akhil@192.168.64.2 caption-centre
 #
-# deploy-win.py's caption-centre phase calls this with KAYA_TCP_NO_DEPLOY=1,
-# having already built and shipped what this would rebuild; run by hand it
-# deploys first, so either way it measures THIS tree.
-#
-# Exit status: 0 only if the probe wrote a measurement. Everything the
-# lane ASSERTS about that measurement it asserts itself, off the AIMV/
-# AIMPLAN lines this prints — see deploy-win.py's caption_centre phase.
+# The probe must run in the VM's INTERACTIVE session — an ssh session has its
+# own window station and can neither see the window nor synthesize input into
+# it (docs/traps.md) — so guest and probe are two `schtasks /it` tasks. The
+# guest runs the shipped toolbar scene with a `settle` appended through
+# KAYA_SCENES_DIR (the shipped file is never written), and that settle is the
+# window the probe measures in. With KAYA_TCP_NO_DEPLOY=1 the caller has
+# already built and shipped. Exit status: 0 only if the probe measured.
 set -u
 
 HOST="${1:?usage: title-centre-probe.sh user@host}"
@@ -79,11 +70,10 @@ ssh "$HOST" "schtasks /create /tn kaya_tcp_p /tr \"wscript.exe $R\\hidden.vbs $R
 ssh "$HOST" "cmd /c del /q $R\\out.txt $R\\prove.txt $R\\psout.txt >nul 2>&1 & schtasks /run /tn kaya_tcp_g" >/dev/null
 sleep 7
 ssh "$HOST" "schtasks /run /tn kaya_tcp_p" >/dev/null
-# POLLED, NOT SLEPT: the ps1 ends with "PROVE: done", so waiting is a
-# read of that line rather than a 50s guess (measured 2026-08-20: the
-# sweep itself finishes in well under half that, and the guess was most
-# of this phase's minute). The deadline covers the settle above, and an
-# expiry SAYS SO, with how far the sweep got — a count read after a
+# POLLED, NOT SLEPT: the ps1 ends with "PROVE: done", so waiting is a read
+# of that line rather than a 50s guess (measured 2026-08-20: the sweep
+# finishes in well under half that). The deadline covers the settle above,
+# and an expiry SAYS SO with how far the sweep got — a count read after a
 # cut-off is the deadline's number, not the sweep's.
 tries=0
 until ssh "$HOST" "cmd /c type $R\\prove.txt" 2>/dev/null | grep -q "^PROVE: done"; do
@@ -95,8 +85,7 @@ until ssh "$HOST" "cmd /c type $R\\prove.txt" 2>/dev/null | grep -q "^PROVE: don
     fi
     sleep 2
 done
-# The guest's scratch scene holds a 45s settle so the probe has a still
-# window to measure; the poll returns long before it ends, and a
+# The poll returns long before the scratch scene's settle ends, and a
 # lingering toolbar window would fight the next phase's legs for the
 # foreground — so the guest is put down here, not left to its timer.
 ssh "$HOST" "taskkill /im toolbar.exe /f >nul 2>&1" >/dev/null 2>&1
@@ -105,9 +94,8 @@ echo "== the measurement =="
 ssh "$HOST" "cmd /c type $R\\prove.txt" > "$WORK/prove.txt" 2>&1
 cat "$WORK/prove.txt"
 # THE PROBE'S OWN LAST WORDS, when the sweep ended without its "PROVE:
-# done": matrix 19 (2026-09-02) read ten AIM lines, no cut-off sentence
-# and no done line, with the guest leaving OK — a shape the settle cannot
-# explain, and prove.txt alone cannot say why the ps1 stopped.
+# done": matrix 19 (2026-09-02) read ten AIM lines with no cut-off sentence
+# and no done line, a shape prove.txt alone cannot explain.
 if ! grep -q "^PROVE: done" "$WORK/prove.txt"; then
     echo "== the probe stopped before PROVE: done; its own output (psout.txt), last 20 lines =="
     ssh "$HOST" "cmd /c type $R\\psout.txt" 2>/dev/null | tail -20

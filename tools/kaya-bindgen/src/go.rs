@@ -1,9 +1,6 @@
-//! Go emitter: the generated half of package kaya (bindings/go). The
-//! hand-written runtime (runtime.go, same package) carries cgo, the
-//! ring consumer, and Submit/Run; this file is constants and packers.
-//! Package scope namespaces everything for consumers; internally,
-//! helpers are lowercase (unexported) and generated parameters are
-//! locals, so the reserved set is keywords plus the helper names.
+//! Go emitter: the generated half of package kaya (bindings/go) —
+//! constants and packers. runtime.go, the hand-written half of the same
+//! package, carries cgo, the ring consumer, and Submit/Run.
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
@@ -169,10 +166,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = camel(prop);
-        // Blob setters take the u64 kaya_blob_register handle (BlobHandle).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (param(prop), "string", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::Bool => (param(prop), "bool", format!("encodeValue(b, {})", param(prop))),
@@ -222,8 +218,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The window-prop duos: const + signal, element sources being
-    // rejected by the wire.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = camel(prop);
         let (ty, expr) = match kind {
@@ -256,8 +251,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let pc = camel(prop);
         let (ty, expr) = match kind {
@@ -288,8 +283,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let pc = camel(prop);
         let (p, ty, expr) = match kind {
@@ -325,9 +320,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
 
     // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
-    // only, policy being the core's and validated on the canonical form.
-    // TxSetMenuShortcut routes through it, so no call site can bypass
-    // canonicalization.
+    // only, policy being the core's. TxSetMenuShortcut routes through
+    // it, so no call site can bypass canonicalization.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
         .iter()
         .map(|k| format!("\"{k}\": true"))
@@ -339,12 +333,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("// CanonicalizeShortcut canonicalizes a shortcut spelling to the wire");
     c.line("// form: lowercase '+'-joined tokens, modifiers ordered primary,");
     c.line("// shift, alt, then one key (a-z, 0-9, or the closed named set).");
-    c.line("// Accepts ASCII case variants and any modifier order; panics on");
-    c.line("// whitespace, empty tokens, repeated modifiers, aliases");
+    c.line("// Panics on whitespace, empty tokens, repeated modifiers, aliases");
     c.line("// (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY");
-    c.line("// stays at the core: escape, shift-only and bare alphanumerics, and");
-    c.line("// the reserved floor are validated there, on the canonical spelling,");
-    c.line("// never rewritten.");
+    c.line("// stays at the core, validated on the canonical spelling.");
     c.line("func CanonicalizeShortcut(spelling string) string {");
     c.line("\tif spelling == \"\" {");
     c.line("\t\tpanic(\"kaya: shortcut is empty\")");
@@ -394,9 +385,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn out + key");
     c.line("}");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root).
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = camel(prop);
         let (p, ty, expr) = match kind {
@@ -444,17 +434,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
     }
     c.line("");
-    // The occurrence blob table. A blob in an OCCURRENCE is a table
-    // handle, not the apply channel's batch-local index, and nothing
-    // retires one here — so the decoder redeems and releases it, which
-    // is what keeps a handle from ever reaching an app.
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index, and nothing retires one here — so the
+    // decoder redeems and releases it, which keeps a handle from ever
+    // reaching an app.
     c.line("// ClipValues is one representation as the decoder hands it over:");
     c.line("// the clip kind, and its values with blobs already redeemed to");
-    c.line("// bytes. The sum itself is the hand-written tier's — this is the");
-    c.line("// taste-free shape the wire carries.");
-    c.line("//");
-    c.line("// Kind is a SINGLE member of the clip enum and never a mask (you");
-    c.line("// offer many and you receive one); 0 with no values is the");
+    c.line("// bytes. Kind is a SINGLE member of the clip enum and never a mask");
+    c.line("// (you offer many and you receive one); 0 with no values is the");
     c.line("// universal empty answer.");
     c.line("type ClipValues struct {");
     c.line("\tKind   uint32");
@@ -484,10 +471,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn clip, at");
     c.line("}");
     c.line("");
-    // One wire value, for the readers whose body is a list of them
-    // rather than a fixed field row. parseClip predates it and keeps its
-    // own inline copy; the undo runs below are what made a named one
-    // worth having.
+    // parseClip keeps its own inline copy of this decode.
     if !crate::undo_occurrence_names(spec).is_empty() {
         c.line("// parseValue decodes one wire value at `at` and returns the offset");
         c.line("// after it. Blobs are redeemed and RELEASED here, as parseClip does:");
@@ -535,9 +519,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t// The alert's one answer: id + u32 choice (AlertChoice*).");
     c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
     c.line("\t}");
-    // The picker's answer: the one occurrence whose payload is a LIST
-    // OF RECORDS. The generic tail reads a KEY PATH, which would take
-    // the file count as a path length and start eight bytes early.
+    // The picker's answer is a LIST OF RECORDS, so it needs its own
+    // arm: the generic tail would take the file count for a key-path
+    // length and start eight bytes early.
     c.line("\tif kind == occFileDialogResult {");
     c.line("\t\t// The picker's answer: id, a count, then three Values");
     c.line("\t\t// per file (handle, name, local_path). EMPTY IS CANCEL.");
@@ -565,25 +549,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\treturn kind, id, nil, files, true");
     c.line("\t}");
-    // The privileged read's one answer, in its own arm: the generic
-    // tail would take the CLIP KIND for a path length, so a text answer
-    // would read the values header as a key.
+    // Its own arm: the generic tail would take the CLIP KIND for a path
+    // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tclip, _ := parseClip(rec, 16)");
         c.line("\t\treturn kind, id, nil, clip, true");
         c.line("\t}");
     }
-    // ONE STEP CAME BACK, and the payload is a STATEMENT OF THE RESTORED
-    // STATE rather than a replay of ops: four counted runs cut out of one
-    // flat Values tail, in the fixed order signals, texts, entries,
-    // orders (docs/undo-plan.md D5; wire::undo_body). Its own arm for the
-    // file_dialog_result reason — the generic tail would take the SIGNAL
-    // COUNT for a key-path length and read the label's bytes as keys.
-    //
-    // It builds the hand-written tier's UndoDelta directly, the way this
-    // parser already builds PickedFile: a taste-free twin would be four
-    // more structs that exist only to be copied.
+    // Four counted runs cut out of one flat Values tail, in the fixed
+    // order signals, texts, entries, orders (docs/undo-plan.md D5;
+    // wire::undo_body). Its own arm for the file_dialog_result reason —
+    // the generic tail would take the SIGNAL COUNT for a key-path
+    // length.
     let undo = crate::undo_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occ{}", camel(n)))
@@ -606,8 +584,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\tfor i := range flat {");
         c.line("\t\t\tflat[i], at = parseValue(rec, at)");
         c.line("\t\t}");
-        // A truncated or over-long tail is a broken ENCODER, not bad
-        // input: it dies here rather than handing an app half a step.
+        // A truncated or over-long tail is a broken ENCODER: it dies
+        // here rather than handing an app half a step.
         c.line("\t\tread := 0");
         c.line("\t\tnext := func(n int) []any {");
         c.line("\t\t\tif read+n > len(flat) {");
@@ -630,10 +608,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\t\tdelta.Signals = append(delta.Signals,");
         c.line("\t\t\t\tUndoSignal{Signal: uint64(num(pair[0])), Value: pair[1]})");
         c.line("\t\t}");
-        // Arity-first like the two runs below, and for their reason: a
-        // stamped copy's field is named by (template node, key path),
-        // which a fixed pair had nowhere to put. path_len 0 means the id
-        // is a live widget id.
+        // A stamped copy's field is named by (template node, key path);
+        // path_len 0 means the id is a live widget id.
         c.line("\t\tfor i := 0; i < texts; i++ {");
         c.line("\t\t\thead := next(3)");
         c.line("\t\t\tsize := int(num(head[0]))");
@@ -727,7 +703,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read from its fixed offset.
+    // these — read from its fixed offset.
     for name in crate::u32_slot_occurrence_names(spec) {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tpayload = binary.LittleEndian.Uint32(rec[20:])");
@@ -741,8 +717,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("\tif {with_payload} {{"));
     c.line("\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
     c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
-    // Type-generic payload decode, same shape as the key loop: no
-    // per-kind logic left to drift.
     c.line("\t\tswitch vtype {");
     c.line("\t\tcase ValueBool:");
     c.line("\t\t\tpayload = rec[at+8] != 0");
@@ -755,16 +729,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t}");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     for name in crate::pasted_occurrence_names(spec) {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tclip, _ := parseClip(rec, at)");
         c.line("\t\tpayload = clip");
         c.line("\t}");
     }
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1).
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occ{}", camel(n)))

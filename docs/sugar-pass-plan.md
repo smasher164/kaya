@@ -38,25 +38,25 @@ each other.
 
 Python is the exception and needs NOTHING here: its transaction is
 ambient, so `kaya.entry(on_change=...)` is literally the same call in
-both zones (guests/python/undo.py:193). The survey confirmed all 14
+both zones (guests/python/undo.py:173). The survey confirmed all 14
 kinds plus spacer already work inside a template there; the module-level
 `_tpl_depth` flips one allocator between Widget and Node
-(bindings/python/kaya/__init__.py:182, :1264) and every constructor
+(bindings/python/kaya/__init__.py:142, :1264) and every constructor
 funnels through it. Python has no floor to fall to and no second surface
 to drift from — it carries D3 and nothing else.
 
 ### D1 — a stamped textarea, select or radio carries no identity tag
 
 **Two backends panic; the other three go silent.** The live path tags
-seven interactive kinds (crates/kaya/src/scene.rs:1257); the stamping
-path tags four (crates/kaya/src/scene.rs:4311). Textarea, Select and
+seven interactive kinds (crates/kaya/src/scene.rs:1192); the stamping
+path tags four (crates/kaya/src/scene.rs:4107). Textarea, Select and
 Radio are missing from the second list, and those are exactly the three
 whose backends treat the tag as mandatory:
 
-    crates/kaya/src/gtk.rs:3807        tag.expect("textareas carry a tag")
-    crates/kaya/src/gtk.rs:3880        .expect("radio groups carry a tag")
-    crates/kaya/src/gtk.rs:3897        tag.expect("selects carry a tag")
-    crates/kaya/src/winui/mod.rs:5868, 5977, 6008 — the same three
+    crates/kaya/src/gtk.rs:3613        tag.expect("textareas carry a tag")
+    crates/kaya/src/gtk.rs:3686        .expect("radio groups carry a tag")
+    crates/kaya/src/gtk.rs:3703        tag.expect("selects carry a tag")
+    crates/kaya/src/winui/mod.rs:4760, 5977, 6008 — the same three
 
 Nothing stops a guest reaching it today: the template `CreateWidget` arm
 accepts every kind, and stamping emits ApplyOps without re-running the
@@ -74,9 +74,9 @@ the backends unwrap a tag for is tagged on both paths.
 
 Go's occurrence dispatch has a live arm and a node arm for clicks, for
 text edits and for toggles, and only a live arm for value changes
-(bindings/go/app.go:3163-3190). A stamped slider's move matches no case
+(bindings/go/app.go:2990-3017). A stamped slider's move matches no case
 and is dropped with no error. Rust has `on_value_node`
-(crates/kaya/src/app.rs:2794); the other seven bindings have no
+(crates/kaya/src/app.rs:2517); the other seven bindings have no
 registrar for it at all.
 
 This is the same failure class check-tx-liveness exists for: a silent
@@ -85,7 +85,7 @@ template — because there is no constructor for one.
 
 ### D3 — Python's `progress(value=<element field>)` raises
 
-`bindings/python/kaya/__init__.py:2336-2338` spells the FieldRef
+`bindings/python/kaya/__init__.py:2069-2071` spells the FieldRef
 accessors `value._level, value._field`. `FieldRef` has `_index`, and
 `_level` is a method; every other callsite in the file gets it right
 (`._level(), ._index`). Verified by running it: `has _field: False`. So
@@ -104,16 +104,14 @@ Two kinds of hit, and the second was not part of the original question.
 
 **Template-zone floor calls** — the ones that need the new sugar. The
 undo scene's per-row note entry, in all seven handle bindings
-(guests/{go/undo/undo.go:224, rust/undo.rs:135, swift/undo.swift:209,
-ocaml/undo.ml:170, haskell/undo.hs:169, csharp/UndoScene.cs:151,
-java/dev/kaya/guests/Undo.java:164}) plus the editor's find bar
-(guests/go/editor/editor.go:568). Python already spells it with sugar.
+(guests/{go/undo/undo.go:181, rust/undo.rs:115, swift/undo.swift:161, ocaml/undo.ml:158, haskell/undo.hs:151, csharp/UndoScene.cs:142, java/dev/kaya/guests/Undo.java:138}) plus the editor's find bar
+(guests/go/editor/editor.go:450). Python already spells it with sugar.
 
 **Live-zone floor calls that already have sugar available** — fixable
 today, and an invariant 5 violation that no gate catches because these
 scenes are not in check-sugar-surface's scene tables.
 `guests/haskell/textarea.hs` builds its ENTIRE scene at the floor while
-`textareaOn` sits in the binding (bindings/haskell/KayaApp.hs:1886);
+`textareaOn` sits in the binding (bindings/haskell/KayaApp.hs:1706);
 `guests/ocaml/textarea.ml` does the same; menus.hs, menus.ml and
 menus.swift each spell one label at the floor. (Line anchors dropped
 2026-08-18: the comment cut moved every one of them, and what these
@@ -154,7 +152,7 @@ radio's option list. Those are one shape for every copy by construction
 text is genuinely optional in a way a label's is not — they are
 uncontrolled, the guest owns the text, and the unbound form is what the
 editor and the undo scene actually want. The bound form is expressible:
-`Prop::Text` is legal on both kinds (crates/kaya/src/scene.rs:505), and
+`Prop::Text` is legal on both kinds (crates/kaya/src/scene.rs:482), and
 an editable list of names pre-filled from row data is the obvious case
 the live zone has no analogue for.
 
@@ -167,10 +165,10 @@ argument, an overload — and the SEMANTICS are identical in all eight
 ### S4 — a stamped image DOES vary per row; Rust was the one that could not say so
 
 Corrected 2026-08-10, after this section first claimed the opposite.
-`ValueType::Blob` has always existed (crates/kaya/src/protocol.rs:687),
+`ValueType::Blob` has always existed (crates/kaya/src/protocol.rs:671),
 so a record field can hold encoded bytes, and Swift, C# and Java all
 ship a per-row image already — `image(_ f: KayaField<Data>)`,
-bindings/swift/KayaApp.swift:3278. The only thing missing was Rust's
+bindings/swift/KayaApp.swift:3003. The only thing missing was Rust's
 marker type: `ValueKind` had Str, Bool, I64 and F64 and no `BlobKind`,
 so Rust could not spell the field even though the wire carried it.
 
@@ -181,7 +179,7 @@ takes a source like every other constructor in the zone.
 
 ### S4b — the zone has TWO surfaces in several bindings, and they drift
 
-Rust's `Tpl` is not the whole template zone: `Row` (crates/kaya/src/app.rs:2614)
+Rust's `Tpl` is not the whole template zone: `Row` (crates/kaya/src/app.rs:2343)
 is the for-STATEMENT façade over the same zone and hand-delegates its
 methods one at a time — it forwarded six while ten kinds were missing.
 Go is worse: its template constructors are spread over four surfaces
@@ -243,7 +241,7 @@ floor call and the sugar call put the same bytes on the wire — the
 sugar just could not say "index 0" without a spelling that meant it.
 
 And the type is fixed, which is what makes this small: `String` is the
-only non-derived `KayaSum` (crates/kaya/src/app.rs:300), so a scalar
+only non-derived `KayaSum` (crates/kaya/src/app.rs:275), so a scalar
 collection is always a collection of strings and its element token is
 always the string field 0. One nullary accessor per binding, named for
 the protocol's own term — `element` — with Go keeping `Row.Value()`,

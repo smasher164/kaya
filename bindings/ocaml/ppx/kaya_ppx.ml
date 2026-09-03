@@ -1,11 +1,9 @@
 (* [@@deriving kaya_gen]: the type declaration is the schema (DESIGN.md, the
    generator tier). From a RECORD `todo`: `todo_record`, one typed field
-   token per field (`todo_title`), and `todo_patch` — one optional labelled
-   argument per field, each supplied one recording an update_field. From a
-   VARIANT of inline records: `post_sum`, per-constructor tokens
-   (`post_note_text`), one refined patch per constructor (`post_todo_patch`,
-   whose writes are witnessed), and the eliminator `post_each`, whose
-   labelled arms are REQUIRED so template totality is a compile error. *)
+   token per field, and `todo_patch`. From a VARIANT of inline records:
+   `post_sum`, per-constructor tokens, one witnessed patch per constructor,
+   and the eliminator `post_each`, whose labelled arms are REQUIRED so
+   template totality is a compile error. *)
 
 open Ppxlib
 

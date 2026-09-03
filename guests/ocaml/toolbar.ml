@@ -1,11 +1,5 @@
-(* The toolbar conformance scene, OCaml port: the [primary] bit as real
-   window chrome (docs/chrome-plan.md C2). The app declares ONE catalog
-   and marks two actions primary; every host promotes the same first two
-   in catalog preorder. There is no toolbar vocabulary to spell, which
-   is the point.
-
-   Canonical semantics in guests/rust/toolbar.rs; the byte-frozen
-   contract in tools/scenes/toolbar.steps. *)
+(* The toolbar scene, OCaml port — guests/rust/toolbar.rs,
+   tools/scenes/toolbar.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -17,24 +11,18 @@ let () =
 
   build app (fun () ->
      let status = signal (Str "ready") in
-     (* The app writes enablement against the MENU ITEM and says nothing
-        about any button: the promoted button IS that item, so it follows
-        or the lowering kept a copy. *)
+     (* Written against the MENU ITEM: the promoted button IS that item. *)
      let can_save = signal (Bool true) in
 
-     (* CATALOG PREORDER DECIDES PROMOTION — top-level groupings in
-        menubar-append order, then each node's children in append order,
-        depth-first. Save is the first primary and Find the second, so
-        every host's promoted set is [Save, Find] however large its own
-        k is. *)
+     (* CATALOG PREORDER DECIDES PROMOTION — menubar-append order, then
+        children depth-first, so every host promotes [Save, Find]. *)
      window ~title:"toolbar"
        ~menus:
          [
            menu ~label:"File"
              [
-               (* [Done] is the checkmark idiom: the vocabulary has no
-                  save-specific glyph, and neither does Apple's own catalog
-                  (docs/styling-plan.md D6). *)
+               (* No save-specific glyph in the vocabulary, nor in Apple's own
+                  catalog; [Done] is the checkmark idiom (docs/styling-plan.md D6). *)
                item ~label:"Save" ~symbol:Done ~primary:true
                  ~bind_enabled:can_save ~shortcut:"primary+s"
                  ~on_activate:(fun () -> write status (Str "saved"));

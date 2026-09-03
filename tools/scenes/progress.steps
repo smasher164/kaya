@@ -1,6 +1,4 @@
-# The progress scene: the bar's contract — the determinate fraction
-# reads back from the REAL control as an integer percent (the slider
-# verdict's spelling), and the indeterminate arm reads back as the
-# platform's activity mode. Display-only: no events, no interaction.
+# The determinate verdict is an INTEGER PERCENT (the slider verdict's
+# spelling), not a fraction.
 expect progress#0 "25%"
 expect progress#1 "indeterminate"

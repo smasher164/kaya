@@ -1,9 +1,5 @@
-// The panes conformance scene, Go port — a THREE-pane ceiling as
-// assertions (docs/multicolumn-plan.md D1/D5). Nothing here is
-// panes-specific except `Panes(3)`, asked for ONCE: the stack is the
-// ordinary navigation stack, and how many of the three fit is the
-// platform's re-decision at every width. See guests/rust/panes.rs and
-// tools/scenes/panes.steps.
+// The panes scene (tools/scenes/panes.steps): nothing here is
+// panes-specific except `Panes(3)`, asked for ONCE.
 package panes
 
 import (
@@ -22,9 +18,7 @@ func App() *kaya.App {
 		tx.Window(0).Title("panes").Panes(3)
 
 		tx.Mount(tx.Column(func() {
-			// Authored ids so the REAL-TREE read can address these: an
-			// index read passes whether or not anything reached the
-			// screen.
+			// Authored ids: an index read passes for an empty arm.
 			caption := tx.Signal("root pane")
 			tx.Label(caption).A11yID("root")       // label#0
 			tx.Button("open content", openContent) // button#0

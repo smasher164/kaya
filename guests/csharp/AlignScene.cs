@@ -1,9 +1,4 @@
-// The align conformance scene, C# port — see guests/rust/align.rs and
-// tools/scenes/align.steps. The tall no-baseline image matters: its
-// bottom sits ON the baseline (the CSS replaced-element rule), which is
-// what separates the modes on every platform's control metrics; the
-// grown, stretched nested column under row#1 is the ruling's own
-// construction.
+// The align scene, C# port — guests/rust/align.rs, tools/scenes/align.steps.
 
 static class AlignScene
 {
@@ -35,8 +30,6 @@ static class AlignScene
                 tx.Row(() => // row#1: the stretch pair's host
                 {
                     tx.Label(bind: anchor); // label#2
-                    // Grown into the row's leftover, stretched across
-                    // its own breadth.
                     var fitcol = tx.Column(() =>
                     {
                         tx.Label(bind: fit); // label#3

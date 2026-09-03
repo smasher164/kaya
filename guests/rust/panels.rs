@@ -1,9 +1,5 @@
-//! The panels conformance scene: the auxiliary-window grammar as
-//! assertions (DESIGN.md, Presentation contexts). The inspector arms
-//! veto_close, so its chrome close emits and closes nothing. The
-//! byte-frozen contract is tools/scenes/panels.steps.
-//!
-//! DESKTOP-ONLY: phone hosts reject create_window by capability.
+//! The panels conformance scene (tools/scenes/panels.steps). DESKTOP-ONLY:
+//! phone hosts reject create_window by capability.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;

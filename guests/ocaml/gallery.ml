@@ -1,14 +1,10 @@
-(* The gallery scene from OCaml: a checkbox and a slider, both owning
-   their state and reporting each change — the entry scene's
-   uncontrolled contract, with a bool and a float.
-
-   Build like milestone2.ml, then run with KAYA_SELFTEST=gallery. *)
+(* The gallery scene, OCaml port — guests/rust/gallery.rs,
+   tools/scenes/gallery.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* A 2x2 RGB PNG, 75 bytes. Embedded as source per the include_str!
-   doctrine: scenes carry their inputs, no runtime file I/O. *)
+(* A 2x2 RGB PNG, 75 bytes, embedded as source. *)
 let test_png =
   Bytes.of_string
     "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\
@@ -34,8 +30,7 @@ let () =
          (Str (Printf.sprintf "volume: %d%%"
                  (int_of_float (Float.round (v *. 100.)))))
      in
-     (* A programmatic write fans out to the control and must NOT come
-        back as an on_volume occurrence. *)
+     (* A programmatic write must NOT come back as an occurrence. *)
      let on_quarter () = write pos (F64 0.25) in
 
      let root =
@@ -48,8 +43,7 @@ let () =
                label ~bind:volume;
                button ~text:"quarter" ~on_click:on_quarter;
              ];
-           (* Deliberately invalid bytes beside valid ones: decode failure is
-              the placeholder class, never a crash, on every backend. *)
+           (* Deliberately invalid bytes: a decode failure reads 0x0. *)
            row
              [
                image ~source:test_png;

@@ -1,11 +1,5 @@
-//! The dirty-state conformance scene: unsaved work as window chrome
-//! (docs/dirty-plan.md). The byte-frozen contract is
-//! tools/scenes/dirty.steps.
-//!
-//! `dirty` IS DECLARED, never inferred: kaya does not watch your
-//! signals and guess, so an edit writes the document AND says
-//! `.dirty(true)`. It arms nothing — the close flow below is the
-//! ordinary veto class.
+//! The dirty-state scene (tools/scenes/dirty.steps). `dirty` IS DECLARED,
+//! never inferred: kaya does not watch your signals and guess.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::AlertChoice;
@@ -20,8 +14,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let (doc, status) = ctx.apply(|tx| {
-        // `dirty` and `veto_close` are orthogonal; this window takes
-        // both because an editor owns its close so it can ask.
+        // `dirty` and `veto_close` are orthogonal.
         tx.window(kaya::DEFAULT_WINDOW).title("dirty").veto_close(true);
         let doc = tx.signal("notes");
         let status = tx.signal("saved");
@@ -65,8 +58,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Answered(choice) => ctx.apply(|tx| match choice {
                 // THIS ARM ABORTS IF IT EVER RUNS — docs/traps.md, "An
-                // app can VETO a close but cannot AGREE to one". The
-                // scene answers cancel; this stays the honest spelling.
+                // app can VETO a close but cannot AGREE to one".
                 AlertChoice::Action(_) => tx.destroy_window(kaya::DEFAULT_WINDOW),
                 AlertChoice::Cancel => tx.write(status, "kept editing"),
             }),

@@ -1,26 +1,14 @@
-(* The stall conformance scene, OCaml port — an app thread that stops
-   taking its occurrences is REPORTED (DESIGN.md, Threading model and
-   protocol).
-
-   THIS IS THE ONE GUEST THAT MISUSES KAYA ON PURPOSE, in every
-   language: [block] sleeps on the app thread, [wedge] never returns at
-   all, and the scene asserts that kaya notices both. The second click
-   is what makes work PENDING while the app thread is gone, which is the
-   only thing the watchdog can see — a handler blocking on an empty
-   queue is indistinguishable from an idle app.
-
-   guests/rust/stall.rs carries the canonical note; the byte-frozen
-   contract is tools/scenes/stall.steps. *)
+(* The stall scene, OCaml port — guests/rust/stall.rs,
+   tools/scenes/stall.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* Comfortably past the watchdog's one-second threshold, and short
-   enough that the leg is not paying for it. *)
+(* Past the watchdog's one-second threshold. *)
 let block_seconds = 2.5
 
-(* A day, never a literal park (docs/traps.md, "The stall scene wedges
-   for a DAY"). *)
+(* A day, never a literal park (docs/traps.md, the stall scene wedges for a
+   DAY). *)
 let wedge_seconds = 86400.
 
 let () =
@@ -30,16 +18,13 @@ let () =
       window ~title:"stall" ();
       let status = signal (Str "ready") in
 
-      (* DELIBERATELY WRONG, and the only place in this repo that is.
-         Anything real belongs on a thread of its own with the result
-         posted back through [post]. *)
+      (* DELIBERATELY WRONG, and the only place in this repo that is. *)
       let block () = Thread.delay block_seconds in
       let ping () = write status (Str "pinged") in
       let wedge () = Thread.delay wedge_seconds in
 
-      (* Children are THUNKS: omitting the trailing unit leaves one, and
-         the container realizes them left to right (DESIGN.md, Binding
-         conventions). *)
+      (* Children are THUNKS: omitting the trailing unit leaves one
+         (DESIGN.md, Binding conventions). *)
       let root =
         column
           [

@@ -7,13 +7,11 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The dead-code gate for the Kotlin layer: detekt's unused family over
-# every hand-written Kotlin source. tools/detekt.yml is the WHOLE
-# config, not an overlay on detekt's defaults.
-#
-# The Kotlin compiler cannot serve here: K2 moved the UNUSED_*
-# diagnostics into IDE inspections (KT-69698, docs/traps.md), so a
-# computed-and-never-applied local compiles clean.
+# detekt's unused family over every hand-written Kotlin source; the
+# compiler cannot serve here (CLAUDE.md's gate list; docs/traps.md:
+# detekt's UnusedImports has no type resolution). tools/detekt.yml is the
+# WHOLE config, not an overlay on
+# detekt's defaults.
 
 import subprocess
 
@@ -32,25 +30,12 @@ for src in SOURCES:
         print(f"check-detekt: no such source tree: {src}")
         sys.exit(1)
 
-# WHAT UnusedImports DOES NOT COVER, stated here because the self-test
-# below passes for it and would otherwise read as a guarantee. The rule
-# is a TEXT heuristic — it has no type resolution, so an import counts
-# as used if its short name appears anywhere in the file, whoever owns
-# that name. Measured 2026-07-27: the Compose split arm stopped calling
-# `Modifier.width()`, the `androidx.compose.foundation.layout.width`
-# import went dead, and this gate stayed green because the file is full
-# of unrelated `bitmap.width` / `root.width` property reads. A
-# word-boundary check written here would miss it for the same reason;
-# only running detekt with --classpath (the full Android + Compose
-# classpath, which this deliberately standalone gate does not have)
-# distinguishes the extension from the property. So: dead imports whose
-# name is unique DO fail here, and dead imports whose name collides
-# with any identifier in the file DO NOT. Reach for the import list by
-# hand when a call site is removed.
-#
-# Self-test: a sample carrying one instance of each rule's defect must
-# make ALL of them fire — a renamed rule in a detekt bump would
-# otherwise turn a curated config green forever.
+# WHAT UnusedImports DOES NOT COVER, since the self-test below would
+# otherwise read as a guarantee: it is a TEXT heuristic, so a dead
+# import whose short name collides with any identifier in the file stays
+# green (docs/traps.md: detekt's UnusedImports has no type resolution).
+# The self-test demands every rule fire on a sample that violates all of
+# them: a renamed rule in a detekt bump turns a curated config green.
 SAMPLE = """\
 package sample
 

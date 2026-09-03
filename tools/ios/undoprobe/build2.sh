@@ -11,11 +11,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 
 # Round 2 of the iOS undo probe: main2.swift (routing + gestures).
-# Usage: tools/ios/undoprobe/build2.sh [udid]
-#
-# NOT A LANE, THROWAWAY. Questions in main2.swift's header; what it
-# decides is docs/undo-plan.md §0.
-#
+# NOT A LANE, THROWAWAY; what it decides is docs/undo-plan.md §0.
 # It UNINSTALLS itself at the end: the simulators are shared with the
 # lane and a probe must leave no fixture behind.
 set -euo pipefail

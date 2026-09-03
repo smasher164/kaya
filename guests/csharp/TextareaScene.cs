@@ -1,5 +1,5 @@
-// The textarea conformance scene, C# port. See
-// guests/rust/textarea.rs and tools/scenes/textarea.steps.
+// The textarea scene, C# port — guests/rust/textarea.rs,
+// tools/scenes/textarea.steps.
 
 static class TextareaScene
 {

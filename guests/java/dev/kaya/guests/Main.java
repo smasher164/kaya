@@ -3,13 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaRing;
 
 /**
- * The desktop twin of the Android shell's MainActivity: load the cdylib
- * (KAYA_LIB when set, the library path otherwise), attach the KayaRing
- * natives, spawn the scene thread, and give the main thread to kaya_run.
- *
- * <p>Same package as the scenes, different source root: the Android
- * build's srcDirs sweep guests/java wholesale, and this file must never
- * compile there — KayaRing.attach() has no Activity on the desktop.
+ * The desktop twin of the Android shell's MainActivity. NEVER compiled by
+ * the Android build: KayaRing.attach() has no Activity on the desktop.
  */
 public final class Main {
     public static void main(String[] args) {

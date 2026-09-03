@@ -1,12 +1,8 @@
-// The feed scene from C#: sum-typed elements, end to end.
-//
-//     KAYA_SELFTEST=feed KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project guests/csharp
+// The feed scene, C# port — guests/rust/feed.rs, tools/scenes/feed.steps.
 
 using System.Linq;
 
-// The whole scene lives in its own namespace: the one guest binary
-// hosts every scene, and todos already owns the bare Todo.
+// Its own namespace: one binary hosts every scene and todos owns the bare Todo.
 namespace Feed;
 
 [KayaGen]
@@ -30,8 +26,6 @@ static class FeedScene
             {
                 tx.Button("promote", t =>
                 {
-                    // Promote: the new constructor restamps that key's
-                    // copy in place.
                     foreach (var entry in feed.Items(t))
                     {
                         if (entry.Value is Note note)
@@ -51,9 +45,8 @@ static class FeedScene
                     {
                         todo.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
                         {
-                            // `?.` is the refinement, re-eliminated at
-                            // write time: a stale occurrence folds into
-                            // null rather than writing the wrong arm.
+                            // `?.` re-eliminates at write time: a stale occurrence
+                            // folds into null rather than writing the wrong arm.
                             PostKaya.AsTodo(t2, feed, keys[0])?.Done(isChecked);
                         });
                         todo.Label(t, x => x.Title);

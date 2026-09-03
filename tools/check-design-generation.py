@@ -8,34 +8,23 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 dev_shell_or_die()
 
 # THE MAC LANE RUNS BOTH macOS DESIGN GENERATIONS, and both halves must
-# stay populated. SwiftUI picks the generation from the MAIN
-# EXECUTABLE's LC_BUILD_VERSION sdk field (docs/traps.md), so the legs
-# kaya links are MODERN and the vendor-built hosts (python3, the .NET
-# apphost, the zulu JVM) are COMPAT. docs/deferred.md carries the
-# standing constraint: do not bump the flake SDK without leaving a
-# compat leg. Either half could empty out with no diff in this repo.
+# stay populated — either could empty out with no diff in this repo
+# (CLAUDE.md's gate list; docs/deferred.md's standing constraint: never
+# bump the flake SDK without leaving a compat leg). The Mach-O is parsed
+# by hand because `vtool`/`otool` are xcrun shims that cannot find their
+# tool here.
 #
-# It measures COMPILES, not build outputs: the modern half is two probes
-# built here and now, through this shell's `cc` and through kaya_swiftc.
-# Reading target/'s guests would make this a stale-artifact reader, and
-# `vtool`/`otool` are xcrun shims here that cannot find their tool.
-#
-# ENV HYGIENE — THE MOVE THAT LOOKS RIGHT AND IS BACKWARDS.
-# `env -u DEVELOPER_DIR -u SDKROOT cc probe.c` does NOT neutralise a
-# caller's stray environment. Measured on this tree: it drops the
-# flake's SDK entirely and stamps 14.4, because DEVELOPER_DIR/SDKROOT
-# are exactly how the apple-sdk derivation's setup hook hands the SDK to
-# clang. So the probe compile is NORMALISED rather than cleared, from a
-# witness a caller does not set: mkShell's own `buildInputs` attribute.
-#
-# MACOSX_DEPLOYMENT_TARGET has no second witness (it comes from
-# stdenv.hostPlatform.darwinMinVersion), so it is inherited and printed
-# inside the minos failure sentence.
+# ENV HYGIENE — THE MOVE THAT LOOKS RIGHT AND IS BACKWARDS. `env -u
+# DEVELOPER_DIR -u SDKROOT cc probe.c` does NOT neutralise a caller's
+# stray environment: those two are how the apple-sdk setup hook hands
+# the SDK to clang, so unsetting them drops the flake's SDK and stamps
+# 14.4 (docs/chrome/sdk-bump-scout.md). The compile is NORMALISED
+# instead, from mkShell's own `buildInputs`; MACOSX_DEPLOYMENT_TARGET
+# has no second witness and is printed in the minos failure.
 #
 # TEST-ONLY SEAM: KAYA_DESIGN_GEN_SUBST="leg=path,…" replaces the binary
-# a named leg reads, for the watched negatives. An unrecognised name is
-# a hard failure: a typo'd substitution would make a watched red
-# vacuous.
+# a named leg reads. An unrecognised name is a hard failure: a typo'd
+# substitution would make a watched red vacuous.
 
 import os
 import platform as platform_mod
@@ -71,9 +60,8 @@ flake_sdk = sdks[0].rstrip("/")
 
 # ------------------------------------------------------------ the table
 #
-# DECLARED_READS is the census: the verdict at the bottom refuses unless
-# exactly this many stamps were read. A reader that resolves nothing
-# agrees with everything.
+# DECLARED_READS is the census: the verdict refuses unless exactly this
+# many stamps were read.
 DECLARED_READS = 6
 
 MODERN_FLOOR = (26, 0)   # sdk >= this is macOS 26's modern generation
@@ -185,8 +173,8 @@ def stamp(path):
 
 
 with scratch_dir("check-design-generation-") as tmp:
-    # 1. THE FLAKE-LINKED PROBE — what rust, go, c, ocaml and haskell
-    #    guests get when the lane links their main executables.
+    # 1. THE FLAKE-LINKED PROBE, compiled here and now: reading target/'s
+    #    guests would make this a stale-artifact reader.
     (tmp / "probe.c").write_text("int main(void) { return 0; }\n",
                                  encoding="utf-8")
     cc_env = dict(
@@ -205,12 +193,11 @@ with scratch_dir("check-design-generation-") as tmp:
         sys.stderr.write(cc.stderr)
         sys.exit(1)
 
-    # 2. THE SWIFT PROBE. Same toolchain the swift mac guests and the
-    #    SwiftUI interpreter are built with (kaya_swiftc steers back to
-    #    Apple's SDK). The toolchain is RESOLVED in a fresh shell, never
-    #    inherited: SWIFTC/SWIFT_DEVELOPER_DIR are dropped so a caller
-    #    carrying one from another build cannot decide which SDK this
-    #    gate's swift half measured.
+    # 2. THE SWIFT PROBE, through kaya_swiftc as the swift legs and the
+    #    SwiftUI interpreter are. The toolchain is RESOLVED in a fresh
+    #    shell, never inherited: SWIFTC/SWIFT_DEVELOPER_DIR are dropped so
+    #    a caller carrying one from another build cannot decide which SDK
+    #    this gate's swift half measured.
     (tmp / "probe.swift").write_text(
         'print("kaya design-generation probe")\n', encoding="utf-8")
     swift_env = {k: v for k, v in os.environ.items()

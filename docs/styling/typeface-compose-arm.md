@@ -167,7 +167,7 @@ attributed:
   MINE and cannot be cleared from here: wiring the leg is a tools/**
   edit, and the leg would fail anyway until the scene's family is
   decided — see §6.
-- **check-stubs** — one line, `crates/kaya/src/protocol.rs:400 declares a
+- **check-stubs** — one line, `crates/kaya/src/protocol.rs:387 declares a
   depth stub on "typeface", but that file is not one of the backends this
   gate reads`. NOT MINE and it predates this arm: the line is a DOC
   COMMENT quoting the call ("the two Rust-native backends still declare

@@ -1019,11 +1019,9 @@ const SHORTCUT_NAMED_KEYS = new Set(["enter", "escape", "delete", "left", "right
 
 /** Canonicalize a shortcut spelling to the wire form: lowercase '+'-joined
  * tokens, modifiers ordered primary, shift, alt, then one key (a-z, 0-9,
- * or the closed named set). Accepts ASCII case variants and any modifier
- * order; rejects whitespace, empty tokens, repeated modifiers, aliases
- * (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY stays
- * at the core: escape, shift-only and bare alphanumerics, and the reserved
- * floor are validated there, on the canonical spelling, never rewritten. */
+ * or the closed named set). Rejects whitespace, empty tokens, repeated
+ * modifiers, aliases (ctrl/cmd/option), and unknown or multiple or missing
+ * keys. POLICY stays at the core, validated on the canonical spelling. */
 export function canonicalize_shortcut(spelling: string): string {
   if (!spelling) throw new Error("kaya: shortcut is empty");
   if (/[ \t\n\v\f\r]/.test(spelling)) throw new Error(`kaya: shortcut ${JSON.stringify(spelling)} contains whitespace`);

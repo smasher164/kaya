@@ -1,14 +1,5 @@
-(* The dirty-state conformance scene, OCaml port — unsaved work as
-   window chrome (docs/dirty-plan.md). The app declares STATE and the
-   backend spells its platform's own affordance.
-
-   TWO DECLARATIONS, ON PURPOSE: kaya does not watch your signals and
-   guess. An edit writes the document AND says [~dirty:true].
-
-   SETTING IT LATER IS THE CONSTRUCT AGAIN — there is no loose setter.
-
-   Canonical semantics in guests/rust/dirty.rs; the byte-frozen contract
-   in tools/scenes/dirty.steps. *)
+(* The dirty scene, OCaml port — guests/rust/dirty.rs,
+   tools/scenes/dirty.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -30,11 +21,8 @@ let () =
        window ~dirty:false ()
      in
 
-     (* The choice is an action index or [alert_cancel], every
-        platform-native dismissal. NOTHING HAS EVER RUN THE DISCARD ARM:
-        [destroy_window 0L] is refused by assertion and aborts the
-        process (docs/traps.md, "An app can VETO a close but cannot AGREE
-        to one"), so the scene answers cancel. *)
+     (* NOTHING HAS EVER RUN THE DISCARD ARM: [destroy_window 0L] aborts
+        the process (docs/traps.md, VETO a close but never AGREE). *)
      let close_answered choice =
        if choice = alert_cancel then write status (Str "kept editing")
        else destroy_window 0L
@@ -48,9 +36,7 @@ let () =
             ~on_result:close_answered ())
      in
 
-     (* [~dirty] and [~veto_close] are orthogonal — either rides the
-        construct without the other. No [~dirty] here: the default false
-        is what the script's first assertion reads. *)
+     (* No [~dirty] here: the default false is the first assertion. *)
      window ~title:"dirty" ~veto_close:true ~on_close_requested ();
 
      let root =

@@ -1,11 +1,5 @@
-// The dirty-state conformance scene, JS port — unsaved work as window
-// chrome (docs/dirty-plan.md). The app declares STATE, and each backend
-// spells its own platform's affordance.
-//
-// TWO DECLARATIONS, ON PURPOSE: an edit writes the document AND says
-// `dirty: true`. kaya does not watch your signals and guess.
-//
-// See guests/rust/dirty.rs and tools/scenes/dirty.steps.
+// The dirty-state scene (tools/scenes/dirty.steps). TWO DECLARATIONS, on
+// purpose: kaya does not watch your signals and guess.
 
 import * as kaya from "kaya-gui";
 
@@ -19,8 +13,7 @@ function edit(): void {
 
 function save(): void {
   status.set("saved");
-  // The mark comes DOWN as well as up — a lowering that only ever sets
-  // the flag would pass every assertion before this one.
+  // The mark comes DOWN as well as up: only this assertion sees it.
   app.window({ dirty: false });
 }
 
@@ -29,18 +22,14 @@ function answered(choice: number): void {
     // Answering a dialog is not saving: the mark stays up.
     status.set("kept editing");
   } else {
-    // UNREACHED BY THE SCENE, AND IT ABORTS IF IT EVER RUNS: there is
-    // no verb for agreeing to a close (docs/traps.md, "An app can
-    // VETO a close but cannot AGREE to one"). The scene answers
-    // cancel; this arm is the honest spelling, not a step.
+    // ABORTS if it runs — docs/traps.md, "An app can VETO a close but
+    // cannot AGREE to one".
     kaya.destroyWindow(0);
   }
 }
 
 async function closeAsked(): Promise<void> {
-  // Nothing has closed yet: the veto class says so. The handler rides
-  // the window construct at its declaration, so it can only ever mean
-  // this surface's close. The answer arrives as the promise's value.
+  // Nothing has closed yet; the handler rides this window's declaration.
   answered(
     await kaya.showAlert({
       title: "unsaved changes",
@@ -54,8 +43,7 @@ async function closeAsked(): Promise<void> {
 let doc!: kaya.Signal<string>;
 let status!: kaya.Signal<string>;
 
-// `dirty` and `vetoClose` are orthogonal. This window does NOT declare
-// dirty here: the default false is the scene's first assertion.
+// Dirty is NOT declared here: the script reads the clean window first.
 app.window({ title: "dirty", vetoClose: true, onCloseRequested: closeAsked }, () => {
   doc = kaya.signal("notes");
   status = kaya.signal("saved");

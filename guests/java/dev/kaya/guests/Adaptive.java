@@ -3,12 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The adaptive conformance scene from the JVM
- * (KAYA_SELFTEST=adaptive) — see guests/rust/adaptive.rs for the
- * rationale and tools/scenes/adaptive.steps for the byte-frozen
- * contract. row@dash flips by a HANDLER (D2's user-driven toggle);
- * row@narrow carries the DECLARED breakpoint (D3), which the handler
- * never touches.
+ * The adaptive scene from the JVM — guests/rust/adaptive.rs,
+ * tools/scenes/adaptive.steps.
  */
 public final class Adaptive {
     private static boolean vertical;
@@ -17,17 +13,13 @@ public final class Adaptive {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // Explicit size: the desktop start must sit ABOVE the
-            // breakpoint's threshold so the scene's resize half crosses
-            // it both ways deterministically.
+            // Above the breakpoint, so the resize half crosses it both ways.
             tx.window(0).title("adaptive").size(900.0, 600.0);
             KayaApp.Signal<String> alpha = tx.signal("alpha");
             KayaApp.Signal<String> longer = tx.signal("a longer label");
             KayaApp.Signal<String> steady = tx.signal("steady");
 
-            // Java lambdas cannot assign captured locals, so a handle
-            // declared inside a container body comes back out through a
-            // one-slot array.
+            // Java lambdas cannot assign captured locals.
             KayaApp.Widget[] dash = new KayaApp.Widget[1];
 
             tx.mount(tx.column(() -> {
@@ -35,8 +27,7 @@ public final class Adaptive {
                     tx.label(alpha); // label#0
                     tx.label(longer); // label#1
                 }).a11yId("dash");
-                // column#1: the control group — its axis answers the
-                // creation kind's own and never moves.
+                // column#1: the control group, whose axis never moves.
                 tx.column(() -> {
                     tx.label(steady); // label#2
                 }).a11yId("steady");
@@ -45,8 +36,7 @@ public final class Adaptive {
                     t.setAxis(dash[0],
                         vertical ? KayaApp.Axis.VERTICAL : KayaApp.Axis.HORIZONTAL);
                 });
-                // row#1: the BREAKPOINT subject (D3) — declared data,
-                // core-evaluated.
+                // row#1: the breakpoint subject, which no handler touches.
                 tx.row(() -> {
                     KayaApp.Signal<String> one = tx.signal("one");
                     KayaApp.Signal<String> two = tx.signal("a wider two");

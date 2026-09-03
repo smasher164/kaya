@@ -1,9 +1,5 @@
-/* The milestone-2 scene from C. THE MAIN THREAD ENTERS kaya_run() and
- * becomes the core's UI thread; a pthread is the app thread — the
- * arrangement every C guest here uses.
- *
- * Compiling by hand needs -I bindings/c alongside
- * -I crates/kaya/include. */
+/* THE MAIN THREAD ENTERS kaya_run(); a pthread is the app thread, as in
+ * every C guest. By hand: -I bindings/c -I crates/kaya/include. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -11,10 +7,8 @@
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one — one run across the When's body and both
- * For templates; signals and collections each count from 1 in their own
- * (DESIGN.md, Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE (tools/check-c-ids.py), one
+ * run across the When's body and both For templates. */
 #define SIG_STATUS 1
 #define SIG_EXTRAS 2
 #define W_COLUMN 1
@@ -83,8 +77,6 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
     unsigned steps = 0;
-    /* No binding-owned model, so the app keeps its own counts beside
-     * the deltas it sends. */
     unsigned items_in[2] = {0, 0}; /* [0]: g1, [1]: g2 */
     const uint8_t *rec;
     for (;;) {

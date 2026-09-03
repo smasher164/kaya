@@ -2,15 +2,12 @@
 // interpreter's own module by tools/check-canvas-blit.py and run as an
 // executable.
 //
-// WHY A PROBE AND NOT A LEG. `expect_ink`'s answer names the appearance
-// the HOST is in, so one mac leg exercises exactly one of the two arms:
-// on a light-mode machine the dark arm is never evaluated, and on a
-// dark-mode machine the light one is not. Every lane before 2026-08-27
-// ran light, which is precisely how a light-only frozen string reached a
-// dark host and reddened a scene nobody had touched. Forcing the host's
-// appearance to cover the other arm would write the user's own system
-// settings, so both arms are driven HERE, against the interpreter's real
-// kayaInkForMode / kayaInkMatches, on whatever machine runs the gate.
+// WHY A PROBE AND NOT A LEG: `expect_ink`'s answer names the appearance
+// the HOST is in, so one mac leg exercises exactly one of the two arms —
+// which is how a light-only frozen string reached a dark host and
+// reddened a scene nobody had touched. Forcing the host's appearance
+// would write the user's own system settings, so both arms are driven
+// here against the interpreter's real kayaInkForMode / kayaInkMatches.
 //
 // The string below is tools/scenes/canvas.steps' own, byte for byte; the
 // per-mode values are the core's, derived by canvas.rs's

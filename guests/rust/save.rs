@@ -1,20 +1,9 @@
-//! The save conformance scene: the ROUND TRIP an editor walks
-//! (docs/save-plan.md D5) — open, edit, save, save-as, reopen. The
-//! byte-frozen contract is tools/scenes/save.steps, which also carries
-//! why no name here has an extension.
-//!
-//! Every status is a READ-BACK: write, reopen, read, report. A write
-//! that returned Ok and landed nowhere is exactly the failure "save"
-//! has, and only reopening can see it.
-//!
-//! THE WORK RUNS OFF THE APP THREAD, which is what `PickedFile::open`
-//! tells every caller to do: it blocks. The parking dance that PROVES
-//! the thread hop belongs to the filedialog scene.
+//! The save round trip (tools/scenes/save.steps). EVERY STATUS IS A
+//! READ-BACK, and no name here carries an extension.
 
 use std::io::{Read, Write};
 
-/// Both halves compute this identically; guests/rust/filedialog.rs
-/// carries the reasoning for each platform's root.
+/// guests/rust/filedialog.rs carries each platform's reasoning.
 #[cfg(target_os = "android")]
 fn scene_root() -> std::path::PathBuf {
     let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
@@ -36,7 +25,7 @@ pub(crate) fn save_dir() -> std::path::PathBuf {
     scene_root().join(format!("kaya-save-{}", std::process::id()))
 }
 
-/// Read a handle back through kaya, with the guest's own file API.
+/// Reads a handle back through kaya.
 fn read_back(file: &kaya::PickedFile) -> String {
     let mut text = String::new();
     match file.open(kaya::FileMode::Read) {
@@ -50,23 +39,20 @@ fn read_back(file: &kaya::PickedFile) -> String {
     text
 }
 
-/// Write `bytes` through a handle and report what the file says
-/// afterwards. `FileMode::Write` truncates, on a picked file and on a
-/// save destination alike — the destination only adds the create.
+/// Reports what the file says afterwards. `FileMode::Write` truncates, and
+/// the destination only adds the create.
 fn write_back(file: &kaya::PickedFile, bytes: &str) -> String {
     match file.open(kaya::FileMode::Write) {
         Ok(mut opened) => {
             if let Err(e) = opened.file.write_all(bytes.as_bytes()) {
                 return format!("write failed: {e}");
             }
-            // Dropped before the reopen, so the bytes are the FILE's and
-            // not a buffer's.
+            // Dropped before the reopen, so the bytes are the FILE's.
             drop(opened.file);
             read_back(file)
         }
-        // The failure docs/save-plan.md D1 exists to prevent reaches the
-        // label verbatim: without the create, a save destination answers
-        // "No such file or directory (os error 2)" here.
+        // Without the create a save destination answers ENOENT here
+        // (docs/save-plan.md D1).
         Err(e) => format!("save failed: {e}"),
     }
 }
@@ -82,9 +68,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         Reopen,
     }
 
-    // The file the scene opens, plus the decoy the picker needs — see
-    // guests/rust/filedialog.rs for why one file in the directory would
-    // let a backend that ignores the name pass.
+    // The decoy the picker needs; guests/rust/filedialog.rs says why.
     let dir = save_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
     std::fs::write(dir.join("draft"), b"first draft").expect("failed to write the file");
@@ -111,13 +95,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         status
     });
 
-    // The two capabilities the scene carries, held as handles and never
-    // as paths — the phones have no re-openable path at all.
+    // Handles and never paths: the phones have no re-openable path.
     let mut source: Option<kaya::PickedFile> = None;
     let mut destination: Option<kaya::PickedFile> = None;
 
-    // Every file operation runs on a thread of the guest's own, because
-    // `open` blocks; the answer comes back through the poster.
+    // Off the app thread, because `open` blocks.
     let work = |job: Box<dyn FnOnce() -> String + Send>| {
         let poster = ctx.poster();
         std::thread::Builder::new()
@@ -144,11 +126,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 work(Box::new(move || format!("opened {}", read_back(&file))));
             }
             Msg::SaveBack => {
-                // No dialog: the handle the user opened with is
-                // writable. A missing handle is an open that never
-                // landed — its OWN sentence, never a panic: a crashed
-                // guest masks the real failure (docs/deferred.md,
-                // save-jvm WATCH).
+                // No dialog: the chosen handle is writable. A missing one
+                // gets its OWN sentence, never a panic (save-jvm WATCH).
                 let Some(file) = source.clone() else {
                     ctx.apply(|tx| tx.write(status, "nothing open to save"));
                     continue;
@@ -156,8 +135,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 work(Box::new(move || format!("saved {}", write_back(&file, "second draft"))));
             }
             Msg::SaveAs => {
-                // The suggested name the dialog OPENS with; the scene
-                // types over it.
+                // The name the dialog OPENS with; the scene types over it.
                 let dialog = ctx.apply(|tx| tx.save_file("copy").show());
                 msgs.on_saved(dialog, Msg::Saved);
             }
@@ -171,9 +149,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 work(Box::new(move || format!("saved {}", write_back(&file, "third draft"))));
             }
             Msg::Reopen => {
-                // BOTH, in order: a save-as that quietly wrote back into
-                // the ORIGINAL passes every earlier step and fails here.
-                // The missing-handle guard, same reason as SaveBack's.
+                // A save-as through the ORIGINAL handle fails only here.
                 let (Some(first), Some(second)) = (source.clone(), destination.clone())
                 else {
                     ctx.apply(|tx| tx.write(status, "nothing to reopen"));

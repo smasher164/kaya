@@ -1,20 +1,14 @@
 # shellcheck shell=bash
 # Shared Swift/macOS toolchain resolution — source, don't execute. No
-# shebang for that reason; line 1's directive is what names the dialect
-# to shellcheck, and without it check-shell errors out.
+# shebang for that reason; line 1's directive names the dialect, and
+# without it check-shell errors out.
 #
 # Inside the nix dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
-# where `xcrun` finds no swiftc, so every Swift build has to steer back
-# to a real Apple toolchain. Callers source this file, then invoke
-# `kaya_swiftc <args>`.
-#
-# Resolution order (prefer the fullest SDK, since the SwiftUI dylib build
-# needs frameworks CommandLineTools may not carry):
-#   1. a full Xcode.app install (its macosx SDK), or
-#   2. whatever `xcode-select` points at with DEVELOPER_DIR/SDKROOT unset
-#      (typically CommandLineTools), or
-#   3. /usr/bin/swiftc + the CommandLineTools SDK explicitly.
-# Sets SWIFTC, SWIFT_SDK_ARGS (array), and SWIFT_DEVELOPER_DIR; memoized.
+# where `xcrun` finds no swiftc, so every Swift build steers back to a
+# real Apple toolchain: source this, then invoke `kaya_swiftc <args>`.
+# Resolution prefers the fullest SDK (the SwiftUI dylib build needs
+# frameworks CommandLineTools may not carry). Sets SWIFTC, SWIFT_SDK_ARGS
+# and SWIFT_DEVELOPER_DIR; memoized.
 
 kaya_resolve_swiftc() {
     [ -n "${SWIFTC:-}" ] && return 0

@@ -1,8 +1,4 @@
-//! `#[derive(KayaGen)]`: the type's own shape is the schema. A struct
-//! derives the one-variant sum (KayaSum + KayaRecord), field tokens and
-//! the typed patch builder; an enum derives the real sum, plus case
-//! tokens, per-variant field tokens and per-variant patch handles
-//! reachable only through a match on the model's current entry.
+//! `#[derive(KayaGen)]`: the type's own shape is the schema.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -84,7 +80,7 @@ fn derive_struct(input: &DeriveInput, fields: &Fields) -> TokenStream {
         }
 
         /// Typed field writes with the key spelled once; each setter
-        /// records one update_field. Recorded writes, never a diff.
+        /// records one update_field.
         #[allow(dead_code)]
         #vis struct #patch<'t, 'c> {
             tx: &'t mut ::kaya::Tx<'c>,
@@ -161,7 +157,6 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
         quote! { #i => #name::#vname { #(#inits),* }, }
     });
 
-    // Per-variant field tokens and the match-refined accessors.
     let mut tokens = Vec::new();
     let mut patches = Vec::new();
     for (i, (vname, fields)) in variants.iter().enumerate() {
@@ -184,8 +179,7 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
             #(#field_tokens)*
 
             /// The match arm as an accessor: `Some` exactly when the
-            /// entry currently holds this constructor, handing back a
-            /// patch refined to its fields.
+            /// entry currently holds this constructor.
             pub fn #accessor<'t, 'c>(
                 tx: &'t mut ::kaya::Tx<'c>,
                 instance: &::kaya::Collection<#name>,
@@ -217,8 +211,7 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
 
         patches.push(quote! {
             /// Field writes refined to one constructor; each setter
-            /// records one update_field carrying the witnessed
-            /// discriminant.
+            /// carries the witnessed discriminant.
             #[allow(dead_code)]
             #vis struct #patch<'t, 'c> {
                 tx: &'t mut ::kaya::Tx<'c>,
@@ -233,8 +226,6 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
         });
     }
 
-    // The template eliminator: a record of arms, one field per
-    // constructor, so the struct literal is the totality check.
     let cases = format_ident!("{name}Cases");
     let cases_out = format_ident!("{name}CasesOut");
     let arm_names: Vec<_> = variants
@@ -270,7 +261,6 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
 
         /// The eliminator as a record of arms: one field per
         /// constructor, held total by the struct literal itself.
-        /// `|_| {}` is the explicit empty arm.
         #[allow(dead_code)]
         #vis struct #cases<#(#arm_fn_params),*> {
             #(pub #arm_names: #arm_fn_params),*

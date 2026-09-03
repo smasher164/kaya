@@ -1,8 +1,5 @@
-(* The encode benchmark: pins "derives target the encoder, not a value
-   tree" (DESIGN.md, milestone 3) as a suite leg. Encodes N
-   collection_insert records through the generated wire encoder and
-   requires a floor rate with ~10x headroom — only a structural
-   regression (per-record reflection, tree building) can trip it. *)
+(* The encode benchmark: "derives target the encoder, not a value tree"
+   (DESIGN.md, milestone 3) as a suite leg. *)
 
 open Kaya_wire
 

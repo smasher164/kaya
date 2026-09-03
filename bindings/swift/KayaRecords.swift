@@ -1,14 +1,11 @@
 // Records: the struct is the schema. Mirror walks a prototype once at
-// declaration — stored properties of wire types (String, Bool, Int64,
-// Double, Data for blobs) in declaration order — and anything else is
-// guest-only. Mirror cannot CONSTRUCT, so init(values:) is the one
-// hand-written member.
+// declaration — stored properties of wire types in declaration order —
+// and cannot CONSTRUCT, so init(values:) is the one hand-written member.
 
 import Foundation
 
-/// The generator's marker: conform a struct or enum to KayaGen and
-/// kaya-swift-gen reads the declaration — the shape decides record or
-/// sum — and emits the runtime conformance in a generated extension.
+/// The generator's marker: kaya-swift-gen reads the declaration — the
+/// shape decides record or sum — and emits the runtime conformance.
 protocol KayaGen {}
 
 /// A collection element type. Conform with a prototype (any instance — Mirror
@@ -81,11 +78,10 @@ extension KayaRecord {
         }
     }
 
-    /// The field token for the field a key path selects:
-    /// Todo.field(\.done). Resolution writes a sentinel through the key
-    /// path on a probe copy and diffs the wire values — CACHED, because
-    /// handlers resolve per event and the Mirror walks must not re-run
-    /// there.
+    /// The field token for the field a key path selects. Resolution
+    /// writes a sentinel through the key path on a probe copy and diffs
+    /// the wire values — CACHED, because handlers resolve per event and
+    /// the Mirror walks must not re-run there.
     static func field<V>(_ keyPath: WritableKeyPath<Self, V>) -> KayaField<V> {
         if let cached = kayaFieldIndexes[keyPath] {
             return KayaField<V>(index: cached)
@@ -262,9 +258,9 @@ extension KayaAppTx {
     /// Declare a collection of T records; the struct is the schema.
     func collection<T: KayaRecord>(of _: T.Type) -> KayaRecordCollection<T> {
         let c = collectionWithSchema(T.kayaSchema)
-        // HOW AN UNDO REBUILDS THIS COLLECTION'S MODEL ENTRIES: an
-        // undo's payload carries wire fields, and this declaration is
-        // the ONLY place T is known.
+        // How an undo rebuilds this collection's model entries: its
+        // payload carries wire fields, and this declaration is the ONLY
+        // place T is known.
         app.registerDecoder(c.id) { _, values in T(values: values) }
         return KayaRecordCollection(collection: c)
     }

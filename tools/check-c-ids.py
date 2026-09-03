@@ -8,35 +8,23 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES (DESIGN.md, Binding
-# conventions), FOR THE ONE TIER WITH NO ALLOCATOR. Every binding mints
-# both from one monotone counter; the C guests hand-author their
-# numbers, and crates/kaya/src/scene.rs deliberately keeps `widgets`
-# and `template_nodes` as separate maps — so a C guest that re-collides
-# the two spaces trips nothing at the core, renders correctly, and
-# ships. All eight overlapped until 2026-08-25 (docs/deferred.md, the
-# C-floor chore). No lane can see it; this census is the only wall.
+# conventions; CLAUDE.md's gate list): scene.rs keeps `widgets` and
+# `template_nodes` as separate maps, so a C guest that re-collides them
+# renders correctly and ships, and no lane can see it.
 #
-# HOW IT PARSES, and what it cannot read:
-#   * Comments and string/char literals are BLANKED first (line breaks
-#     kept, so line numbers stay exact). They carry numbers and even
-#     whole call texts — self-test N4 plants one of each.
-#   * The create calls are then walked IN SOURCE ORDER against a
-#     template-nesting depth: kaya_tx_create_widget's id is a live
-#     widget at depth 0 and a template node inside; kaya_tx_create_for
-#     and kaya_tx_create_when take their id at the CURRENT depth and
-#     then OPEN a template; kaya_tx_template_end closes one. That is
-#     scene.rs's own division of the two maps.
+# THE PARSER'S CONTRACT:
+#   * comments and string/char literals are BLANKED first, line breaks
+#     kept (self-test N4 plants a number and a call text in each);
+#   * create calls are walked IN SOURCE ORDER against a template-nesting
+#     depth — create_widget's id is a widget at depth 0 and a template
+#     node inside; create_for and create_when take their id at the
+#     CURRENT depth and then OPEN a template; template_end closes one;
 #   * NOT the `W_`/`N_` prefixes: feed.c's N_POSTS and reorder.c's
-#     N_ITEMS are row COUNTS whose numbers collide with real widget ids
-#     in their own files, so a name-keyed census would refuse both
-#     guests today.
-#   * An id argument must fold to a number — a decimal/hex literal, a
-#     #define, or #defines in + - * arithmetic. One that does not is a
-#     FINDING naming the site, never a skip: an id this gate cannot
-#     read is an id it cannot hold in a space.
-#   * Preprocessor conditionals are not evaluated. A template opened on
-#     one #if branch and closed on the other reads as unbalanced, which
-#     is also a finding.
+#     N_ITEMS are row COUNTS that collide with real widget ids;
+#   * an id must fold to a number (literal, #define, or #defines in
+#     + - * arithmetic); one that does not is a FINDING, never a skip;
+#   * preprocessor conditionals are not evaluated, so a template opened
+#     on one #if branch and closed on the other reads as unbalanced.
 # Signals, collections, menu items, windows, alerts and dialogs keep
 # their own id spaces and are not read here.
 

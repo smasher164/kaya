@@ -1,11 +1,8 @@
 //! kaya-bindgen: emit each language's vocabulary file from the protocol
-//! spec (kaya::spec::SPEC). Constants, record packers and the occurrence
-//! parser only — the runtime layer and the idiomatic surface are
-//! hand-written per language beside the generated file.
+//! spec (kaya::spec::SPEC).
 //!
-//! Usage: kaya-bindgen <repo-root> [--check]
-//! --check regenerates into memory and fails if the checked-in files
-//! are out of date, touching nothing.
+//! Usage: kaya-bindgen <repo-root> [--check]; --check regenerates into
+//! memory and fails if the checked-in files are stale, touching nothing.
 
 use std::fmt::Write as _;
 
@@ -26,9 +23,7 @@ fn main() {
     let root = args.next().expect("usage: kaya-bindgen <repo-root> [--check]");
     let check = args.next().as_deref() == Some("--check");
 
-    // Spec-derived identifiers must not collide with an emitter's own
-    // helpers or a target language's keywords. csharp is absent: its
-    // emitter escapes keywords with @, so a collision there is handled.
+    // csharp is absent: its emitter escapes keywords with @.
     validate_identifiers(&SPEC, "python", python::RESERVED);
     validate_identifiers(&SPEC, "c", c::RESERVED);
     validate_identifiers(&SPEC, "go", go::RESERVED);
@@ -101,25 +96,21 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
     }
 }
 
-/// The property enum's variants: every emitter derives its per-prop
-/// helper trio (set/bind/bind-element) from this.
+/// The property enum's variants.
 pub(crate) use kaya::spec::PropKind;
 
-/// The protocol fingerprint, baked into every generated file; runtimes
-/// assert the loaded core's kaya_spec_hash() agrees before any bytes flow.
+/// The protocol fingerprint, baked into every generated file.
 pub(crate) fn spec_hash() -> u64 {
     kaya::spec::hash()
 }
 
-/// Properties with their value kinds, driving typed setter generation:
-/// set_text takes a string, set_checked a bool, in every language.
+/// Properties with their value kinds, driving typed setter generation.
 pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::PROPS
 }
 
 /// Window properties, driving the typed window setters. Element sources
-/// are rejected by the wire, so the emitters write const + signal duos,
-/// never trios.
+/// are rejected by the wire, so emitters write const + signal duos.
 pub(crate) fn window_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
@@ -127,16 +118,14 @@ pub(crate) fn window_prop_variants(
 }
 
 /// Navigation-entry properties, their own table rather than WINDOW_PROPS
-/// with applicability checks (DESIGN.md, Navigation). Const + signal
-/// duos like windows.
+/// with applicability checks (DESIGN.md, Navigation).
 pub(crate) fn entry_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::ENTRY_PROPS
 }
 
-/// Section properties (DESIGN.md, Sections). Const + signal duos; icon
-/// rides the blob channel like the image source.
+/// Section properties (DESIGN.md, Sections).
 pub(crate) fn section_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
@@ -144,18 +133,15 @@ pub(crate) fn section_prop_variants(
 }
 
 /// Menu-item properties (DESIGN.md, Menus). NOT plain duos: only the
-/// menu_prop_bindable ones get a signal binder, and the wire rejects
-/// SOURCE_SIGNAL on the rest at the root. The shortcut const setter is
-/// the one place the generated canonicalizer is invoked.
+/// menu_prop_bindable ones get a signal binder.
 pub(crate) fn menu_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::MENU_PROPS
 }
 
-/// Which menu props accept SOURCE_SIGNAL. Mirrors scene.rs's
-/// is_bindable_menu_prop; the match is exhaustive over today's table, so
-/// a NEW menu prop fails generation until it is declared here.
+/// Which menu props accept SOURCE_SIGNAL, in lockstep with scene.rs's
+/// is_bindable_menu_prop.
 pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
     match prop {
         "label" | "enabled" | "checked" | "value" => true,
@@ -168,10 +154,8 @@ pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
 }
 
 /// The shortcut spelling floor every generated canonicalizer transcribes
-/// (DESIGN.md, Menus). f1..f12 are expanded so every binding does flat
-/// membership. `escape` is deliberately IN the set: the binding tier
-/// canonicalizes it and the CORE rejects it. This tier owns SPELLING
-/// only; policy lives at the core.
+/// (DESIGN.md, Menus). This tier owns SPELLING only; `escape` is
+/// deliberately IN the set and the CORE rejects it.
 // The modifier list is baked into every emitter's control flow, so it is
 // test-only from rustc's point of view — hence the cfg_attr.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -179,19 +163,13 @@ pub(crate) const SHORTCUT_MODIFIERS: &[&str] = &["primary", "shift", "alt"];
 pub(crate) const SHORTCUT_NAMED_KEYS: &[&str] = &[
     "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5",
     "f6", "f7", "f8", "f9", "f10", "f11", "f12",
-    // Named rather than spelled with the character, to keep the wire
-    // spelling clear of what the step grammar and menu paths use. Each
-    // names the UNSHIFTED US position, so Command-plus is asked for as
-    // primary+shift+equal and no `plus` key exists.
+    // Each names the UNSHIFTED US position, so there is no `plus` key
+    // (DESIGN.md, Menus).
     "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket",
 ];
 
-/// The normative canonicalizer every emitter transcribes, kept here so
-/// the algorithm has ONE statement and the test table below is the
-/// shared vector set. Accepts ASCII case variants and any modifier order
-/// before the final key; emits lowercase `primary`,`shift`,`alt`,key.
-/// Rejects whitespace, empty tokens, repeated modifiers, aliases, and
-/// unknown or multiple or missing keys. It does NOT reject escape,
+/// The normative canonicalizer every emitter transcribes, and the test
+/// table below is the shared vector set. It does NOT reject escape,
 /// shift-only or bare alphanumerics, or the reserved floor: that is root
 /// policy, validated by the core on the canonical form.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -246,16 +224,14 @@ pub(crate) fn canonicalize_shortcut_reference(spelling: &str) -> Result<String, 
     Ok(out)
 }
 
-/// Occurrence records, split by whether they carry a trailing payload
-/// value after the key path — a spec fact (Record::payload).
+/// Occurrence records, split by Record::payload.
 pub(crate) fn occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence.iter().map(|r| r.name).collect()
 }
 
 /// Surface-lifecycle occurrences: records whose whole body is one u64
-/// surface id. DERIVED from the record shapes, so a new id-only
-/// occurrence reaches all 8 parsers with zero emitter edits; a
-/// hand-copied list left them parsing it as click-shaped.
+/// surface id. DERIVED, never listed by hand — a hand list leaves the 8
+/// parsers reading a new one as click-shaped.
 pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -269,8 +245,8 @@ pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
 }
 
 /// Surface-pair occurrences: records whose whole body is two u64 surface
-/// ids. Derived like id_only. Parsers yield the SECOND id as the handler
-/// key (handlers scope to the section) and the first as the payload.
+/// ids. Parsers yield the SECOND id as the handler key (handlers scope
+/// to the section) and the first as the payload.
 pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -287,9 +263,8 @@ pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
 
 /// Occurrences carrying ONE REPRESENTATION: records whose last three
 /// fields are `clip` (u32), a reserved u32, and a `value` Values block.
-/// DERIVED, on the id_only stance: a third one added by hand-copied
-/// lists would meet seven decoders that silently take its clip kind for
-/// a key-path length.
+/// DERIVED — a hand list leaves seven decoders taking a new one's clip
+/// kind for a key-path length.
 fn representation_shaped(rec: &Record) -> bool {
     let n = rec.fields.len();
     n >= 3
@@ -300,9 +275,7 @@ fn representation_shaped(rec: &Record) -> bool {
         && matches!(rec.fields[n - 1].ty, kaya::spec::FieldTy::Values)
 }
 
-/// The representation-carrying occurrences that are CLICK-SHAPED: an
-/// identity tag (id + path_len + reserved, then the key path) with the
-/// clip after it.
+/// The representation-carrying occurrences that are CLICK-SHAPED.
 pub(crate) fn pasted_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -334,10 +307,8 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
 
 /// Occurrences whose THIRD field — the u32 at offset 20, where the
 /// click-tag family writes `reserved` — is a NAMED value the handler
-/// needs (today: sort_requested's `column`). The generic tag
-/// fallthrough reads {u64 id, u32 path_len} and skips that slot, so
-/// every parser needs one extra read for these, DERIVED from the field
-/// name rather than listed by hand.
+/// needs. The generic tag fallthrough skips that slot, so every parser
+/// needs one extra read for these.
 pub(crate) fn u32_slot_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -352,11 +323,9 @@ pub(crate) fn u32_slot_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str
 }
 
 /// THE CANVAS ASKS: a click identity tag followed by a run of BARE f64
-/// values — draw_requested's `size`, tick's `frame` (docs/canvas-plan.md
-/// §3.2.1). `wire::draw_body` writes those values one after another with
-/// no count in front of them, so a reader takes values UNTIL THE RECORD
-/// ENDS; that is what lets one arm serve both arities (2 for a redraw, 3
-/// for a tick) without the spec carrying a length it does not have.
+/// values (docs/canvas-plan.md §3.2.1). `wire::draw_body` writes them
+/// with no count in front, so a reader takes values UNTIL THE RECORD
+/// ENDS and one arm serves both arities.
 pub(crate) fn values_tail_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -374,11 +343,9 @@ pub(crate) fn values_tail_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static 
 
 /// Occurrences carrying an UNDO DELTA: a window, four u32 run lengths,
 /// the group's `label`, and one flat `delta` Values tail the runs cut up
-/// (docs/undo-plan.md D5, and `wire::undo_body`).
-///
-/// DERIVED, and it has to be: the generic tail every parser falls
-/// through to reads {u64 id, u32 path_len} and would take `window` for a
-/// widget and the SIGNAL COUNT for a key-path length.
+/// (docs/undo-plan.md D5, and `wire::undo_body`). DERIVED, and it has to
+/// be: the generic tail would take `window` for a widget and the SIGNAL
+/// COUNT for a key-path length.
 pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -395,9 +362,8 @@ pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
 }
 
 /// Click-shaped occurrences without a payload: {u64 id, u32 path_len,
-/// u32 reserved}, then the key path. The 7 generic parsers fall through
-/// to the click path via occurrence_names, but the C floor emits one
-/// named parser per record, so this list is DERIVED too.
+/// u32 reserved}, then the key path. Needed because the C floor emits
+/// one named parser per record.
 pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -406,10 +372,9 @@ pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static
                 && r.fields.len() == 3
                 && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
                 && r.fields[1].name == "path_len"
-                // The third slot must be PADDING: a record carrying a
-                // real value there (sort_requested's column) is the
-                // u32-slot family, and a click-shaped parse would drop
-                // the value silently.
+                // The third slot must be PADDING: a record with a real
+                // value there is the u32-slot family, and a click-shaped
+                // parse would drop it silently.
                 && r.fields[2].name == "reserved"
         })
         .map(|r| r.name)
@@ -417,15 +382,11 @@ pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static
 }
 
 /// The only tx field a guest never passes: `reserved` is padding and
-/// always encodes 0. Everything else is a parameter.
+/// always encodes 0.
 ///
-/// ONE PREDICATE FOR THE SIGNATURE AND THE BODY. record_params below
-/// builds the signature from it and all 8 emit_packer()s take their
-/// write-a-zero arm from it, so a field dropped from a signature can
-/// never still be emitted by name. It could: this filter also held
-/// `tag_len` and `path_len`, which no tx record had, and the day TX 45
-/// set_column_headers grew `path_len` every one of the 8 bindings
-/// emitted a reference to an identifier it had just refused to declare.
+/// ONE PREDICATE FOR THE SIGNATURE AND THE BODY — record_params and all
+/// 8 emit_packer()s read it, so a field dropped from a signature can
+/// never still be emitted by name.
 pub(crate) fn is_padding(f: &Field) -> bool {
     f.name == "reserved"
 }
@@ -438,8 +399,7 @@ pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
 mod tests {
     use super::*;
 
-    /// The shared vector table for the shortcut canonicalizer: every
-    /// per-language negative check draws its cases from here. `escape`,
+    /// The shared vector table for the shortcut canonicalizer. `escape`,
     /// shift-only/bare alphanumerics and the reserved floor are ACCEPTED
     /// on purpose — they canonicalize fine and die at the core.
     #[test]
@@ -514,7 +474,6 @@ mod tests {
         }
     }
 
-    /// The bindability split covers exactly the spec's menu-prop table.
     /// Walking the whole table triggers menu_prop_bindable's panic for an
     /// undeclared prop in CI rather than at someone's regeneration.
     #[test]

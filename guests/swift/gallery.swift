@@ -1,11 +1,9 @@
-// The gallery scene from Swift: a checkbox and a slider, each owning its
-// state and reporting every change — the entry's uncontrolled contract,
-// with a Bool and a Double.
+// The gallery scene, Swift port — guests/rust/gallery.rs,
+// tools/scenes/gallery.steps.
 
 import Foundation
 
-/// A 2x2 RGB PNG, 75 bytes. Scenes carry their inputs as source; no
-/// runtime file I/O.
+/// A 2x2 RGB PNG, 75 bytes, embedded as source.
 let testPNG = Data([
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2,
     0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115, 0, 0, 0, 18, 73, 68, 65,
@@ -33,8 +31,7 @@ app.build { tx in
                 t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
             }
             tx.label(bind: volume)
-            // The programmatic write: fans out to the control and
-            // must NOT come back as a volume occurrence.
+            // A programmatic write must NOT come back as an occurrence.
             tx.button("quarter") { t in
                 t.write(pos, .f64(0.25))
             }

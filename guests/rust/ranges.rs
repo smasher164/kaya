@@ -1,15 +1,8 @@
-//! The text-ranges conformance scene: HIGHLIGHT a set of ranges, SELECT
-//! one, REVEAL one (docs/ranges-plan.md). The byte-frozen contract is
-//! tools/scenes/ranges.steps.
-//!
-//! THE OFFSETS ARE UTF-8 BYTE OFFSETS, which is what
-//! `tx.highlight_ranges` takes. The document's CJK first line is what
-//! makes that testable: every match sits six bytes further along than
-//! it does in UTF-16, the unit four of the five backends count.
+//! The text-ranges scene (tools/scenes/ranges.steps). THE OFFSETS ARE UTF-8
+//! BYTE OFFSETS; the CJK first line is what makes a UTF-16 reader fail.
 
-/// The document, frozen. Three occurrences of `alpha` and nothing else
-/// containing that substring; forty short lines, so the last match is
-/// far below a 240x96 viewport and REVEAL has something to do.
+/// Frozen: three occurrences of `alpha`, and the last match must sit far
+/// below the viewport.
 const DOC: &str = "line 00: 日本語 preface
 line 01: gamma kappa
 line 02: alpha beta gamma
@@ -53,8 +46,7 @@ line 39: the last line";
 
 const NEEDLE: &str = "alpha";
 
-/// The whole search: literal, forward, non-overlapping. kaya ships no
-/// find engine — what to decorate is the app's question.
+/// kaya ships no find engine: what to decorate is the app's question.
 fn find_all(doc: &str, needle: &str) -> Vec<std::ops::Range<usize>> {
     doc.match_indices(needle)
         .map(|(at, hit)| at..at + hit.len())
@@ -77,9 +69,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("0 matches");
         let (root, editor) = tx
             .column(|tx| {
-                // The a11y id is not decoration: every range assertion
-                // reads the platform's tree, and the id is how a leg
-                // finds this control there.
+                // Every range assertion finds this control by its id.
                 let editor = tx.textarea().a11y_id("doc").a11y_label("Document").id();
                 tx.set_text(editor, DOC);
                 msgs.on_change(editor, Msg::Edited);
@@ -101,16 +91,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (status, editor)
     });
 
-    // The app's own copy, the ONLY authority on what the offsets mean.
+    // The ONLY authority on what the offsets mean.
     let mut doc = DOC.to_string();
 
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Edited(text) => {
                 doc = text;
-                // kaya has ALREADY dropped the decorations: a declared
-                // set is bound to the text it was declared against (D2),
-                // so the app must search again before claiming anything.
+                // kaya has ALREADY dropped the decorations on this edit.
                 ctx.apply(|tx| {
                     tx.write(status, "0 matches");
                 });
@@ -120,8 +108,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let count = hits.len();
                 ctx.apply(|tx| {
                     tx.highlight_ranges(editor, hits.clone());
-                    // The second match, so a leg can tell the selection
-                    // apart from "the first thing found".
+                    // The SECOND match, so a leg can tell it from the first.
                     if let Some(one) = hits.get(1) {
                         tx.select_range(editor, one.clone());
                     }

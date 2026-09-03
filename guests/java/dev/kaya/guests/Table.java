@@ -8,19 +8,13 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * The table scene from the JVM: column headers and click-to-sort on
- * the For vocabulary (docs/tables-plan.md). A header click is a
- * REQUEST — this guest reorders its collection BY KEY (the reorder
- * scene's idiom) and re-declares the header with the new indicator;
- * the platform sorts nothing. The byte-frozen contract is
- * tools/scenes/table.steps.
+ * The table scene from the JVM — guests/rust/table.rs, tools/scenes/table.steps.
  */
 public final class Table {
     @KayaGen(key = "String")
     record TableItem(String name, String size) {}
 
-    // The guest's sort policy — the platform never has one: clicking
-    // the sorted column flips it, clicking another starts ascending.
+    // The guest's sort policy; the platform never has one.
     private static long sortedCol = -1;
     private static boolean sortedDesc;
 
@@ -29,10 +23,8 @@ public final class Table {
 
         app.build(tx -> {
             var items = TableItemKaya.collection(tx);
-            // The root is a row so the For's container is the scene's
-            // only column-kind widget (the reorder scene's rule). The
-            // table IS the For, headers declared on the rows value that
-            // opened it.
+            // The root is a row so the For's container is the scene's only
+            // column-kind widget (the reorder scene's rule).
             tx.mount(tx.row(() -> {
                 var rows = TableItemKaya.rows(tx, items);
                 for (var row : rows) {
@@ -42,10 +34,8 @@ public final class Table {
                     });
                 }
                 var table = rows.handle;
-                // Grown on purpose: this scene asserts the
-                // fill-and-scroll viewport, the grown half of the
-                // empty-row ruling — ungrown would hug its rows
-                // (tables-plan decision 8).
+                // Grown on purpose: ungrown would hug its rows
+                // (docs/tables-plan.md decision 8).
                 tx.setGrow(table, 1);
                 rows.columns(new String[] { "Name", "Size" }, KayaApp.Sort.none());
                 app.onSort(table, (t, column) -> {
@@ -60,8 +50,7 @@ public final class Table {
                         by = by.reversed();
                     }
                     entries.sort(by);
-                    // Keys, never indices: moving each key to the end
-                    // in the target order leaves the collection sorted.
+                    // Keys, never indices.
                     for (var e : entries) {
                         items.moveToEnd(t, e.key);
                     }

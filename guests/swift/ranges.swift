@@ -1,20 +1,10 @@
-// The text-ranges conformance scene from Swift: the three primitives an
-// editor cannot write for itself — HIGHLIGHT a set of ranges, SELECT
-// one, REVEAL one. See guests/rust/ranges.rs and
+// The ranges scene, Swift port — guests/rust/ranges.rs,
 // tools/scenes/ranges.steps.
-//
-// Hand kaya the `Range<String.Index>` and let kayaByteRange convert it
-// (bindings/swift/KayaApp.swift). Converting by hand is six bytes wrong
-// on this document, silently — docs/traps.md, "Swift's String is
-// indexed by neither bytes nor integers".
 
 import Foundation
 
-/// Frozen: the same bytes as every other language's guest, because the
-/// script's offsets are byte offsets into it. The CJK word in line 00
-/// is what makes bytes and UTF-16 disagree (813 vs 807), and the forty
-/// short lines put the last `alpha` below a 240x96 viewport so REVEAL
-/// has something to do.
+/// Frozen: the same bytes as every other language's guest. The CJK word in
+/// line 00 is what makes bytes and UTF-16 disagree (813 vs 807).
 let doc0 = """
     line 00: 日本語 preface
     line 01: gamma kappa
@@ -60,10 +50,8 @@ let doc0 = """
 
 let needle = "alpha"
 
-/// THE WHOLE SEARCH: literal, forward, non-overlapping. `.literal` is
-/// not decoration — without it Foundation compares by canonical
-/// equivalence, so the search's notion of a match would differ from the
-/// document's bytes.
+/// `.literal` is not decoration: without it Foundation compares by canonical
+/// equivalence, so a match would differ from the document's bytes.
 func findAll(_ text: String, _ needle: String) -> [Range<String.Index>] {
     var hits: [Range<String.Index>] = []
     var from = text.startIndex
@@ -76,30 +64,24 @@ func findAll(_ text: String, _ needle: String) -> [Range<String.Index>] {
 
 let app = KayaApp()
 
-// The app's own copy, the ONLY authority on what the offsets mean. A
-// `String.Index` is meaningful only against the string it came from,
-// which is why every range call below names this one.
+// A `String.Index` is meaningful only against the string it came from.
 var doc = doc0
 
 app.build { tx in
     tx.window(title: "ranges")
     let status = tx.signal(.str("0 matches"))
 
-    // The handle the four buttons need. A widget parents at CREATION
-    // (docs/traps.md, result builders), so the editor rides out of the
-    // column body through this var.
+    // A widget parents at CREATION, so the editor rides out through this var
+    // (docs/traps.md, result builders).
     var editor: KayaWidget! = nil
 
     let root = tx.column {
         editor = tx.textarea { t, text in
             doc = text
-            // THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO: kaya has
-            // already dropped the decorations, a declared set being bound
-            // to the text it was declared against (D2).
+            // A declared set is bound to the text it was declared against (D2).
             t.write(status, .str("0 matches"))
         }
-        // The a11y id is load-bearing: every range assertion reads the
-        // platform's accessibility tree and finds this control by id.
+        // Every range assertion finds this control by its authored id.
         tx.setText(editor, doc0)
         tx.setA11yId(editor, "doc")
         tx.setA11yLabel(editor, "Document")

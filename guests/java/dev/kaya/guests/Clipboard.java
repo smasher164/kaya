@@ -11,26 +11,14 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * The clipboard conformance scene from the JVM — one clip in several
- * representations, and the privileged read that takes one back
- * (DESIGN.md, Clipboard; docs/clipboard-plan.md). Canonical semantics
- * in guests/rust/clipboard.rs; the byte-frozen contract in
+ * The clipboard scene from the JVM — guests/rust/clipboard.rs,
  * tools/scenes/clipboard.steps.
- *
- * <p>EVERY ASSERTION CROSSES A PROCESS BOUNDARY: a check where kaya
- * reads what kaya wrote parses its own malformed header happily. The
- * custom format is the one exception.
- *
- * <p>THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every
- * host re-encodes freely.
  */
 public final class Clipboard {
     private Clipboard() {}
 
-        /**
-         * A 4x4 PNG, spelled out rather than generated: a foreign decoder
-         * asserts its size, so it has to be a real encoded image.
-         */
+    /** A 4x4 PNG: a foreign decoder asserts its size, so this must stay
+     * a valid encoded image. */
     private static final byte[] PIXEL_PNG = {
         (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
         0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -44,33 +32,25 @@ public final class Clipboard {
         0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82, // IEND + crc
 };
 
-        /**
-         * The app-defined format's id: reverse-DNS and SPACE-FREE, because
-         * it reaches every platform's own registry verbatim.
-         */
+    /** Reverse-DNS and SPACE-FREE: this id reaches every platform's own
+     * registry verbatim. */
     private static final String NOTE_ID = "dev.kaya/note";
 
-        /**
-         * NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r
-         * and \\ in all three interpreters, with no \".
-         */
+    /** NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r
+     * and \\ in all three interpreters, with no \". */
     private static final byte[] NOTE_BYTES = "note=1".getBytes(StandardCharsets.UTF_8);
 
     public static void app() {
         KayaApp app = new KayaApp();
 
-        // TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
-        // Java's java.io.tmpdir ignores TMPDIR on macOS
-        // (docs/traps.md, "java.io.tmpdir").
+        // TMPDIR FIRST: java.io.tmpdir ignores it on macOS (docs/traps.md,
+        // "java.io.tmpdir").
         String tmp = System.getenv("TMPDIR");
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
-        // THE PHONES USE THE SHARED COLLECTION, and must: the outside
-        // reader is another app, which cannot see this one's cache.
-        // The interpreter expands $TMP the same way, so a guest writing
-        // to the cache dir instead kills the seed. A JVM guest has no
-        // cfg(), so Android is detected by the vendor string.
+        // THE PHONES USE THE SHARED COLLECTION: the outside reader is another
+        // app. No cfg() in a JVM guest, so Android is the vendor string.
         if (System.getProperty("java.specification.vendor", "")
                 .contains("Android")) {
             String ext = System.getenv("EXTERNAL_STORAGE");
@@ -101,9 +81,6 @@ public final class Clipboard {
             tx.mount(tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("copy", inner -> { // button#0
-                    // ONE CLIP, FOUR REPRESENTATIONS: kaya derives none
-                    // of them from any other, and the wire order is
-                    // kaya's rather than this chain's.
                     inner.copy()
                             .text("kaya clip")
                             .html("<b>kaya</b> clip")
@@ -144,12 +121,8 @@ public final class Clipboard {
 
                 fields[1] = tx.entry().a11yId("plain"); // entry#1
 
-                // The same two doors on a STAMPED copy. The accept list
-                // must be declared on the TEMPLATE: every backend hands
-                // the gesture to the platform when the focused widget's
-                // accept list is empty, so a node hook without it is
-                // registered, dispatched and unable to fire
-                // (docs/tpl-props-plan.md §1).
+                // The accept list must be declared on the TEMPLATE, or the node
+                // hook can never fire (docs/tpl-props-plan.md §1).
                 tx.label(rowStatus).a11yId("row-status"); // label#1
                 for (var row : tx.rows(notes)) {
                     KayaApp.Node note = row.entry(); // entry#2, one stamped copy
@@ -164,8 +137,7 @@ public final class Clipboard {
                     });
                 }
             }));
-            // Seeded after the mount: the copy stamps from a template
-            // that is already closed.
+            // Seeded after the mount: the copy stamps from a closed template.
             tx.insert(notes, "r1", "");
         });
 
@@ -177,16 +149,12 @@ public final class Clipboard {
             KayaApp.Signal<String> status,
             KayaApp.Tx tx,
             KayaApp.Representation clip) {
-        // EMPTY IS THE UNIVERSAL NO: denied, unfocused, absent or not
-        // accepted are indistinguishable, and the platforms decline to
-        // say which.
         if (clip == null) {
             tx.write(status, "empty");
             return;
         }
-        // INSTANCEOF PATTERNS RATHER THAN A PATTERN SWITCH: switching
-        // over a sealed interface is a preview feature until JDK 21,
-        // and this file is compiled at 17.
+        // instanceof, not a pattern switch: switching over a sealed interface
+        // is preview until JDK 21 and this compiles at 17.
         if (clip instanceof KayaApp.Representation.Text text) {
             tx.write(status, "text " + text.value());
         } else if (clip instanceof KayaApp.Representation.Html html) {
@@ -195,8 +163,7 @@ public final class Clipboard {
             tx.write(status, "custom " + custom.id() + " "
                     + new String(custom.bytes(), StandardCharsets.UTF_8));
         } else if (clip instanceof KayaApp.Representation.Image image) {
-            // Straight back out, so a foreign DECODER makes the
-            // assertion.
+            // Straight back out, so a foreign DECODER makes the assertion.
             tx.copy().image(image.bytes()).send();
             tx.write(status, "image");
         } else if (clip instanceof KayaApp.Representation.Files files) {
@@ -206,8 +173,7 @@ public final class Clipboard {
             }
             KayaApp.PickedFile file = files.value().get(0);
             Thread worker = new Thread(() -> {
-                // OFF THE APP THREAD: open blocks, and a pasted file is
-                // a picked one arriving through a second door.
+                // OFF THE APP THREAD: open blocks.
                 String text;
                 try {
                     KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_READ);
@@ -220,21 +186,16 @@ public final class Clipboard {
                 String read = text;
                 app.post(t -> t.write(status, "files " + file.name() + " " + read));
             }, "clipboard-reader");
-            // The worker MUST be a daemon: a parked non-daemon thread
-            // keeps the JVM alive, which never shows on a passing run
-            // and turns a FAILING one into a timeout, not a report.
+            // The worker MUST be a daemon: a parked non-daemon thread keeps the
+            // JVM alive and turns a FAILING run into a timeout.
             worker.setDaemon(true);
             worker.start();
             tx.write(status, "reading");
         }
     }
 
-    /**
-     * This process's id, without NAMING {@code ProcessHandle}: the same
-     * file is compiled into the Android APK, whose SDK has no such
-     * class, so naming it is a compile error there. Reached
-     * reflectively; /proc/self answers directly on linux and Android.
-     */
+    /** This process's id, without NAMING {@code ProcessHandle}: the Android
+     * SDK has no such class, so naming it is a compile error there. */
     private static long pid() {
         try {
             return Long.parseLong(

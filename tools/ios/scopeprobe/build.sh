@@ -12,20 +12,14 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 
 # Build, sign, install and launch ScopeProbe on a PAIRED IPHONE.
-# Usage: tools/ios/scopeprobe/build.sh
+# NOT A LANE: it needs hardware and a human, because the simulator does
+# not enforce the app sandbox (docs/traps.md). See main.swift.
 #
-# NOT A LANE: it needs hardware and a human. It exists because the
-# simulator does not enforce the app sandbox (docs/traps.md). See
-# main.swift for what it measures.
-#
-# WHAT IT NEEDS:
-#   - full Xcode (devicectl, the iphoneos SDK)
-#   - an Apple ID added to Xcode, so `security find-identity -p
-#     codesigning` is non-empty. It is EMPTY on a fresh machine.
-#   - one provisioning profile Xcode has already downloaded. A free
-#     account mints one only after you build SOME app for the device
-#     from Xcode once.
-#   - the phone plugged in, unlocked, with developer mode enabled.
+# NEEDS: full Xcode; an Apple ID in Xcode so `security find-identity -p
+# codesigning` is non-empty (EMPTY on a fresh machine); one provisioning
+# profile Xcode has already downloaded (a free account mints one only
+# after building some app for the device from Xcode once); and the phone
+# plugged in, unlocked, with developer mode enabled.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -1,13 +1,5 @@
-// The filedialog conformance scene, Go port — the picker's
-// request/result grammar and the capability it hands back (DESIGN.md,
-// File dialogs).
-//
-// THE READ RUNS OFF THE APP THREAD, which is what Open tells every caller
-// to do: it blocks. The worker PARKS between reading and posting, so a
-// guest that read inline is caught by the script and one that did the
-// work on the app thread wedges everything after.
-//
-// See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
+// The filedialog scene (tools/scenes/filedialog.steps). THE READ RUNS OFF
+// THE APP THREAD, because Open blocks, and the worker PARKS before posting.
 package filedialog
 
 import (
@@ -21,16 +13,8 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// sceneRoot is the directory the picker and this guest can BOTH see, and
-// it is not temp everywhere: an Android provider cannot see an app's
-// private storage and iOS's picker cannot see its container, so each
-// phone names the place its own file browser reaches.
-//
-// A GUEST ASKS KAYA FOR PLATFORM LOCATIONS, NEVER GO'S SNAPSHOT: in
-// kaya's Android artifact Go's copy of the environment is empty forever.
-// os.TempDir is legal only as the fallback of a function that branches on
-// runtime.GOOS and asks kaya.Env — tools/check-go-env.py holds exactly
-// that shape, and its header carries the measurement.
+// Not temp everywhere: neither phone's picker sees private storage, and
+// os.TempDir is legal only as this runtime.GOOS switch's fallback.
 func sceneRoot() string {
 	switch runtime.GOOS {
 	case "android":
@@ -48,15 +32,13 @@ func sceneRoot() string {
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// The pid keeps parallel legs from colliding, and the script names the
-	// same place the same way ($TMP/kaya-picked-$PID).
+	// The script names the same place the same way ($TMP/kaya-picked-$PID).
 	dir := filepath.Join(sceneRoot(), "kaya-picked-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
 	}
-	// THE DECOY IS LOAD-BEARING and sorts before "picked": a picker asked to
-	// Open with nothing selected completes with the only file in the
-	// directory (docs/traps.md).
+	// The decoy sorts before "picked": Open with nothing selected completes
+	// with the only file there (docs/traps.md).
 	if err := os.WriteFile(filepath.Join(dir, "picked.txt"), []byte("picked bytes"), 0o644); err != nil {
 		panic("failed to write the file: " + err.Error())
 	}
@@ -64,8 +46,7 @@ func App() *kaya.App {
 		panic("failed to write the decoy: " + err.Error())
 	}
 
-	// The release channel: the app goroutine closes it, the worker waits on
-	// the receive, and close never blocks.
+	// The app goroutine closes it: close never blocks.
 	release := make(chan struct{})
 
 	var status kaya.Signal[string]
@@ -80,8 +61,6 @@ func App() *kaya.App {
 				return
 			}
 			go func() {
-				// THE CLAIM: the handle crossed a goroutine boundary, and it is redeemed
-				// and read with Go's own file API on the goroutine that received it.
 				text := ""
 				f, _, err := files[0].Open(kaya.FileModeRead)
 				if err != nil {
@@ -101,7 +80,6 @@ func App() *kaya.App {
 					tx.Write(status, fmt.Sprintf("%d %s", count, text))
 				})
 			}()
-			// The handler RETURNED without reading.
 			tx.Write(status, "reading")
 		}
 

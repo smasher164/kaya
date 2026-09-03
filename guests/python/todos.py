@@ -1,17 +1,5 @@
-"""The todos scene: records and field projection, end to end. The
-collection's elements are records; the dataclass IS the schema (wire-typed
-fields in declaration order), the template binds each field to its own
-widget, and toggling a row sends one field's delta — `patch(key, done=...)`
-never resends the title. The items-left label is a derived signal
-recomputed from the collection after every mutation.
-
-THE DERIVED LABEL COMES BACK FROM AN UNDO WITH NOBODY RESTORING IT,
-which is why this file registers no `on_undone`: the derive's write
-lands in the add's own batch, so the core banks it in both directions.
-
-Build the library first (cargo build), then:
-    KAYA_SELFTEST=todos python3 guests/python/todos.py
-"""
+"""The todos scene (tools/scenes/todos.steps). IT REGISTERS NO `on_undone`:
+the derive's write rides the add's batch, so the ledger banks it."""
 
 import sys
 from dataclasses import dataclass
@@ -43,17 +31,12 @@ def on_change(text):
 def on_add():
     if not draft:
         return
-    # The ambient tier names the step from INSIDE the handler — the
-    # binding opened this transaction, not the app — and the marker still
-    # leads the batch wherever the call sits in the body.
+    # The marker leads the batch wherever the call sits in the body.
     kaya.undoable(f"add {draft}")
-    # The binding mints the key (docs/fresh-key-plan.md); the toggle
-    # handler below receives that same minted key.
+    # The binding mints the key (docs/fresh-key-plan.md).
     todos.insert_fresh(Todo(title=draft, done=False))
-    # Finishing the form is a SECOND transaction: `clear` inside an
-    # undoable group is refused at apply (docs/undo-plan.md D4), and
-    # undoing the add must not put "buy milk" back beside a todo that is
-    # gone. A handler IS one transaction here, so this one is posted.
+    # A SECOND transaction: `clear` inside an undoable group is refused at
+    # apply, and a handler IS one transaction here.
     app.post(finish_form)
 
 
@@ -65,8 +48,7 @@ def finish_form():
 
 
 def on_toggle(key, checked):
-    # One field's delta: the title never travels; the derived signal
-    # updates itself.
+    # One field's delta: the title never travels.
     todos.patch(key, done=checked)
 
 
@@ -82,8 +64,7 @@ with app.window(title="todos"):
         field = kaya.entry(on_change=on_change)
         kaya.button("Add", on_click=on_add)
         kaya.label(bind=items_left)
-        # The for statement IS the For: the body runs ONCE, authoring the
-        # blueprint; stamping is the core's replay.
+        # The body runs ONCE, authoring the blueprint.
         for todo in todos:
             with kaya.row():
                 kaya.checkbox(checked=todo.done, on_toggle=on_toggle)

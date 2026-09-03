@@ -199,7 +199,7 @@ family reads the main executable, not the loaded image). So today:
 - every other leg's host process is stamped SDK 14.4 / 11.3 → **compatibility generation**
 
 **The mac lane is ALREADY running both design generations, and has been.**
-`tools/validate-mac.py:699-704` says so in `build_swift`'s docstring — "the fleet's
+`tools/validate-mac.py:659-664` says so in `build_swift`'s docstring — "the fleet's
 modern-stamp legs" — and `docs/deferred.md:967-969` says so explicitly ("the
 swift mac guests compile against the system toolchain and exercise the modern
 generation — both covered on purpose"). But no gate asserts it.
@@ -405,7 +405,7 @@ modern generation today):
 | **`editor`** | **`expect_inset row#0 8`** + `expect_order` | **NO — Go only** | **NO** |
 
 `editor` is kaya's forcing artifact and runs on the mac lane as a **single Go
-leg** (`tools/lib/lanes/mac.py:131`, the editor group's one go entry);
+leg** (`tools/lib/lanes/mac.py:125`, the editor group's one go entry);
 its HAND_QUEUED comment notes it is deliberately in neither `SCENES` nor
 `DEPTH_SCENES`. Go is a kaya-built leg, so the bump moves it 14.4 → 26.5, and
 `expect_inset row#0 8` — the tree's only **non-zero** geometry assertion — runs
@@ -459,7 +459,7 @@ both `640x400` and `480x320`. Title-bar height can move freely without touching 
 I checked specifically. **`git ls-files "*.png"` returns 0 tracked files.** There
 are no golden images, no reference screenshots, no pixel-diff assertions. Every
 PNG in the tree is an untracked output under `target-linux/recordings/`. The only
-pixel-reading code is `tools/harness-extract.sh:81-89`'s `dominant()` selftest,
+pixel-reading code is `tools/harness-extract.sh:72-80`'s `dominant()` selftest,
 and it runs against **synthetic ffmpeg solid-color video**
 (`color=red/lime/blue`), never real UI — immune by construction.
 

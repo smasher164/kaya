@@ -1,19 +1,10 @@
-/* The KayaTx cap probe, run by tools/check-c-bounds.py.
- *
- * Built TWICE — against bindings/c/kaya_wire.h as it stands, and against
- * the PRE-CAP header spliced out of git with -DKAYA_TX_PRE_CAP — so the
- * negative is the shipped bug itself rather than a hand-written imitation.
- *
- * THE BUFFER IS WALLED: `walled()` hands back exactly `cap` writable bytes
- * whose NEXT byte is an unmapped page, so a write one byte past cap is a
- * fault and not a heuristic. That is the PRIMARY proof: byte-exact, no
- * runtime, and the linux lane can run it too.
- *
- * The `heap*` modes are the ASan companion's instead — a plain malloc, where
- * the byte after cap is another allocation rather than an unmapped page,
- * which is what a guest's buffer actually is. Only a sanitizer sees that
- * overrun, and only the compiler flake.nix names has one that runs on this
- * host (docs/traps.md). check-c-bounds.py runs them under nothing else. */
+/* The KayaTx cap probe, run by tools/check-c-bounds.py. Built TWICE —
+ * against bindings/c/kaya_wire.h as it stands and against the PRE-CAP
+ * header spliced out of git with -DKAYA_TX_PRE_CAP — so the negative is
+ * the shipped bug itself. `walled()` hands back exactly `cap` writable
+ * bytes with the next byte unmapped, which is the PRIMARY proof; the
+ * `heap*` modes are the ASan companion's, on a plain malloc, and only the
+ * compiler flake.nix names has an ASan that runs here (docs/traps.md). */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -57,10 +48,9 @@ static KayaTx tx_over(uint8_t *buf, size_t cap) {
     return tx;
 }
 
-/* Every packer the encode path has, once: begin/end, u32, u64, pad (the
- * 13-byte string), values (a key path and a field list), variant_schemas,
- * and a value of all five tags. What a guest emits is some sequence of
- * these, so bytes identical here are bytes identical for every guest. */
+/* Every packer the encode path has, once. What a guest emits is some
+ * sequence of these, so bytes identical here are identical for every
+ * guest. */
 static void repertoire(KayaTx *tx) {
     const uint32_t tags[] = {KAYA_VALUE_STR, KAYA_VALUE_BOOL};
     KayaVariantSchema variants[1];
@@ -99,9 +89,8 @@ static void one_big_record(KayaTx *tx) {
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
 
-    /* The whole repertoire into a buffer that fits it, hexdumped. The gate
-     * compares this line across the two headers: a caller who sized right
-     * gets the bytes the pre-cap header wrote, to the byte. */
+    /* The whole repertoire into a buffer that fits it, hexdumped: the
+     * gate compares this line across the two headers. */
     if (strcmp(mode, "bytes") == 0) {
         uint8_t buf[4096];
         KayaTx tx = tx_over(buf, sizeof buf);
@@ -110,9 +99,8 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* THE SAME REPERTOIRE, WALLED at its own exact size. Nothing here
-     * overflows, so this is the clause that would catch a fits() check
-     * that is off by a byte in the SAFE direction. */
+    /* THE SAME REPERTOIRE, WALLED at its own exact size: nothing here
+     * overflows, so this catches a fits() off by a byte the SAFE way. */
     if (strcmp(mode, "exact") == 0) {
         uint8_t sized[4096];
         KayaTx measure = tx_over(sized, sizeof sized);
@@ -139,11 +127,9 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* Three 24-byte records into a walled 24 bytes: the first fits to
-     * the byte and the second runs off the end through the SMALL
-     * packers. Which packer takes the fault is the point — `overflow`
-     * exercises the string arm, this one the u64 and the two u32s, so a
-     * check removed from any of them has a mode that catches it. */
+    /* Three 24-byte records into a walled 24 bytes. Which packer takes
+     * the fault is the point: `overflow` exercises the string arm, this
+     * one the u64 and the two u32s. */
     if (strcmp(mode, "many") == 0) {
         uint8_t *wall = walled(24);
         KayaTx tx = tx_over(wall, 24);
@@ -156,13 +142,10 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* THE COMPANION'S TWO MODES: `overflow` and `many` again, but on a
-     * plain malloc of exactly cap. The bytes past cap belong to the
-     * allocator, so nothing here attributes the pre-cap header's overrun
-     * except a sanitizer: measured 2026-08-27, unsanitized it exits 0 in
-     * silence, and under the dev shell's hardening it dies of a SIGTRAP
-     * printing zero bytes. Run under ASan only (tools/check-c-bounds.py,
-     * companion mode). */
+    /* THE COMPANION'S TWO MODES, on a plain malloc of exactly cap: only
+     * a sanitizer attributes the pre-cap overrun — measured 2026-08-27,
+     * unsanitized it exits 0 in silence and under the dev shell's
+     * hardening it dies of a mute SIGTRAP. ASan only. */
     if (strcmp(mode, "heap") == 0) {
         uint8_t *heap = malloc(64);
         KayaTx tx = tx_over(heap, 64);
@@ -200,9 +183,8 @@ int main(int argc, char **argv) {
     }
 
 #ifndef KAYA_TX_PRE_CAP
-    /* GROW AND RETRY, the reason the refusal is a refusal: build into a
-     * buffer that cannot hold it, grow to the len it reported, build again,
-     * and get the bytes a big-enough buffer would have given. */
+    /* GROW AND RETRY, the reason the refusal is a refusal: grow to the
+     * len it reported and get the bytes a big-enough buffer would give. */
     if (strcmp(mode, "retry") == 0) {
         size_t cap = 64;
         uint8_t *heap = malloc(cap);

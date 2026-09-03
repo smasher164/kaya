@@ -3,35 +3,31 @@
 //! See DESIGN.md at the repository root.
 
 mod app;
-// Asset resolution: docs/assets-plan.md. Ungated on purpose — capi
-// compiles on all five targets and every one can be handed a name.
+// Asset resolution (docs/assets-plan.md); ungated — every target can be
+// handed a name.
 mod assets;
 mod brand;
-// The canvas raster (docs/canvas-plan.md). Ungated for assets' reason:
-// the core draws once and every platform blits, so every target compiles
-// the rasterizer.
+// The canvas raster (docs/canvas-plan.md); ungated — the core draws once
+// and every platform blits.
 mod canvas;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
-// THAT ABORTS THE PROCESS IS THE WRONG SHAPE"). Ungated for the reason
-// assets is: every target has frames that cannot unwind.
+// THAT ABORTS THE PROCESS IS THE WRONG SHAPE"); ungated — every target
+// has frames that cannot unwind.
 mod fault;
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod harness;
 mod protocol;
 mod ring;
-// The row-windowing band machine (docs/virtualization-plan.md §1-§2);
-// scene.rs owns the sites it keys on.
+// The row-windowing band machine (docs/virtualization-plan.md §1-§2).
 mod rowwindow;
 mod scene;
-// Not harness-gated: a shipped app is where an unreported stall costs
-// the most (DESIGN.md, Threading model and protocol).
+// Not harness-gated (DESIGN.md, Threading model and protocol).
 mod stall;
 /// The protocol as data — the root document tools/kaya-bindgen walks.
 pub mod spec;
-// The harness's verb trace, gated exactly like harness: it is that
-// module's alone, and a scripted-verb instrument is not something a
-// shipped app carries.
+// Gated exactly like harness: a scripted-verb instrument is not something
+// a shipped app carries.
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod vtrace;
@@ -108,8 +104,7 @@ pub(crate) use winui as backend;
 #[cfg(target_os = "linux")]
 pub(crate) use gtk as backend;
 // The SwiftUI and Compose pumps block in kaya_next_commands on the
-// presentation channel itself, so a sent transaction IS the wakeup and
-// the doorbell has nothing to ring.
+// presentation channel, so a sent transaction IS the wakeup.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
 pub(crate) mod backend {
     pub(crate) fn ring_doorbell() {}
@@ -174,14 +169,11 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     }
 }
 
-/// The exit every host-facing path leaves by — the harness's fire
-/// paths and the Node addon's `exit` alike. TerminateProcess on Windows
-/// (loader shutdown under a wedged COM thread held exit itself past the
-/// grace, 2026-08-27) and `_exit` on unix (libc's `exit` runs the HOST's
-/// static destructors, and a Node host's are V8's teardown under a
-/// worker still executing the app — verdict printed, then SIGSEGV on
-/// the way out, 2026-09-01); both in docs/traps.md. What is flushed is
-/// this crate's own stdio; the verdict is already on it.
+/// The exit every host-facing path leaves by. TerminateProcess on Windows
+/// and `_exit` on unix, never libc's `exit`, which runs the HOST's static
+/// destructors: docs/traps.md, "exit() is not final on Windows" and "A Node
+/// host's exit tears the worker down under a native thread still inside
+/// Node-API". What is flushed is this crate's own stdio.
 pub(crate) fn exit_hard(code: i32) -> ! {
     use std::io::Write;
     let _ = std::io::stderr().flush();

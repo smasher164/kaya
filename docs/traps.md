@@ -6916,3 +6916,1004 @@ escaped, composed and interpreter-prefixed shapes by hand BEFORE the
 matrix — `git grep -nE 'name\\\.ext'`, `'\{[^}]*\}\.ext'`,
 `'(bash|sh) +[^ ]*name'` — because the lanes that reach a composed name
 are the ones that take longest to tell you.
+## Mutating a RichEdit document through its `ITextSelection` kills the process at teardown (measured 2026-08-06)
+
+An `ITextSelection` obtained from `TextDocument().Selection()` is fine to READ
+(positions, story length) and fine to MOVE (`SetRange`), and the harness's `type`
+verb does both on every run. But MUTATING THE DOCUMENT THROUGH IT —
+`Selection().SetText(..)` after a real Ctrl+V — produced the correct text and
+then killed the process at teardown with an access violation (0xC0000005),
+reproducibly, on every run, found five builds deep into a bisection on the
+Windows VM. The same insertion through `GetRange(start, end)` — the identical
+span, read off that same selection — exits cleanly, as does a whole-document
+`SetText`. Deferring the mutation a dispatcher tick did NOT help, which is how
+the selection object rather than the paste's re-entrancy was identified as the
+cause. The rule: READ the selection, MUTATE a range (`selection_range` in
+crates/kaya/src/winui/mod.rs). The cut and copy arms take the same shape by
+analogy rather than by their own measurement.
+
+## A RichEdit `SetText` with `FormatRtf` parses the guest's string as a document (measured 2026-08-06)
+
+`TextSetOptions::None` is a pin on the textarea's write path. The same call with
+`FormatRtf` PARSES the string as a document: measured on the VM, `{\rtf1 KAYARTF}`
+set with `FormatRtf` reads back as `KAYARTF`, and with `None` reads back whole. A
+guest whose textarea text happened to begin `{\rtf1` would see it rendered on
+windows and stored literally on the other four platforms — invariant 6 broken by
+a wire value nobody typed.
+
+## A logged-and-continued control-resource merge fail-fasts LATER, on a layout tick, with no message (measured 2026-08-05)
+
+WinUI's control resources are merged once at launch, and in an unpackaged process
+the merge can fail (ms-appx resolves against the EXECUTABLE's directory, so a host
+without resources.pri beside it gets nothing — docs/traps.md, "WinUI resource
+resolution is anchored to the PROCESS exe's directory"). Logging that and
+continuing does not keep the process alive: it walks into a bare
+`RaiseFailFastException` later, on a layout tick, with no message. Measured twice
+on the matrix (todos_go and todos_csharp): the dump's stack is
+`DefaultStyles::GetDefaultStyleByTypeName` (0x800f1000) under `CControl::EnterImpl`
+under `CLayoutManager::UpdateLayout` — XAML realizing a MenuBarItem, asking for its
+built-in style, and finding none. Six harness steps had already run by then, so the
+crash pointed at the wrong step. The remedy: the launch records WHY the merge
+failed and `require_control_resources` refuses at the menu surface, where the
+dependency enters, with that reason in the sentence.
+
+## A window inset stamped on containers alone is dropped by a scroll-rooted window (measured 2026-08-30)
+
+WinUI folds the window inset and a container's own padding into ONE Padding
+(SwiftUI and Compose nest two boxes), so kaya stamps the sum onto the mounted
+container. A `kaya.scroll` mounted as a window's ROOT has no container to carry
+it: matching containers alone drops the window inset silently. The portfolio
+dashboard sat flush against the window edge from the morning its root grew a
+scroll until `expect_inset 16` joined the scene. The other three backends nest the
+window inset OUTSIDE the mounted tree and never had the hole. The padding cannot go
+on the ScrollViewer either — its default template does not bind Control.Padding —
+so `stamp_container_padding` writes it onto the minted HOST of a scroll-rooted
+window.
+
+## A range read against the PREVIOUS band's spacer alternates two bands forever (measured 2026-08-25)
+
+In the windowed table tier the layout must follow the core and the visible range
+must follow the layout, in that order. `y0` is measured in the BAND PANEL's own
+coordinates, and the top spacer is what puts the realized rows where the core says
+they are — so a range read while that spacer still holds the PREVIOUS band's number
+is arithmetic over two different collections. Measured on the windows lane: after
+one band move the tier read the stale 15,795dip spacer, found no track under the
+viewport, estimated a row from the mean, reported THAT, and moved the band again —
+2,254 report cycles alternating between two bands for the whole 15s retry window,
+with `expect_window` answering "6 300" where the scene wanted "200 300".
+
+## A one-pass collapsed band lets the ScrollViewer clamp the reader's offset (measured 2026-08-25)
+
+The band panel's two spacer tracks are rebuilt from stored numbers by the
+re-stamp, so the spacers must be written BEFORE the re-stamp, not after it. A
+re-stamp carrying the PREVIOUS band's spacers collapses the content for one layout
+pass, and one pass is long enough for the ScrollViewer to clamp the offset out
+from under the reader: measured on the windows lane, a scroll parked at 20,574dip
+came back at 540.
+
+## A `TemplateBinding` gives the bound element no logical parent, so walking up from it centres nothing, silently (measured 2026-08-17)
+
+`FrameworkElement.Parent` is the LOGICAL parent. A `TemplateBinding` to
+`TitleBar.Content` puts the element inside a presenter without giving it a logical
+parent, so `Parent` is NULL: the first version of the WinUI caption's
+`center_caption_title` read the title's own parent to find the content slot, got
+`Err`, and centred nothing at all with no error anywhere — the lane measured the
+title still 63 px left of the window's centre. The slot has to be found by the name
+the template gives it (`PART_ContentPresenterGrid`,
+docs/chrome/TitleBar-v220.xaml:262-266), never by walking up from the bound child.
+
+## A caption title below its own ellipsis floor is not centred by anything, and asserting on it aborts legs (measured 2026-08-17)
+
+A `TextBlock` ellipsizes down to one "…" and no further, and `MaxWidth` cannot take
+it below that. Measured on the menus scene at 540 DIP: the menu leaves a 9 DIP slot
+against a 19.5 DIP ellipsis, so the title's arranged width is no longer the width
+its box was given. An assertion comparing the arranged centre with the asked-for
+one is then an assertion about the font's ellipsis metrics: before it was gated on
+"the title fits", that post-condition aborted five legs of the menus scene on a
+4 DIP disagreement no aim could have removed.
+
+## A UIElement's XamlRoot is null mid-reparent, so a width read off the content is circular (measured 2026-08-17)
+
+The WinUI backend's list-detail arm REPLACES a window's content. Reading the
+window's width as `Content().XamlRoot().Size()` reads whatever element occupies the
+window, and a UIElement's `XamlRoot` is null until it is parented into a live tree
+— so an element mid-reparent legitimately has none. The trace showed `measured`
+alternating between `Some(900.0)` and `None` as the tree was swapped underneath the
+reading. `GetClientRect` answers about the WINDOW and is available before XAML has
+laid anything out, which is what `window_client_width` uses.
+
+## Three WinUI caption walls that no shared scene can fail (measured 2026-08-17/18)
+
+Each was measured by deleting the write and watching the lane stay green.
+(a) With the early return in `refresh_toolbar` deleted, every menu-bearing window
+takes an extended caption it never asked for and seven rust legs ALL PASSED — no
+harness verb reads "is this caption extended", and there is no such concept on the
+other four backends to add a uniform read for. (b) With `SetLeftHeader` deleted
+from `rehost_menubar`, the MenuBar is detached from its row and attached to
+nothing, the window shows NO MENU AT ALL, and `menus_rust` PASSED in 2s: every menu
+question the backend answers goes through the bar OBJECT or the item objects, and
+none of them asks whether the bar is in a tree. (c) With the mark's compose call
+deleted, the identity scene still passes, because `expect_app_icon` reads
+`WM_GETICON` on the HWND — the same answer whether the caption's mark was composed,
+composed in the wrong column, or never composed at all. The remedy in all three is
+a post-condition inside the backend, on the path every promoted window runs.
+
+## A RichEditBox raises TextChanged for kaya's own paint, and the app's fold made it a feedback loop (measured 2026-08-10)
+
+The editor's first windows leg. kaya's `highlight_ranges` writes a character format
+— a background colour, not one character of text — and a RichEditBox raises
+`TextChanged` for that write exactly as it does for a keystroke. The editor app
+folds `text_changed` and re-declares its find set from the fold, so the paint
+raised TextChanged, the raise reached the app as an edit, the app re-declared, and
+the pair ran at ~260 round trips a second for the whole 180-second leg. Every one of
+that leg's six failures was downstream of it: the UI thread never went idle, so the
+find bar's own keystrokes sat on the queue for a minute, a ContentDialog never
+reached `IsLoaded`, and the app's match count was overwritten by the next spurious
+fold before anything could read it. The fix is in `bank_text_changed_on`: a raise
+carrying no text change is not a text change, and the compare is against what THAT
+HANDLER last saw on the control (`banked_text`), never against the core's model —
+the core is told about kaya's own writes through `absorb_text_writes`, so comparing
+there would also silence the echo of a routed native undo, the one programmatic
+write the app is required to hear.
+
+## TSF refuses a synchronous edit session and a NULL composition sink, and says so as a SUCCESSFUL call (measured 2026-08-06)
+
+Two findings from the harness's marked-text verb on the windows VM, both
+E_INVALIDARG and neither documented as a refusal. `ITfContext::RequestEditSession`
+answers TWICE: the call's own HRESULT (did TSF understand the request) and
+`phrSession` (was the lock given). A refused SYNCHRONOUS request comes back as a
+successful call carrying a failed grant, so a caller that only checks the HRESULT
+believes it has a write lock it never got. Measured: the sync request
+(TF_ES_SYNC|TF_ES_READWRITE) is answered E_INVALIDARG — a synchronous lock is the
+document owner's privilege and an in-process client that is not the text service
+does not have it — while the ASYNC request is granted and the composition appears.
+So the fallback is keyed on the GRANT, not on the call.
+`ITfContextComposition::StartComposition` documents its sink parameter as optional.
+With a NULL sink it answers E_INVALIDARG on this Windows build, measured twice,
+with the composition range obtained both ways (`ITfInsertAtSelection` and
+`GetSelection`). Microsoft's own TSF sample passes its text service as the sink; the
+sample is right and the reference page is optimistic.
+
+## ITextRange::GetRect(ClientCoordinates)` returns DOCUMENT coordinates, so a viewport question needs the ScrollViewer too (measured 2026-08-06)
+
+On a RichEditBox the option is named for client coordinates and does not mean them.
+Measured on the VM: the last match of a 40-line document reported Y=689 with the
+viewport at offset 0 AND with it at 625 — the rectangle did not move, because the
+Rich Edit engine renders into a surface that the XAML ScrollViewer slides, and the
+engine's coordinates are the surface's. A visibility test built on the rectangle
+alone therefore answers the same thing at every scroll position.
+`ITextRange::ScrollIntoView`, the write side, DOES move the XAML ScrollViewer
+(measured: offset 0 -> 625 of 662), so the write needs one coordinate system and
+the read needs both combined.
+
+## A WinUI textarea sized by a MINIMUM is as tall as its document, and nothing scrolls (measured 2026-08-06)
+
+The textarea's WinUI arm gave its `RichEditBox` a `MinWidth`/`MinHeight` of 240x96,
+the pair docs/probes/range-probe-windows.md records, and left the height itself
+unconstrained. WinUI measures a control in an Auto row against INFINITE height and
+gives it whatever it asks for, so a textarea holding a 40-line document asked for
+758 pixels and got them. The control's own ScrollViewer then had nothing to do:
+nothing overflowed, so nothing scrolled, and the widget was a document-shaped hole
+in the layout rather than a viewport onto a document. The ranges scene is what found
+it — `reveal_range` has nothing to do in a control as tall as its text, and
+`expect_revealed ... offscreen` cannot be true there on any platform whose textarea
+grows. The fix is an EXPLICIT height (`SetHeight(96.0)`), the third spelling of one
+size beside SwiftUI's `.frame(width: 240, height: 96)` and GTK's
+`set_size_request(240, 96)`. An explicit height also OUTRANKS a star row's Stretch
+(the 96dip-in-126dip case), so a grower on the grid's main axis trades the explicit
+height for the floor plus Stretch.
+
+## The windows ink read crosses no colour space, unlike the mac's (measured 2026-08-26)
+
+`expect_ink` samples a canvas's probe points out of a GDI DIB that `PrintWindow`
+filled, which is BGRA8 with an ignored alpha, and the bytes that come back are the
+CORE'S OWN: measured `FFFFFF/D2E3F7` against the scene's frozen `FFFFFF/D2E3F7`,
+with no conversion anywhere on the path. That is the counterpart to the macOS entry
+("A canvas ink read crosses the display's colour space"), where the window's backing
+store carries the display's profile and costs a unit per channel. The ±1 tolerance
+the ruling gave `expect_ink` is therefore slack this platform never uses — a windows
+ink reading that is off by one is a real difference, not a colour-space round trip.
+
+## A windows `type` verb that settles on the CONTROL leaves the undo ledger one edit behind (measured, the first windows undo leg; no date on the record)
+
+On the WinUI backend `TextChanged` is raised ASYNCHRONOUSLY, so the control shows
+the typed text a beat before kaya has been told about it. The harness's `type` verb
+is contractually "delivered AND processed", and the action that follows it in
+tools/scenes/undo.steps is `menu_activate "Edit>Undo"`, whose routing asks the
+LEDGER rather than the control. A verb that settled on the control alone returned
+into an undo that took the STAR GROUP instead of the typing — one entry too deep —
+and the field kept the text the user had just typed. The settle condition is
+`banked_text`, the ledger's own view of the field, written beside every
+`note_text_changed`. (The fact is still stated inline in the code; no pointer was
+left, because a pointer to an absent headline is worse than the fact.)
+
+## A routed `TextBox.Undo()` raises TextChanged a runloop turn LATER, so a flag around the call is already gone (measured 7ms in the probe)
+
+Q2's ledger-quiet bracket on WinUI cannot be a boolean set and cleared around the
+native undo call: the control's ordinary `TextChanged` arrives a runloop turn after
+the call returns (7ms in the probe, with `inside_undo_call=false` at the raise), by
+which time the flag has been cleared. The backend records the TEXT the routed undo
+left in the widget instead: matching the sampled text is exact, needs no clock, and
+self-clears when the edit it was written for is consumed. Only the BANKING is
+suppressed; the occurrence still reaches the app, because the field is uncontrolled
+and a native undo is an edit like any other. (Also stated inline, no pointer.)
+
+## A guest that never sends a node-bearing batch is silent for its whole leg
+
+`kayaSelftestAdmissionTransition`'s startup-rescue arm)
+
+    ## A guest that never sends a node-bearing batch is silent for its whole leg
+
+    2026-08-24, reviewing 01dd633. Swift scene admission waits for a completed
+    apply batch (see "A vacuous opening expect is not Swift scene admission"),
+    and a node-bearing batch with no mount arms a five-second grace. A guest
+    that sends NEITHER arms nothing at all: the pre-admission interpreter had
+    answered "FAILED (no such target label#0)" in 6s, while the admission one
+    said nothing for 120s, because `.waiting` armed no timer and the leg died
+    at the runner's timeout with no verdict and no diagnosis.
+
+    Guard: `kayaArmSelftestStartupDeadline` arms a 10s deadline from the root's
+    appear — batch-independent, so it fires for a guest that sends nothing —
+    and forces the start. The script's own expects then produce the honest
+    sentence. The deadline is generous against a slow guest (whose batches
+    admit it far earlier anyway) and tiny against the leg timeout the silence
+    used to burn whole.
+
+## An explicit broadcast to a package the sender cannot SEE is filtered out with no error (2026-08-03)
+
+On targetSdk 30+ ActivityManagerService resolves receivers through
+`PackageManagerInternal.queryIntentReceivers` WITH THE CALLER'S UID, so
+app-visibility filtering applies to an EXPLICIT component too and the
+broadcast simply finds nothing to deliver to. Silently: an ordered
+broadcast with no receiver still runs the sender's result receiver, with
+the initial code, which reads exactly like a helper that answered
+nothing. The remedy is a `<queries><package android:name="…"/></queries>`
+in each validation app's manifest — android/{rusthost,javahost,gohost,
+pyhost}/src/main/AndroidManifest.xml all carry one for
+`dev.kaya.cliphelper`, and its absence was half of what kept
+clipboard-go off the android lane.
+Every cell in docs/clipboard-plan.md §7 was measured from the SHELL uid
+(adb), which holds QUERY_ALL_PACKAGES and never needed this. App-to-app
+is the path the arm actually takes.
+
+## material-icons-core 1.7.8 asks for a compose.ui BELOW the BOM's own (2026-08-16)
+
+android/kaya/build.gradle.kts overrides compose-bom 2024.10.01 for the
+two material-icons modules, pinning 1.7.8 where the BOM supplies 1.7.5
+— 1.7.8 being the last release those modules will ever have. Overriding
+a BOM is only safe if the override does not drag the rest of the stack
+forward, and that was measured from the 1.7.8 poms:
+`material-icons-core` depends on `compose.ui:ui-android:1.6.0`, BELOW
+the BOM's 1.7.5, so ui and foundation stay exactly where the BOM put
+them and only the icon classes move. Check the poms the same way before
+overriding a BOM again.
+
+## A hard Light manifest theme is a half-dark app the Compose theme cannot reach (2026-08-12)
+
+An Activity's window background, its status bar and everything drawn
+before the first Compose frame come from the MANIFEST theme, which no
+Compose theme reaches. Every kaya app named
+`@android:style/Theme.Material.Light*` — a hard LIGHT theme — so a
+composition following the system into dark mode put dark-scheme
+controls on a light page: screencapped on emulator-5554, the window
+stayed #FAFAFA in BOTH appearances while the primary role moved
+#6750A4 -> #D0BCFF. The fix is kaya's own DayNight theme through the
+`-night` resource qualifier
+(android/kaya/src/main/res/values{,-night}/themes.xml); CLAUDE.md's
+check-appearance paragraph and docs/styling-plan.md D1 hold the rule,
+and this entry holds the measurement.
+
+## The Compose highlight witness composites what it expects, and aims in surface space (2026-08-10)
+
+`kayaHighlightRead` photographs each on-screen range with `PixelCopy`
+because the record alone is not enough: deleting the `drawPath` call and
+leaving the apply arm, the staleness compare and the record left the leg
+GREEN with nothing decorated on screen.
+THE PREDICATE CANNOT BE HARD-CODED. The current match in any find bar is
+highlighted AND selected, and the platform paints its selection wash on
+top of kaya's decoration. A fixed "much more red and green than blue"
+test matches the decoration alone (#F4E689, the highlight over the
+field's #E6E0E9 container) and is blind to the washed form, measured on
+the editor scene as #ACC0B4 (r-b = -8, g-b = 12: both clauses fail). So
+the witness composites what it expects — the field's own undecorated
+background SAMPLED from the photograph, that background under
+KAYA_HIGHLIGHT_COLOR, and the washed form under the composition's own
+selection background (foundation's default 0xFF4286F4 at 0.4 for an app
+that wraps no MaterialTheme). Both computed values reproduced the
+measured pixels to within one level, and the wash over the BARE
+container computes to #A4BCED, 57 levels of blue away, so "selected but
+not highlighted" is still refused.
+AND THE PHOTOGRAPH IS AIMED IN SURFACE SPACE. `PixelCopy` takes its
+srcRect in the window's SURFACE space and `boundsInWindow()` answers in
+WINDOW space; the two agree only while nothing has panned the window.
+With the soft keyboard up, `decorView.getLocationInWindow()` was
+(0, -199) and the witness photographed 199px below the field — a flat
+block of the app's background it reported as "the lowering painted
+nothing".
+The code keeps the short form of both halves and points here.
+
+## A wire arm nobody references ships untested, and a dead-code warning is the only symptom (measured 2026-07-28 and 2026-08-17)
+
+crates/kaya/src/wire.rs decodes what eight foreign bindings pack by hand,
+and an arm that no in-tree caller reaches is invisible to every gate: the
+Rust API never crosses the wire, so nothing but a foreign guest's bytes
+exercises it, and those arrive on a matrix leg rather than in a build.
+
+TWICE, the only symptom was rustc's dead-code warning on the surrounding
+constant or function.
+
+*2026-07-28, adding file dialogs.* A new tx record shipped with NO decode
+arm. A foreign guest's bytes would have hit the catch-all and panicked —
+loudly, but only when that guest actually sent one. The missing arm was
+found by accident, because a dead-code warning fired on the unused
+constant; had the constant been referenced anywhere else, it would have
+shipped. Guard: `wire::tests::every_spec_record_has_a_decode_arm`, which
+inspects this file's own source rather than round-tripping, because every
+record has different fields and a generic encoder for all 34 would be more
+machinery than the thing it guards. (The Go binding's chokepoint test uses
+the same shape for the same reason.)
+
+*2026-08-17, chasing a dead-code warning on `write_clip`.* `read_clip` —
+the root's reading of the TX_COPY record every one of the bindings packs by
+hand — had NO coverage at all: a `panic!()` on its first line left all 356
+tests green, because its only encoder had been written for a round-trip
+test nobody then wrote. A drift in the canonical (descending-richness)
+order or in the header counts would have surfaced on a matrix leg at best,
+and at worst handed an app somebody else's representation. Guard:
+`wire::tests::copy_records_round_trip`, whose MIXED clip is the one that
+can fail — a clip carrying one representation round-trips under any order
+at all — with two customs and two files, because a count read as a flag
+passes at one.
+
+The general shape: coverage of a wire arm cannot be inferred from the suite
+being green, because the callers are in other languages. A new arm needs a
+test that names it, and the absence of one is only ever announced by a
+warning about something else.
+```
+
+(The first pass's proposed entry is the last one above — it is repeated
+here in full so the coordinator has one list to append, not two.)
+
+## GTK's Adwaita icon names read right and draw wrong, and a miss is silent (measured on adwaita-icon-theme 43/45/48/50, GTK 4.18.6)
+
+Every name in gtk.rs's SYMBOL table is copied from the catalog report, not
+recalled, because the obvious spelling is repeatedly the wrong picture:
+`dialog-information-symbolic` is a LIGHTBULB and not the circled "i",
+`edit-delete-symbolic` is an X in a circle and not a trash can,
+`preferences-system-symbolic` is a wrench and screwdriver and not a gear,
+and `emblem-favorite-symbolic` — the obvious spelling of `star` — was a
+HEART and was deleted from the theme in the 48 cycle. Each of those reads
+right and draws wrong.
+
+AND AN UNRESOLVABLE NAME FALLS BACK SILENTLY. GTK's icon lookup does not
+fail: it ends at `icon_paintable_new("image-missing", ...)` and the only
+notice is behind `GTK_DEBUG=iconfallback`. MEASURED on the lane image (GTK
+4.18.6, adwaita-icon-theme 48.1), what a GtkStackSwitcher then paints is
+not even that broken-image glyph: the button is BLANK, zero ink in its
+whole box. That is why `assert_symbol_icons_resolve` runs once per process
+the first time any app declares any symbol.
+
+Two spelling rules ride with it. Full names INCLUDING the `-symbolic`
+suffix, because GTK decides symbolic-ness by string-matching it and the
+bare name takes the fullcolor legacy path. And NO `-rtl` suffix is ever
+appended — `choose_icon` tries the direction-suffixed name first, so
+`go-previous-symbolic` is RTL-aware for free while hard-coding the suffix
+would break LTR.
+
+## GTK switchers draw a section's symbol OR its title, never both — and the sidebar draws no symbol at all (measured, GTK 4.18.6)
+
+Two facts from the validation container, both about how a section's
+`icon-name` reaches the screen:
+
+1. `GtkStackSwitcher` renders icon OR title, never both. `rebuild_child`
+   builds a GtkImage when the page has an icon-name and a GtkLabel
+   otherwise, and moves the title to the button's TOOLTIP. The probe read
+   `GtkToggleButton label=(null)` over `GtkImage visible=1 mapped=1
+   icon-name=go-home-symbolic`. So a section's symbol REPLACES its tab
+   title on GTK, where the SwiftUI arm shows both.
+2. `GtkStackSidebar` ignores icon-name entirely: it binds only the page's
+   title into a GtkLabel (probe: `GtkListBoxRow > GtkLabel`), so the
+   SIDEBAR arm draws no symbol at all.
+
+It follows that the harness's TITLE -> ROW pairing has to be POSITIONAL (a
+section with a symbol has no visible label to match on), and that the
+accessible DESCRIPTION is where the semantic name goes: the button's NAME
+is GTK's own and already carries the title (measured: `role='page tab'
+name='Feed'`), so kaya must not overwrite it. With the description set the
+node reads `role='page tab' name='Archive' DESC='star'`.
+
+## A GMenu row's icon reaches the widget and is never drawn (measured, GTK 4.18.6, adwaita-icon-theme 48.1)
+
+`G_MENU_ATTRIBUTE_ICON` takes a SERIALIZED GIcon rather than a name, and
+the attribute DOES reach the widget — the realized `GtkModelButton` holds
+`GThemedIcon object-select-symbolic`. GTK's menu dress then keeps that
+image HIDDEN: `update_visibility` sets `visible = has_icon && (iconic ||
+!has_text)`, and the probe read `GtkImage visible=0` beside `GtkLabel
+visible=1 label=Save`.
+
+Two consequences. kaya's `menu_symbol` read claims nothing about pixels on
+this platform, and NO accessible description is stamped on a menu row — it
+would announce an icon this platform draws nowhere. (A TOP-LEVEL holder
+gets no icon either: PopoverMenuBar renders each as a
+GtkPopoverMenuBarItem binding `label` alone, and the probe read exactly one
+GtkLabel and the popover.)
+
+## GTK's focus flags clear with WINDOW ACTIVATION, and the lane has no window manager (measured 2026-08-10, editor scene, linux/x11)
+
+`is_focus()` and FOCUS_WITHIN both track WINDOW ACTIVATION, so both CLEAR
+the moment the toplevel goes inactive — while `gtk_window_get_focus` still
+names the same widget and keystrokes still land in it. A modal dialog
+deactivates its parent, and re-activating it is the window manager's job;
+the lane's X server has none and the headless compositor does not do it
+either.
+
+Right after File>Open… closed, the instrument read:
+
+    widget_focused flags=false win_active=false
+                   win_has_focus_widget=true
+
+What that cost: `widget_focused` classifies a text change as a USER EDIT
+rather than a programmatic one, so the keystroke after the dialog was
+banked as programmatic, no open episode was recorded, and `route_undo` sent
+Edit>Undo to the CORE tier — a programmatic write, which reaches no guest.
+The fix is the second clause, `gtk_window_get_focus`, which a session with
+no window manager needs.
+
+## A bare GtkTextView grows to its content, and `scroll_to_mark` then lies (measured, GTK 4.18.6)
+
+A GtkTextView sized by its own content is not a text editor: 400 lines made
+a 6400px widget in a 6692px window — no scrollbar, no keyboard scroll, the
+text unreachable, and `scroll_to_mark` returning TRUE while moving nothing,
+because the view believed the whole buffer was visible.
+
+The viewport is the fix, in the ONE shape that works: the TextView as the
+DIRECT child of the GtkScrolledWindow. GtkTextView implements
+GtkScrollable, so the scrolled window drives the view's own adjustments and
+adds no GtkViewport; put a Box between them and the view is handed its
+natural height again and nothing scrolls. `propagate_natural_width/height`
+both stay false — either one true asks the scrolled window for its CHILD's
+natural size and restores the wart. The 240x96 minimum moves to the
+viewport, which is now the widget the parent measures.
+
+ONE AXIS, like kaya's `scroll` kind, which is only honest if no line can
+escape sideways — so the view WRAPS, WordChar rather than Word so a single
+unbreakable token cannot reopen the unbounded-width half of the same wart.
+Wrapping touches no observable: the buffer, `read_text` and the AT-SPI Text
+interface all speak the stored string.
+
+## A fresh wtype keyboard loses its first key (measured on wayland; X11 has no such race)
+
+`wtype tea` types "ea", every invocation. A transient Wayland virtual
+keyboard races GDK's wl_keyboard bind, so the FIRST key of a fresh
+keyboard's invocation is delivered before the client is listening. The
+warm-up is a press-hold-release of F24 riding INSIDE the same invocation:
+the press is lost to the same race, and the release at +800ms lands after
+the bind.
+
+The keyboard exists only for that invocation's lifetime ON PURPOSE. A
+session-held one makes keyboard focus EXCLUSIVE across the compositor, and
+adding a holder broke three unrelated legs' `expect_focused` the day it was
+tried (2026-08-03).
+
+## "the promotion list reached no toolbar" was printed for a window that plainly had one (measured 2026-08-16)
+
+`expect_toolbar`'s backend reading was
+`<promoted found in the real chrome>/<promoted in the catalog>/<remainder's
+home>` — two counts and a home. A watched negative perturbed the mac
+lowering so the promoted buttons drew bare text; AppKit built the
+toolbar and left both items' labels EMPTY, the found count came back 0,
+and the step failed with "the promotion list reached no toolbar" about a
+window whose chrome was right there. A diagnostic may only print what it
+measured (CLAUDE.md invariant 3), so the reading grew a THIRD number —
+the count of items the chrome actually holds — and "no chrome at all"
+(`0/2/0/menubar`) and "a chrome whose items are not these" (`0/2/2/menubar`)
+are now different sentences. `toolbar_chrome_fits` in
+crates/kaya/src/harness.rs and its `toolbar_chrome_invariant` test hold
+both.
+
+---
+
+## A harness panic on the harness thread is reported as a multi-minute HANG (measured 2026-07-25)
+
+A panic on the harness thread unwinds only that thread; the UI thread
+keeps the process alive, and the runner — which waits for process EXIT —
+sees nothing and burns its whole timeout. Measured on Windows: a
+`shortcut` verb panicked at +714ms and the leg was reported as a
+328-SECOND HANG, with the real diagnosis sitting unread in the output
+file the entire time. So `harness::spawn` catches the unwind, flushes
+both streams (an orderly exit is not available from a foreign thread on
+every backend — WinUI's XAML apartment in particular) and terminates:
+the exit code is what lets the runner's `EXIT=` appear at once, turning
+a multi-minute silent stall into a one-second labelled failure.
+
+---
+
+## POLL_DEADLINE is 15 seconds and not 5, because a loaded VM answered a first click in more than five (measured 2026-08-03)
+
+Under the five-lane matrix a loaded VM answered a first click in more
+than five seconds and the `entry_go` leg — 145/145 solo — went red. A
+passing observation returns the moment it matches, so the wider deadline
+costs a green run nothing and only a genuine failure reports slower.
+`harness::POLL_DEADLINE`.
+
+---
+
+## A failure not printed the moment it becomes final is lost to an abort, and every failed step then looks like a step that took 15 seconds (measured 2026-08-10)
+
+The harness verdict is the only place the failure list is named, and it
+needs the run to reach the end. A scene that fails and then ABORTS — the
+one-alert-per-process guard, a panic in a later handler — takes the
+whole list with it, and the log shows a crash with no reason. Measured
+on the editor scene's first linux run: six assertions failed on x11 and
+two on wayland, then the alert guard aborted; nothing in the log said
+so, and diagnosing it meant noticing that six steps had taken EXACTLY
+15.0s, which is POLL_DEADLINE — a failing `poll` returns only when its
+deadline runs out. Every failure is now printed the moment it is final,
+on the same line-buffered writer as the step trace, so it survives an
+abort as well as a kill (`KAYA_HARNESS: step-failed …`).
+
+---
+
+## expect_window's pair cannot see whether a row band ever narrowed (measured 2026-08-25)
+
+`Stage::window_band` answers `"<first visible> <total>"`, and the
+realized band's WIDTH is deliberately not in it — no byte-shared scene
+could freeze a viewport metric. That means the pair is blind to the
+windowing itself: measured on the GTK lane, `windowed.steps` passed with
+the range report removed entirely, because the first visible row is a
+fact about the viewport either way. The report loop's links are held
+statically per backend instead — tools/check-table-tier.py for the mac
+tier, tools/check-gtk.py's census for GTK.
+
+---
+
+## A fixed sentence for a dlopen failure sent fifty legs after the wrong cause (measured 2026-08-18)
+
+`crates/kaya/src/swiftui_host.rs` answered every failed `dlopen` of the
+SwiftUI interpreter with one sentence: "build it with
+tools/swiftui/build-dylib.sh and set KAYA_SWIFTUI_LIB". That is a CAUSE,
+and it was printed for every cause it did not name. Measured 2026-08-18:
+fifty legs of a five-lane matrix died with that sentence while the dylib
+was on disk, current, and named by KAYA_SWIFTUI_LIB exactly as the
+sentence asked for; the reader spent the next twenty minutes looking for a
+build that had never gone wrong.
+
+The loader's own answer is the only thing that can tell an absent file from
+a bad architecture from a missing dependency from a process that has run
+out of file descriptors, so `loader_said()` asks `dlerror()` — read exactly
+once, right after the failing call, because it is one-shot and
+thread-local — and the refusal prints that first, then two facts about the
+path this process actually looked at (whether it is there, and how big it
+is). This is invariant 3's rule one file over from `kayaOpenPanelWhyNot`,
+and `tools/check-diagnostics.py` is what holds the shape.
+
+## The named list of nounwind boundaries had missed a second copy of the drain (measured 2026-08-21)
+
+`crates/kaya/src/fault.rs`'s census first checked a NAMED list of the
+places a backend drives `Scene::apply` — capi.rs's `kaya_next_commands`,
+winui's `drain_transactions` and `deliver_undo`, gtk's
+`drain_transactions`. Measured 2026-08-21: `gtk.rs`'s `type_text` carries a
+SECOND copy of the drain inside its quiescence wait, under `on_main_mut`
+(`glib::idle_add`) — a C callback that cannot unwind — and the named list
+had missed it, because nobody thought to name it.
+
+The clause that found it is the one that does not use a list: every line
+calling `scene.apply(` in capi.rs, winui/mod.rs and gtk.rs must have a
+`fault::guard(` within 40 lines above it, and the census refuses a verdict
+if it finds fewer than four such sites. A new pump arrives red instead of
+arriving unguarded.
+
+## exclude` does not stop cargo walking up, so a nested worktree claims tools/ packages (measured 2026-08-27)
+
+The repo workspace `exclude`s `tools/kaya-bindgen` and `tools/winui-bindgen`
+and each carries its own `Cargo.lock`, but exclusion only stops cargo at
+THAT manifest and it keeps walking up. From a git worktree nested under the
+repo (`.claude/worktrees/<id>`), the next manifest up is the MAIN checkout's,
+whose exclude list names a path that does not match, so every `cargo run` in
+those directories dies with "current package believes it's in a workspace
+when it's not" — taking gen-bindings.py, gates.py and deploy-win.py with it.
+The fix is the empty `[workspace]` stanza at the top of each of those two
+manifests, which makes the package its own workspace root: it looks
+redundant beside the repo's `exclude` and it is not. Measured on
+winui-bindgen 2026-08-27, where a regeneration was skipped because of it.
+
+## A spec field named like an emitted local packs the buffer offset, silently in Swift (measured 2026-08-27 or earlier; the finding was carried in tools/kaya-bindgen/src/swift.rs)
+
+Every generated record helper opens with a local holding the record's start
+offset — `let kayaAt = self.begin(...)` in Swift, `size_t kaya_at =
+kaya_wire_begin(...)` in C. A spec field of the same name is then shadowed
+inside its own helper, and `self.u64(start)` writes the RECORD OFFSET where
+the field's value belongs. That is not hypothetical: the local was called
+`start` for about an hour and the Swift emitter cheerfully shipped it, while
+the C emitter had the same local and at least failed to compile. Both locals
+are kaya-prefixed now so nothing an author writes can reach them, and both
+names are in their emitter's RESERVED list so kaya-bindgen refuses a spec
+field that collides rather than emitting a helper that lies.
+
+## os.Getenv is empty forever in a c-shared library, so a Go guest reads the host's environment through C (measured; the finding was carried in bindings/go/runtime.go)
+
+Go fills `runtime.envs` from the envp handed to the PROCESS ENTRY, and a
+`-buildmode=c-shared` library never sees one, while C's `getenv(3)` reads
+the live `environ`. Measured side by side on Android:
+`os.Getenv("KAYA_SELFTEST") == ""` and `len(os.Environ()) == 0` while
+`C.getenv("KAYA_SELFTEST") == "milestone2"`. The failure is SILENT because
+an empty scene name is not an unknown scene name, it is the DEFAULT arm, so
+the wrong spelling fails every step for the wrong reason.
+`kaya.Env`/`kaya.LookupEnv` are the only spellings a kaya guest may use and
+`tools/check-go-env.py` keeps `os.Getenv`/`os.LookupEnv`/`os.Environ` out of
+bindings/go and guests/go. THE GATE READS A COMMENT: its first self-test
+doctors `C.getenv(` in bindings/go/runtime.go and requires exactly TWO
+substitutions, one in code and one in that function's doc comment — this
+comments pass deleted the comment occurrence and turned the gate red before
+it was restored, so the sentence's spelling is load-bearing.
+
+## A Go `#cgo darwin` line links iOS against the macOS libkaya (measured; the finding was carried in bindings/go/runtime.go)
+
+GOOS=ios also satisfies the `darwin` build tag, so an unqualified `#cgo
+darwin` line answers for iOS too and points the link at the macOS build.
+The failure is `ld: building for 'iOS-simulator', but linking in dylib
+built for 'macOS'`, at the end of a cross-build that looked fine until
+then; `darwin,!ios` is what keeps the two apart. GOOS=android satisfies
+`linux` the same way, and its own line points at the NDK-built target dir
+the android lane fills (target/aarch64-linux-android/debug/libkaya.so, the
+same .so the APK carries in jniLibs), so `linux,!android` is the second
+half of the same rule. Android names `-lkaya` rather than a path because
+the artifact is a SHARED library there, found by SONAME under the app's
+linker namespace. The ios line must NAME THE ARCHIVE BY PATH: ld64 prefers
+the dylib when both answer `-lkaya`, and the bundle then carries an
+absolute build-machine path (docs/deferred.md, "The Swift iOS bundle is
+not self-contained"). The triple is the SIMULATOR's, the only iOS the lane
+runs; a device build wants aarch64-apple-ios and fails loudly at link
+time. tools/ios/run-sim.py and docs/probes/mobilepkg-contract.md hold the
+ld64 half from the other side.
+
+## Java's read-write picked file is two streams over one descriptor (measured)
+
+Java is the one binding that hands back TWO objects from
+`PickedFile.open`, where every other binding hands back one duplex object
+whose permitted operations follow the mode. Java's stream types are
+unidirectional and no public API wraps a descriptor in a duplex object at
+all — `RandomAccessFile` takes a path, and a channel obtained from either
+stream carries that stream's one direction — so `FILE_MODE_READ_WRITE`
+opens a `FileInputStream` and a `FileOutputStream` over the SAME
+`FileDescriptor`. MEASURED to share one file offset, which is what makes
+the pair a faithful stand-in for the duplex object: read three bytes then
+write, and the write lands at three, exactly as the duplex object would.
+Closing either half closes the descriptor once (the JDK's
+`FileDescriptor` tracks its parents). The carve-out is stated at
+`KayaApp.Opened` and nowhere else.
+
+## A Swift get/set computed property serves a MUTATING call by copying the value out and back (measured 2026-08-24)
+
+`KayaAppTx.tx` is the one chokepoint every write in
+bindings/swift/KayaApp.swift passes, so it is a computed property that
+checks liveness on the way in. Spelled `get`/`set`, it served each
+`tx.<verb>(...)` — a MUTATING call on a struct — by copying the whole
+accumulated batch out, mutating the copy and writing it back, so N records
+cost N²/2 bytes of memcpy. At 32,000 inserts that is 3070ms with
+`get`/`set` against 16ms with `_modify`, which yields the storage in
+place. This is the DOMINANT half of the Swift binding's quadratic insert;
+the keyed `slots` index in `KayaInstance` is the other (docs/deferred.md,
+"BUG — the Swift binding's insert is quadratic", whose 15,135ms -> 18ms is
+both fixes together). `_modify` is an underscored accessor and looks like
+something to clean up: it is not, and the ONE chokepoint is why the answer
+is not to check liveness at the callsites instead.
+
+## detekt's UnusedImports has no type resolution, so a dead import whose name collides with a property stays green (measured 2026-07-27)
+
+`tools/check-detekt.py` runs detekt's unused family over the Kotlin
+sources and its self-test proves every rule in the curated config fires.
+UnusedImports is the one that promises less than it looks like it
+promises: the rule is a TEXT heuristic with no type resolution, so an
+import counts as used if its short name appears anywhere in the file,
+whoever owns that name.
+
+Measured 2026-07-27: the Compose split arm stopped calling
+`Modifier.width()`, the `androidx.compose.foundation.layout.width`
+import went dead, and the gate stayed green because KayaCompose.kt is
+full of unrelated `bitmap.width` / `root.width` property reads. A
+word-boundary check written into the gate would miss it for the same
+reason; only running detekt with `--classpath` (the full Android +
+Compose classpath, which the deliberately standalone gate does not have)
+tells the extension from the property.
+
+So: dead imports whose name is unique DO fail the gate, and dead imports
+whose name collides with any identifier in the file DO NOT. Reach for
+the import list by hand when a call site is removed.
+```
+
+## The GTK row window's three links are invisible to every scene (measured 2026-08-25)
+
+`windowed.steps` passes on the real X11 leg with any one of the row
+window's three links to the core cut — the range report, the height
+report, or the top spacer's core-supplied size — each perturbed alone
+with the substitution count printed.
+
+The reason is `expect_window`: it reads the FIRST VISIBLE row, which is
+a fact about the viewport and stays true whether or not the band ever
+narrowed. The band's WIDTH deliberately left the verb the same day
+(docs/virtualization-plan.md §5), because the platforms legitimately
+disagree about it. The mac tier hit the same wall and answered it the
+same way, in `tools/check-table-tier.py`; on GTK the answer is the
+static census in `tools/check-gtk.py`, where the four entries are held
+by name with a plausible SILENT perturbation each — a report that always
+says "all of it", heights filed against the wrong rows, a spacer that
+forgets the offset.
+```
+
+## A cancelled alert satisfies the expect for the NEXT one with the same title (measured 2026-08-10)
+
+On the iOS lane, editor.steps went red inside the core with "alert N is
+already live — one alert per process". The app guards unsaved work at
+three doors under ONE alert title, so `expect_alert "unsaved changes"`
+cannot tell a NEW dialog from the one still on screen. The stretch that
+failed: `alert_choose cancel`, then `expect textarea#0 "scratch"` and
+`expect_dirty true` — both already true, both passing instantly — then
+`menu_activate "File>New"` and `expect_alert "unsaved changes"`, which
+matched the OLD alert at +0ms. The app's second show then hit the core's
+one-alert-per-process assertion and aborted the guest.
+
+Two conditions have to meet for the race to exist, and a guard wider than
+both fires on correct scripts and gets deleted rather than obeyed: the
+TITLES REPEAT (a stale "delete item?" can never satisfy `expect_alert
+"eject disk?"`), and THE ANSWER WAS `cancel` — an action's continuation
+does something the script can wait on, while a cancel's continuation is by
+construction "leave everything as it was", so every assertion after it was
+already true before the dialog opened. `expect_alerts 0` between the two
+is the only wait available. tools/check-steps.py's alert_wait_lint holds
+it, watched in all four directions and on editor.steps itself.
+
+## cmd runs everything after an `&` INSIDE the preceding `if` (measured 2026-09-01)
+
+`if exist X rmdir /s /q X & mkdir Y` in ONE cmd string does not do what it
+reads like: cmd binds the `&` inside the `if`, so a directory that never
+existed is never created. The JS binding's Windows staging died on exactly
+this, and two older staging lines carried the same latent shape. The fix
+is two statements; tools/check-steps.py refuses the one-string shape with
+three self-tests (the one-string shape, the split pair accepted, and the
+shape spread over two source lines — a python string continues across
+lines, so a split source line is still one command).
+
+## Per-lane duration ceilings, and the measurements that set them
+
+tools/validate-all.py's BUDGETS block was the durable home of every ceiling's
+calibration (docs/HACKING.md delegates "the live numbers" to it, and
+docs/traps.md's "Cutting comments is its own trap family" names it as a
+delegated block). The block was 172 lines. The CURRENT ceiling and the reading
+that set it stay in the code; the superseded ceilings, the bands each was
+calibrated against and the readings deliberately NOT covered are below, and the
+code now carries `docs/traps.md, "Per-lane duration ceilings, and the
+measurements that set them"`. Body (verbatim, as it stood):
+
+```
+BUDGETS = {
+    # 900 since 2026-08-10, raised in the commit that makes the lane
+    # slower, as this block asks. The save scene brought NINE legs
+    # that must run ALONE BETWEEN DRAINS: macOS keeps a save panel's
+    # last directory as a user preference shared by every process, so
+    # pooled guests trample each other (measured — a leg asserting its
+    # own kaya-save-<pid> directory was shown a sibling's).
+    # Serialising ~18s x 9 costs about 170s that used to overlap: the
+    # lane measured 610s pooled and 778s serialised, same 267 legs.
+    # 900 keeps the ~1.25x headroom the other lanes have (the earlier
+    # 678s reading, which this block previously declined to raise for,
+    # was an environmental window and is NOT the reason for this one).
+    #
+    # LOWERED TO 560 on 2026-08-10, and lowering a ceiling is the
+    # rarer half of this block's job. The lane stopped running its
+    # guests out of `target/debug/examples`, a build directory that
+    # had reached 776,613 entries — macOS enumerates an unbundled
+    # executable's siblings on every launch, so all 32 rust legs
+    # walked it, and the resulting LaunchServices contention starved
+    # the ocaml, haskell and swift legs running beside them. All eight
+    # languages now measure 1.1-1.6s a leg where four of them were
+    # 8-31s (docs/deferred.md).
+    #
+    # Measured on the fixed tree: 431s contended at 268 legs, against
+    # 966s the run before. 560 is the same ~1.25x over the contended
+    # time the other lanes keep — and holding 900 here would let this
+    # lane double again before saying a word, which is exactly what
+    # let the old cost hide.
+    #
+    # 620 since 2026-09-01, raised in the commit that made the lane
+    # bigger, as this block asks: the ninth binding added 42 js legs
+    # (349 -> 391). STANDALONE the lane is unchanged in kind — 391
+    # green at legs 275s against 248s the day before, the 27s being
+    # the new legs' own cost at the python legs' per-leg rate. The
+    # first contended matrix after read 546s (under 560 by 14s, with
+    # the dialog legs failing fast on the host's Accessibility gate,
+    # so not a clean reading); the second read 621s under a host at
+    # load 75 from three simulators reseeding. 620 covers the roster
+    # at the ~1.25x-over-quiet-contended headroom this block keeps;
+    # the second reading is an environmental window, not the reason.
+    "mac": 620,
+    # 450 since 2026-08-20, raised in the commit that made the lane
+    # bigger, as this block asks: the panes scene added 14 legs (seven
+    # languages, both protocols), 550 -> 564. STANDALONE the lane is
+    # UNCHANGED in kind — 564 legs green in the runs that landed the
+    # slice, panes legs 2-3s each — and the first contended matrix
+    # after read 442s against the old 420, which is the ~28s the legs
+    # themselves cost. 450 keeps the same ~1.25x-over-contended
+    # headroom this block has always kept.
+    #
+    # The history it extends: 420 since 2026-08-07, when text-ranges
+    # added 16 legs (444 -> 460; contended 337s measured thrice
+    # against the old 300-at-~240s).
+    #
+    # 470 since 2026-08-21, raised in the commit that made the lane
+    # bigger, as this block asks: the tables scene added 14 legs
+    # (seven languages, both protocols), 564 -> 578. STANDALONE the
+    # lane is unchanged in kind — 578 green at 401s in the first quiet
+    # contended matrix after — and the two busy-host matrices the same
+    # day read 452s and 467s against video decode and a 46%
+    # WindowServer, tripping 450 by 2s and 17s with every leg green.
+    # 470 kept the ~1.25x-over-quiet-contended headroom.
+    #
+    # 530 since 2026-08-27, raised in the commit that made the lane
+    # bigger, as this block asks: canvas added 2 legs (584 -> 586),
+    # each wrapped in a11y-leg.sh's bus session (the ax-bus fix), and
+    # the disk sweep the same night reset every cache. The three
+    # post-sweep contended matrices read 796s (cold), 524s, 502s —
+    # monotone toward warm — with every leg green all three times; 502
+    # against the old 470 was the third consecutive trip, which is
+    # this block's own signal to recalibrate rather than re-annotate.
+    # 530 covers the warm-contended 502 with tight margin so a change
+    # in kind still trips it.
+    #
+    # 600 since 2026-09-01, raised in the commit that made the lane
+    # bigger, as this block asks: the ninth binding added 80 js legs
+    # (604 -> 684, one per python leg on both protocols). STANDALONE
+    # the lane is unchanged in kind — 683 green at legs 235s against
+    # 222s before. The first contended matrix read 459s (under 530);
+    # the second 663s under the same load-75 window as the mac
+    # reading above, with 682 legs green and one wayland table read
+    # a sighting. 600 keeps the ~1.25x-over-quiet-contended headroom
+    # over the roster's own growth; the 663 is not the reason.
+    "linux": 600,
+    # 480 since 2026-08-03, and the ceiling moved in the commit that
+    # made the lane slower, as this block asks. Two measured reasons,
+    # neither a change in kind: filedialog_java used to ABORT at 4s
+    # (the COM apartment defect) and now runs its scene to the end,
+    # and the lane's four contention-sensitive legs (stall_rust,
+    # panels_*) each take 20-26s longer under five concurrent lanes.
+    # Everything else is unchanged — the per-leg median delta against
+    # a standalone run is MINUS one second, which is the check that
+    # says no work was added to every leg.
+    # 520 since 2026-08-21: a run whose commit touches BINDING sources
+    # pays a full manifest re-ship plus the remote javac and dotnet
+    # rebuilds — measured 494s on the tables fan-out (the first
+    # eight-binding commit since the per-file deploy landed) against
+    # the 420-456 incremental band. The ceiling covers the
+    # deploy-heavy mode; an incremental run drifting past ~460 is
+    # still the signal the old 480 was for.
+    # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
+    # column (2026-09-01) and the four quiet matrices since read 498,
+    # 442, 488 and 559 — 520 left 1.05x over that band's top where the
+    # other lanes keep ~1.2x, and the 559 fired on a run whose other
+    # lanes were 20-30% over their own quiet readings together (the
+    # host, per the anomaly's own consumer list). 600 is 1.2x over the
+    # band's top.
+    "windows": 600,
+    # 540 since 2026-08-10, raised in the commit that makes the lane
+    # slower, as this block asks. The save scene added a leg measured
+    # at 21s STANDALONE (the panel is typed into, so it is the slowest
+    # non-clipboard leg on this lane), taking the lane to 74 legs.
+    # Contended runs since: 401, 407, 409, 414, 416 and 446s against a
+    # 420 ceiling — one crossing and two within five seconds, which is
+    # a guard that fires on variance rather than on a change in kind.
+    # Standalone the lane is 294s (boot 7 + three build-and-leg
+    # phases), so the growth is contention amplifying real work, not
+    # work added to every leg. 540 restores the ~1.25x headroom the
+    # other lanes keep.
+    #
+    # MAC WAS DELIBERATELY NOT RAISED at the same time: it measured
+    # 678s against 680 once, but that run overlapped a ~20-minute
+    # window when every mac file-dialog leg failed for an
+    # environmental reason (proven by running two unrelated legs as
+    # controls); with the scene fully graduated it measures 610s at
+    # 267 legs. Raising a ceiling to fit an environmental anomaly is
+    # how a guard stops guarding.
+    #
+    # 600 since 2026-09-01: 540 was set against the 74-leg roster, and
+    # the lane has run 113 legs since 2026-08-31 — five accepted
+    # matrices measured 452, 460, 465, 475 and 491s under it, headroom
+    # of 1.10-1.19x where the other lanes keep ~1.25x. The fourth
+    # matrix of 2026-09-01 then measured 551s with every leg green:
+    # the windows lane, whose roster had not moved, was 7-20% over its
+    # own band on the same host, and the LocalStorage admission hit
+    # the slow-flow re-probe on two of three phones. 600 is 1.22x over
+    # the band's top; run-sim.py prints the admission's per-device
+    # time and the join's wait now, so the next anomaly says whether
+    # the admission reached the critical path.
+    "ios": 600,
+    # 310 since 2026-08-20: the pool-degradation trap's remedy is a
+    # COLD BOOT (docs/traps.md), and the reboot run then carries
+    # ~60-90s of emulator startup that the old 250 — set against a
+    # warm pool — read as an anomaly. 310 clears a measured cold-boot
+    # run (267s) with the usual headroom while still catching a change
+    # in kind on a warm one.
+    "android": 310,
+    # 490 since 2026-08-23: dynamic tables added 17 watched
+    # copy-target perturbations to check-steps and 12 surface/
+    # forcing-app perturbations to check-sugar-surface.
+    #
+    # THE 378/387/391s BAND IT WAS SET AGAINST IS NOT THIS SCHEDULE'S.
+    # Those three sweeps ran from t0 at ordinary priority, alongside
+    # all five lanes for their whole length (docs/tables-plan.md,
+    # docs/deferred.md). On the tree that changed the schedule, that
+    # same from-t0 shape measured 427s at ordinary priority and 467s
+    # niced (docs/traps.md) — so "1.25x over the band's top", which
+    # this arm used to claim, was never true of 490 here.
+    #
+    # What 490 guards is the DELAYED-plus-NICED band, which has one
+    # accepted sample: 348s (2026-08-24), with 218s and 208s from the
+    # barrier-only and delayed-only experiments beside it. That is
+    # ~1.4x. It deliberately does NOT cover 467: that reading is from
+    # a schedule this file no longer runs, and a ceiling raised to
+    # clear an abandoned schedule stops guarding the live one.
+    #
+    # The sweep is its own matrix unit AND half the wall (see the
+    # launch block above): it starts only after Android exits, so its
+    # tail runs at a host share no other reading has. A second
+    # delayed-and-niced sample is the number this arm most needs.
+    "gates": 490,
+}
+```
+
+## A paste dispatched during a focus handover lands in the PREVIOUS field (measured 2026-08-04)
+
+On the mac clipboard leg, twice in one run, `menu_activate "Edit>Paste"`
+arrived while the platform's focus was still catching up with kaya's, and
+the content went to entry#0 — the field focused a moment earlier — instead
+of entry#1. Every other assertion in clipboard.steps reads the same either
+way (entry#1 simply stays empty), so `expect entry#0 ""` after the second
+paste is the only line that tells "the paste reached nobody" from "the paste
+reached the wrong widget". docs/clipboard-plan.md §10 documents the
+neighbouring disabled-paste failure from the same run but not this one.
+
+## The portfolio's recents tail is 8 rows, not 12 (measured 2026-08-30)
+
+guests/python/portfolio.py's `RECENT` was twelve — the count
+docs/portfolio-plan.md §5 still names — and the transactions view's side
+panel keeps that many rows in file order. With the adaptive fold, the
+recents card and the ledger share one screen on a phone, and at twelve
+rows the card pushed the seam and the ledger's own opening below the
+fold: the screen a person saw first had no ledger on it. Eight was the
+maintainer's call the same day. The constraint on the number is
+two-sided — small enough that the fold leaves the ledger visible, and
+small enough that the realized band covers the whole collection
+(docs/virtualization-plan.md §1), which is the one place a shared scene
+can freeze a realized count.
+
+## A canvas's inset edges are only stable on the axis whose track is wide (measured 2026-08-26)
+
+`expect_drawing` rounds a drawing's ink bounds to HUNDREDTHS of the
+canvas's own box, so an inset edge is a stable expectation only while one
+pixel is under half a hundredth of that axis. In tools/scenes/sizepolicy.steps
+four grown canvases share a 420pt window and each gets about 90pt of
+height, where one pixel is 1.1 hundredths — an inset vertical edge
+declared at 40 reads back 39 (measured by guests/rust/sizepolicy.rs's own
+derivation test at 461x87). So every figure in that scene puts its
+vertical edges at 0 or 1 and does its discriminating on the horizontal
+edges, whose tracks are wide. A figure inset on both axes would be an
+intermittent leg, not a wrong one.
+
+## A registry subscript on the harness thread races the main thread's write, and dies as a tagged-pointer objectForKey (measured 2026-09-02)
+
+The serial matrix that validated the comments pass failed ONE leg, mac's
+table-ocaml-swiftui, at +54ms into `expect_column_edges`, with
+`-[__NSTaggedDate objectForKey:]: unrecognized selector sent to instance
+0x8000000000000000` under `kayaTableHorizontal` -> Swift's
+`Dictionary._Variant.lookup`. The same leg passed for five other languages
+seconds apart and six times by hand afterwards. The mechanism: the three
+table registries (`kayaTableDrivers`, `kayaTableColumnAxes`,
+`kayaTableWindows`) are written on the main thread by the representables as
+tables appear and leave, and the harness verbs subscripted them BARE from
+the harness thread — a Swift Dictionary read racing a write is undefined
+behaviour, and the garbage it reads is a tagged pointer. The driver METHODS
+already hopped to the main thread (the tile-off-main entry above); the
+lookup that found the driver did not. Every harness-side read goes through
+`kayaOnMain` now, and tools/check-table-tier.py refuses a bare subscript of
+those registries inside kayaRunScript, kayaTableHorizontal or
+kayaTableTrailing. A race of this shape reproduces by hand at about 0 in 6,
+so a green rerun is not evidence: the fix is structural or it is nothing.

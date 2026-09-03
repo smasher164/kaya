@@ -1,7 +1,4 @@
-// The clipboard conformance scene, C# port — one clip in several
-// representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md). Canonical semantics in
-// guests/rust/clipboard.rs; the byte-frozen contract in
+// The clipboard scene, C# port — guests/rust/clipboard.rs,
 // tools/scenes/clipboard.steps.
 
 using System;
@@ -13,8 +10,7 @@ using System.Threading;
 
 static class ClipboardScene
 {
-    // A real 4x4 PNG: a foreign decoder asserts its size, so this must
-    // stay a valid encoded image.
+    // A real 4x4 PNG: a foreign decoder asserts its size.
     static readonly byte[] PixelPng =
     {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -29,21 +25,17 @@ static class ClipboardScene
         0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 };
 
-    // Reverse-DNS and space-free: this id reaches every platform's own
-    // registry VERBATIM (UTI, RegisterClipboardFormat, X11 target atom,
-    // Android MIME type).
+    // Reverse-DNS and space-free: reaches every registry VERBATIM.
     const string NoteId = "dev.kaya/note";
 
-    // No quotes in the payload: the step grammar escapes \n, \r and \\
-    // only, so a quoted byte could not be spelled in the expectation.
+    // No quotes: the step grammar escapes \n, \r and \\ only.
     static readonly byte[] NoteBytes = Encoding.UTF8.GetBytes("note=1");
 
     public static void Run()
     {
         var app = new KayaApp();
 
-        // Guest and interpreter are one process and compute this path
-        // identically; the pid keeps parallel legs from colliding.
+        // The pid keeps parallel legs from colliding.
         string dir = Path.Combine(
             Path.GetTempPath(),
             "kaya-clip-" + Process.GetCurrentProcess().Id);
@@ -73,8 +65,6 @@ static class ClipboardScene
             {
                 switch (clip)
                 {
-                    // Empty is the universal no: denied, unfocused,
-                    // absent or unaccepted, and no platform says which.
                     case null:
                         tx.Write(status, "empty");
                         break;
@@ -130,8 +120,6 @@ static class ClipboardScene
                 tx.SetA11yId(label, "status");
                 tx.Button("copy", onClick: inner =>
                 {
-                    // One clip, four representations: kaya derives none
-                    // of them from any other, so the app spells each.
                     inner.Copy()
                         .Text("kaya clip")
                         .Html("<b>kaya</b> clip")
@@ -167,9 +155,6 @@ static class ClipboardScene
                 plain = tx.Entry(); // entry#1
                 tx.SetA11yId(plain, "plain");
 
-                // A stamped paste target: the accept list comes from the
-                // TEMPLATE, and the paste arrives as an instance
-                // occurrence carrying the copy's key.
                 tx.SetA11yId(tx.Label(bind: rowStatus), "row-status"); // label#1
                 var rows = tx.Collection();
                 tx.Each(rows, t =>

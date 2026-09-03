@@ -5,10 +5,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
 }
 
-// The APK is Android's reader of the declared identity
-// (docs/app-identity-plan.md, rulings 3 and 4). Read AT CONFIGURATION
-// TIME, not in a task: a task would have to be ordered ahead of AGP's
-// resource merge by hand.
+// Read AT CONFIGURATION TIME, not in a task: a task would have to be
+// ordered ahead of AGP's resource merge by hand
+// (docs/app-identity-plan.md, rulings 3 and 4).
 
 /** The declaration: `name` and `icon` out of kaya's packaging manifest. */
 data class KayaIdentity(val name: String, val icon: File)
@@ -23,7 +22,6 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "or a picture."
         )
     }
-    // A missing key is a failure, never a default.
     fun value(key: String): String {
         val re = Regex("""^\s*$key\s*=\s*"([^"]*)"\s*$""", RegexOption.MULTILINE)
         val m = re.find(manifest.readText())
@@ -95,9 +93,9 @@ subprojects {
             sourceSets.getByName("main").res.srcDir(generatedRes)
             sourceSets.getByName("main").assets.srcDir(generatedAssets)
             buildTypes.getByName("debug") {
-                // AAPT2's PNG crunch would re-encode the mark and break
-                // the byte-equality check. Already the debug default;
-                // written down because the check depends on it.
+                // Already the debug default, written down because the
+                // byte-equality check depends on it: AAPT2's PNG crunch
+                // would re-encode the mark.
                 isCrunchPngs = false
             }
         }

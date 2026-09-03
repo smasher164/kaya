@@ -8,35 +8,17 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # THE C FLOOR REFUSES PAST ITS CAP RATHER THAN SMASHING PAST IT (ruled
-# 2026-08-26; DESIGN.md, Binding conventions). KayaTx was {buf, len} —
-# a Go slice header missing its third field — and every packer wrote
-# through the bare pointer, so a long string was an unchecked memcpy
-# into the caller's array. The seven sugar bindings all encode into a
-# growable buffer; C was the one surface where overflow was undefined
-# behaviour rather than an error (docs/deferred.md, java-record-
-# ceiling).
-#
-# NOTHING ELSE CAN SEE THIS. Every in-tree guest sizes its buffers
-# correctly, so the bytes on the wire are identical either way and no
-# scene, no lane and no capture is any different — which is how the
-# unchecked memcpy shipped from milestone 0 under green lanes. A gate
-# is the only wall, exactly as for check-c-ids one file over.
-#
-# TWO MODES, AND THE GUARD PAGE IS THE PRIMARY ONE: the probe's
-# walled() hands back exactly cap writable bytes whose next byte is
-# unmapped, so a one-byte overrun is a FAULT and not a redzone
-# heuristic, and with no sanitizer runtime in it the linux lane runs it
-# unchanged. AddressSanitizer is the COMPANION beside it, on a plain
-# malloc — the shape the wall cannot take, and what a guest's buffer
-# actually is. It needs the compiler flake.nix names, because every
-# nixpkgs clang below 22 has an ASan that hangs before main on this
-# host (docs/traps.md); a host without that compiler runs the primary
-# alone and SAYS SO.
-#
-# THE NEGATIVE IS THE SHIPPED BUG, not an imitation of it: the probe is
-# built a second time against the PRE-CAP header read out of git, and
-# that build must die of a signal where this one prints a sentence —
-# and must be REPORTED by ASan where this one refuses.
+# 2026-08-26; DESIGN.md, Binding conventions; CLAUDE.md's gate list;
+# docs/deferred.md, java-record-ceiling). NOTHING ELSE CAN SEE IT:
+# every in-tree guest sizes its buffers correctly, so the wire bytes are
+# identical either way. TWO MODES, THE GUARD PAGE PRIMARY: walled()
+# hands back exactly cap writable bytes whose next byte is unmapped, so
+# an overrun is a FAULT and not a heuristic, and with no sanitizer in it
+# the linux lane runs it unchanged; ASan is the COMPANION, on the plain
+# malloc the wall cannot model, and a host without the compiler
+# flake.nix names runs the primary alone and SAYS SO. THE NEGATIVE IS
+# THE SHIPPED BUG, built against the PRE-CAP header out of git: it must
+# die of a signal where this one prints a sentence.
 
 import os
 import re
@@ -68,17 +50,12 @@ CC = os.environ.get("CC", "clang")
 
 
 # --- clause A: every write through tx->buf is guarded -----------------
-#
-# Read as CODE, not as text: brace depth is tracked and each write is
-# tested against the conditions of the `if`s it actually sits inside. A
-# generator edit that emits one more raw `memcpy(tx->buf ...)` is the
-# failure this exists for, and a line-oriented pattern would miss the
-# one whose guard is two lines up — kaya_wire_begin's memset/memcpy
-# pair is exactly that shape.
-#
-# A write THROUGH the transaction buffer: tx->buf as a memcpy/memset
-# DESTINATION, or as the target of an assignment. `memcpy(&kind,
-# tx->buf + ...)` reads out of it and is not one.
+# Read as CODE: brace depth is tracked and each write tested against the
+# `if`s it sits inside, since a line-oriented pattern would miss the one
+# whose guard is two lines up (kaya_wire_begin's memset/memcpy pair).
+# A write THROUGH the buffer is tx->buf as a memcpy/memset DESTINATION
+# or the target of an assignment; `memcpy(&kind, tx->buf + ...)` reads
+# out of it and is not one.
 WRITE = re.compile(r"mem(?:cpy|set)\(tx->buf\b|\btx->buf\[[^\]]*\]\s*=[^=]")
 IF = re.compile(r"^\s*(?:\}\s*else\s+)?if\s*\((.*)\)\s*\{?\s*$")
 GUARD = re.compile(r"kaya_wire_fits\(|tx->len <= tx->cap")
@@ -408,22 +385,15 @@ modes_ran.append("guard-page")
 # --- the ASan companion, beside the guard page ------------------------
 #
 # WHAT IT ADDS: a plain malloc, where the byte after cap belongs to the
-# allocator rather than to an unmapped page. That is the shape a
-# guest's buffer has, and it is the one nothing else here can see — the
-# same pre-cap overrun measured 2026-08-27 exits 0 SILENTLY with no
-# sanitizer and no hardening, and dies of a bare SIGTRAP printing zero
-# bytes with the dev shell's hardening on. ASan names the write, its
-# size and the allocation site. So this mode's negative is also its
-# liveness proof: a sanitizer that is not really instrumenting prints
-# nothing and fails here rather than passing quietly.
-#
-# THE COMPILER IS ASKED FOR BY NAME, never `clang`: the dev shell's own
-# 21.1.8 compiles -fsanitize=address happily and then hangs before main
-# for the whole ceiling, saying nothing (docs/traps.md). flake.nix puts
-# llvm 22.1.8 on PATH under the name below.
-# >>> asan-skip-branch (cut out verbatim by self-test N5, which doctors
-# the name below away; must stand alone, so it reads nothing this file
-# sets)
+# allocator rather than to an unmapped page — the shape a guest's buffer
+# has. Measured 2026-08-27: the same pre-cap overrun exits 0 SILENTLY
+# with no sanitizer and no hardening, and dies of a bare SIGTRAP with
+# zero output under the dev shell's hardening. So this mode's negative
+# is also its liveness proof. THE COMPILER IS ASKED FOR BY NAME, never
+# `clang`: the shell's own 21.1.8 compiles -fsanitize=address and then
+# hangs before main for the whole ceiling (docs/traps.md).
+# >>> asan-skip-branch (cut verbatim by self-test N5, which doctors the
+# name below away; must stand alone and read nothing this file sets)
 ASAN_CC = "kaya-asan-clang"
 
 
@@ -453,15 +423,11 @@ def asan_or_skip():
 
 def asan_build(out_bin, inc, *extra):
     # NIX_HARDENING_ENABLE="" BECAUSE FORTIFY PREEMPTS THE SANITIZER,
-    # measured 2026-08-27 (docs/traps.md): with the wrapper's default
-    # `fortify`, this probe's heap-many overrun dies of SIGTRAP with
-    # ZERO bytes of output — __memcpy_chk fires before ASan reports —
-    # and a smaller probe lost the instrumentation outright (no
-    # __asan_report* symbol at all; an out-of-bounds store exited 0).
-    # The wrapper appends its own -D_FORTIFY_SOURCE after the command
-    # line, so no -U/-D here can undo it; only the whitelist can. An
-    # ASan that cannot report is a gate satisfied without exercising
-    # the real thing (invariant 4).
+    # measured 2026-08-27 (docs/traps.md): __memcpy_chk fires before ASan
+    # reports, and a smaller probe lost the instrumentation outright (no
+    # __asan_report* symbol; an out-of-bounds store exited 0). The
+    # wrapper appends its own -D_FORTIFY_SOURCE after the command line,
+    # so no -U/-D undoes it — only the whitelist.
     r = subprocess.run(
         [ASAN_CC, PROBE,
          "-I", str(ROOT / "crates" / "kaya" / "include"),

@@ -1423,12 +1423,10 @@ public final class KayaWire {
 
     /** Canonicalize a shortcut spelling to the wire form: lowercase
      * '+'-joined tokens, modifiers ordered primary, shift, alt, then one
-     * key (a-z, 0-9, or the closed named set). Accepts ASCII case
-     * variants and any modifier order; throws on whitespace, empty
-     * tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown
-     * or multiple or missing keys. POLICY stays at the core: escape,
-     * shift-only and bare alphanumerics, and the reserved floor are
-     * validated there, on the canonical spelling, never rewritten. */
+     * key (a-z, 0-9, or the closed named set). Throws on whitespace,
+     * empty tokens, repeated modifiers, aliases (ctrl/cmd/option), and
+     * unknown or multiple or missing keys. POLICY stays at the core,
+     * validated on the canonical spelling and never rewritten. */
     public static String canonicalizeShortcut(String spelling) {
         if (spelling.isEmpty()) {
             throw new IllegalArgumentException("kaya: shortcut is empty");
@@ -1613,12 +1611,9 @@ public final class KayaWire {
     }
 
     /** One representation as the decoder hands it over: the clip
-     * kind, and its values with blobs already redeemed to byte[].
-     * The sum itself is the hand-written tier's — this is the
-     * taste-free shape the wire carries.
-     *
-     * <p>kind is a SINGLE member of the clip enum and never a mask
-     * (you offer many and you receive one); 0 with no values is the
+     * kind, and its values with blobs already redeemed to byte[]. The
+     * kind is a SINGLE member of the clip enum and never a mask (you
+     * offer many and you receive one); 0 with no values is the
      * universal empty answer. */
     public static final class ClipValues {
         public final int kind;

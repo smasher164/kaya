@@ -24,25 +24,11 @@
 {-# OPTIONS_GHC -Werror=missing-methods #-}
 
 -- kaya's idiomatic surface for Haskell: scene declaration as a builder
--- monad, with When and For as combinators taking do-blocks.
---
--- THE ZONE RULE IS IN THE TYPES: Build is the live zone and its elements
--- are Widgets; Tpl is a template body and its elements are Nodes. This
--- module is ONE FLAT NAMESPACE, so the RESULT TYPE is the template
--- zone's only scope: a constructor identical in both zones keeps one
--- name and dispatches on it, a source-taking one is template-only and
--- takes the plain kind name or `<kind>Bound`, and a container takes
--- NODES so it cannot share a name at all (rowOf, columnOf, scrollOf,
--- gridOf). That makes the zone enumerable — `grep '-> Tpl Node'` is its
--- whole surface, which is what tools/tpl-surfaces.py reads.
---
--- A DISPATCHING NAME IS THE ONE EXCEPTION TO THAT GREP, and there are
--- three: 'Declare''s methods (the element is `El m`, so the zone is the
--- INSTANCE the arm sits in), 'HandlerTarget''s six registrars (dispatching
--- on the element, since `App -> e -> … -> IO ()` mentions no monad to
--- pin) and 'CollectionHandle''s 'at'. For those the zone is a SCOPE, not a
--- result type, and tools/tpl-surfaces.py reads them by scope for that
--- reason.
+-- monad, with When and For as combinators taking do-blocks. THE ZONE
+-- RULE IS IN THE TYPES: Build's elements are Widgets, Tpl's are Nodes,
+-- so `grep '-> Tpl Node'` is the template zone's whole surface — except
+-- 'Declare', 'HandlerTarget' and 'CollectionHandle', which dispatch on a
+-- SCOPE (tools/tpl-surfaces.py reads it both ways).
 module KayaApp
   ( App,
     Build,
@@ -202,9 +188,6 @@ module KayaApp
     imageBytes,
     imageAsset,
     imageBound,
-    -- The canvas: 'canvas' stands in both zones through 'BothZones',
-    -- 'canvasOf' is the template flavour spelled at its own type, and
-    -- 'drawAt' re-declares ONE stamped copy's drawing (docs/canvas-plan.md).
     Viewbox (..),
     Paint (..),
     FillRule (..),
@@ -222,15 +205,11 @@ module KayaApp
     canvas,
     canvasOf,
     drawAt,
-    -- The size policy, LIVE CANVASES ONLY (docs/canvas-plan.md §3.2.1):
-    -- 'fixed' is the property, 'onDraw' and 'onTick' are the drawing as a
-    -- function of the size it is handed. `scale` is spelled by writing
-    -- none of them.
+    -- The size policy, LIVE CANVASES ONLY (docs/canvas-plan.md §3.2.1);
+    -- `scale` is spelled by writing none of these three.
     fixed,
     onDraw,
     onTick,
-    -- The TEMPLATE zone's own surface: one constructor per widget kind, each
-    -- returning 'Tpl Node' (the module header's naming rule).
     TplStrSource,
     bindTextSource,
     TplBoolSource (..),
@@ -360,9 +339,7 @@ import qualified KayaWire as W
 -- canonical note, which every binding's copy of this surface shortens.
 newtype Capabilities = Capabilities
   { -- | The host can materialize a surface beside the primary one
-    -- ('createWindow', 'mountIn'). 'False' on iOS and Android, whose
-    -- systems own surface geometry; there 'createWindow' aborts at the
-    -- root.
+    -- ('createWindow', 'mountIn'). 'False' on iOS and Android.
     auxWindows :: Bool
   }
   deriving (Eq, Show)
@@ -385,11 +362,7 @@ newtype Node = Node Word64
 data Collection = Collection Word64 [W.Value]
 
 -- | A collection handle that can be narrowed to one stamped copy. ONE
--- NAME DISPATCHING ON THE HANDLE (the module header's rule): appending a
--- key is the same operation either way, and a record handle that lost its
--- type here could not be handed to insertRecord\/patch\/recordItems at
--- all — which is what "Haskell cannot address a nested record instance"
--- meant.
+-- NAME DISPATCHING ON THE HANDLE (the module header's rule).
 class CollectionHandle c where
   -- | The instance of this collection inside the copy keyed by @key@ of
   -- the next enclosing For; chain for deeper nesting.
@@ -401,16 +374,10 @@ instance CollectionHandle Collection where
 instance CollectionHandle (RecordCollection a) where
   at (RecordCollection c) key = RecordCollection (at c key)
 
--- A For binds the collection itself — its template stamps per entry of
--- every instance — so handing it an 'at' handle is a bug.
 assertRoot :: Collection -> Word64
 assertRoot (Collection cid []) = cid
 assertRoot _ = error "kaya: forEach binds the collection itself, not an instance — drop the at"
 
--- | One file the picker answered with: a handle to redeem, a display
--- name, and a re-openable name — EMPTY unless re-opening it actually
--- works, which measurement puts at the three desktops and neither
--- phone (DESIGN.md, File dialogs).
 -- | One representation, arriving — the sum a copy is the record of.
 -- 'RImage' may be a RE-ENCODE of what was copied, so compare what the
 -- image IS, never the bytes it arrived in.
@@ -427,8 +394,7 @@ data Clip = Clip
     clipHtml :: Maybe String,
     clipImage :: Maybe BS.ByteString,
     -- | Picked-file handles: copying a file and picking one are the
-    -- same currency, so a picked file goes straight on and the bytes
-    -- never move through kaya.
+    -- same currency, so the bytes never move through kaya.
     clipFiles :: [PickedFile],
     -- | The one plural field with names, since several app-defined formats
     -- are legitimate.
@@ -446,6 +412,10 @@ emptyClip =
       clipCustom = []
     }
 
+-- | One file the picker answered with: a handle to redeem, a display
+-- name, and a re-openable name — EMPTY unless re-opening it actually
+-- works, which is the three desktops and neither phone (DESIGN.md, File
+-- dialogs).
 data PickedFile = PickedFile
   { pickedHandle :: !Word64,
     pickedName :: !String,
@@ -459,35 +429,28 @@ openPicked :: PickedFile -> Word32 -> IO (Handle, Bool)
 openPicked f = R.openPicked (pickedHandle f)
 
 -- | AN ASSET — a file this app's own BUILD put where the running
--- program can find it (docs\/assets-plan.md, ratified 2026-08-18): the
--- vendored typeface, the app's mark, a licence text.
+-- program can find it (docs\/assets-plan.md).
 type Asset = R.Asset
 
 -- | Open an asset by its relative path under the asset root, spelled
--- with @\/@ — @asset "fonts\/sora-wght.ttf"@. Resolving the root is the
--- core's (docs\/assets-plan.md); no guest reads an asset environment
--- variable or carries a repo-relative default, and tools/check-assets.py
--- enforces that.
+-- with @\/@ — @asset "fonts\/sora-wght.ttf"@ (docs\/assets-plan.md;
+-- tools/check-assets.py refuses a guest that resolves one itself).
 --
 -- IO, AND CALLED OUTSIDE THE TRANSACTION: 'Build' is a pure state monad,
 -- so a scene opens its assets in the IO around 'buildTx'. A miss raises
--- with the core's sentence verbatim, and EACH CALL READS — no cache, no
--- watch, no reload. In Haskell the byte value IS the reader (DESIGN.md,
--- Binding conventions).
+-- with the core's sentence verbatim, and EACH CALL READS — no cache.
 asset :: String -> IO Asset
 asset = R.openAsset
 
 -- | Why 'asset' would raise for this name — the sentence it would carry,
--- handed over without raising. @""@ means the name resolves. LINE 1
--- (name, rule, census) is the same on every platform and is the line a
--- scene freezes; line 2 names the resolved place, which three platforms
--- spell three ways. Authored by @asset_why_not@ in
+-- handed over without raising. @""@ means the name resolves. LINE 1 is
+-- the same on every platform and is the line a scene freezes; line 2
+-- names the resolved place. Authored by @asset_why_not@ in
 -- crates\/kaya\/src\/assets.rs.
 assetMissSentence :: String -> IO String
 assetMissSentence = R.assetMissSentence
 
--- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory, for
--- a guest that is itself the consumer.
+-- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory.
 assetBytes :: Asset -> IO BS.ByteString
 assetBytes = R.assetBytes
 
@@ -498,9 +461,8 @@ assetClose = R.assetClose
 
 data Counters = Counters
   { cSignal :: !Word64,
-    -- Live widgets AND template nodes, one sequence (DESIGN.md, Binding
-    -- conventions). No cNode: without the field, a second node counter does
-    -- not compile.
+    -- Live widgets AND template nodes, ONE sequence (DESIGN.md, Binding
+    -- conventions). No cNode: a second node counter must not compile.
     cWidget :: !Word64,
     cCollection :: !Word64,
     cAlert :: !Word64,
@@ -509,8 +471,8 @@ data Counters = Counters
     cMenuItem :: !Word64
   }
 
--- One instance of a collection: the table inside the stamped copy selected by
--- its path (the empty path for a live-zone collection).
+-- One collection instance: the table inside the stamped copy its path
+-- selects; the empty path is a live-zone collection.
 data Instance = Instance
   { iPath :: ![W.Value],
     -- One [W.Value] per entry: the record's wire fields (a scalar collection
@@ -518,15 +480,8 @@ data Instance = Instance
     iEntries :: ![(W.Value, (Word32, [W.Value]))]
   }
 
--- The collection is the model — the only copy: every mutation op edits it and
--- appends the wire delta in the same state step, so reads (items, count) are
--- exactly the writes.
 type Model = Map.Map Word64 [Instance]
 
--- The minter's counters, one per collection INSTANCE, keyed the way the
--- model is: collection id to a list of (path, counter). A path is a
--- [W.Value] carrying a Double, so it is compared rather than hashed.
---
 -- BESIDE THE MODEL AND NOT INSIDE IT: 'absorbUndo' rebuilds Instances
 -- from the core's payload, so a counter living in an Instance would be
 -- rewritten by every history walk.
@@ -534,22 +489,12 @@ type Fresh = Map.Map Word64 [([W.Value], Int64)]
 
 data BuildState = BuildState
   { bCounters :: !Counters,
-    -- The transaction under construction: IO Builder, not Builder.
     bRecords :: IO Builder,
     bModel :: !Model,
-    -- The fresh-key counters, threaded through the same fold as the
-    -- model and stored back beside it: a monotonic per-instance
-    -- sequence has to outlive the transaction that advanced it.
     bFresh :: !Fresh,
     bChildren :: !(Map.Map Word64 [Word64]),
     bOpenFors :: ![Word64],
-    -- Handlers declared at their constructors: pure data until buildTx
-    -- registers them alongside the submit, so an abandoned Build
-    -- abandons its handlers with its records.
     bPending :: ![Pending],
-    -- Signals recomputed from a collection after each of its mutations,
-    -- written into the same transaction; stored back at buildTx like the
-    -- model, so an abandoned Build abandons its registrations too.
     bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)])
   }
 
@@ -631,7 +576,6 @@ lookupEntries cid path model =
     (i : _) -> iEntries i
     [] -> []
 
--- One instance's counter, made if this is the first anyone has asked.
 withCounter :: Word64 -> [W.Value] -> (Int64 -> (a, Int64)) -> Fresh -> (a, Fresh)
 withCounter cid path body fresh =
   let instances = Map.findWithDefault [] cid fresh
@@ -643,11 +587,9 @@ withCounter cid path body fresh =
       | p == path = let (a, n') = body n in (a, (path, n') : rest)
       | otherwise = let (a, rest') = go rest in (a, (p, n) : rest')
 
--- The next fresh key for one instance: counter+1, and the counter keeps it.
 mintKey :: Word64 -> [W.Value] -> Fresh -> (Int64, Fresh)
 mintKey cid path = withCounter cid path (\n -> (n + 1, n + 1))
 
--- An explicit key, shown to the minter on its way into the table.
 absorbKey :: Word64 -> [W.Value] -> W.Value -> Fresh -> Fresh
 absorbKey cid path key fresh = case key of
   W.VI64 n -> snd (withCounter cid path (\c -> ((), max c n)) fresh)
@@ -692,9 +634,6 @@ instance Applicative Tpl where
 instance Monad Tpl where
   Tpl g >>= f = Tpl $ \s -> let (a, s') = g s in unTpl (f a) s'
 
--- Pure records enter the transaction as `pure builder`; blob-carrying
--- records enter through the IO variants as the action that registers
--- their bytes and then builds — run in record order at buildTx.
 emitB :: Builder -> Build ()
 emitB = emitBIO . pure
 
@@ -727,8 +666,6 @@ allocM = Build $ \s ->
       n = cMenuItem c + 1
    in (n, s {bCounters = c {cMenuItem = n}})
 
--- Runs a template body inside whichever zone hosts it, bracketing its records
--- with the opener and template_end.
 bracketTpl :: (BuildState -> (Word64, BuildState)) -> (Word64 -> Builder) -> Maybe Word64
            -> Tpl a -> BuildState -> ((Word64, a), BuildState)
 bracketTpl alloc opener forCid (Tpl body) s0 =
@@ -744,10 +681,6 @@ bracketTpl alloc opener forCid (Tpl body) s0 =
         }
    in ((self, a), s4)
 
--- One collection's birth, both zones and both schemas: the counter, the
--- teardown edge, and the CreateCollection record. The variant list is the
--- only thing a record table does differently, which is why 'collectionOf'
--- can stand in the same class as 'collection'.
 newCollection :: [[Word32]] -> BuildState -> (Collection, BuildState)
 newCollection variants s =
   let c = bCounters s
@@ -765,30 +698,25 @@ newRecordCollection p s =
 class Monad m => Declare m where
   type El m
   widget :: Word32 -> m (El m)
-  -- | Write Prop::Text on this element, in whichever zone — THE FLOOR
-  -- SPELLING, kept apart from the 'setText' VERB below: the verb is the
-  -- sugar check-sugar-surface requires of all eight bindings, and a
-  -- text write on a template NODE is floor. No regex sees a type, so
-  -- one name could not be both (docs/tpl-props-plan.md F3).
+  -- | Write Prop::Text on this element, in whichever zone — the FLOOR
+  -- spelling, deliberately apart from the 'setText' VERB below
+  -- (docs/tpl-props-plan.md F3).
   setTextProp :: El m -> String -> m ()
   setChecked :: El m -> Bool -> m ()
-  -- | This element's flex weight within its row\/column: 0 is natural size,
-  -- positive weights divide the container's leftover main-axis space in
-  -- proportion.
+  -- | This element's flex weight within its row\/column: 0 is natural
+  -- size, positive weights divide the leftover main-axis space.
   setGrow :: El m -> Double -> m ()
   -- | A grid's column count: its children lay out row-major into this
-  -- many columns. Describes the PROTOTYPE, so it is a constant in both
-  -- zones.
+  -- many columns. Describes the PROTOTYPE, so it is a constant.
   setColumns :: El m -> Int -> m ()
   -- | Put a progress bar in the platform's activity mode: no fraction,
   -- so nothing to source.
   setIndeterminate :: El m -> Bool -> m ()
   addChild :: El m -> El m -> m ()
   collection :: m Collection
-  -- | A collection of a-records; the type is the schema. IN BOTH ZONES
-  -- because a NESTED collection must be declared inside the template
-  -- scope (docs/tables-plan.md, MEASURED IN SLICE 1), and a table whose
-  -- rows carry fields needs it there.
+  -- | A collection of a-records; the type is the schema. IN BOTH ZONES:
+  -- a NESTED collection must be declared inside the template scope
+  -- (docs/tables-plan.md).
   collectionOf :: KayaRecord a => Proxy a -> m (RecordCollection a)
   -- | A For over a collection: the do-block declares the template;
   -- returns the For itself alongside the block's result.
@@ -796,15 +724,9 @@ class Monad m => Declare m where
   -- | Declare the column header bar on a For's container — the element
   -- 'forEach' returns. One title per column; the row template's root
   -- must be a row of exactly one cell per column, refused loudly
-  -- otherwise. Re-call after sorting to move the indicator
-  -- (docs\/tables-plan.md).
-  --
-  -- IN BOTH ZONES because a nested table's bar must be declared in the
-  -- parent TEMPLATE scope, where the core can still see the inner For
-  -- (docs\/tables-plan.md, dynamic tables): the live arm carries a For
-  -- CONTAINER and declares the flat table's bar, the template arm
-  -- carries a template NODE and declares the bar of every stamped copy.
-  -- Per-copy indicators are 'columnsAt'.
+  -- otherwise. Re-call after sorting to move the indicator. IN BOTH
+  -- ZONES: a nested table's bar is declared in the parent TEMPLATE
+  -- scope (docs\/tables-plan.md). Per-copy indicators are 'columnsAt'.
   columns :: El m -> [String] -> Sort -> m ()
   -- | A When over a Bool signal: stamps on true, unstamps on false.
   when_ :: Signal -> Tpl a -> m (El m, a)
@@ -830,8 +752,7 @@ instance Declare Build where
           ((self, a), s') =
             bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
        in ((Widget self, a), s')
-  -- pathLen 0 against a LIVE container: the flat table's bar (the
-  -- template arm's pathLen 0 is every copy's).
+  -- pathLen 0 against a LIVE container: the flat table's bar.
   columns (Widget n) titles sort =
     emitB
       ( W.txSetColumnHeaders
@@ -885,7 +806,8 @@ instance Declare Tpl where
             bracketTpl (unTpl allocN) (`W.txCreateWhen` sid) Nothing body s
        in ((Node self, a), s')
 
--- Live-zone-only vocabulary.
+-- Live-zone-only vocabulary. (tools/check-sugar-surface.py scans the Tpl
+-- instance up to THIS line, so the sentence is load-bearing.)
 
 signal :: W.Value -> Build Signal
 signal initial = Build $ \s ->
@@ -897,8 +819,6 @@ signal initial = Build $ \s ->
 writeSignal :: Signal -> W.Value -> Build ()
 writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 
--- Every derived signal rooted at this collection, recomputed from the new
--- model and written into the same transaction.
 recomputeDerived :: Word64 -> [W.Value] -> BuildState -> BuildState
 recomputeDerived cid path s
   | not (null path) = s
@@ -910,9 +830,6 @@ recomputeDerived cid path s
               (Map.findWithDefault [] cid (bDerived s))
        in s {bRecords = bRecords s <> pure writes}
 
--- THE ONE INSERT PATH EVERY KEY TRAVELS, scalar or record: the model fold,
--- the wire record, the derived recompute — and ABSORPTION, which is why it is
--- one function and not two.
 insertEntry :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> IO Builder -> BuildState -> BuildState
 insertEntry n path key vals record s0 =
   let s = s0 {bFresh = absorbKey n path key (bFresh s0)}
@@ -936,8 +853,7 @@ remove (Collection n path) key = Build $ \s ->
     s {bRecords = bRecords s <> pure (W.txCollectionRemove n path key),
        bModel = modelRemove (bChildren s) n path key (bModel s)})
 
--- | Reposition an entry before another's: order is collection data, so the
--- model reorders and the wire carries the same keys-only delta.
+-- | Reposition an entry before another's.
 moveBefore :: Collection -> W.Value -> W.Value -> Build ()
 moveBefore c key anchor = moveEntry c key [anchor]
 
@@ -945,17 +861,14 @@ moveBefore c key anchor = moveEntry c key [anchor]
 moveToEnd :: Collection -> W.Value -> Build ()
 moveToEnd c key = moveEntry c key []
 
--- | Reposition an entry at the front: sugar for moveBefore the
--- current first key, lowering to the same wire op.
+-- | Reposition an entry at the front.
 moveToFront :: Collection -> W.Value -> Build ()
 moveToFront c@(Collection n path) key = Build $ \s ->
   case map fst (lookupEntries n path (bModel s)) of
     [] -> error ("kaya: move of missing key " ++ show key)
     (first : _) -> unBuild (moveEntry c key [first]) s
 
--- | Reposition an entry directly after another's: sugar for
--- moveBefore the anchor's successor (moveToEnd when the anchor is
--- last), lowering to the same wire op.
+-- | Reposition an entry directly after another's.
 moveAfter :: Collection -> W.Value -> W.Value -> Build ()
 moveAfter c@(Collection n path) key anchor = Build $ \s ->
   let keys = map fst (lookupEntries n path (bModel s))
@@ -969,8 +882,6 @@ moveAfter c@(Collection n path) key anchor = Build $ \s ->
             | succKey == key -> ((), s) -- already directly after the anchor
             | otherwise -> unBuild (moveEntry c key [succKey]) s
 
--- The same checks the scene makes, made where the guest can see the
--- stack: a missing key or anchor is a guest bug, never a fallback.
 moveEntry :: Collection -> W.Value -> [W.Value] -> Build ()
 moveEntry (Collection n path) key before = Build $ \s ->
   let keys = map fst (lookupEntries n path (bModel s))
@@ -1004,9 +915,8 @@ data BrandAttr
     BDark Word32
 
 -- | REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one
--- packed sRGB hex, @0xRRGGBB@, is the whole call —
--- @brandAccent 0x3584E4@ — and the per-appearance form adds the
--- attribute list: @brandAccent 0x3584E4 [BDark 0x62A0EA]@.
+-- packed sRGB hex, @0xRRGGBB@, is the whole call, and the
+-- per-appearance form adds the attribute list.
 --
 -- SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write or
 -- a late one. The app never writes a foreground or a contrast variant.
@@ -1028,20 +938,17 @@ emitBrand seed attrs = emitB (W.txSetBrandAccent seed mask (pack light) (pack da
     lastOf p = foldl (\held a -> maybe held Just (p a)) Nothing attrs
     light = lastOf (\a -> case a of BLight c -> Just c; _ -> Nothing)
     dark = lastOf (\a -> case a of BDark c -> Just c; _ -> Nothing)
-    -- The wire's presence mask: bit 0 light, bit 1 dark. Disjoint bits,
-    -- so the sum IS the union; an absent cell rides as 0 and the core
-    -- fills it from the seed.
+    -- The wire's presence mask: bit 0 light, bit 1 dark; an absent cell
+    -- rides as 0 and the core fills it from the seed.
     mask = maybe 0 (const 1) light + maybe 0 (const 2) dark
     pack = fromMaybe 0
 
 -- | WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
--- @platform@; docs/styling-plan.md Slice 2b): one entry per backend
--- roster row, closed.
+-- @platform@; docs/styling-plan.md Slice 2b).
 --
 -- AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
--- @currentPlatform@ and there will not be: GHC's @System.Info.os@
--- reports the COMPILE TARGET and says @darwin@ for both macOS and iOS.
--- Every row travels to every backend and each backend picks its own.
+-- @currentPlatform@: GHC's @System.Info.os@ reports the COMPILE TARGET
+-- and says @darwin@ for both macOS and iOS.
 data Platform
   = PlatformMac
   | PlatformIos
@@ -1050,9 +957,8 @@ data Platform
   | PlatformAndroid
   deriving (Eq, Show)
 
--- The wire tags, from the generated table rather than from literals —
--- 'symbolWire's reason verbatim: the discriminants are spec facts, and a
--- hand-typed 1..5 here would be a second copy of them to drift.
+-- From the generated table, never literals (as 'symbolWire'): the
+-- discriminants are spec facts and a hand-typed copy here would drift.
 platformWire :: Platform -> Int64
 platformWire p = fromIntegral $ case p of
   PlatformMac -> W.platformMac
@@ -1079,14 +985,11 @@ data TypefaceAttr
     TFontAsset Asset
 
 -- | REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
--- one family name is the whole call — @brandTypeface "Georgia"@ — and
--- every platform that has that family installed uses it. THE FAMILY,
--- NEVER THE SCALE.
+-- @brandTypeface "Georgia"@. THE FAMILY, NEVER THE SCALE.
 --
 -- SET ONCE, BEFORE THE FIRST MOUNT, like 'brandAccent'. A FAMILY A
 -- PLATFORM DOES NOT HAVE LEAVES THAT PLATFORM'S OWN TYPEFACE IN PLACE,
--- deliberately and silently: each lowering gates on the family being
--- installed rather than letting the platform pick a stranger.
+-- deliberately and silently.
 brandTypeface :: (TypefaceArgs r) => String -> r
 brandTypeface = typefacish
 
@@ -1103,10 +1006,9 @@ emitTypeface :: String -> [TypefaceAttr] -> Build ()
 emitTypeface family attrs =
   emitBIO (W.txSetBrandTypeface mask (W.VStr family) rows <$> slot)
   where
-    -- THE ROWS ARE A LIST AND THE FONT IS A CELL. A repeated 'TFont' is
-    -- last-wins — one font slot on the wire — while the 'TFor' rows are NOT
-    -- folded and NOT deduplicated: a platform named twice must reach the root
-    -- and die there, as it does from Rust.
+    -- THE ROWS ARE A LIST AND THE FONT IS A CELL: a repeated 'TFont' is
+    -- last-wins, while the 'TFor' rows are NOT folded and NOT
+    -- deduplicated — a platform named twice must reach the root and die.
     rows =
       concatMap
         ( \a -> case a of
@@ -1115,9 +1017,8 @@ emitTypeface family attrs =
             TFontAsset _ -> []
         )
         attrs
-    -- ONE SLOT, TWO WAYS TO FILL IT, so they fold together and the last
-    -- one written wins — a TFont after a TFontAsset is not a second font
-    -- any more than a TFont after a TFont is.
+    -- ONE SLOT, TWO WAYS TO FILL IT: they fold together, last written
+    -- wins.
     font =
       foldl
         ( \held a -> case a of
@@ -1129,10 +1030,8 @@ emitTypeface family attrs =
         attrs
     -- The wire's presence mask: bit 0 says a font blob rides the slot.
     mask = maybe 0 (const 1) font
-    -- The slot is written either way — an empty Str stands in when there
-    -- are no bytes — so the record's field count never varies with the
-    -- payload. Bytes register through the blob channel and travel as a
-    -- handle, which is why this write needs IO.
+    -- The slot is written either way — an empty Str stands in — so the
+    -- record's field count never varies with the payload.
     slot = case font of
       Nothing -> pure (W.VStr "")
       Just (Left b) -> W.VBlob <$> registerBlob b
@@ -1140,43 +1039,30 @@ emitTypeface family attrs =
 
 -- | DECLARE this app's identity (docs/app-identity-plan.md): the name it
 -- goes by and the picture that stands for it, as the bytes of one image
--- file — @appIdentity "Aurora Notes" markPng@. Send a PNG; each lowering
--- converts, and no platform-specific artwork rides the wire.
+-- file. Send a PNG; each lowering converts.
 --
 -- SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write, a
 -- late one and an empty name.
 appIdentity :: String -> BS.ByteString -> Build ()
 appIdentity name icon =
-  -- Real bytes register through the blob channel first (the menu icon's
-  -- mechanism) and travel as a handle, which is why this needs IO.
   emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> registerBlob icon)
 
 -- | The ASSET form of the icon slot: the same declaration, with the mark
--- NAMED rather than read — @appIdentityAsset "Aurora Notes" =\<\< asset
--- "icons\/kaya-mark.png"@.
+-- NAMED rather than read.
 appIdentityAsset :: String -> Asset -> Build ()
 appIdentityAsset name icon =
   emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> R.assetBlob icon)
 
--- | The NAME-ONLY form, for an app that has a name and no mark yet — a SECOND
--- FUNCTION rather than an attribute list, because there is exactly one
--- optional thing here and Haskell names it by naming the function.
+-- | The NAME-ONLY form, for an app that has a name and no mark yet.
 appIdentityNamed :: String -> Build ()
 appIdentityNamed name =
-  -- The slot is written either way — an empty Str stands in when there
-  -- are no bytes — so the record's field count never varies with the
-  -- payload.
   emitB (W.txSetAppIdentity 0 (W.VStr name) (W.VStr ""))
 
--- | Mount into the default window; per-window targets arrive with the
--- window vocabulary.
 -- | Window construction attributes — the config-list spelling. The
--- handler attrs ride the declaration (per-window — handlers scope to
--- the thing that creates them): 'WOnCloseRequested' fires per chrome
--- close while veto_close is armed (answer with 'destroyWindow' to
--- agree); 'WOnClosed' fires when the non-veto auxiliary is
--- chrome-closed and retires with it; 'WOnUndone' and 'WOnRedone' hear
--- this window's undo ledger.
+-- handler attrs ride the declaration: 'WOnCloseRequested' fires per
+-- chrome close while veto_close is armed (answer with 'destroyWindow'
+-- to agree); 'WOnClosed' fires when the non-veto auxiliary is
+-- chrome-closed and retires with it.
 data WindowAttr
   = WTitle String
   | WSize Double Double
@@ -1184,16 +1070,12 @@ data WindowAttr
   | -- | The CEILING on how many of this window's stack entries present
     -- side by side: 1 is the serial stack, 2 and 3 are columns on a
     -- window wide enough, the shallowest shed first as it narrows
-    -- (docs/multicolumn-plan.md carries the ruling and the measured
-    -- mechanics). There is deliberately no argument for WHICH entries
-    -- show — the stack's order is the priority order — and the live
-    -- count is the platform's own judgment where it has one. The root
-    -- refuses 0 and anything above 3.
+    -- (docs/multicolumn-plan.md). The live count is the platform's own
+    -- judgment where it has one; the root refuses 0 and anything above 3.
     WPanes Word32
   | WSectionsPresentation Int64
   | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
-    -- D1). STATE, not chrome: each backend spells its own platform's
-    -- affordance. 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
+    -- D1). 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
     -- byte-compared across platforms.
     WDirty Bool
   | -- | The space kaya's own interpreters put around this window's
@@ -1203,25 +1085,20 @@ data WindowAttr
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
   | -- | Hear an undo kaya routed in this window: the step's label —
-    -- EMPTY for a typing episode, since kaya invents no user-facing
-    -- strings — and what the core put back. THE DELTA IS THE ONLY
-    -- NOTIFICATION: applying an inverse is a programmatic write, so the
-    -- echo doctrine silences every occurrence it would otherwise cause.
+    -- EMPTY for a typing episode — and what the core put back. THE
+    -- DELTA IS THE ONLY NOTIFICATION (the echo doctrine).
     WOnUndone (String -> UndoDelta -> IO ())
   | -- | The 'WOnUndone' twin. A frontier typing episode redoes on the
     -- platform's own stack and reports itself as an ordinary edit, so
     -- that one does not arrive here.
     WOnRedone (String -> UndoDelta -> IO ())
-  | -- | The menubar rides the window construct (the window-attribute
-    -- unification rule): 'WMenus' realizes its inline Build actions in order
-    -- and appends each top-level grouping node ('menu' or 'radioGroup') to
-    -- this window's command catalog — append-only, at any time.
+  | -- | The menubar rides the window construct: 'WMenus' realizes its
+    -- inline Build actions in order and appends each top-level grouping
+    -- node to this window's catalog — append-only, at any time.
     WMenus [Build (MItem 'BarM)]
 
--- | Set a window's attributes in one construct — the attribute set
--- is EXACTLY 'createWindow''s (a window's attributes ride its window
--- construct; the primary differs only in having no creation moment —
--- the process owns it): @window 0 [WTitle "sections",
+-- | Set a window's attributes in one construct — the attribute set is
+-- EXACTLY 'createWindow''s: @window 0 [WTitle "sections",
 -- WSectionsPresentation 1]@.
 window :: Word64 -> [WindowAttr] -> Build ()
 window n = mapM_ apply
@@ -1260,13 +1137,11 @@ mountIn :: Word64 -> Widget -> Build ()
 mountIn window (Widget n) = emitB (W.txMount window n)
 
 -- | Navigation-entry construction attributes — the config-list
--- spelling. The handler attrs ride the push (per-entry, the
--- 'showAlert' handler precedent — no id inspection anywhere):
--- 'EOnPopped' fires when the user's back affordance pops THIS entry
--- natively (post-fact; a programmatic 'popEntry' does not fire it —
--- its caller already knows) and retires with the one pop; 'EOnBack'
--- fires per back request while intercept_back is armed — nothing has
--- popped; answer with 'popEntry' to agree.
+-- spelling. 'EOnPopped' fires when the user's back affordance pops THIS
+-- entry natively (a programmatic 'popEntry' does not fire it) and
+-- retires with the one pop; 'EOnBack' fires per back request while
+-- intercept_back is armed — nothing has popped, answer with 'popEntry'
+-- to agree.
 data EntryAttr
   = ETitle String
   | EInterceptBack Bool
@@ -1276,16 +1151,13 @@ data EntryAttr
 data SectionAttr
   = STitle String
   | -- | The switcher item's SEMANTIC ICON ('Symbol'): a concept each
-    -- backend draws in its own platform's symbol set — a tab bar without
-    -- icons is not the platform's real thing, and a blob is the wrong
-    -- primitive for a STANDARD one.
+    -- backend draws in its own platform's symbol set.
     SSymbol Symbol
   | SOnSelected (IO ())
 
--- | Push a navigation entry onto the primary surface's stack (entry ids are
--- guest-allocated in the shared surface namespace, the 'createWindow'
--- discipline); materializes covered, 'mountIn' presents it: @pushEntry 7
--- [ETitle "detail", EOnPopped (…)]@.
+-- | Push a navigation entry onto the primary surface's stack (entry ids
+-- are guest-allocated in the shared surface namespace); materializes
+-- covered, 'mountIn' presents it.
 pushEntry :: Word64 -> [EntryAttr] -> Build ()
 pushEntry n attrs = do
   emitB (W.txPushEntry 0 n)
@@ -1301,15 +1173,12 @@ pushEntry n attrs = do
 popEntry :: Build ()
 popEntry = emitB (W.txPopEntry 0)
 
--- | Append a section to the primary window's section set (section
--- ids are guest-allocated in the shared surface namespace); the set
--- is append-only — sections have no destruction grammar, and every
--- section's root is retained while covered (switching is SELECTION,
--- not lifecycle). 'mountIn' fills its pane:
--- @addSection 7 [STitle "Feed", SOnSelected (…)]@. 'SOnSelected'
--- rides the add (per-section): fires each time the USER switches to
--- it — post-fact and NOT one-shot; a programmatic 'selectSection'
--- does not fire it (the echo doctrine).
+-- | Append a section to the primary window's section set; the set is
+-- append-only — sections have no destruction grammar, and every
+-- section's root is retained while covered (switching is SELECTION, not
+-- lifecycle). 'SOnSelected' fires each time the USER switches to it —
+-- NOT one-shot; a programmatic 'selectSection' does not fire it (the
+-- echo doctrine).
 addSection :: Word64 -> [SectionAttr] -> Build ()
 addSection = addSectionIn 0
 
@@ -1329,11 +1198,9 @@ addSectionIn w n attrs = do
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
 
--- --- The semantic icon vocabulary (docs/styling-plan.md D6) ---------
-
 -- | THE SEMANTIC ICON VOCABULARY (spec enum @symbol@; DESIGN.md "Icons
--- want names, not bytes"), shared by the two constructs above and below
--- it: 'SSymbol' on a section, 'ISymbol' on a menu item.
+-- want names, not bytes"; docs/styling-plan.md D6), shared by 'SSymbol'
+-- on a section and 'ISymbol' on a menu item.
 data Symbol
   = SymbolAdd
   | SymbolRemove
@@ -1367,9 +1234,8 @@ data Symbol
   | SymbolHome
   deriving (Eq, Show)
 
--- The wire values, from the generated table rather than from literals:
--- the discriminants are spec facts and are append-only, and a hand-typed
--- 1..20 here would be a second copy of them to drift.
+-- From the generated table, never literals: the discriminants are spec
+-- facts, append-only, and a hand-typed copy here would drift.
 symbolWire :: Symbol -> Int64
 symbolWire s = fromIntegral $ case s of
   SymbolAdd -> W.symbolAdd
@@ -1396,11 +1262,9 @@ symbolWire s = fromIntegral $ case s of
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
 -- | The anchor scope a catalog belongs to, as a phantom index: 'BarM
--- is a window catalog (a shortcut home), 'CtxM a context anchor.
--- 'IShortcut' is typed @IAttr 'BarM@ and the node-flavor handlers
--- @IAttr 'CtxM@, so a shortcut on a context item — or a keyed handler
--- on a bar item — is a TYPE error where the anchor is known; the
--- runtime guard at the root remains the floor beneath.
+-- is a window catalog (a shortcut home), 'CtxM a context anchor. A
+-- shortcut on a context item — or a keyed handler on a bar item — is a
+-- TYPE error; the runtime guard at the root remains the floor beneath.
 data MScope = BarM | CtxM
 
 -- | A live menu item: its OWN id space behind its own type (indexed by anchor
@@ -1413,14 +1277,10 @@ newtype MItem (s :: MScope) = MItem Word64
 newtype MOption (s :: MScope) = MOption Word64
 
 -- | A context catalog built UNANCHORED ('contextCatalog') for a template
--- node: menu items are live and shared across stamped copies, so the catalog
--- is built in the live zone and 'nodeContextMenu' attaches it inside the
--- template, where each activation carries the copy's key path.
+-- node: menu items are live and shared across stamped copies, so the
+-- catalog is built in the live zone and 'nodeContextMenu' attaches it.
 newtype Catalog = Catalog [Word64]
 
--- | The closed standard-command vocabulary (DESIGN.md, Menus): macOS
--- places this one in the application menu, and every other host leaves
--- the item where the app declared it.
 -- | A named vocabulary for the accept list's closed half. A MISTYPED
 -- BARE STRING IS SILENT: it becomes a custom format id no clipboard will
 -- ever offer, so Paste stays dead and the paste hook never fires.
@@ -1460,12 +1320,9 @@ roleRedo = "redo"
 
 -- | Menu item construction attributes — the config-list spelling over
 -- a closed GADT indexed by anchor scope. Label and enablement are
--- signal-bindable ('ILabel'/'IEnabledBy'); 'IChecked'/'IValue' bind
--- both ways under the Checkbox/Choice contracts (programmatic writes
--- are QUIET — the echo doctrine); icon, primary, and shortcut are
--- const-only. Handlers ride the declaration — no app-global menu
--- dispatcher exists; the @Node@ flavors receive the stamped copy's
--- key path (the keys ARE the noun).
+-- signal-bindable; 'IChecked'/'IValue' bind both ways (programmatic
+-- writes are QUIET — the echo doctrine); icon, primary and shortcut are
+-- const-only. The @Node@ flavors receive the stamped copy's key path.
 data IAttr (s :: MScope) where
   -- | Bind the label to a Str signal (constant labels are the
   -- creator's positional argument).
@@ -1477,17 +1334,13 @@ data IAttr (s :: MScope) where
   IValue :: Int -> IAttr s
   IValueBy :: Signal -> IAttr s
   IIcon :: BS.ByteString -> IAttr s
-  -- | The item's SEMANTIC ICON ('Symbol') — the closed concept
-  -- vocabulary each backend maps to its own platform's symbol set.
-  -- BESIDE 'IIcon', not instead of it: app-specific art still rides the
-  -- blob. Every kind but 'separator' takes one (the root holds that
-  -- rule, as it holds icon's); const-only, so there is no bind flavor.
+  -- | The item's SEMANTIC ICON ('Symbol'). BESIDE 'IIcon', not instead
+  -- of it: app-specific art still rides the blob. Const-only, so there
+  -- is no bind flavor.
   ISymbol :: Symbol -> IAttr s
   IPrimary :: Bool -> IAttr s
-  -- | Any window-anchored LEAF command — an action, a toggle, or one
-  -- option of a group: a chord needs a window catalog as its native
-  -- dispatch home, and the type carries that rule (the root carries
-  -- the kind rule).
+  -- | Any window-anchored LEAF command: a chord needs a window catalog
+  -- as its native dispatch home, and the type carries that rule.
   IShortcut :: String -> IAttr 'BarM
   -- | Window-anchored actions only: a role names a standard command in the
   -- window catalog.
@@ -1499,8 +1352,6 @@ data IAttr (s :: MScope) where
   IOnSelect :: (Int -> IO ()) -> IAttr s
   IOnSelectNode :: ([W.Value] -> Int -> IO ()) -> IAttr 'CtxM
 
--- The total interpreter: an attr without an arm is a compile failure
--- (the capi-completeness tripwire's type-level twin).
 applyIAttr :: Word64 -> IAttr s -> Build ()
 applyIAttr n attr = case attr of
   ILabel (Signal s) -> emitB (W.txBindMenuLabel n s)
@@ -1531,9 +1382,8 @@ newMenuItem kind label attrs = do
   return n
 
 -- | An action — a leaf command firing exactly one menu_activated
--- occurrence (menu click OR its shortcut: ONE occurrence, one
--- dispatch path; 'IOnActivate' rides the declaration and covers
--- both): @item "Save" [IShortcut "primary+s", IOnActivate h]@.
+-- occurrence (menu click OR its shortcut: ONE occurrence, one dispatch
+-- path): @item "Save" [IShortcut "primary+s", IOnActivate h]@.
 item :: String -> [IAttr s] -> Build (MItem s)
 item label attrs = MItem <$> newMenuItem W.menuKindAction (Just label) attrs
 
@@ -1552,10 +1402,9 @@ option label attrs = MOption <$> newMenuItem W.menuKindRadioOption (Just label) 
 separator :: Build (MItem s)
 separator = MItem <$> newMenuItem W.menuKindSeparator Nothing []
 
--- | A menu grouping node — a bar root through the window construct's
--- 'WMenus', or nested as an inline Build action in a parent's child list (one
--- nested grouping level is the cap, root-checked): @menu "File" [IEnabledBy
--- canExport] [item "Save" [...], ...]@.
+-- | A menu grouping node — a bar root through 'WMenus', or nested
+-- inline in a parent's child list (one nested grouping level is the cap,
+-- root-checked).
 menu :: String -> [IAttr s] -> [Build (MItem s)] -> Build (MItem s)
 menu label attrs children = do
   n <- newMenuItem W.menuKindMenu (Just label) []
@@ -1564,11 +1413,9 @@ menu label attrs children = do
   return (MItem n)
 
 -- | A radio group — the Choice contract with the platform's checkmark
--- idiom, admissible wherever a menu grouping node is. The children
--- are 'option's ONLY (their type holds the closed grammar); 'IValue'
--- /'IValueBy' is the selected 0-based index, applied AFTER the
--- options so the index has options to address; 'IOnSelect' receives
--- each USER pick's new index.
+-- idiom. The children are 'option's ONLY (their type holds the closed
+-- grammar); 'IValue'\/'IValueBy' is the selected 0-based index, applied
+-- AFTER the options so the index has options to address.
 radioGroup :: String -> [IAttr s] -> [Build (MOption s)] -> Build (MItem s)
 radioGroup label attrs options = do
   n <- newMenuItem W.menuKindRadioGroup (Just label) []
@@ -1583,26 +1430,17 @@ contextMenu (Widget w) roots =
   mapM_ (\root -> root >>= \(MItem n) -> emitB (W.txContextAttach w n)) roots
 
 -- | Build a context catalog UNANCHORED — free root items for a
--- template-node anchor (menu items are live and shared across stamped
--- copies): 'nodeContextMenu' attaches it inside the template, and
--- each activation carries the copy's key path.
+-- template-node anchor; 'nodeContextMenu' attaches it inside the
+-- template, and each activation carries the copy's key path.
 contextCatalog :: [Build (MItem 'CtxM)] -> Build Catalog
 contextCatalog roots =
   Catalog <$> mapM (\root -> (\(MItem n) -> n) <$> root) roots
 
--- | Attach a live-built context catalog to a template node: every stamped
--- copy shows the same catalog, and each activation carries that copy's key
--- path — the keys ARE the noun (received by the @...Node@ attr handlers).
+-- | Attach a live-built context catalog to a template node: each
+-- activation carries that copy's key path — the keys ARE the noun.
 nodeContextMenu :: Node -> Catalog -> Tpl ()
 nodeContextMenu (Node n) (Catalog roots) =
   mapM_ (emitT . W.txContextAttachNode n) roots
-
--- The dynamic tier for a RETAINED item — every mutable prop, each
--- judged by the root against the item's kind and anchor, plus
--- 'menuAppend'/'menuOptions', the reopening of a grouping node
--- (append-at-any-time). Label and enablement writes never emit
--- anything; programmatic checked/value writes are configuration and
--- stay QUIET (the echo doctrine).
 
 setMenuLabel :: MItem s -> String -> Build ()
 setMenuLabel (MItem n) text = emitB (W.txSetMenuLabel n text)
@@ -1642,11 +1480,9 @@ setMenuSymbol (MItem n) s = emitB (W.txSetMenuSymbol n (symbolWire s))
 setMenuPrimary :: MItem s -> Bool -> Build ()
 setMenuPrimary (MItem n) v = emitB (W.txSetMenuPrimary n v)
 
--- | The action's shortcut (window-anchored actions only).
--- Canonicalized by the binding's one parser
--- ('W.canonicalizeShortcut'); the shortcut is another affordance of
--- the same item — it fires the SAME menu_activated occurrence as a
--- click.
+-- | The action's shortcut (window-anchored actions only), canonicalized
+-- by 'W.canonicalizeShortcut'. The shortcut fires the SAME
+-- menu_activated occurrence as a click.
 setMenuShortcut :: MItem s -> String -> Build ()
 setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n spelling)
 
@@ -1656,8 +1492,7 @@ setMenuRole :: MItem 'BarM -> String -> Build ()
 setMenuRole (MItem n) name = emitB (W.txSetMenuRole n name)
 
 -- | Reopen a RETAINED grouping node and append more children — the
--- append-at-any-time discipline: @menuAppend file [item "Publish" [IPrimary
--- True, IOnActivate h]]@.
+-- append-at-any-time discipline.
 menuAppend :: MItem s -> [Build (MItem s)] -> Build ()
 menuAppend (MItem n) children =
   mapM_ (\child -> child >>= \(MItem c) -> emitB (W.txMenuItemAppend n c)) children
@@ -1676,11 +1511,11 @@ data AlertAttr
   | AAction String
   | ACancel String
 
--- | Request a modal alert (the request/result grammar), the handler riding
--- the request like 'buttonOn'. The handler fires exactly once — choice is an
+-- | Request a modal alert (the request/result grammar), the handler
+-- riding the request. The handler fires exactly once — choice is an
 -- action index (0 or 1) or 'W.alertChoiceCancel' — and its registration
--- retires with the result. AT MOST TWO AActions (the platform floor) and
--- EXACTLY ONE ACancel, required.
+-- retires with the result. AT MOST TWO AActions (the platform floor)
+-- and EXACTLY ONE ACancel, required.
 showAlert :: [AlertAttr] -> (Word32 -> IO ()) -> Build ()
 showAlert attrs handler = do
   let titles = [t | ATitle t <- attrs]
@@ -1711,14 +1546,6 @@ showAlert attrs handler = do
                 (W.VStr (concat (take 1 cancels)))
             )
 
--- | Ask the platform for files. THE PICK, NOT THE OPEN — the result
--- carries handles you redeem later, so the name says @pick@
--- (DESIGN.md, File dialogs). The filters are (label, space-separated
--- extensions) pairs, ADVISORY on every platform.
---
--- The handler fires exactly once and retires with its answer. CANCEL IS
--- THE EMPTY LIST. One dialog may be live per process; show the next
--- from the handler.
 -- | Check one accept-list entry and return it. Ids reach every
 -- platform's own registry verbatim, so they carry no spaces.
 acceptToken :: String -> String
@@ -1791,6 +1618,12 @@ readClipboard accepting handler = do
 setAccepts :: Widget -> [String] -> Build ()
 setAccepts (Widget w) kinds = emitB (W.txSetAccepts w (acceptList kinds))
 
+-- | Ask the platform for files. THE PICK, NOT THE OPEN — the result
+-- carries handles you redeem later (DESIGN.md, File dialogs). The
+-- filters are (label, space-separated extensions) pairs, ADVISORY on
+-- every platform. The handler fires exactly once and retires with its
+-- answer; CANCEL IS THE EMPTY LIST, and one dialog may be live per
+-- process.
 pickFiles :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
 pickFiles = pick True
 
@@ -1815,22 +1648,16 @@ pick multiple filters handler = do
     )
 
 -- | Ask the platform WHERE TO SAVE — the picker's twin, on the same
--- request\/result grammar and out of the same one-live-dialog slot. The
--- handler fires exactly once and retires with its answer; CANCEL IS
--- 'Nothing'.
---
--- The first argument is the name the dialog OPENS with, and every
--- platform guarantees nothing about it: read the name you GOT
--- ('pickedName'), never the one you asked for. WHAT YOU GET BACK OPENS
--- EMPTY — 'openPicked' with 'fileModeWrite' succeeds and yields an empty
--- file on every platform (docs\/save-plan.md D1; DESIGN.md).
+-- request\/result grammar and out of the same one-live-dialog slot; the
+-- handler fires exactly once and CANCEL IS 'Nothing'. Read the name you
+-- GOT ('pickedName'), never the one you asked for: no platform promises
+-- the suggested one. WHAT YOU GET BACK OPENS EMPTY
+-- (docs\/save-plan.md D1; DESIGN.md).
 saveFile :: String -> [(String, String)] -> (Maybe PickedFile -> IO ()) -> Build ()
 saveFile suggested filters handler = do
-  -- THE PICKER'S COUNTER AND THE PICKER'S TABLE, deliberately. The core
-  -- has one dialog id space, one live slot and one retire gate, and the
-  -- answer rides `file_dialog_result` unchanged — so a save that minted
-  -- ids of its own could collide with a pick on the very guard that
-  -- makes one-dialog-per-process meaningful.
+  -- THE PICKER'S COUNTER AND THE PICKER'S TABLE, deliberately: the core
+  -- has one dialog id space, one live slot and one retire gate, so a
+  -- save minting ids of its own could collide with a pick.
   n <- Build $ \s ->
     let c = bCounters s
         next = cFileDialog c + 1
@@ -1843,12 +1670,9 @@ saveFile suggested filters handler = do
 filterValues :: [(String, String)] -> [W.Value]
 filterValues = concatMap (\(label, exts) -> [W.VStr label, W.VStr exts])
 
+-- | Mount a root into the default window; mounting presents.
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
-
--- One-shot commands: momentary verbs into widget-owned state, riding the open
--- transaction like any record — the insert and the clear beside it submit
--- together or not at all.
 
 -- | Drop an entry's content now (the field stays authoritative).
 clearWidget :: Widget -> Build ()
@@ -1858,22 +1682,18 @@ clearWidget (Widget n) = emitB (W.txWidgetCommand n W.commandClear)
 focusWidget :: Widget -> Build ()
 focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
 
--- The three text-range verbs (docs\/ranges-plan.md D1): DECLARE a set of
--- decorated ranges, put the SELECTION at one, SCROLL one into view.
--- Textarea only (docs\/deferred.md).
+-- The three text-range verbs (docs\/ranges-plan.md D1). Textarea only.
 --
 -- A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS, half-open, and HASKELL'S OWN
 -- UNIT IS NOT BYTES: a 'String' is a list of 'Char', so @findIndex@ over
 -- one counts SCALARS and every offset it returns is wrong for a
 -- non-ASCII document, silently. Search the UTF-8 encoding instead —
 -- @Data.ByteString.breakSubstring@ over @toLazyByteString . stringUtf8@.
--- The core refuses a malformed offset before any backend sees it.
 
 -- | Declare the decorated ranges of a textarea, replacing whatever was
 -- declared before; @[]@ is the clear. APP-OWNED AND NEVER TRACKED: the
--- first edit of any kind drops the set, and the app re-declares from the
--- fold 'onChange' already drives. kaya adjusts no range across an edit
--- and ships no search (docs\/ranges-plan.md §3).
+-- first edit of any kind drops the set, and kaya adjusts no range across
+-- an edit (docs\/ranges-plan.md §3).
 highlightRanges :: Widget -> [(Int, Int)] -> Build ()
 highlightRanges (Widget n) ranges =
   emitB (W.txHighlightRanges n (fromIntegral (length ranges)) (concatMap pair ranges))
@@ -1898,13 +1718,8 @@ revealRange (Widget n) (start, stop) =
   emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
 
 -- | Write a live widget's text: seed an editor's document, re-caption a
--- label. LIVE WIDGETS ONLY, which is the whole point of this signature
--- — the same write on a template Node is the floor spelling
--- 'setTextProp', because a stamped copy's text has a source-taking
--- constructor ('label', 'entryBound') and a raw write throws the row
--- away. One name for both would put a sugar verb and a floor write
--- under one spelling that no sweep could tell apart, since the receiver
--- is what decides (docs\/tpl-props-plan.md F3).
+-- label. LIVE WIDGETS ONLY — the same write on a template Node is the
+-- floor spelling 'setTextProp' (docs\/tpl-props-plan.md F3).
 setText :: Widget -> String -> Build ()
 setText = setTextProp
 
@@ -1917,21 +1732,16 @@ setSpacing :: Widget -> Double -> Build ()
 setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 
 -- | A container's OWN padding: the DIP between its bounds and its
--- children, uniform on all four sides — the window inset one level
--- down (docs\/styling-plan.md D3). Containers only, exactly as
--- 'setSpacing' is, and the ROOT is what says so: a leaf dies at
--- declare time naming the prop, and a negative or non-finite pad dies
--- the same way, in one sentence, the same in all eight languages.
--- The dynamic path; the declarative spelling is the 'Inset' attr.
+-- children, uniform on all four sides (docs\/styling-plan.md D3).
+-- Containers only, and the ROOT is what says so: a leaf, a negative or
+-- a non-finite pad dies at declare time naming the prop. The dynamic
+-- path; the declarative spelling is the 'Inset' attr.
 setInset :: Widget -> Double -> Build ()
 setInset (Widget w) pad = emitB (W.txSetInset w pad)
 
--- Construction props are a closed GADT indexed by widget class: the
--- attr list admits exactly kaya's vocabulary (no forged config
--- actions — uniform semantics, in types), 'applyAttr' is a total
--- match (a new prop cannot ship without its arm — the compiler's
--- version of the capi completeness tripwire), and container-only
--- props on a leaf are type errors before they are scene errors.
+-- Construction props are a closed GADT indexed by widget class:
+-- container-only props on a leaf are type errors before they are scene
+-- errors.
 data WClass = BoxW | LeafW
 
 -- | A container's cross-axis child placement (the align spec enum; the
@@ -1968,30 +1778,26 @@ axisWire AxisHorizontal = fromIntegral W.axisHorizontal
 axisWire AxisVertical = fromIntegral W.axisVertical
 
 -- | The user-driven orientation toggle (docs\/adaptive-layout-plan.md
--- D2). Row\/column only. No constructor spells it: the widget stays what
--- its creation kind made it and only its presentation moves.
+-- D2). Row\/column only; the widget stays what its creation kind made it
+-- and only its presentation moves.
 setAxis :: Widget -> Axis -> Build ()
 setAxis (Widget w) a = emitB (W.txSetAxis w (axisWire a))
 
--- | A window's named SIZE CLASS (spec enum "size_class"; ruled
--- 2026-08-31): what 'stackWhen' speaks in place of an author-invented
--- width. 'Compact' is the whole surface today — the platform's own
--- class on iOS, narrower than 600 points everywhere else. An app names
--- a class, it never asks which one the window is.
+-- | A window's named SIZE CLASS (spec enum "size_class"): what
+-- 'stackWhen' speaks in place of an author-invented width. 'Compact' is
+-- the whole surface today — the platform's own class on iOS, narrower
+-- than 600 points everywhere else. An app names a class, it never asks
+-- which one the window is.
 data SizeClass = Compact
 
 sizeClassWire :: SizeClass -> Int64
 sizeClassWire Compact = fromIntegral W.sizeClassCompact
 
 -- | Stack this row's children vertically while the window's SIZE CLASS
--- is the named one ('Compact', the only class today), reverting on
--- leaving the class — ONE core-evaluated breakpoint record
--- (docs\/adaptive-layout-plan.md D3; classes ruled 2026-08-31: iOS
--- answers with the platform's own class, every other platform is
--- compact below 600 points).
--- The declarative spelling is the 'StackWhen' attr; taking a 'Widget'
--- is the template zone's refusal, since a breakpoint's setters name live
--- widgets and a template row is a blueprint stamped per entry.
+-- is the named one, reverting on leaving the class — ONE core-evaluated
+-- breakpoint record (docs\/adaptive-layout-plan.md D3). The declarative
+-- spelling is the 'StackWhen' attr; taking a 'Widget' is the template
+-- zone's refusal, since a breakpoint's setters name live widgets.
 stackWhen :: Widget -> SizeClass -> Build ()
 stackWhen (Widget w) when =
   emitB
@@ -2049,10 +1855,7 @@ setA11yLabel (Widget w) l = emitB (W.txSetA11yLabel w l)
 setA11yHint :: Widget -> String -> Build ()
 setA11yHint (Widget w) h = emitB (W.txSetA11yHint w h)
 
--- | The SIGNAL-SOURCED forms of the trio — the live zone's half of the
--- template zone's 'TplStrSource' instances, spelled as 'bindText' is: a
--- spoken name that follows app state. Since 2026-09-02, uniform across
--- the nine bindings (docs/deferred.md, the live-zone a11y entry).
+-- | The SIGNAL-SOURCED forms of the trio, spelled as 'bindText' is.
 bindA11yId, bindA11yLabel, bindA11yHint :: Widget -> Signal -> Build ()
 bindA11yId (Widget w) (Signal s) = emitB (W.txBindA11yId w s)
 bindA11yLabel (Widget w) (Signal s) = emitB (W.txBindA11yLabel w s)
@@ -2124,10 +1927,8 @@ withAttrs attrs act = do
   return w
 
 -- One name, both arities — `row [kids]` and `row [Grow 2] [kids]`
--- dispatch on the RESULT type. The equality-constrained general heads
--- are what make that selection fire before the element types are known.
--- LIVE ZONE ONLY: an 'Attr' list in template position has no instance,
--- because template props take SOURCES where these take values.
+-- dispatch on the RESULT type. LIVE ZONE ONLY: an 'Attr' list in
+-- template position has no instance, since template props take SOURCES.
 class RowCol a r where
   rowish :: Word32 -> [a] -> r
 
@@ -2135,9 +1936,8 @@ instance (a ~ Build Widget, b ~ Widget) => RowCol a (Build b) where
   rowish = containerOf
 
 -- The wall where someone walks into it: `row [...]` inside a forEach
--- body is the natural thing to write, and "No instance for RowCol" is
--- not an answer. GHC prints this instead, and the instance body is
--- unreachable because selecting it IS the error.
+-- body is the natural thing to write. GHC prints this instead, and the
+-- instance body is unreachable because selecting it IS the error.
 instance
   ( TypeError
       ( 'Text "kaya: a template row is `rowOf` and a template column is `columnOf`."
@@ -2174,9 +1974,6 @@ scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
 grid :: Int -> [Build Widget] -> Build Widget
 grid = gridWith
 
--- One declaration, whichever zone hosts it — 'containerOf' with a
--- column count, so the two zone names below are the same three records
--- from their own id space.
 gridWith :: (Declare m) => Int -> [m (El m)] -> m (El m)
 gridWith columns children = do
   handles <- sequence children
@@ -2186,18 +1983,15 @@ gridWith columns children = do
   return parent
 
 -- | A spacer: PURE SUGAR for an empty grown column — it consumes the
--- leftover main-axis space between its siblings. In EITHER zone, since
--- it takes nothing that could come from a row: 'Declare' alone picks
--- the zone, no dispatcher class needed.
+-- leftover main-axis space between its siblings. In EITHER zone.
 spacer :: (Declare m) => m (El m)
 spacer = do
   w <- widget W.kindColumn
   setGrow w 1.0
   return w
 
--- The leaf half of the same idiom: every leaf constructor's result is either
--- the widget or a function awaiting its attr list — `labelBound probe` and
--- `labelBound probe [Grow 1]` under one name.
+-- The leaf half of the same idiom: every leaf constructor's result is
+-- either the widget or a function awaiting its attr list.
 class LeafArgs r where
   leafish :: Build Widget -> r
 
@@ -2210,10 +2004,9 @@ instance (a ~ Attr 'LeafW, r ~ Build Widget) => LeafArgs ([a] -> r) where
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
--- | Bind a slider's position to a float signal — the programmatic
--- write path (writeSignal fans out to the control; property writes
--- never echo an occurrence, so a handler's own writes cannot loop
--- back at it).
+-- | Bind a slider's position to a float signal — the programmatic write
+-- path (property writes never echo an occurrence, so a handler's own
+-- writes cannot loop back at it).
 bindValue :: Widget -> Signal -> Build ()
 bindValue (Widget w) (Signal s) = emitB (W.txBindValue w s)
 
@@ -2228,7 +2021,6 @@ containerOf kind children = do
   mapM_ (addChild parent) handles
   return parent
 
--- Construction sugar, live zone: props and handlers at the constructor.
 pendB :: Pending -> Build ()
 pendB pending = Build $ \s -> ((), s {bPending = pending : bPending s})
 
@@ -2239,10 +2031,9 @@ buttonOn text handler = leafish $ do
   pendB (PClick n handler)
   return w
 
--- The handler-free siblings: the same leaves with the event slot empty, for
--- an app that registers its handlers centrally. THE LEAVES THAT STAND IN BOTH
--- ZONES are exactly the ones whose arguments are the same in both — a
--- constant caption, or nothing.
+-- The handler-free siblings, with the event slot empty. THE LEAVES THAT
+-- STAND IN BOTH ZONES are exactly the ones whose arguments are the same
+-- in both — a constant caption, or nothing.
 class BothZones r where
   bothish :: (forall m. Declare m => m (El m)) -> r
 
@@ -2255,8 +2046,6 @@ instance (b ~ Node) => BothZones (Tpl b) where
 instance (a ~ Attr 'LeafW, r ~ Build Widget) => BothZones ([a] -> r) where
   bothish act attrs = withAttrs attrs act
 
--- One declaration, whichever zone hosts it: the same two records at
--- both depths, from that zone's own id space.
 captionedButton :: (Declare m) => String -> m (El m)
 captionedButton text = do
   w <- widget W.kindButton
@@ -2267,10 +2056,9 @@ button :: (BothZones r) => String -> r
 button text = bothish (captionedButton text)
 
 -- | An uncontrolled single-line field, in either zone. Handler-free by
--- construction: the field owns its text and reports each edit, live
--- through 'onChange' (or co-located with 'entryOn'), stamped through the
--- same 'onChange' at the Node, which adds the copy's key path. A template
--- copy that should OPEN holding the row's own text is 'entryBound'.
+-- construction: the field owns its text and reports each edit. A
+-- template copy that should OPEN holding the row's own text is
+-- 'entryBound'.
 entry :: (BothZones r) => r
 entry = bothish (widget W.kindEntry)
 
@@ -2285,7 +2073,6 @@ entryOn handler = leafish $ do
 textarea :: (BothZones r) => r
 textarea = bothish (widget W.kindTextarea)
 
--- | A labeled checkbox with its toggle handler co-located.
 -- | A multi-line text editor with its change handler co-located:
 -- the entry's uncontrolled contract over the platform's real
 -- multi-line editor.
@@ -2295,6 +2082,7 @@ textareaOn handler = leafish $ do
   pendB (PChange n handler)
   return w
 
+-- | A labeled checkbox with its toggle handler co-located.
 checkboxOn :: (LeafArgs r) => String -> (Bool -> IO ()) -> r
 checkboxOn text handler = leafish $ do
   w@(Widget n) <- widget W.kindCheckbox
@@ -2343,12 +2131,11 @@ sliderBoundOn lo hi sig handler = leafish $ do
   pendB (PValue n handler)
   return w
 
--- | A dropdown select over fixed options — each option becomes a
--- label child (labels only, scene-checked) — at the given initial
--- 0-based index (domain-checked at the root against the option
--- count), with its pick handler co-located: the handler receives
--- each USER pick's new 0-based index (programmatic writes never
--- echo) — the slider's uncontrolled contract.
+-- | A dropdown select over fixed options — each option becomes a label
+-- child (labels only, scene-checked) — at the given initial 0-based
+-- index (domain-checked at the root), with its pick handler co-located:
+-- the handler receives each USER pick's new index (programmatic writes
+-- never echo).
 selectOn :: (LeafArgs r) => [String] -> Int -> (Int -> IO ()) -> r
 selectOn options selected handler = leafish $ do
   w@(Widget n) <- widget W.kindSelect
@@ -2434,10 +2221,8 @@ imageBytes bytes = leafish $ do
   return w
 
 -- | The ASSET form of the source slot: the same image, with the picture
--- NAMED rather than read — @imageAsset mark [A11yLabel \"Logo\"]@, the mark
--- opened in the IO around 'buildTx'. THE BYTES NEVER ENTER THIS GUEST'S
--- HEAP: the core clones one refcount into the blob table,
--- 'appIdentityAsset''s route verbatim.
+-- NAMED rather than read. THE BYTES NEVER ENTER THIS GUEST'S HEAP: the
+-- core clones one refcount into the blob table.
 imageAsset :: (LeafArgs r) => Asset -> r
 imageAsset src = leafish $ do
   w@(Widget n) <- widget W.kindImage
@@ -2451,9 +2236,8 @@ imageBound sig = leafish $ do
   bindSource w sig
   return w
 
--- THE CANVAS (docs/canvas-plan.md §2.2). Haskell is the one binding where
--- the drawing scope is literally a LIST, which is what the wire carries
--- anyway: 'DrawOp' holds one opcode and its operands already encoded.
+-- THE CANVAS (docs/canvas-plan.md §2.2): 'DrawOp' holds one opcode and
+-- its operands already encoded, which is what the wire carries anyway.
 
 -- | A canvas's coordinate system AND its natural size in
 -- device-independent points (docs/canvas-plan.md §3.2). The op stream is
@@ -2579,10 +2363,9 @@ drawingRecord n keys (Viewbox w h) ops =
     flat = concat [vs | DrawOp vs <- ops]
 
 -- | A drawing surface, and the whole drawing with it: the op list
--- replaces whatever was declared before, never patches it. The viewbox is
--- the coordinate system the ops are written in AND the canvas's natural
--- size in points (§3.2). 'canvasOf' is the template flavour, as 'rowOf'
--- is 'row''s.
+-- replaces whatever was declared before, never patches it. The viewbox
+-- is the coordinate system the ops are written in AND the canvas's
+-- natural size in points (§3.2).
 canvas :: (LeafArgs r) => Viewbox -> [DrawOp] -> r
 canvas vb ops = leafish $ do
   w@(Widget n) <- widget W.kindCanvas
@@ -2590,62 +2373,42 @@ canvas vb ops = leafish $ do
   return w
 
 -- | THIS CANVAS REFUSES COERCION: it draws at its viewbox and is placed
--- in whatever track layout gives it, never adapting to it
--- (docs\/canvas-plan.md §3.2.1). A PROPERTY rather than a handler, which
--- is why it is a 'Build' action like every other live prop; the other
--- two policies are 'onDraw' and 'onTick', and a canvas that declares
--- none of the three is @scale@.
+-- in whatever track layout gives it (docs\/canvas-plan.md §3.2.1). A
+-- canvas that declares none of 'fixed', 'onDraw' and 'onTick' is
+-- @scale@.
 fixed :: Widget -> Build ()
 fixed (Widget w) = emitB (W.txSetSizePolicy w W.sizePolicyFixed)
 
--- | THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core hands over
--- the size layout assigned and takes back the ops drawn for it
--- (docs\/canvas-plan.md §3.2.1). PROVIDING THE FUNCTION IS THE
--- DECLARATION — that is what @redraw@ means — so this registers it AND
--- puts the policy on the wire in one act.
---
--- The size handed over IS the drawing's viewbox, so a chart re-lays-out
--- for the width instead of scaling its old pixels. The ask never reaches
--- the guest as an occurrence: 'dispatchLoop' answers it inside a
--- transaction the BINDING opens (tools\/check-ambient-tx.sh).
---
--- Registered at the element that produced the occurrence, like 'onSort'
--- — LIVE CANVASES ONLY, and the argument type is the refusal (see
--- 'canvasOf').
+-- | THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE (docs\/canvas-plan.md
+-- §3.2.1): registering IS the declaration, so this also puts the policy
+-- on the wire, and the size handed over IS the drawing's viewbox. The
+-- ask never reaches the guest as an occurrence — 'dispatchLoop' answers
+-- it in a transaction the BINDING opens (tools\/check-ambient-tx.py).
+-- LIVE CANVASES ONLY; the argument type is the refusal.
 onDraw :: App -> Widget -> (Viewbox -> [DrawOp]) -> IO ()
 onDraw app w f = registerDraw app w W.sizePolicyRedraw (\size _ -> f size)
 
 -- | The same, on the platform's FRAME CLOCK: the function is handed the
--- assigned size and the frame's time in seconds. @on_tick@ is @on_draw@
--- plus that drive, so a ticking canvas is asked as a plain redraw once
--- before its first frame and answers that ask at time 0.
---
--- THE TIME IS THE PLATFORM'S. A guest that reads its own clock
--- re-imports the frame jitter the platforms' frame times exist to
--- remove; under the harness it is the core's deterministic step, moved
--- by the @frame@ verb.
+-- assigned size and the frame's time in seconds; a ticking canvas is
+-- asked as a plain redraw once before its first frame and answers at
+-- time 0. THE TIME IS THE PLATFORM'S — a guest that reads its own clock
+-- re-imports the frame jitter frame times exist to remove.
 onTick :: App -> Widget -> (Viewbox -> Double -> [DrawOp]) -> IO ()
 onTick app w f = registerDraw app w W.sizePolicyTick f
 
 -- REGISTERING AND DECLARING ARE ONE ACT: a handler without its policy
 -- record is a drawing function nothing ever calls (docs/canvas-plan.md
--- §3.2.1's ruling 1). THE HANDLER IS WIDENED HERE, not at dispatch: one
--- stored shape means the answer path never asks which policy it holds,
--- so calling a tick function with a redraw's arity is unspellable
--- rather than merely avoided.
+-- §3.2.1's ruling 1). The handler is widened HERE, so the answer path
+-- never asks which policy it holds.
 registerDraw :: App -> Widget -> Word32 -> (Viewbox -> Double -> [DrawOp]) -> IO ()
 registerDraw app (Widget n) policy f = do
   modifyIORef' (appDraws app) (Map.insert n f)
   submitTx app (emitB (W.txSetSizePolicy n policy))
 
--- Construction sugar, template flavor: one name per widget, and the
--- argument's type picks the addressable source — a constant, a signal, or an
--- element field.
 pendT :: Pending -> Tpl ()
 pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
 
--- One Str prop's three generated emitters, travelling together: the
--- const form, the signal form, the element form.
+-- One Str prop's three generated emitters: const, signal, element.
 data StrProp = StrProp
   { strConst :: Word64 -> String -> Builder,
     strSignal :: Word64 -> Word64 -> Builder,
@@ -2675,9 +2438,8 @@ instance TplStrSource Signal where
 instance TplStrSource (KField String) where
   bindStrSource p (Node n) (KField i) = emitT (strElement p n 0 i)
 
--- | The text prop's binder — a label's text, a button's caption, an
--- entry's or textarea's opening text — which every text-carrying
--- constructor in this zone goes through.
+-- | The text prop's binder, which every text-carrying constructor in
+-- this zone goes through.
 bindTextSource :: TplStrSource s => Node -> s -> Tpl ()
 bindTextSource = bindStrSource textProp
 
@@ -2711,12 +2473,10 @@ instance TplImageSource (KField BS.ByteString) where
 
 -- | What a template F64 prop can bind to: a progress bar's fraction, a
 -- slider's position, a choice's selected index. The 'KField' instance is
--- Double-ONLY, because Prop::Value is an F64 slot.
---
--- A NUMERIC LITERAL NEEDS ITS TYPE SAID OUT LOUD here and nowhere else:
--- @progressBound (0.5 :: Double)@. The constraint set is @(Fractional s,
--- TplNumberSource s)@ and Haskell defaults only when every class in it
--- is standard, so GHC reports an ambiguous type variable instead.
+-- Double-ONLY, because Prop::Value is an F64 slot. A NUMERIC LITERAL
+-- NEEDS ITS TYPE SAID OUT LOUD here and nowhere else — @progressBound
+-- (0.5 :: Double)@ — since GHC defaults only when every class in the
+-- constraint set is standard.
 class TplNumberSource s where
   bindValueSource :: Node -> s -> Tpl ()
 
@@ -2734,10 +2494,8 @@ instance TplNumberSource (KField Double) where
 -- each stamped copy's prop can come from its own row.
 data TplAttr where
   -- | This stamped element's flex weight within its row\/column. A
-  -- CONSTANT and not a source: grow describes the prototype's share of
-  -- its track, and every copy of one blueprint divides its parent the
-  -- same way. ('setGrow' on 'Declare' writes the same prop as a
-  -- statement, and reaches this zone too.)
+  -- CONSTANT and not a source: every copy of one blueprint divides its
+  -- parent the same way.
   TplGrow :: Double -> TplAttr
   -- | This stamped CONTAINER's own padding, in layout units — the
   -- window inset two levels up and the live 'Inset' one zone down, the
@@ -2748,28 +2506,21 @@ data TplAttr where
   TplA11yId :: TplStrSource s => s -> TplAttr
   -- | What an assistive client SPEAKS for this stamped copy. THE
   -- ROW-FIELD CASE IS WHY THIS PROP EXISTS: @TplA11yLabel (field
-  -- \@"title" \@Task)@ makes every row announce its own name, which no
-  -- live spelling can say, because a live widget has no row to read.
+  -- \@"title" \@Task)@ makes every row announce its own name.
   TplA11yLabel :: TplStrSource s => s -> TplAttr
-  -- | What ACTIVATING this stamped copy does — a verb phrase, as in the
-  -- live 'A11yHint'. ACTIVATION KINDS ONLY (button, checkbox, select,
-  -- radio); the refusal is the ROOT'S, at declare time before a row
-  -- stamps and naming the kind it refused. There is no type-level wall
-  -- here for the reason written above the GADT: a class-free 'Node' has
-  -- nothing for @Attr 'LeafW@'s trick to stand on.
+  -- | What ACTIVATING this stamped copy does — a verb phrase.
+  -- ACTIVATION KINDS ONLY (button, checkbox, select, radio); the refusal
+  -- is the ROOT'S, at declare time, naming the kind it refused.
   TplA11yHint :: TplStrSource s => s -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
-  -- appearance, over the live 'Role' vocabulary. A CONSTANT: what a copy
-  -- means is a fact about the prototype. Which role fits which kind is
-  -- the ROOT'S call.
+  -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
+  -- call.
   TplRole :: Role -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
-  -- name ('acceptText' and friends) plus any custom format ids. A
-  -- CONSTANT LIST AND NOT A SOURCE: an accept list describes the
-  -- PROTOTYPE, and the root's domain check runs on the const branch
-  -- alone. Every backend gates the paste occurrence on the focused
-  -- widget's accept list, so without this 'onPaste' at a Node could never
-  -- fire (docs\/tpl-props-plan.md §1).
+  -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
+  -- Every backend gates the paste occurrence on the focused widget's
+  -- accept list, so without this 'onPaste' at a Node could never fire
+  -- (docs\/tpl-props-plan.md §1).
   TplAccepts :: [String] -> TplAttr
 
 applyTplAttr :: TplAttr -> Node -> Tpl ()
@@ -2781,27 +2532,19 @@ applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 
--- The accept list on a template node: 'setAccepts' one zone down,
--- through the same token vocabulary and the same 'acceptList' encoder,
--- so a token with a space is refused at the same place in both zones.
 setNodeAccepts :: Node -> [String] -> Tpl ()
 setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
 
--- A template node's padding and its role: 'setInset' and 'setRole' one zone
--- down, through the SAME emitters and the same 'roleWire', because a template
--- node rides the ordinary SetProperty record a live widget does.
 setNodeInset :: Node -> Double -> Tpl ()
 setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
 
 setNodeRole :: Node -> Role -> Tpl ()
 setNodeRole (Node n) r = emitT (W.txSetRole n (roleWire r))
 
--- | Props on a template node. A COMBINATOR AND NOT AN EXTRA ARITY: the
--- four leaves that stand in both zones dispatch through 'BothZones' on
--- the head shape @[a] -> r@, and a second instance at that head is
--- GHC-59692 "Duplicate instance declarations". Keeping every
--- constructor's @-> Tpl Node@ signature is also what
--- tools\/tpl-surfaces.py reads.
+-- | Props on a template node. A COMBINATOR AND NOT AN EXTRA ARITY: a
+-- second 'BothZones' instance at the @[a] -> r@ head is GHC-59692
+-- "Duplicate instance declarations", and every constructor's
+-- @-> Tpl Node@ signature is what tools\/tpl-surfaces.py reads.
 withTplAttrs :: [TplAttr] -> Tpl Node -> Tpl Node
 withTplAttrs attrs act = do
   n <- act
@@ -2887,21 +2630,18 @@ scrollOf :: Tpl Node -> Tpl Node
 scrollOf child = containerOf W.kindScroll [child]
 
 -- | A template grid, laying each stamped copy's children row-major into
--- @columns@ columns. The count describes the PROTOTYPE and so stays a
--- constant: every copy of a grid has the same shape, and only the
--- values inside it vary.
+-- @columns@ columns. The count describes the PROTOTYPE and stays a
+-- constant.
 gridOf :: Int -> [Tpl Node] -> Tpl Node
 gridOf = gridWith
 
--- | A canvas per stamped copy — a sparkline in a table cell, which is the
--- case set_drawing grew its keys-first addressing for
--- (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
--- every copy is born with it; 'drawAt' re-declares one copy's afterwards.
+-- | A canvas per stamped copy — a sparkline in a table cell, the case
+-- set_drawing grew its keys-first addressing for (docs/canvas-plan.md
+-- §3.1). The drawing is declared with the node, so every copy is born
+-- with it; 'drawAt' re-declares one copy's afterwards.
 --
--- NO SIZE POLICY HERE, and the type is the refusal: 'fixed' takes a
--- 'Widget' and 'onDraw'\/'onTick' register at one, so a stamped copy
--- keeps @scale@ — the default, and correct (docs/deferred.md, the
--- template-zone bullet of the size-policy entry).
+-- NO SIZE POLICY HERE, and the type is the refusal: a stamped copy keeps
+-- @scale@ (docs/deferred.md, the size-policy entry).
 canvasOf :: Viewbox -> [DrawOp] -> Tpl Node
 canvasOf vb ops = do
   n@(Node i) <- widget W.kindCanvas
@@ -2957,10 +2697,10 @@ choiceWith kind options src = do
 each :: Declare m => Collection -> Tpl a -> m (El m)
 each c body = fst <$> forEach c body
 
--- | The header bar's sort indicator (docs/tables-plan.md): which
--- column shows it, in which direction — the guest's declaration,
--- re-sent with the new state after it handles a sort request. The
--- platform never sorts; a header click only asks.
+-- | The header bar's sort indicator (docs/tables-plan.md): which column
+-- shows it, in which direction — re-sent with the new state after the
+-- guest handles a sort request. The platform never sorts; a header click
+-- only asks.
 data Sort = Sort {sortColumn :: Word32, sortDirection :: Word32}
 
 sortNone :: Sort
@@ -2972,10 +2712,6 @@ sortAsc column = Sort (fromIntegral column) 0
 sortDesc :: Int -> Sort
 sortDesc column = Sort (fromIntegral column) 1
 
--- | Re-declare ONE stamped copy's header bar: the table's template Node
--- plus that copy's keys, outermost first — the keys the node arm of
--- 'onSort' hands the handler. An empty key list re-declares the bar for
--- every copy. The core walls the template bar being declared first.
 -- | Re-declare ONE stamped copy's drawing: the canvas template Node plus
 -- that copy's keys, outermost first. An empty key list re-declares the
 -- drawing every copy is born with, which is what 'canvasOf' spells at
@@ -2983,6 +2719,10 @@ sortDesc column = Sort (fromIntegral column) 1
 drawAt :: Node -> [W.Value] -> Viewbox -> [DrawOp] -> Build ()
 drawAt (Node n) keys vb ops = emitB (drawingRecord n keys vb ops)
 
+-- | Re-declare ONE stamped copy's header bar: the table's template Node
+-- plus that copy's keys, outermost first. An empty key list re-declares
+-- the bar for every copy. The core walls the template bar being declared
+-- first.
 columnsAt :: Node -> [W.Value] -> [String] -> Sort -> Build ()
 columnsAt (Node n) keys titles sort =
   emitB
@@ -2996,11 +2736,8 @@ columnsAt (Node n) keys titles sort =
         (keys ++ map W.VStr titles)
     )
 
--- Sums: the data declaration is the sum. KayaSum derives everything from the
--- Generic representation — one schema per constructor (each constructor's
--- fields walked by the same GRecord machinery records use), the discriminant,
--- both conversions — so `deriving Generic` + an empty instance is the whole
--- obligation, exactly as with records.
+-- Sums: the data declaration is the sum. (tools/check-sugar-surface.py
+-- scans columnsAt up to THIS line, so the sentence is load-bearing.)
 
 class GSum f where
   gsCount :: proxy f -> Word32
@@ -3028,9 +2765,8 @@ instance (GSum a, GSum b) => GSum (a :+: b) where
     | otherwise = R1 (gsFromParts (v - gsCount (Proxy :: Proxy a)) vs)
 
 -- The sum-of-records shape: each constructor wraps exactly one record
--- type (PNote Note | PTodo Todo), so the constructor's schema is the
--- inner record's, and the per-constructor field tokens are the inner
--- record's own (field @"done" @Todo) — nothing new to declare.
+-- type, so the constructor's schema is the inner record's and the
+-- per-constructor field tokens are the inner record's own.
 instance KayaRecord inner => GSum (M1 C c (M1 S sc (K1 R inner))) where
   gsCount _ = 1
   gsSchemas _ = [kayaSchema (Proxy :: Proxy inner)]
@@ -3162,11 +2898,6 @@ eachSum (SumCollection coll) arms = Build $ \s ->
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
 
--- Records: the type is the schema. KayaRecord derives everything from the
--- Generic representation — one field tag, one conversion each way, and the
--- selector names for field tokens — so schema, insert order, and indexes
--- cannot drift from the data declaration.
-
 -- | A Haskell type that can be one record field.
 class KayaFieldType v where
   fieldTag :: proxy v -> Word32
@@ -3193,29 +2924,22 @@ instance KayaFieldType Double where
   toFieldValue = W.VF64
   fromFieldValue v = case v of W.VF64 x -> x; _ -> error "kaya: field is not an F64"
 
--- | Encoded image bytes are a wire type: the schema slot is Blob, and every
--- encode registers the bytes with the core right then — handles are single-
--- submit, so insert, update, and update_field all re-register (one copy into
--- core memory per write).
+-- | Encoded image bytes are a wire type: the schema slot is Blob, and
+-- every encode registers the bytes with the core right then — handles
+-- are single-submit, so insert, update and update_field all re-register.
 instance KayaFieldType BS.ByteString where
   fieldTag _ = W.valueBlob
   toFieldValue = W.VStr . BC.unpack
   fromFieldValue v = case v of W.VStr s -> BC.pack s; _ -> error "kaya: field is not a Blob"
 
--- Model form to wire form for one field, at the transaction's IO
--- boundary: scalar slots pass through; a Blob slot's bytes register
--- with the core now, yielding the handle the submit consumes.
 encodeFieldWire :: Word32 -> W.Value -> IO W.Value
 encodeFieldWire tag v
   | tag == W.valueBlob, W.VStr s <- v = W.VBlob <$> registerBlob (BC.pack s)
   | otherwise = pure v
 
--- One record's fields, schema tags in parallel.
 encodeFields :: [Word32] -> [W.Value] -> IO [W.Value]
 encodeFields tags = sequence . zipWith encodeFieldWire tags
 
--- The Generic walker: one pass shape for schema, names, and both
--- conversions, over the product of selectors.
 class GRecord f where
   gSchema :: proxy f -> [Word32]
   gNames :: proxy f -> [String]
@@ -3274,9 +2998,8 @@ newtype KField v = KField Word32
 
 -- | The field token for a's field, by type-level name:
 -- `field @"done" @Todo`. GHC's HasField constraint makes both the
--- membership and the field's type a compile-time fact (its functional
--- dependency pins v), so a wrong name or type is a type error at the
--- use site — no strings restating what the record already declares.
+-- membership and the field's type a compile-time fact, so a wrong name
+-- or type is a type error at the use site.
 field ::
   forall name a v.
   (KayaRecord a, KayaFieldType v, HasField name a v, KnownSymbol name) =>
@@ -3345,10 +3068,9 @@ updateFieldWire (RecordCollection (Collection n path)) key i tag value = Build $
         s {bRecords = bRecords s <> (W.txCollectionUpdateField n path key i 0 <$> encodeFieldWire tag value),
            bModel = modelSet n path key 0 updated (bModel s)})
 
--- | One recorded field write of an a-record: the value's type checks
--- against the field's at the use site, then the triple travels as
--- (index, schema tag, model value) — the tag tells the boundary
--- whether the value is a Blob slot that must register its bytes.
+-- | One recorded field write of an a-record: the triple travels as
+-- (index, schema tag, model value) — the tag tells the boundary whether
+-- the value is a Blob slot that must register its bytes.
 data FieldSet a = FieldSet !Word32 !Word32 !W.Value
 
 set :: forall v a. KayaFieldType v => KField v -> v -> FieldSet a
@@ -3402,19 +3124,13 @@ bindValueField (Node n) level (KField i) = emitT (W.txBindValueElement n level i
 bindSourceField :: Node -> Word32 -> KField BS.ByteString -> Tpl ()
 bindSourceField (Node n) level (KField i) = emitT (W.txBindSourceElement n level i)
 
--- The app: id counters that outlive any one transaction, and the
--- dispatch tables.
-
 data App = App
-  { -- Work handed over by other threads, waiting to run as
-    -- transactions on the app thread. THE ONLY FIELD HERE TOUCHED FROM
-    -- ANOTHER THREAD, and the only reason this record carries an MVar
-    -- at all — every IORef below is app-thread-only by construction.
+  { -- THE ONLY FIELD HERE TOUCHED FROM ANOTHER THREAD, and the only
+    -- reason this record carries an MVar at all — every IORef below is
+    -- app-thread-only by construction.
     appPosted :: MVar [IO ()],
     appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
-    -- The minter's counters, outliving any one transaction exactly as the id
-    -- counters above do.
     appFresh :: IORef Fresh,
     appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
@@ -3445,10 +3161,8 @@ data App = App
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64,
-    -- The undo ledger's two reports, keyed by WINDOW: a history is
-    -- per window, and so is the registration that hears it walked.
-    -- NOT one-shot (the section_selected stance): a user walks a
-    -- history as often as they like.
+    -- The undo ledger's two reports, keyed by WINDOW. NOT one-shot: a
+    -- user walks a history as often as they like.
     appUndone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
     appRedone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
     appFileDialogHandlers :: IORef (Map.Map Word64 ([PickedFile] -> IO ())),
@@ -3458,10 +3172,9 @@ data App = App
     appNextClipboardRead :: IORef Word64,
     appWidgetPastes :: IORef (Map.Map Word64 (Representation -> IO ())),
     appNodePastes :: IORef (Map.Map Word64 ([W.Value] -> Representation -> IO ())),
-    -- Menu dispatch tables, keyed by MENU ITEM id — their own id
-    -- space, separate from every widget/node table ("two tables,
-    -- always" — now N tables, still always). The node flavors receive
-    -- the stamped copy's key path (the keys ARE the noun).
+    -- Menu dispatch tables, keyed by MENU ITEM id — their own id space,
+    -- separate from every widget/node table. The node flavors receive
+    -- the stamped copy's key path.
     appMenuActivated :: IORef (Map.Map Word64 (IO ())),
     appMenuActivatedNode :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appMenuToggled :: IORef (Map.Map Word64 (Bool -> IO ())),
@@ -3469,20 +3182,13 @@ data App = App
     appMenuSelected :: IORef (Map.Map Word64 (Int -> IO ())),
     appMenuSelectedNode :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ())),
     -- The canvas's drawing-as-a-function-of-size (docs/canvas-plan.md
-    -- §3.2.1), keyed by the canvas's widget id. NOT a handler in the
-    -- sense the tables above are: these produce a DRAWING rather than
-    -- doing something, so 'dispatchLoop' answers the ask itself and the
-    -- guest never sees it. ONE STORED SHAPE for both policies —
-    -- 'onDraw' widens a size-only function — so the answer path has one
-    -- call shape and the frame time is 0 for a plain redraw.
+    -- §3.2.1), keyed by the canvas's widget id. 'dispatchLoop' answers
+    -- the ask itself and the guest never sees it. ONE STORED SHAPE for
+    -- both policies, so the answer path has one call shape and the frame
+    -- time is 0 for a plain redraw.
     appDraws :: IORef (Map.Map Word64 (Viewbox -> Double -> [DrawOp]))
   }
 
--- | Run a Build to records, submit them as one transaction, and return
--- the block's result (the handles the app keeps). The model folds
--- inside the Build's pure state and is stored back here, alongside the
--- submit — a transaction that never reaches this point (its Build
--- threw) leaves the model exactly as committed.
 -- | The app thread, learned when the dispatch loop starts. Nothing
 -- before then, which is the single-threaded construction phase.
 appThreadRef :: IORef (Maybe ThreadId)
@@ -3510,6 +3216,10 @@ requireAppThread = do
         else return ()
     Nothing -> return ()
 
+-- | Run a Build to records, submit them as one transaction, and return
+-- the block's result. The model folds inside the Build's pure state and
+-- is stored back here alongside the submit — a transaction that never
+-- reaches this point (its Build threw) leaves the model as committed.
 buildTx :: App -> Build a -> IO a
 buildTx app (Build f) = do
   requireAppThread
@@ -3518,11 +3228,9 @@ buildTx app (Build f) = do
   fresh <- readIORef (appFresh app)
   derived <- readIORef (appDerived app)
   let (a, s) = f (BuildState counters mempty model fresh children [] [] derived)
-  -- Force the Build's final state before the first store-back: a
-  -- Build that throws must throw HERE, where the boundary abandons
-  -- everything — never later, from a poisoned thunk inside an IORef
-  -- (the catch-and-continue dispatch would trip on it transactions
-  -- after the guilty one).
+  -- Force the Build's final state before the first store-back: a Build
+  -- that throws must throw HERE, where the boundary abandons everything
+  -- — never later, from a poisoned thunk inside an IORef.
   _ <- evaluate s
   -- Serialize now, before any store-back: this runs the records' IO, which is
   -- where image sources and Blob record fields register their bytes with the
@@ -3573,31 +3281,26 @@ submitTx :: App -> Build () -> IO ()
 submitTx app b = buildTx app b
 
 -- | 'buildTx' as ONE undoable step, named @label@ (docs/undo-plan.md
--- D2): @undoableTx app ("add " ++ draft) $ do insertRecord ...@. The
--- marker is emitted before @body@ runs, so no call order can put it
--- anywhere but first.
---
--- WHAT A GROUP MAY HOLD is the reactive half — signal writes and
--- collection deltas. Anything else (a const property write, creating a
--- widget, showing a dialog) fails at apply, naming the op. The label
--- must be NON-EMPTY: the empty one is how a typing episode names itself.
+-- D2). The marker is emitted before @body@ runs, so no call order can
+-- put it anywhere but first. WHAT A GROUP MAY HOLD is the reactive half
+-- — signal writes and collection deltas; anything else fails at apply,
+-- naming the op. The label must be NON-EMPTY: the empty one is how a
+-- typing episode names itself.
 undoableTx :: App -> String -> Build a -> IO a
 undoableTx app = undoableTxIn app 0
 
--- | 'undoableTx' against an auxiliary window's ledger. Each window has
--- its own history, because Undo in one window has never meant "revert
--- what happened in another".
+-- | 'undoableTx' against an auxiliary window's ledger; each window has
+-- its own history.
 undoableTxIn :: App -> Word64 -> String -> Build a -> IO a
 undoableTxIn app windowId label body =
   buildTx app (emitB (W.txUndoGroup windowId (W.VStr label)) >> body)
 
--- Fold an undo's payload into the collection model. The payload is
--- core-authoritative, so nothing here re-derives anything.
+-- Fold an undo's payload into the collection model; the payload is
+-- core-authoritative.
 --
 -- NO DERIVED RECOMPUTE HERE, DELIBERATELY: a derived signal's write rode
 -- the SAME transaction as the mutation that caused it, so the core has
--- already restored it by the time this runs. Recomputing would open a
--- transaction the app never asked for.
+-- already restored it by the time this runs.
 absorbUndo :: App -> UndoDelta -> IO ()
 absorbUndo app delta = modifyIORef' (appModel app) fold
   where
@@ -3615,33 +3318,25 @@ absorbUndo app delta = modifyIORef' (appModel app) fold
     place o i
       | iPath i == uoPath o =
           -- Positioned by the payload's list, keeping anything it does
-          -- not name at the end: the delta describes one instance's
-          -- whole order, and an entry it never mentions is one this
-          -- undo did not move.
+          -- not name at the end: an entry the delta never mentions is
+          -- one this undo did not move.
           let named = [(k, v) | k <- uoKeys o, Just v <- [lookup k (iEntries i)]]
               rest = filter ((`notElem` uoKeys o) . fst) (iEntries i)
            in i {iEntries = named ++ rest}
       | otherwise = i
 
 -- | The registration vocabulary, shared by both zones: a handler is
--- registered at the element that produced the occurrence. ONE NAME
--- DISPATCHING ON THE ELEMENT (the module header's rule) — 'Declare''s
--- @El m@ cannot serve here, since nothing in @App -> e -> … -> IO ()@
--- could pin the zone monad.
---
--- ONE CLASS, NOT ONE PER VERB, and the reason is the guard:
--- -Werror=missing-methods fires for a method missing from an EXISTING
--- instance, so every verb in one class means a zone that skips one is a
--- red at the instance. Six one-method classes would move that to a
--- MISSING INSTANCE, which is an error only where a guest calls it —
--- exactly how 'collectionOf' and the header bar came to be live-zone-only
--- (docs/deferred.md, the nested RECORD collection entry).
+-- registered at the element that produced the occurrence. ONE CLASS, NOT
+-- ONE PER VERB — -Werror=missing-methods fires only for a method missing
+-- from an EXISTING instance, so six one-method classes would turn a
+-- skipped zone into a MISSING INSTANCE, an error only where a guest
+-- calls it (docs/deferred.md, the nested RECORD collection entry).
 class HandlerTarget e where
   -- | What this zone hands a handler ahead of the payload @p@: nothing in
   -- the live zone, the stamped copy's key path (outermost first) in a
   -- template. ONE STATEMENT OF THAT RULE for every verb — a handler type
   -- written out per verb can promise the template arm the LIVE shape and
-  -- still compile, which is the silent divergence this family forecloses.
+  -- still compile.
   type Keyed e p
 
   onClick :: App -> e -> Keyed e (IO ()) -> IO ()
@@ -3666,8 +3361,7 @@ class HandlerTarget e where
   -- | The table's header-click handler, registered at its For; the
   -- payload is the 0-based column of a sort REQUEST. Nothing has changed
   -- on screen: reorder the collection by key and re-declare the header —
-  -- 'columns' live, 'columnsAt' with the keys a template copy hands back,
-  -- so a sibling table's arrows do not move (docs\/tables-plan.md).
+  -- 'columns' live, 'columnsAt' per stamped copy (docs\/tables-plan.md).
   onSort :: App -> e -> Keyed e (Int -> IO ()) -> IO ()
 
 instance HandlerTarget Widget where
@@ -3785,11 +3479,9 @@ kayaMain setup = do
   takeMVar done
   if code == 0 then exitSuccess else exitWith (ExitFailure (fromIntegral code))
 
--- | One handler dispatch: an exception crosses the build boundary
--- (the pure Build's store-back and submit never ran, so the model
--- shows exactly what was shipped), is logged, and the loop moves to
--- the next occurrence — the uniform dispatch discipline across every
--- binding.
+-- | One handler dispatch: an exception crosses the build boundary (the
+-- pure Build's store-back and submit never ran, so the model shows
+-- exactly what was shipped), is logged, and the loop moves on.
 dispatch :: IO () -> IO ()
 dispatch body =
   body `catch` \e ->
@@ -3832,14 +3524,11 @@ dispatchLoop app = do
       if more then dispatchLoop app else return () -- shutdown
     Just (kind, ident, keys, payload, clip, undone, askTail)
       -- THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
-      -- (docs/canvas-plan.md §3.2.1): the guest registered a drawing as a
-      -- function of size, so this calls it for the size the core asked
-      -- about and submits the one set_drawing itself, in a transaction the
-      -- BINDING opens (tools/check-ambient-tx.py). An unregistered canvas
-      -- id drops the ask like any other unclaimed occurrence.
-      --
-      -- The size the ask carried IS the new viewbox, which is what makes
-      -- the coordinates the assigned points.
+      -- (docs/canvas-plan.md §3.2.1): this calls the registered function
+      -- for the size the core asked about and submits the one
+      -- set_drawing itself, in a transaction the BINDING opens
+      -- (tools/check-ambient-tx.py). The size the ask carried IS the new
+      -- viewbox.
       | kind == W.occKindDrawRequested || kind == W.occKindTick -> do
           draws <- readIORef (appDraws app)
           case Map.lookup ident draws of
@@ -3922,9 +3611,8 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindClipboardResult -> do
           -- One-shot like the alert, and the request retires with it.
-          -- EMPTY IS THE UNIVERSAL NO and arrives as Nothing — denied,
-          -- unfocused, absent and nothing-we-accept alike, because no
-          -- platform says which.
+          -- EMPTY IS THE UNIVERSAL NO and arrives as Nothing, because no
+          -- platform says which cause it was.
           handlers <- readIORef (appClipboardReads app)
           writeIORef (appClipboardReads app) (Map.delete ident handlers)
           dispatch (mapM_ ($ representationOf clip) (Map.lookup ident handlers))
@@ -3968,8 +3656,7 @@ dispatchLoop app = do
       -- the label rides as the payload). NOT one-shot. THE MODEL IS
       -- RECONCILED FIRST, and unconditionally: the core moved without a
       -- transaction, so an app reading `count` in the handler must see
-      -- the restored state, and an app with no handler must not be left
-      -- with a stale model.
+      -- the restored state.
       | kind == W.occKindUndone || kind == W.occKindRedone -> do
           let delta = maybe emptyUndoDelta id undone
               label = case payload of Just (W.VStr s) -> s; _ -> ""
@@ -3979,11 +3666,9 @@ dispatchLoop app = do
               (if kind == W.occKindUndone then appUndone app else appRedone app)
           dispatch (mapM_ (\h -> h label delta) (Map.lookup ident handlers))
           dispatchLoop app
-      -- Menu occurrences key the menu-item tables — their own id
-      -- space, so neither widget nor node ids can collide with them.
-      -- Node-anchored context items carry the stamped copy's keys
-      -- (the keys ARE the noun); toggles carry the new state, radio
-      -- groups the new 0-based index.
+      -- Menu occurrences key the menu-item tables — their own id space.
+      -- Node-anchored context items carry the stamped copy's keys;
+      -- toggles carry the new state, radio groups the new 0-based index.
       | kind == W.occKindMenuActivated -> do
           case keys of
             [] -> do
@@ -4023,10 +3708,9 @@ dispatchLoop app = do
       dispatchLoop app
 
 -- The canvas ask's trailing values: the size the core is asking about,
--- and a tick's frame time in seconds. TIME 0 FOR A PLAIN REDRAW, which
--- is not a special case but the record's own shape — a ticking canvas is
--- asked once as a draw_requested before its first frame, and the stored
--- function takes the time either way.
+-- and a tick's frame time in seconds. TIME 0 FOR A PLAIN REDRAW — a
+-- ticking canvas is asked once as a draw_requested before its first
+-- frame, and the stored function takes the time either way.
 askSize :: [W.Value] -> (Viewbox, Double)
 askSize (W.VF64 w : W.VF64 h : rest) =
   (Viewbox w h, case rest of W.VF64 t : _ -> t; _ -> 0)

@@ -1,7 +1,4 @@
-// The standard-commands scene, Swift port: a chord on every leaf kind,
-// the punctuation keys those chords need, and the `settings` role —
-// macOS shows it in the application menu while the item stays
-// addressable where it was declared. See guests/rust/commands.rs and
+// The commands scene, Swift port — guests/rust/commands.rs,
 // tools/scenes/commands.steps.
 
 import Foundation
@@ -14,15 +11,13 @@ app.build { tx in
     let details = tx.signal(.bool(false))
     let sort = tx.signal(.f64(0.0))
 
-    // Reload sits beside Settings so the menu is not left empty once
-    // macOS moves the settings item out of it.
+    // Reload keeps this menu non-empty once macOS moves Settings out.
     let file = tx.menu(
         "File",
         items: [
             tx.item("Reload"),
             tx.item("Settings…", shortcut: "primary+comma", role: KayaAppTx.roleSettings) { t in
-                // Fires twice on purpose: once by the chord, once by
-                // activating the item at its DECLARED path.
+                // Fires twice on purpose: the chord and the declared path.
                 settingsCount += 1
                 t.write(status, .str("settings \(settingsCount)"))
             },

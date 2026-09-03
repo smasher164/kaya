@@ -1,69 +1,37 @@
-# The variable-height scene (docs/virtualization-plan.md §5): the
-# correction path, driven on purpose. guests/python/varied.py stamps 300
-# rows whose heights differ by STRUCTURE — row i holds an inner For of
-# k lines, k = 1 + (i * 7 % 11) % 5 — so the same row is the same number
-# of lines on every platform while its pixel height is that platform's
-# business. Row 0 is one line and row 1 is three, so the presumption
-# taken from the first realized row fails at the second and the For is
-# on the corrected path for the rest of its life (plan §2).
-#
-# WHAT THIS SCENE MAY ASSERT, and what it must not: the correction
-# changes pixel arithmetic, and pixel extents on this path are
-# legitimately platform- and history-dependent. So every expectation
-# below is a CORRECTION-STABLE fact — band membership by row identity,
-# the first index after each move, the declared total, one row's own
-# inner content — and none is an extent.
-#
-# expect_window says the FIRST VISIBLE row and the DECLARED TOTAL,
-# both data (ruled 2026-08-25); the band's WIDTH is the viewport's
-# business and the compiled table-tier gate's to hold, so no line here
-# names it.
-#
-# ONE ROW'S CONTENT IS FAIR GAME, though the band's listing is not: each
-# row's inner For carries that row's key as its automation id, so
-# `expect_order column@r200` reads exactly one copy's lines and says
-# nothing about how many copies exist. That is what proves nested
-# collection instances outlive their stamps (ruled 2026-08-25 — the
-# entry it closed is in docs/deferred.md, the measurement in
-# docs/traps.md).
+# docs/virtualization-plan.md §5, the correction path on purpose: rows
+# differ in height by STRUCTURE (row 0 is one line, row 1 is three), so
+# the presumption from the first realized row fails at the second.
+# EVERY EXPECTATION IS A CORRECTION-STABLE FACT — membership by row
+# identity, the first index after a move, the declared total, one row's
+# content — and NEVER an extent, which is platform- and
+# history-dependent on this path.
 expect label#0 "300 rows, 845 lines"
-# The whole collection is DATA — 300 rows declared — while a band of
-# widgets exists. THE SENTENCE: a windowed For's total is what the
-# guest inserted, not what the platform realized.
+# A windowed For's total is what the guest INSERTED, never what the
+# platform realized.
 expect_window column@varied 0 300
-# THE INNER LIST OF A REALIZED ROW. Each row's own For carries the row's
-# key as its automation id, so one row's lines read out on their own.
+# Each row's own For carries the row's key as its automation id, so one
+# row's lines read out alone and say nothing about how many copies exist.
 expect_order column@r000 "r000 line 1"
-# Deep, past two hundred rows the band has never realized: every
-# position it crossed was PRESUMED from row 0's pitch, which is already
-# known to be wrong. THE SENTENCE: the scroll follows a ROW, so an
-# unrealized row is reachable by identity.
+# Deep past rows the band never realized, every position PRESUMED from
+# row 0's pitch: the scroll follows a ROW, reachable by identity.
 scroll_to_row column@varied r200
 expect_window column@varied 200 300
-# THE WRITE TO AN OUT-OF-BAND ROW, READ BACK. r200's four lines were
-# inserted during the build, when the table was seeded at a screenful
-# and r200 had no widgets at all — so these are model data that became
-# widgets on realization. THE SENTENCE: a nested collection's instance
-# belongs to the ROW, not to its stamp.
+# r200's four lines were inserted during the build, when it had no
+# widgets at all: a nested collection's instance belongs to the ROW, not
+# to its stamp.
 expect_order column@r200 "r200 line 1|r200 line 2|r200 line 3|r200 line 4"
-# Back to the top. The rows between were realized and measured on the
-# way, so the prefix sums above the viewport are CORRECTED now and were
-# presumed before. THE SENTENCE: correction moves arithmetic, never
-# membership — these two lines are byte-identical to the two above.
+# The prefix sums above the viewport are CORRECTED now and were presumed
+# before: correction moves arithmetic, never membership, so these two
+# lines are byte-identical to the two above.
 scroll_to_row column@varied r000
 expect_window column@varied 0 300
-# AWAY AND BACK. r000's copy was torn down when the band left it and
-# stamped again on the way home; its line came back with it. THE
-# SENTENCE: teardown takes widgets and leaves data — this line is
-# byte-identical to the one before the deep scroll.
+# r000's copy was torn down and stamped again: teardown takes widgets
+# and leaves data.
 expect_order column@r000 "r000 line 1"
-# THE ANCHORING ASSERTION (plan §5's last sentence). Park on r150 with
-# the fifty rows above it still presumed; realize them by visiting r100,
-# which corrects their heights and therefore r150's pixel position; come
-# back to r150. THE SENTENCE: scroll position is anchored to ROW
-# IDENTITY, so a correction above the viewport adjusts the scrollbar and
-# not the content under the reader's eyes — the parked row is the band's
-# anchor again, and the band around it holds the same rows.
+# THE ANCHORING ASSERTION (plan §5): visiting r100 corrects the heights
+# above r150 and therefore its pixel position, and scroll position is
+# anchored to ROW IDENTITY — so a correction above the viewport moves
+# the scrollbar and not the content under the reader's eyes.
 scroll_to_row column@varied r150
 expect_window column@varied 150 300
 scroll_to_row column@varied r100

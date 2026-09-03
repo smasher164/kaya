@@ -1,9 +1,5 @@
-// The sections conformance scene, Go port: two peer roots in the primary
-// window's section set — presentation context, not lifecycle. The user's
-// switch emits OnSelected; the feed button's programmatic SelectSection
-// moves the selection silently, and the count surviving switch round
-// trips proves retention. See guests/rust/sections.rs and
-// tools/scenes/sections.steps.
+// The sections conformance scene (tools/scenes/sections.steps): two peer
+// roots in the primary window's section set.
 package sections
 
 import (
@@ -16,10 +12,8 @@ const (
 	feed    = 7
 	archive = 8
 
-	// The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
-	// shared scene covers BOTH arms. It opens from a handler only the
-	// desktop tail's click reaches, so CreateWindow never runs where the
-	// capability is absent.
+	// An AUX WINDOW, reached only by the desktop tail's click, so
+	// CreateWindow never runs where the capability is absent.
 	library = 1
 	shelves = 2
 	loans   = 3
@@ -34,9 +28,7 @@ func App() *kaya.App {
 		tx.Window(0).Title("sections").SectionsPresentation(kaya.SectionsPresentationBar)
 		visits = tx.Signal("archive: 0 visits")
 
-		// THE SEMANTIC ICON (docs/styling-plan.md D6): the glyph that
-		// means home differs per platform, and no shared asset would be
-		// legal anyway (SF Symbols are licensed to Apple platforms only).
+		// SF Symbols are licensed to Apple platforms: no shared asset exists.
 		feedSection := tx.AddSection(feed).Title("Feed").Symbol(kaya.SymbolHome).Id()
 		archiveSection := tx.AddSection(archive).
 			Title("Archive").
@@ -51,8 +43,7 @@ func App() *kaya.App {
 			ready := tx.Signal("feed ready")
 			tx.Label(ready) // label#0
 			tx.Button("to archive", func(tx *kaya.Tx) { // button#0
-				// Programmatic selection: configuration, no echo —
-				// OnSelected must NOT fire.
+				// Programmatic selection: OnSelected must NOT fire.
 				tx.SelectSection(archive)
 			})
 			tx.Button("open library", func(tx *kaya.Tx) { // button#1

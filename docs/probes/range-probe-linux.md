@@ -8,7 +8,7 @@ Environment:
 
 - GTK 4.18.6, pango 1.56.3, at-spi2-core 2.56.2-1+deb13u1 (Debian trixie)
 - `gtk4` 0.11.4 with feature `v4_10`, `pango` 0.22.8, `atspi` 0.30
-  (crates/kaya/Cargo.toml:119,123)
+  (crates/kaya/Cargo.toml:66,123)
 - probe sources (throwaway, outside the repo):
   scratchpad/probe.rs (gone), scratchpad/ime.rs (gone), scratchpad/reader.py (gone),
   scratchpad/run.sh (gone), scratchpad/ime-run.sh (gone)
@@ -21,7 +21,7 @@ GTK charges very little for HIGHLIGHT and SELECT on a textarea, and both are
 readable from outside the process today with the dependency kaya already has.
 REVEAL is the expensive one, and not because of the scroll API: **kaya's
 textarea has no viewport at all**, so there is nothing to scroll into view.
-The widget is a bare `GtkTextView` (crates/kaya/src/gtk.rs:3226) that grows to
+The widget is a bare `GtkTextView` (crates/kaya/src/gtk.rs:3068) that grows to
 its full content height, so a 400-line buffer produces a 6400px-tall widget in
 a 6692px-tall window. `scroll_to_iter` returns `true` and moves nothing.
 Shipping REVEAL on linux means wrapping the textarea in a `GtkScrolledWindow`,

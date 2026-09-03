@@ -1,5 +1,4 @@
-// Sum-typed collections: an abstract record is the sum, its derived
-// records the constructors. See DESIGN.md's variants section.
+// Sum-typed collections. See DESIGN.md's variants section.
 
 using System;
 using System.Collections.Generic;

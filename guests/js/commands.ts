@@ -1,9 +1,5 @@
-// The standard-commands scene, JS port: a chord on every leaf kind (a
-// checkable command, one option of a group, a plain command), the
-// punctuation keys those chords need, and the `settings` role — which
-// macOS shows in the application menu while the item stays addressable
-// where it was declared. Canonical semantics in guests/rust/commands.rs;
-// the byte-frozen contract in tools/scenes/commands.steps.
+// The standard-commands scene (tools/scenes/commands.steps): macOS moves
+// the `settings` role but the item stays addressable where declared.
 
 import * as kaya from "kaya-gui";
 
@@ -21,8 +17,7 @@ function onSorted(index: number): void {
 
 function onSettings(): void {
   // Fires twice on purpose: once by the chord, once by activating the
-  // item at its DECLARED path — which on macOS lives in the
-  // application menu by then.
+  // item at its DECLARED path.
   settingsCount += 1;
   status.set(`settings ${settingsCount}`);
 }

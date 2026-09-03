@@ -5,15 +5,10 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * The harness's eyes and hands OUTSIDE this app. Android's picker is
- * DocumentsUI, a separate APK, so nothing in-process can read it. UI
- * Automator could, but it is instrumentation and this lane launches
- * with `am start` and reads logcat; an accessibility service crosses
- * the same line without restructuring the lane.
- *
- * NOT IN THE LIBRARY'S MANIFEST: only the validation apps declare the
- * service, so a user's app never carries one it did not ask for. The
- * runner enables it over adb; nothing here starts on its own.
+ * The harness's eyes and hands OUTSIDE this app: Android's picker is
+ * DocumentsUI, a separate APK. NOT IN THE LIBRARY'S MANIFEST — only the
+ * validation apps declare the service, the runner enables it over adb,
+ * and nothing here starts on its own.
  */
 class KayaHarnessAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
@@ -81,15 +76,11 @@ class KayaHarnessAccessibility : AccessibilityService() {
             private set
 
         /**
-         * Is the app's OWN activity resumed? Written on the main thread
-         * from the mounted activity's lifecycle (KayaCompose.mount),
-         * read by [dismiss] from the harness thread.
-         *
-         * IN-PROCESS AND SO LAG-FREE, which is the whole reason it
-         * exists: every other signal [dismiss] has comes out of the
-         * accessibility window list, and that list is a snapshot that
-         * lags reality in both directions (docs/deferred.md's WATCH
-         * entry on the dialog family).
+         * Is the app's OWN activity resumed? Written from the mounted
+         * activity's lifecycle, read by [dismiss] on the harness thread.
+         * IN-PROCESS AND SO LAG-FREE, unlike every other signal
+         * [dismiss] has: the accessibility window list lags reality in
+         * both directions (docs/deferred.md's dialog-family WATCH).
          */
         @Volatile
         internal var appResumed: Boolean = false
@@ -141,44 +132,11 @@ class KayaHarnessAccessibility : AccessibilityService() {
         private const val BREADCRUMB_ID = "/breadcrumb_text"
 
         /**
-         * THE SAVE PANEL'S TWO NODES, and the one that tells the two
-         * dialogs apart.
-         *
-         * `ACTION_CREATE_DOCUMENT` is DocumentsUI too — the same
-         * package, the same breadcrumb, the same file list — so
-         * "DocumentsUI is up" does NOT mean "the open picker is up",
-         * and the readers below must not see each other's panel.
-         * Getting that wrong does not produce a wrong answer, it
-         * produces a HANG: a picker read that could see a save panel
-         * polls five seconds for a list that is never coming, and
-         * `file_save`'s postcondition reads a null state as "the press
-         * landed".
-         *
-         * THE DISCRIMINATOR IS THE NAME FIELD, because it is the only
-         * thing the create mode actually adds. `container_save` looks
-         * like the obvious answer and is NOT one: MEASURED on both
-         * panels, phone and tablet (docs/probes/open-panel-phone.md —
-         * the two uiautomator dumps' identical id sets), it is in the SHARED
-         * layout and is published EMPTY by the browse mode — a
-         * discriminator that says "save" about every picker. Keying on
-         * it turned every `expect_file_dialog` on this platform red.
-         *
-         * The name field is also what the two save verbs work on, so
-         * this asks one question rather than two that could disagree: a
-         * save panel with nothing to type into is not one this harness
-         * could drive anyway.
-         *
-         * THE NAME FIELD AND EVERY ROW SHARE ONE ID — both are
-         * `android:id/title` (measured: `text="decoy"` and
-         * `text="draft"` carry the id the name box does). So the id
-         * alone cannot name the field, and a reader keyed on it reads
-         * the FIRST ROW's basename as the name the user typed. Only one
-         * of them is EDITABLE, which is the property that makes it the
-         * name field rather than a naming coincidence.
-         *
-         * SUFFIXES, like ROW_ID and BREADCRUMB_ID above, because
-         * DocumentsUI ships under two package names and its own ids
-         * carry whichever one this device has.
+         * THE SAVE PANEL'S TWO NODES. Both dialogs are DocumentsUI, so
+         * the discriminator is the NAME FIELD (`container_save` is in the
+         * SHARED layout and published empty by browse mode, measured on
+         * phone and tablet). The name field and EVERY ROW share
+         * `android:id/title`, so only EDITABLE tells them apart.
          */
         private const val SAVE_NAME_ID = "/title"
         private const val SAVE_BUTTON_ID = "/button1"
@@ -294,30 +252,18 @@ class KayaHarnessAccessibility : AccessibilityService() {
 
     /**
      * Every package that currently owns a window WHOSE ROOT ANSWERED.
-     *
-     * PRIVATE, because as a failure string it lies: a window whose root
-     * read returns null contributes nothing here and is invisible to
-     * every reader built on this one. [windowCensus] is what a failure
-     * prints.
+     * PRIVATE, because as a failure string it lies — a null-rooted
+     * window is invisible here. [windowCensus] is what a failure prints.
      */
     private fun windowPackages(): List<String> =
         windows.orEmpty().mapNotNull { it.root?.packageName?.toString() }
 
     /**
      * WHAT THE SERVICE CAN SEE AND WHAT IT COULD READ: every window,
-     * with its package when the root answered and `root-unreadable`
-     * plus the window's title when it did not.
-     *
-     * An unreadable root is not the same failure as a missing window
-     * and wants the opposite fix, and no reader above can tell them
-     * apart — [pickerPackage], [pickerWindow] and [nodesIn] all drop a
-     * null-rooted window silently, which is how a save leg printed
-     * "DocumentsUI is showing []" about a list it never read
-     * (docs/deferred.md's WATCH entry, 2026-08-21 matrix6).
-     *
-     * THE A11Y ID IS PRINTED because system_server names windows by it
-     * in its own complaint — `AccessibilityManagerService: wait for
-     * adding window timeout: <id>` — so the two logs can be joined.
+     * with `root-unreadable` where the root did not answer — a failure
+     * the readers above drop silently (docs/deferred.md's WATCH). The
+     * a11y id is printed because system_server names windows by it in
+     * "wait for adding window timeout: <id>".
      */
     fun windowCensus(): String {
         val entries = ArrayList<String>()
@@ -356,17 +302,11 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * What the live SAVE panel is REALLY showing: the directory it is
-     * in, and the name in its name field. Null when no save panel is up.
-     *
-     * THE NAME HALF IS THE WHOLE POINT: a backend that ignored the name
-     * it was told saves under the SUGGESTED name, and every assertion
-     * downstream passes on the wrong file.
-     *
-     * THE ROWS ARE NOT READ HERE, for the mac arm's reason rather than
-     * this platform's: a save dialog need not publish a file browser at
-     * all. DocumentsUI happens to list files in CREATE mode (measured),
-     * and this reader still does not look.
+     * What the live SAVE panel is REALLY showing: its directory and the
+     * name in its name field. THE NAME HALF IS THE WHOLE POINT — a
+     * backend that ignored the name saves under the SUGGESTED one, and
+     * every later assertion passes on the wrong file. The rows are
+     * deliberately not read.
      */
     fun saveState(): Pair<String, String>? {
         val nodes = dialogNodes(save = true) ?: return null
@@ -375,16 +315,11 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * Type a name into the live save panel's name field — the harness
-     * doing what a user's keyboard would, at set_text's tier.
-     *
-     * ACTION_SET_TEXT and not a synthesized key stream: measured to
-     * return true and to read back as the typed value, and the URI the
-     * panel then answered with carried that name
-     * (docs/probes/save-probe-android.md, log-B2). False when no save
-     * panel is up or the field refused, which the caller reports —
-     * silence here would let the leg save under the SUGGESTED name with
-     * every byte assertion still passing.
+     * Type a name into the live save panel's name field, through
+     * ACTION_SET_TEXT rather than a synthesized key stream
+     * (docs/probes/save-probe-android.md, log-B2). False when no panel
+     * is up or the field refused, which the CALLER must report — silence
+     * saves under the SUGGESTED name with every assertion still passing.
      */
     fun setSaveName(name: String): Boolean {
         val field = dialogNodes(save = true)?.let { nameField(it) } ?: return false
@@ -501,25 +436,11 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * Dismiss the picker with the system back gesture — there is no
-     * Cancel button. ONE BACK IS NOT ENOUGH: the first backs walk UP
-     * the directory tree, and only the one taken at the root dismisses
-     * (docs/traps.md). Bounded, with the picker being GONE as the
-     * proof, never the action's return value.
-     *
-     * KIND-AGNOSTIC ON PURPOSE, unlike [choose] and [saveState]: back is
-     * the cancel affordance of BOTH dialogs (measured at three backs and
-     * a null result Intent for the save panel too), and "gone" is the
-     * same proof either way.
-     *
-     * MUST NOT RUN ON THE MAIN THREAD — getWindows() is refreshed on
-     * this service's main looper, which is the app's (docs/traps.md).
-     * Asserted below rather than commented.
-     *
-     * Null when the picker went; a measured sentence when it did not,
-     * because "would not dismiss" has two causes the caller cannot
-     * otherwise tell apart — a picker that ate its backs, and a gate
-     * that never let one through.
+     * Dismiss the picker with back — there is no Cancel button, ONE BACK
+     * IS NOT ENOUGH, and being GONE is the proof rather than the
+     * action's return value (docs/traps.md). MUST NOT RUN ON THE MAIN
+     * THREAD, where getWindows() is refreshed. Null when the picker went,
+     * else a sentence telling an eaten back from a withheld one.
      */
     fun dismiss(): String? {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
@@ -595,11 +516,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
         // TWO CONSECUTIVE ABSENCES, not one: the window list is a lagging
         // snapshot in BOTH directions — a dismissed picker lingers in it
         // (the straggler-back class) and a LIVE one can transiently drop
-        // out mid-relayout under load. One absent read declared a picker
-        // gone whose activity was top-resumed in the at-fail dumpsys, the
-        // choose reported success, the result never came, and the next
-        // open died on the one-per-process wall (2026-08-21, the tables
-        // ledger's ghost family).
+        // out mid-relayout under load, which then declares a picker gone
+        // whose activity was top-resumed (2026-08-21, the tables ledger's
+        // ghost family).
         var absent = 0
         var seenId: Int? = null
         for (i in 0 until GONE_TRIES) {

@@ -1,26 +1,11 @@
-// The save conformance scene, Swift port — the ROUND TRIP an editor
-// walks (docs/save-plan.md D5): open, edit, save, save-as, reopen. See
-// guests/rust/save.rs and tools/scenes/save.steps.
-//
-// EVERY STATUS IS A READ-BACK. The guest writes, closes, reopens through
-// the handle kaya gave it, and reports what Foundation read off the
-// disk. THE BYTES ARE THE ASSERTION — never a file's NAME, which
-// Android's SAF may extend at creation.
-//
-// The last step reopens BOTH handles, so a save-as that quietly wrote
-// back into the ORIGINAL fails here and nowhere else. A save
-// destination is openable because the core creates it
-// (docs/save-plan.md D1).
-//
-// NO EXTENSIONS ON THE NAMES and no filter on either request
-// (docs/deferred.md, the NSSavePanel extension-hiding entry).
+// The save scene, Swift port — guests/rust/save.rs, tools/scenes/save.steps.
 
 import Foundation
 
 let app = KayaApp()
 
-// iOS's picker cannot see the app's container, so the scene's files go
-// in Documents; TMPDIR first everywhere else (docs/traps.md).
+// iOS's picker cannot see the app's container, so the files go in Documents;
+// TMPDIR first everywhere else (docs/traps.md).
 #if os(iOS)
     let kayaRoot = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
 #else
@@ -31,9 +16,8 @@ let saveDir = (kayaRoot as NSString)
 try? FileManager.default.createDirectory(
     atPath: saveDir, withIntermediateDirectories: true)
 
-// The file the scene opens, plus the DECOY the picker needs: with one
-// file in the directory a dialog completes with it when nothing is
-// selected. "decoy" sorts first and its bytes differ (docs/traps.md).
+// The DECOY must sort first and hold different bytes: with one file in the
+// directory a dialog completes with it when nothing is selected (docs/traps.md).
 FileManager.default.createFile(
     atPath: (saveDir as NSString).appendingPathComponent("draft"),
     contents: Data("first draft".utf8))
@@ -43,9 +27,7 @@ FileManager.default.createFile(
 
 var status: KayaSignal!
 
-// The two capabilities the scene carries, held as HANDLES and never as
-// paths — `localPath` is empty on both phones, so a guest that reopened
-// by path would work on the desktops and on neither phone.
+// Handles, never paths — `localPath` is empty on both phones.
 var source: KayaPickedFile?
 var destination: KayaPickedFile?
 
@@ -61,8 +43,8 @@ func readBack(_ file: KayaPickedFile) -> String {
     }
 }
 
-/// Write `text` through a handle and report what the file says
-/// afterwards. `KAYA_FILE_MODE_WRITE` truncates; a destination adds create.
+/// Write `text` through a handle and report what the FILE says afterwards.
+/// `KAYA_FILE_MODE_WRITE` truncates; a destination adds create.
 func writeBack(_ file: KayaPickedFile, _ text: String) -> String {
     do {
         let (handle, _) = try file.open(UInt32(KAYA_FILE_MODE_WRITE))
@@ -100,8 +82,7 @@ app.build { tx in
 
     func saved(_ tx: KayaAppTx, _ file: KayaPickedFile?) {
         guard let file else {
-            // CANCEL IS nil: nothing named, nothing written, and NO
-            // DESTINATION REMEMBERED.
+            // CANCEL IS nil: nothing named, nothing written, no destination.
             tx.write(status, .str("save cancelled"))
             return
         }
@@ -115,11 +96,8 @@ app.build { tx in
             inner.pickFile(onResult: picked)
         }
         tx.button("save") { _ in  // button#1
-            // SAVE-BACK NEEDS NO DIALOG: the handle the user chose with
-            // is writable — the claim this step drives.
-            // A missing handle is an open that never landed — its OWN
-            // sentence, never a crash: a crashed guest masks the real
-            // failure (docs/deferred.md, save-jvm WATCH).
+            // A missing handle gets its OWN sentence, never a crash: a crashed
+            // guest masks the real failure (docs/deferred.md, save-jvm WATCH).
             guard let file = source else {
                 tx.write(status, .str("nothing open to save"))
                 return
@@ -127,14 +105,12 @@ app.build { tx in
             work { "saved \(writeBack(file, "second draft"))" }
         }
         tx.button("save as") { inner in  // button#2
-            // The suggested name the dialog OPENS with; the harness types
-            // over it.
+            // The name the dialog OPENS with; the harness types over it.
             inner.saveFile(suggestedName: "copy", onResult: saved)
         }
         tx.button("reopen") { _ in  // button#3
-            // BOTH, in order: a save that went to the wrong handle passes
+            // BOTH, in order: a save-as that wrote to the wrong handle passes
             // every earlier step and fails here.
-            // The missing-handle guard, same reason as save's.
             guard let first = source, let second = destination else {
                 tx.write(status, .str("nothing to reopen"))
                 return

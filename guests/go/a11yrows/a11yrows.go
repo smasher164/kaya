@@ -1,12 +1,5 @@
-// The stamped-accessibility scene, Go port: two entries stamped from ONE
-// template, each carrying its OWN ROW's accessibility identity, read back
-// out of the platform's real tree.
-//
-// SEPARATE FROM THE a11y SCENE ON PURPOSE: a For materializes a column
-// and container registries are creation-order, which differs by language.
-// This scene asserts no container at all.
-//
-// See guests/rust/a11yrows.rs and tools/scenes/a11yrows.steps.
+// The stamped-a11y scene (tools/scenes/a11yrows.steps). It asserts NO
+// container: a For materializes one, and their registries are ordinal.
 package a11yrows
 
 import (
@@ -21,18 +14,14 @@ func App() *kaya.App {
 			notes := tx.Collection()
 			for row := range tx.Rows(notes).All() {
 				field := row.Entry()
-				// BOTH PROPS ELEMENT-SOURCED. The ID is forced: expect_ax
-				// searches the REAL tree by the authored identifier, so copies
-				// sharing one const id are an ambiguity that verb refuses.
+				// expect_ax REFUSES copies that share one const id.
 				row.BindA11yID(field, row.Value())
 				row.BindA11yLabel(field, row.Value())
 			}
 			tx.InsertFresh(notes, "First note")  // entry#0
 			tx.InsertFresh(notes, "Second note") // entry#last
 
-			// A SECOND COLLECTION rather than two more widgets in the first:
-			// a scalar row has exactly one field to spend on an id. Both
-			// props are CONST — facts about the prototype, not the row.
+			// A SECOND collection: a scalar row has one field for an id.
 			heads := tx.Collection()
 			for head := range tx.Rows(heads).All() {
 				var title kaya.Node

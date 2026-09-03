@@ -35,13 +35,13 @@ tools/mac/clipprobe/main.swift (NSImage → tiff → PNG).
 
 ## 2. What the scenes actually assert about those bytes [REPO]
 
-- `tools/scenes/gallery.steps:12-13` — `expect image#0 "2x2"`,
+- `tools/scenes/gallery.steps:8-9` — `expect image#0 "2x2"`,
   `expect image#1 "0x0"`. DECODED DIMENSIONS.
-- `tools/scenes/clipboard.steps:36` — `expect_clipboard image "4x4"`.
+- `tools/scenes/clipboard.steps:19` — `expect_clipboard image "4x4"`.
   docs/clipboard-plan.md:688 titles the reason: "The image is a decoded
   size, never bytes" — macOS synthesizes six other formats from one PNG,
   so a byte count differs per lane.
-- `tools/scenes/a11y.steps:33` — `expect_ax image#0 "image/Logo"`. The
+- `tools/scenes/a11y.steps:17` — `expect_ax image#0 "image/Logo"`. The
   a11y name, not the pixels.
 - `tools/scenes/align.steps` — baseline geometry off the tall image.
 
@@ -71,7 +71,7 @@ extent of the existing guard, and it is dimension-level, not byte-level.
    `include_bytes!` in the tree (crates/kaya/src/winui/mod.rs) — the core
    reaching across into `guests/`.
 2. **The scene corpus.** `tools/scenes/*.steps`, 38 files, 188 KB,
-   resolved by `crates/kaya/src/harness.rs:94` from `KAYA_SCENES_DIR`
+   resolved by `crates/kaya/src/harness.rs:50` from `KAYA_SCENES_DIR`
    with a compile-time-relative default. **TWO transports**, because the
    phones have no shared filesystem with the runner: the path, and
    `KAYA_SELFTEST_SCRIPT` carrying the CONTENT itself over an iOS bundle
@@ -87,20 +87,20 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 
 | lane | mechanism | verified? |
 |---|---|---|
-| Android | `adb push` + `chmod 644` + **size check** (`adb shell stat -c %s` vs `wc -c`), then `am start --es KAYA_FONT_FILE` (tools/android/run-emulator.py:712-729, the hash-verified successor) | yes, size |
-| Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.py:466-486) | no |
+| Android | `adb push` + `chmod 644` + **size check** (`adb shell stat -c %s` vs `wc -c`), then `am start --es KAYA_FONT_FILE` (tools/android/run-emulator.py:662-679, the hash-verified successor) | yes, size |
+| Windows | `scp` every run, deliberately OUTSIDE the deploy stamp, into a repo-mirror path (tools/deploy-win.py:439-450) | no |
 | Linux | nothing — repo bind-mounted at `/work` | n/a |
 | macOS | nothing — runs from the repo root | n/a |
 | **iOS** | **no file-push route for assets exists.** The only host→guest binary channel is a base64-over-container-file bridge in tools/ios/run-sim.py, which is the clipboard/dialog protocol, not an asset installer | — |
 
 [MEASURED] `grep -c typeface`: validate-mac 5, linux/run-suites 19,
 deploy-win 15, android/run-emulator (gone) 21, **ios/run-sim 0**. The iOS scene
-lists (tools/lib/lanes/ios.py:26, :40) do not contain `typeface`. The
+lists (tools/lib/lanes/ios.py:24, :40) do not contain `typeface`. The
 one asset the tree ships never reaches iOS.
 
 ## 6. The four per-platform icon tables — NOT assets
 
-swift/KayaSwiftUI.swift (SF Symbols), crates/kaya/src/gtk.rs:78 (Adwaita
+swift/KayaSwiftUI.swift (SF Symbols), crates/kaya/src/gtk.rs:65 (Adwaita
 names), crates/kaya/src/winui/mod.rs (Fluent: 17 enum members + 3 raw
 code points), android/.../KayaCompose.kt (gone) (Material). 20 entries each,
 hand-written from untracked research files under `styling/`.
@@ -116,7 +116,7 @@ comment names it as the intended gate.
 
 ## 7. The wire's existing blob channel [REPO]
 
-`crates/kaya/src/capi.rs:1003-1012` — bulk payloads live once in
+`crates/kaya/src/capi.rs:972-981` — bulk payloads live once in
 core-owned memory; `kaya_blob_register` copies bytes in and returns a
 handle valid for exactly one submit; records carry 8-byte handles. Two
 directions, two small id spaces. The C floor's guests call

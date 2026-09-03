@@ -1,15 +1,8 @@
-//! The split conformance scene: adaptive panes as assertions
-//! (DESIGN.md; docs/multicolumn-plan.md). Nothing here is
-//! split-specific except `panes(2)`, asked for ONCE — the stack is the
-//! ordinary navigation stack, and every re-decision after that is the
-//! platform's.
+//! The split scene, driven by TWO scripts (tools/scenes/split.steps and
+//! listdetail.steps): the presentation is asked for ONCE and never again.
 
-/// TWO scripts drive this ONE app — tools/scenes/split.steps drives the
-/// size class with real resizes, tools/scenes/listdetail.steps asserts
-/// the bare invariant at whatever width its host gives. A scene selects
-/// a SCRIPT, never an app, so there is no second binary; the one
-/// assertion that could not be shared is the window title, which
-/// listdetail deliberately does not make.
+/// `split` drives the size class with real resizes; `listdetail` asserts
+/// the bare invariant at whatever width its host gives.
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
 
@@ -29,10 +22,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("list pane");
         let root = tx
             .column(|tx| {
-                // Authored ids so the REAL-TREE read can address these:
-                // `expect label#N` reads kaya's own model and passes
-                // whether or not anything reached the screen, which is
-                // what let a non-rendering split arm look green.
+                // Authored ids: an index read passes for an empty arm.
                 tx.label(status).a11y_id("list"); // label#0
                 let open = tx.button("open detail").id(); // button#0
                 msgs.on_click(open, Msg::OpenDetail);
@@ -58,8 +48,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
                 msgs.on_entry_popped(entry, Msg::PoppedDetail);
             }
-            // Retention: the base root took this write while the detail
-            // was up, on a regular window where it stayed VISIBLE.
+            // Retention: the base root took this write while covered.
             Msg::PoppedDetail => ctx.apply(|tx| {
                 tx.write(status, "popped detail");
             }),

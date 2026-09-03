@@ -1,11 +1,5 @@
-"""The dirty-state conformance scene, Python port — unsaved work as
-window chrome (docs/dirty-plan.md). The app declares STATE, and each
-backend spells its own platform's affordance.
-
-TWO DECLARATIONS, ON PURPOSE: an edit writes the document AND says
-`dirty=True`. kaya does not watch your signals and guess.
-
-See guests/rust/dirty.rs and tools/scenes/dirty.steps."""
+"""The dirty-state scene (tools/scenes/dirty.steps). TWO DECLARATIONS, on
+purpose: kaya does not watch your signals and guess."""
 
 import sys
 
@@ -22,8 +16,7 @@ def edit():
 
 def save():
     status.set("saved")
-    # The mark comes DOWN as well as up — a lowering that only ever sets
-    # the flag would pass every assertion before this one.
+    # The mark comes DOWN as well as up: only this assertion sees it.
     app.window(dirty=False)
 
 
@@ -32,17 +25,13 @@ def answered(choice):
         # Answering a dialog is not saving: the mark stays up.
         status.set("kept editing")
     else:
-        # UNREACHED BY THE SCENE, AND IT ABORTS IF IT EVER RUNS: there is
-        # no verb for agreeing to a close (docs/traps.md, "An app can
-        # VETO a close but cannot AGREE to one"). The scene answers
-        # cancel; this arm is the honest spelling, not a step.
+        # ABORTS if it runs — docs/traps.md, "An app can VETO a close but
+        # cannot AGREE to one".
         kaya.destroy_window(0)
 
 
 def close_asked():
-    # Nothing has closed yet: the veto class says so. The handler rides
-    # the window construct at its declaration, so it can only ever mean
-    # this surface's close.
+    # Nothing has closed yet; the handler rides this window's declaration.
     kaya.show_alert(
         title="unsaved changes",
         message="the document has unsaved changes",
@@ -52,8 +41,7 @@ def close_asked():
     )
 
 
-# `dirty` and `veto_close` are orthogonal. This window does NOT declare
-# dirty here: the default false is the scene's first assertion.
+# Dirty is NOT declared here: the script reads the clean window first.
 with app.window(title="dirty", veto_close=True,
                 on_close_requested=close_asked):
     doc = kaya.signal("notes")

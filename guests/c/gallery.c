@@ -1,13 +1,10 @@
-/* The gallery scene from C, on the function floor: the uncontrolled
- * contract with a bool and a double. */
-
 #include <kaya.h>
 #include <kaya_wire.h>
 
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids; tools/check-c-ids.py holds the one id space. */
 #define SIG_STATUS 1
 #define SIG_VOLUME 2
 #define SIG_POS 3
@@ -55,10 +52,8 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_QUARTER, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_QUARTER, "quarter");
 
-    /* Deliberately invalid bytes read 0x0: decode failure is the
-     * placeholder class and never a crash. A REGISTERED BLOB IS CONSUMED
-     * BY THE NEXT kaya_submit, and the guest's bytes may be dropped as
-     * soon as the register call returns. */
+    /* A decode failure is the placeholder class, never a crash. A
+     * REGISTERED BLOB IS CONSUMED BY THE NEXT kaya_submit. */
     static const uint8_t not_an_image[] = "not an image";
     uint64_t png_handle = kaya_blob_register(TEST_PNG, sizeof TEST_PNG);
     uint64_t bad_handle =
@@ -112,8 +107,7 @@ static void *app(void *arg) {
                 uint8_t buf[256];
                 KayaTx tx = {buf, 0, sizeof buf};
                 char volume[32];
-                /* Integer percent, so every language's formatting agrees
-                 * byte for byte (tools/scenes/gallery.steps). */
+                /* Integer percent: every language must format alike. */
                 snprintf(volume, sizeof volume, "volume: %d%%",
                          (int)(value.f * 100.0 + 0.5));
                 kaya_tx_write_signal(&tx, SIG_VOLUME, kaya_str(volume));
@@ -121,9 +115,7 @@ static void *app(void *arg) {
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_QUARTER && n_keys == 0) {
-                /* The programmatic write fans out to the control and
-                 * must NOT come back as a value_changed occurrence:
-                 * only the user path and commands emit. */
+                /* A programmatic write must NOT echo value_changed. */
                 uint8_t buf[256];
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_POS, kaya_f64(0.25));

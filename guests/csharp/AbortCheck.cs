@@ -1,12 +1,5 @@
-// The uniform-abort guard, plus every C# surface fact a SCENE cannot
-// see (menu record emission, the undo group's head-of-batch rule, the
-// mirror fold an undone/redone payload drives, the nested table's three
-// spellings and the generated row façade's two routes to them). Run by
-// tools/check-abort.py.
-//
-// Runs headless: the library loads (KAYA_LIB) and records submit, but
-// Run() is never entered. The bindings compile into this assembly, so
-// the internal mirrors are in reach.
+// The C# uniform-abort guard and the surface facts no scene reaches. Run
+// headless by tools/check-abort.py.
 
 using System;
 using System.Collections.Generic;
@@ -68,10 +61,9 @@ static class AbortCheck
         return false;
     }
 
-    // A set_column_headers record, field by field: u32 length, u16 kind,
-    // u16 pad, then u64 target, u32 sorted, u32 direction, u32 count,
-    // u32 path_len, then the Values run (u32 count, u32 reserved, then
-    // {u32 tag, u32 len, bytes} each).
+    // set_column_headers: u32 len, u16 kind, u16 pad, u64 target, u32 sorted,
+    // u32 direction, u32 count, u32 path_len, then Values (u32 count, u32
+    // reserved, then {u32 tag, u32 len, bytes} each).
     static ulong HeaderTarget(byte[] rec) => BitConverter.ToUInt64(rec, 8);
 
     static uint HeaderCount(byte[] rec) => BitConverter.ToUInt32(rec, 24);
@@ -94,9 +86,8 @@ static class AbortCheck
         return found;
     }
 
-    // A set_property record: u64 widget, u32 prop, u32 source, and for an
-    // ELEMENT source u32 level then u32 field — the exact-index token a
-    // typed row surface writes, which a literal caption never carries.
+    // set_property: u64 widget, u32 prop, u32 source, and for an ELEMENT
+    // source u32 level then u32 field.
     static List<uint> BoundFields(List<byte[]> records, int from, int to)
     {
         var fields = new List<uint>();
@@ -110,10 +101,7 @@ static class AbortCheck
         return fields;
     }
 
-    // The record window one template occupies: everything between the
-    // create_for that opens `node` and its own template_end, nested Fors
-    // and Whens counted so an inner end never closes the outer one. WHICH
-    // ZONE A CELL RECORDED INTO is not visible any other way — the record
+    // WHICH ZONE A CELL RECORDED INTO is visible no other way: the record
     // reads the same wherever it was queued.
     static (int Open, int Close) TemplateWindow(List<byte[]> records, int from, ulong node)
     {
@@ -136,11 +124,8 @@ static class AbortCheck
         return (open + 1, records.Count);
     }
 
-    // THE NESTED TABLE, which no C# scene reaches: the dashboard shape
-    // is "for every account, a positions table", so the header bar is
-    // declared on a template NODE and each stamped copy sorts on its own
-    // (docs/tables-plan.md, dynamic tables). Rust pins the same two
-    // records in crates/kaya/src/app.rs's unit tests.
+    // THE NESTED TABLE, which no C# scene reaches (docs/tables-plan.md,
+    // dynamic tables). Rust pins the same two records in app.rs's tests.
     static void NestedTable(KayaApp app)
     {
         string[] titles = { "Ticker", "Qty" };
@@ -151,16 +136,14 @@ static class AbortCheck
             int before = tx.Records.Count;
             tx.Each(accounts, account =>
             {
-                // The nested collection is declared INSIDE the template
-                // scope — the core's own-scope wall.
+                // Declared INSIDE the template scope — the core's own-scope wall.
                 var holdings = account.Collection();
                 table = account.Each(holdings, row => row.Row(() =>
                 {
                     row.Label("ticker");
                     row.Label("qty");
                 }));
-                // After the For closes and still inside the parent's
-                // template body, which is where the record finds it.
+                // After the For closes, still inside the parent's template body.
                 account.Columns(table, titles, Sort.None);
             });
             var bar = LastHeaderRecord(tx.Records, before);
@@ -171,14 +154,10 @@ static class AbortCheck
                 "the template bar is path_len 0 with one value per column");
             Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
                 "with no key path the values are the titles alone");
-            // The handler scopes to the For that owns the bar, and a
-            // copy answers for itself: keys in, keys back out.
             app.OnSort(table, (t, keys, column) =>
                 t.Columns(table, keys, titles, Sort.Asc(column)));
         });
 
-        // The per-copy re-declaration a sort request answers with: the
-        // same template node, plus that copy's keys outermost first.
         app.Build(tx =>
         {
             int before = tx.Records.Count;
@@ -194,12 +173,8 @@ static class AbortCheck
         });
     }
 
-    // THE SAME TABLE THROUGH THE GENERATED ROW FAÇADE, which could not
-    // name one at all before 2026-08-24: `<Rec>Row` had no Each/ForEach/
-    // Collection and a private Tpl, and `<Rec>Kaya.Each` opened the LIVE
-    // zone only (docs/deferred.md, the closed C# façade entry). Both
-    // routes below are compile-time claims first — they do not build
-    // without the forwards and the twin — and decode what they queue.
+    // THE SAME TABLE THROUGH THE GENERATED ROW FAÇADE (docs/deferred.md, the
+    // closed C# façade entry). Both routes are compile-time claims first.
     static void FacadeNestedTable(KayaApp app)
     {
         string[] titles = { "Ticker", "Qty" };
@@ -207,8 +182,7 @@ static class AbortCheck
         {
             var accounts = TableItemKaya.Collection(tx);
 
-            // ROUTE ONE: the outer body holds a TableItemRow, and every
-            // call in it is one of the façade's new forwards.
+            // ROUTE ONE: every call in the outer body is a façade forward.
             int before = tx.Records.Count;
             Node table = default;
             TableItemKaya.Each(tx, accounts, account =>
@@ -230,9 +204,8 @@ static class AbortCheck
             Check(HeaderValueCount(bar) == 2 && HeaderFirstValue(bar) == "Ticker",
                 "with no key path the values are the titles alone");
 
-            // ROUTE TWO: the Tpl twin. The NESTED For's body holds the
-            // row façade too, so its cells are `row.Label(row.Name)` —
-            // the exact-index tokens — and not the raw zone's literals.
+            // ROUTE TWO: the Tpl twin, whose nested cells are the row façade's
+            // exact-index tokens and not the raw zone's literals.
             before = tx.Records.Count;
             Node typed = default;
             tx.Each(accounts.Collection, account =>
@@ -258,13 +231,8 @@ static class AbortCheck
         });
     }
 
-    // THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
-    // fields, and until 2026-08-25 CollectionOf was a Tx extension and
-    // RecordCollection<T> had no At, so a C# scene could reach the
-    // template zone only through the untyped Collection (docs/deferred.md,
-    // the nested-record-collection gap). Both halves lie in ways that
-    // COMPILE — a constructor called on the wrong zone, a narrowing that
-    // drops the key — so both are decoded off the records here.
+    // THE ROW'S OWN FIELDS (docs/deferred.md, the nested-record-collection
+    // gap). Both halves lie in ways that COMPILE, so both are decoded here.
     static void NestedRecordTable(KayaApp app)
     {
         app.Build(tx =>
@@ -275,9 +243,8 @@ static class AbortCheck
             RecordCollection<TableItem> positions = null;
             tx.Each(accounts, account =>
             {
-                // THE TEMPLATE ZONE'S OWN CONSTRUCTOR. `tx.CollectionOf`
-                // is the live one, spelled the same; only the receiver
-                // tells them apart.
+                // The TEMPLATE zone's own constructor: `tx.CollectionOf` is the
+                // live one, spelled the same, and only the receiver tells them apart.
                 positions = account.CollectionOf<TableItem>();
                 table = TableItemKaya.Each(account, positions, row => row.Row(() =>
                 {
@@ -305,9 +272,7 @@ static class AbortCheck
                 "the nested rows must bind the RECORD's own tokens, in wire-index "
                     + "order, inside the nested template");
 
-            // `At` KEEPS T, so this is the record insert. The untyped
-            // narrowing hands back a Collection, whose Insert takes a
-            // bare value and puts the row's fields out of reach.
+            // `At` KEEPS T: the untyped narrowing puts the row's fields out of reach.
             int atInsert = tx.Records.Count;
             positions.At("brokerage").Insert(tx, "aapl", new TableItem("AAPL", "10"));
             byte[] insert = null;
@@ -332,16 +297,11 @@ static class AbortCheck
         });
     }
 
-    // OPEN IS NOT ENOUGH: a transaction is the app thread's. `closed`
-    // cannot see a Task continuation writing through a transaction that
-    // is still open, nor a background Build opening one of its own —
-    // both race the app thread's model, silently (docs/deferred.md).
-    // The refusal's Go twin is bindings/go/app_test.go's
-    // TestATransactionRefusesAnotherGoroutine.
+    // OPEN IS NOT ENOUGH: a transaction is the app thread's (docs/deferred.md).
+    // The Go twin is bindings/go/app_test.go's TestATransactionRefusesAnotherGoroutine.
     static void WrongThread(KayaApp app)
     {
-        // DispatchLoop makes this claim in production; the check is
-        // headless, so it claims its own thread here.
+        // Headless, so the check claims the app thread itself.
         KayaApp.ClaimAppThread();
         Signal probe = default;
         app.Build(tx => probe = tx.Signal("before"));
@@ -365,8 +325,7 @@ static class AbortCheck
             return message ?? "";
         }
 
-        // A live transaction, written from a thread the handler spawned:
-        // still OPEN, so only the thread rule can refuse it.
+        // Still OPEN, so only the thread rule can refuse it.
         string live = "";
         app.Build(tx => live = Elsewhere(() => tx.Write(probe, "from elsewhere")));
         Check(live.Contains("belongs to the app thread"),
@@ -375,15 +334,12 @@ static class AbortCheck
         Check(live.Contains("App.Post"),
             "the wrong-thread refusal must name the way out: \"" + live + "\"");
 
-        // And a background Build, which reaches no chokepoint at all
-        // when its body writes nothing.
+        // A background Build reaches no chokepoint when its body writes nothing.
         string empty = Elsewhere(() => app.Build(tx => { }));
         Check(empty.Contains("belongs to the app thread"),
             "Build from another thread was answered with \"" + empty + "\" — an "
                 + "empty body writes no record, so only Build's own check sees it");
 
-        // The way out the message names actually works, and the app
-        // thread still builds.
         bool ran = false;
         Elsewhere(() => app.Post(tx => { ran = true; tx.Write(probe, "after"); }));
         app.DrainPosted();
@@ -395,20 +351,13 @@ static class AbortCheck
     {
         var app = new KayaApp();
 
-        // ONE ID SPACE: a template node draws from the WIDGET counter, so
-        // an app hands out one number sequence and the core's two "already
-        // exists" walls can never fire on an id this binding minted
-        // (DESIGN.md, Binding conventions). The CONTIGUOUS RUN is the
-        // assertion, not inequality — a private node counter restarted at 1
-        // sits under the live ids an app has already spent and passes a !=
-        // while being exactly the defect. First thing this check does, so
-        // the run starts at 1.
+        // ONE ID SPACE (DESIGN.md, Binding conventions). The CONTIGUOUS RUN is
+        // the assertion: a private node counter restarted at 1 passes a !=.
         ulong live = 0, site = 0, node = 0, after = 0;
         app.Build(tx =>
         {
             live = tx.Label("live").Id;
             var rows = tx.Collection();
-            // The For's own container is a live widget; the node is inside.
             site = tx.Each(rows, t => node = t.Label("row").Id).Id;
             after = tx.Label("live").Id;
         });
@@ -457,8 +406,8 @@ static class AbortCheck
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "post-abort commit broken"));
 
-        // The record-time mirror-read guard (DESIGN.md, "record-time
-        // mirror-read guard"): no model read inside a template body.
+        // The record-time mirror-read guard (DESIGN.md): no model read in a
+        // template body.
         app.Build(tx =>
         {
             tx.Each(todos, t =>
@@ -472,8 +421,7 @@ static class AbortCheck
                 catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
                 Check(threw, "Count inside a For body did not throw");
             });
-            // Pinned separately because OpenFors tracks Fors only — a
-            // When pushes nothing there.
+            // Pinned separately: OpenFors tracks Fors only, a When pushes nothing.
             var visible = tx.Signal(true);
             tx.When(visible, t =>
             {
@@ -485,14 +433,11 @@ static class AbortCheck
             Check(KeysEqual(EntryKeys(tx, todos), "a", "b", "c"),
                 "read after the template scope closed broken");
         });
-        // Redundant on purpose: the guard is template-scope only, never
-        // build-wide.
+        // Redundant on purpose: the guard is template-scope, never build-wide.
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "build-tx read after the guard broken"));
 
-        // The menu constructors must REACH the record stream: one that
-        // emits nothing passes every surface gate until a scene fails
-        // live.
+        // A menu constructor that emits nothing passes every surface gate.
         MenuItem file = default;
         app.Build(tx =>
         {
@@ -525,8 +470,7 @@ static class AbortCheck
             Check(threw, "an alias shortcut must die in the binding's one parser");
         });
 
-        // Append-at-any-time: a retained handle reopens in a later
-        // transaction, under the same parent and with no new bar anchor.
+        // Append-at-any-time: same parent, no new bar anchor.
         app.Build(tx =>
         {
             int before = tx.Records.Count;
@@ -550,8 +494,7 @@ static class AbortCheck
             int before = tx.Records.Count;
             var s = tx.Signal("a");
             tx.Write(s, "b");
-            // Called after the work it names, but the marker must still
-            // LEAD the batch: the wire reads it head-of-batch.
+            // Called after the work it names; the marker still LEADS the batch.
             tx.Undoable("step");
             Check(RecKind(tx.Records[before]) == KayaWire.TxKindUndoGroup,
                 "Undoable did not put the group marker at the head of the batch");
@@ -563,8 +506,6 @@ static class AbortCheck
             Check(threw, "a second Undoable must refuse — one name per step");
         });
 
-        // The mirror fold an undone/redone payload drives — the one
-        // direction the wire travels fields-to-object.
         RecordCollection<Todo> notes = default;
         app.Build(tx =>
         {
@@ -573,8 +514,7 @@ static class AbortCheck
             notes.Insert(tx, "b", new Todo("tea", false));
         });
         var undone = new UndoDelta();
-        // "a" gone (an undone insert), "b" restored with the core's
-        // fields, "c" back from nothing (an undone remove).
+        // "a" gone (an undone insert), "b" restored, "c" back from nothing.
         undone.Entries.Add(new UndoEntry
         {
             Collection = notes.Collection.Id,

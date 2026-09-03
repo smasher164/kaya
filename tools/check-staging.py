@@ -7,13 +7,10 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# A LEG'S ARTIFACT MUST BE IN THE STAGING DERIVATION (maintainer,
-# 2026-08-25): a runner that wires a leg whose binary the same file
-# never stages fails ten minutes into a matrix with "No such file",
-# when a census over the runner's own text can say it in seconds — the
-# windowed-rust mac leg is the measured instance (wired hand-queued,
-# absent from the SCENES/DEPTH_SCENES derivation that populates
-# $RUST_GUESTS). Every finding names the leg AND the list to extend.
+# A LEG'S ARTIFACT MUST BE IN THE STAGING DERIVATION (ruled 2026-08-25):
+# a leg whose binary the same runner never stages fails ten minutes into a
+# matrix with "No such file". Every finding names the leg AND the list to
+# extend.
 
 import importlib.util
 import re
@@ -23,11 +20,10 @@ gate = Gate("check-staging")
 
 
 def load_win_lane(path):
-    """The windows lane's tables, imported from a PATH — python's own
-    reader, so this census and the runner cannot disagree about what the
-    module says. Loaded per call under a throwaway name (never through
-    sys.modules) so the shadow negatives can perturb a copy and see
-    their perturbation."""
+    """The windows lane's tables, imported from a PATH so this census and
+    the runner cannot disagree. Loaded per call under a throwaway name
+    (never through sys.modules) so the shadow negatives can perturb a copy
+    and see their perturbation."""
     spec = importlib.util.spec_from_file_location("kaya_lane_shadow", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -59,11 +55,9 @@ def check(root):
         return set(body.split())
 
     # --- validate-mac: rust legs vs SCENES + DEPTH_SCENES ------------
-    # The mac tables are DATA since the runner conversion
-    # (tools/lib/lanes/mac.py): the staging loop copies SCENES ∪
-    # DEPTH_SCENES out of target/debug/examples, and every rust leg's
-    # guest stem must be in that union or the leg dies at run time
-    # with 'No such file'. The census imports what the runner imports.
+    # The staging loop copies SCENES ∪ DEPTH_SCENES out of
+    # target/debug/examples, so every rust leg's guest stem must be in that
+    # union. The census imports what the runner imports.
     mac_lane = load_mac_lane(root / "tools/lib/lanes/mac.py")
     mac_staged = set(mac_lane.SCENES) | set(mac_lane.DEPTH_SCENES)
     mac_rust = {(name, mac_lane.guest_stem(scene))
@@ -80,9 +74,8 @@ def check(root):
                  f"it and the leg dies at run time with 'No such file' "
                  f"— add {stem} to DEPTH_SCENES (or SCENES if every "
                  f"language has the guest)")
-    # ...and every python and js leg's guest file exists (the runner
-    # derives the path from the module, so the module is the thing to
-    # hold). The two interpreted guests share the shape.
+    # ...and every python and js leg's guest file exists: the runner
+    # derives the path from the module, so the module is what to hold.
     SOURCE_LEGS = {"python": ("python", ".py"), "js": ("js", ".ts")}
     for name, scene, mac_l in mac_lane.legs():
         if mac_l not in SOURCE_LEGS:
@@ -94,20 +87,16 @@ def check(root):
                  f"guests/{folder}/{stem}{ext}, which does not exist")
 
     # --- deploy-win: the lane module's roster vs its build lists -----
-    # The windows tables are DATA since the runner conversion
-    # (tools/lib/lanes/win.py); this census imports what the runner
-    # imports, so the roster read cannot go vacuous the way a regex
-    # over retired shell text would. The DEFAULT depth list is read on
-    # purpose: the census must not follow KAYA_WIN_DEPTH_SCENES.
+    # This census imports what the runner imports. The DEFAULT depth list
+    # is read on purpose: the census must not follow
+    # KAYA_WIN_DEPTH_SCENES.
     win_lane = load_win_lane(root / "tools/lib/lanes/win.py")
     exes = (set(win_lane.SCENES) | set(win_lane.DEPTH_SCENES)
             | set(win_lane.GO_ONLY_SCENES))
     pys = set(win_lane.SCENES) | set(win_lane.PY_ONLY_SCENES)
     # A suite's ARTIFACT is what its checked-in launcher names, not the
-    # suite's own word: listdetail runs split.exe (two scenes, one
-    # guest), so the launcher is the only honest derivation source.
-    # The module roster covers the milestone2 bare legs too, which the
-    # old `<scene>_<lang>` regex never could.
+    # suite's own word: listdetail runs split.exe (two scenes, one guest),
+    # so the launcher is the only honest derivation source.
     for suite in [leg for block in win_lane.ORDER for leg in block]:
         launcher = root / "tools" / "guest" / win_lane.launcher(suite)
         if not launcher.is_file():
@@ -120,9 +109,9 @@ def check(root):
         for e in re.finditer(r"(?:^|[\s\\])([a-z0-9_]+)\.exe\b", body,
                              re.M):
             base = e.group(1)
-            # Runtimes are not guest artifacts: what python.exe RUNS
-            # is the .py clause's business, and dotnet/java ship
-            # their own guest trees whole.
+            # Runtimes are not guest artifacts: what python.exe RUNS is
+            # the .py clause's business, and dotnet/java ship their own
+            # guest trees whole.
             if base in ("python", "pythonw", "java", "dotnet", "cmd",
                         "wscript", "cscript", "schtasks", "taskkill"):
                 continue
@@ -179,15 +168,10 @@ def check(root):
                      f"not exist")
 
     # --- the iOS bundle: a leg's WINDOW GEOMETRY is not unpinned state
-    # An app declaring no supported orientations inherits the DEVICE's,
-    # and the same phone then reports 375x734 or 724x355 depending on
-    # how the simulator happens to be turned. `adaptive`'s breakpoint is
-    # declared at 520, so one of those two widths makes `expect_axis
-    # row@narrow "vertical"` true and the other makes it false — same
-    # build, no code in between, and the verdict is CORRECT both times,
-    # which is why no rerun could ever explain it (measured 2026-08-29,
-    # docs/traps.md). The pool's device TYPE is pinned in run-sim.py;
-    # this is its geometry.
+    # An app declaring no supported orientations inherits the DEVICE's
+    # (docs/traps.md: "A leg whose premise is the window's WIDTH, on a
+    # device nothing pinned the orientation of"). The pool's device TYPE is
+    # pinned in run-sim.py; this is its geometry.
     plist = (root / "tools/ios/Info.plist.in").read_text(encoding="utf-8")
     for key in ("UISupportedInterfaceOrientations",
                 "UISupportedInterfaceOrientations~ipad"):
@@ -207,13 +191,9 @@ def check(root):
                  f"declared")
 
     # --- every guest .ps1 is in the windows deploy list --------------
-    # The .cmd and .vbs families ride GLOBS, so a new one ships itself;
-    # a .ps1 is named individually. The shell body kept TWO hand-written
-    # copies of the list (deploy_stamp and DEPLOY_ARTIFACTS) and
-    # shot-window.ps1 once shipped with the .ps1 in NEITHER; the python
-    # runner has ONE deploy_artifacts() list feeding both the manifest
-    # ship and the stamp, so the drift between the halves is gone by
-    # construction and this census holds the one list to the directory.
+    # The .cmd and .vbs families ride GLOBS, so a new one ships itself; a
+    # .ps1 is named individually, and deploy_artifacts() is the ONE list
+    # feeding both the artifact ship and the deploy stamp.
     def block(text, opener, closer):
         start = text.find(opener)
         if start < 0:
@@ -347,8 +327,7 @@ negative(
     "stamp)")
 
 # N7 plants a NEW .ps1 on the shadow's disk with no list entry — the
-# census direction that catches the next shot-window.ps1 the day it is
-# written.
+# census direction that catches an unlisted helper the day it is written.
 _s7 = shadow("n7")
 (_s7 / "tools/guest/ghosthelper.ps1").write_text(
     "Write-Output ghost\n", encoding="utf-8")

@@ -1,5 +1,5 @@
--- The progress conformance scene, Haskell port. See
--- guests/rust/progress.rs and tools/scenes/progress.steps.
+-- The progress scene, Haskell port — guests/rust/progress.rs,
+-- tools/scenes/progress.steps.
 
 import KayaApp
 

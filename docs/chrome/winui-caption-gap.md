@@ -25,7 +25,7 @@ is a 12-column Grid. The three columns that matter here:
   no Padding** in the template (`:274-281` — Content, both alignments, nothing
   else). kaya writes none either: `refresh_toolbar` does
   `titlebar.SetRightHeader(&bar.cast::<UIElement>()?)` and never touches the
-  bar's margin (`crates/kaya/src/winui/mod.rs:3036`).
+  bar's margin (`crates/kaya/src/winui/mod.rs:2572`).
 - **Column 11** is NOT 0 at runtime. `TitleBar::UpdatePadding`
   (`TitleBar.cpp:466-478`) overwrites it every layout with
   `appTitleBar.RightInset()` — the width the system's own caption buttons

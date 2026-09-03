@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The night half of values/themes.xml. Same name, dark platform
-         parent: the system picks this file whenever the device is in
-         night mode, before any of kaya's code runs. -->
+    <!-- The night half of values/themes.xml: same name, dark platform
+         parent, picked by the system before any of kaya's code runs. -->
     <style name="Theme.Kaya.NoActionBar" parent="@android:style/Theme.Material.NoActionBar" />
 </resources>

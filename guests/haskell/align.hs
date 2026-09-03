@@ -1,10 +1,5 @@
-{- The align conformance scene, Haskell port — see guests/rust/align.rs
-   and tools/scenes/align.steps for the full rationale. The row's tall
-   no-baseline image has its BOTTOM on the baseline (the CSS
-   replaced-element rule); that construction is what separates the modes
-   on every platform's control metrics. row#1 hosts the grown, stretched
-   nested column the ruling pins (docs/deferred.md, the nested-container
-   GAP). -}
+-- The align scene, Haskell port — guests/rust/align.rs,
+-- tools/scenes/align.steps.
 
 import qualified Data.ByteString as BS
 import KayaApp
@@ -51,8 +46,6 @@ main = kayaMain $ \app -> do
           row
             []
             [ labelBound anchor, -- label#2
-              -- grown into the row's leftover, stretched across its
-              -- own breadth
               column
                 [Grow 1, Align AlignStretch, A11yId "fitcol"]
                 [ labelBound fit, -- label#3

@@ -1,15 +1,11 @@
-// UndoProbe round 2 (macOS) — pin down WHO answers Edit>Undo, whether a
-// programmatic write registers anything at all, and how the entry's
-// private NSCellUndoManager behaves across fields and focus.
-//
-// The shape round 1 established, and what these questions answered, are
-// docs/undo-plan.md §0. The R-labels below mark which reading is which.
-//
+// UndoProbe round 2 (macOS) — WHO answers Edit>Undo, whether a
+// programmatic write registers anything, and how the entry's private
+// NSCellUndoManager behaves across fields and focus
+// (docs/undo-plan.md §0; the R-labels are in the print lines below).
 // THREE MODES, not two: `nohook` = a delegate that does NOT implement
 // windowWillReturnUndoManager (what kaya ships), `plainhook` = a stock
-// UndoManager, `hook` = the logging subclass. Implementing the method
-// and returning nil is a DIFFERENT thing, which round 1 conflated.
-//
+// UndoManager, `hook` = the logging subclass — implementing the method
+// and returning nil is a DIFFERENT thing.
 // THROWAWAY. Nothing builds it but build.sh beside it.
 import AppKit
 import SwiftUI

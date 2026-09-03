@@ -260,7 +260,7 @@ run "$proto" typeface-rust env KAYA_SELFTEST=typeface \
 ### check-stubs is red on somebody else's prose
 
 ```
-check-stubs: crates/kaya/src/protocol.rs:400 declares a depth stub on "typeface", but that file is not one of the backends this gate reads
+check-stubs: crates/kaya/src/protocol.rs:387 declares a depth stub on "typeface", but that file is not one of the backends this gate reads
 check-stubs: android/javahost/.../MainActivity.kt:96 declares a depth stub on "typeface", …
 ```
 

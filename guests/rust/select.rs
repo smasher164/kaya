@@ -1,6 +1,5 @@
-//! The select conformance scene: the control owns its selection and
-//! reports each change as a 0-based index — the slider contract with
-//! an index. The contract is tools/scenes/select.steps.
+//! The select conformance scene (tools/scenes/select.steps): the control
+//! owns its selection and reports a 0-based index.
 
 const OPTIONS: [&str; 3] = ["Red", "Green", "Blue"];
 

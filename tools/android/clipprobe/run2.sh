@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 
-# ClipProbe, second campaign — the SAME-PACKAGE clipboard cells
-# (P1..P8 below). Results: docs/clipboard-plan.md:1223. The
-# cross-package half, which is the half that counts, is
-# tools/android/cliphelper/run3.sh.
-#
-# Throwaway; nothing in the validation ladder calls this. Results on
-# stdout — the receivers answer through ORDERED broadcast result data,
-# which `am broadcast` prints directly (no logcat race).
+# ClipProbe, second campaign — the SAME-PACKAGE clipboard cells.
+# Results: docs/clipboard-plan.md:1223. The cross-package half, which is
+# the half that counts, is tools/android/cliphelper/run3.sh.
+# THROWAWAY; nothing in the validation ladder calls this. Results ride
+# ORDERED broadcast result data, which `am broadcast` prints (no logcat
+# race).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

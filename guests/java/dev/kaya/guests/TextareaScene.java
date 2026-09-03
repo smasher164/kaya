@@ -3,8 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The textarea conformance scene from the JVM. See
- * guests/rust/textarea.rs and tools/scenes/textarea.steps.
+ * The textarea scene from the JVM — guests/rust/textarea.rs,
+ * tools/scenes/textarea.steps.
  */
 public final class TextareaScene {
     private record Scene(KayaApp.Signal<String> lines, KayaApp.Widget editor,
@@ -28,9 +28,7 @@ public final class TextareaScene {
             tx.window(0).title("textarea");
             KayaApp.Signal<String> lines = tx.signal("0 lines");
 
-            // Java lambdas cannot assign captured locals, so handles
-            // declared inside a container body come back out through
-            // one-slot arrays.
+            // Java lambdas cannot assign captured locals.
             KayaApp.Widget[] editor = new KayaApp.Widget[1];
             KayaApp.Widget[] clear = new KayaApp.Widget[1];
             tx.mount(tx.column(() -> {

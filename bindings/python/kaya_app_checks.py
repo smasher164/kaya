@@ -55,11 +55,9 @@ with app.window():
                 check("guard trips in a When body", True)
             kaya.label("empty")
 
-# ONE ID SPACE: a template node draws from the WIDGET counter, so an app
-# hands out one number sequence and the core's two "already exists" walls
-# can never fire on an id the binding minted (DESIGN.md, Binding
-# conventions). The contiguous run is the assertion — a private node
-# counter passes "all different" while restarting at 1.
+# ONE ID SPACE: a template node draws from the WIDGET counter (DESIGN.md,
+# Binding conventions). The contiguous run is the assertion — a private
+# node counter passes "all different" while restarting at 1.
 with app.build():
     with kaya.column():
         live = kaya.label("live")
@@ -73,9 +71,8 @@ check("widget and node ids run through one counter",
       node.id == live.id + 2 and after.id == node.id + 1)
 
 # THE SIZE POLICY IS A LIVE-ZONE DECLARATION IN THIS SLICE
-# (docs/canvas-plan.md §3.2.1, docs/deferred.md's template-zone entry).
-# Python's one handle serves both zones, so the refusal is a raise rather
-# than a missing method, and its SENTENCE is what an app reads.
+# (docs/canvas-plan.md §3.2.1). Python's one handle serves both zones, so
+# the refusal is a raise rather than a missing method.
 with app.build():
     with kaya.column():
         with kaya.for_each(c):
@@ -94,13 +91,9 @@ with app.build():
             check("a canvas declares ONE size policy", False)
         except ValueError:
             check("a canvas declares ONE size policy", True)
-        # THE ARITY IS THE POLICY'S, NEVER THE RECORD KIND'S. A tick
-        # canvas is a redraw canvas too — the core asks it once, as a
-        # draw_requested, before its first frame — so both stored handlers
-        # must take the time. Reading the arity off the record instead
-        # raised inside the handler guard, which logged and moved on, and
-        # the ticking canvas stayed empty with the scene still green
-        # (measured 2026-08-28, docs/canvas-plan.md §3.2.1).
+        # THE ARITY IS THE POLICY'S, NEVER THE RECORD KIND'S: both
+        # stored handlers must take the time (docs/canvas-plan.md,
+        # "WIDEN THE HANDLER AT REGISTRATION").
         drawn = kaya.canvas((10.0, 10.0), on_draw=lambda d, size: None)
         ticked = kaya.canvas((10.0, 10.0), on_tick=lambda d, size, t: None)
         widened = True
@@ -214,9 +207,8 @@ with app.build():
     check("abandoned tx rolls back collection mirror", "g9" not in c)
     check("derived mirror rolled back too", derived._mirror is False)
 
-# The tracing tier: the for statement traces to a For, comparisons are
-# the derive vocabulary in operator clothes, and statement branching has
-# no truth value at record time.
+# The tracing tier: the for statement traces to a For, comparisons
+# derive, and statement branching has no truth value at record time.
 from dataclasses import dataclass
 
 
@@ -386,12 +378,9 @@ check(
     keyed_header,
 )
 
-# THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
-# fields: the record-schema constructor must reach the TEMPLATE zone
-# (Python's is ambient, so the open-For edge is what puts it there), and
-# narrowing to one stamped copy must keep the record type — an instance
-# that lost it would encode the copy's entries against no schema. Six
-# other bindings' twins closed 2026-08-25 (docs/deferred.md).
+# THE ROW'S OWN FIELDS: the record-schema constructor must reach the
+# TEMPLATE zone, and narrowing to one stamped copy must KEEP the record
+# type — an instance that lost it encodes against no schema.
 app_rec = kaya.App()
 with app_rec.window():
     rec_accounts = kaya.collection()
@@ -440,8 +429,7 @@ with app_rec.build():
     )
 
 # One-shot commands: a Widget carries clear/focus, a Node is a blueprint
-# and has neither. Commands carry no mirror state, so an aborted build's
-# rollback is the records dying.
+# and has neither.
 app_cmd = kaya.App()
 with app_cmd.window():
     with kaya.column():
@@ -468,10 +456,8 @@ finally:
     kaya.runtime.submit = _real_submit
 check("an aborted build ships no commands", not _submitted)
 
-# The blob channel at the binding boundary: image() registers its bytes,
-# a bytes dataclass field maps to VALUE_BLOB and re-registers at every
-# encode, and template binds lower to SOURCE_ELEMENT. The type walls
-# hold: str is not image data, bytes are not label text.
+# The blob channel at the binding boundary. The type walls hold: str is
+# not image data, bytes are not label text.
 @dataclass
 class Avatar:
     name: str
@@ -511,12 +497,10 @@ with app_rows_props.window():
     )
 
 
-# A NESTED For's a11y_id MAY COME FROM THE ROW. The copies of one
-# template node share a node id, so a constant names N containers at
-# once and the harness cannot tell them apart — which is exactly what
-# tools/scenes/varied.steps needs (`expect_order column@r200`). The
-# failure this watches for is the coercing arm: `str(row.key)` succeeds
-# and writes a FieldRef's repr onto every copy.
+# A NESTED For's a11y_id MAY COME FROM THE ROW: copies of one node share
+# a node id, so a constant names N containers at once. The failure
+# watched for is the coercing arm — `str(row.key)` succeeds and writes a
+# FieldRef's repr onto every copy.
 app_nested_key = kaya.App()
 with app_nested_key.window():
 
@@ -666,25 +650,19 @@ with app.build():
             "column align= reaches the records",
             _prop_write(kaya.wire.PROP_ALIGN, kaya.wire.VALUE_I64),
         )
-        # And as the F64 the prop is typed as, out of the int written
-        # here: an I64 is refused by the root for its TYPE, which is a
-        # true complaint about the wrong mistake.
+        # As the F64 the prop is typed as: an I64 is refused by the root
+        # for its TYPE, a true complaint about the wrong mistake.
         check(
             "column inset= reaches the records",
             _prop_write(kaya.wire.PROP_INSET, kaya.wire.VALUE_F64)
             and not _prop_write(kaya.wire.PROP_INSET, kaya.wire.VALUE_I64),
         )
 
-# AN EMPTY A11Y LABEL PASSES THROUGH FOR THE ROOT'S WALL TO REFUSE —
-# brand_accent's rule one prop over (crates/kaya/src/scene.rs,
-# an_empty_a11y_label_dies_at_declare). The refusal is deliberately the
-# ROOT'S and not this binding's: four backends each answered `A11yLabel
-# = ""` their own way and only WinUI's aborted, so the semantics is
-# settled once at the chokepoint all eight bindings reach rather than
-# eight times (invariant 1, docs/deferred.md a11y-empty-label).
-# WHAT THIS WATCHES FOR is the helpful binding: a Python tier that
-# dropped an empty label as a no-op would leave the root nothing to
-# refuse, and the divergence would be back with every gate green.
+# AN EMPTY A11Y LABEL PASSES THROUGH FOR THE ROOT'S WALL TO REFUSE
+# (crates/kaya/src/scene.rs, an_empty_a11y_label_dies_at_declare;
+# docs/deferred.md a11y-empty-label). WHAT THIS WATCHES FOR is the
+# helpful binding: a Python tier that dropped an empty label as a no-op
+# would leave the root nothing to refuse, every gate green.
 with app.build():
     if True:
         before = len(kaya._tx)
@@ -706,8 +684,7 @@ with app.build():
         )
 
 # The generated shortcut canonicalizer (DESIGN.md, Menus): spelling is
-# canonicalized here, POLICY dies at the core on the canonical form. The
-# vectors mirror kaya-bindgen's reference table.
+# canonicalized here, POLICY dies at the core on the canonical form.
 for spelling, want in (
     ("primary+s", "primary+s"),
     ("PRIMARY+S", "primary+s"),
@@ -804,9 +781,9 @@ with app.build():
         ),
     )
 
-    # The radio value's seat: value= must land AFTER the option children
-    # it addresses — the root judges the index against the option count
-    # at the record, so an eager emission dies with "0 options".
+    # value= must land AFTER the option children it addresses: the root
+    # judges the index against the option count at the record, so an
+    # eager emission dies with "0 options".
     before = len(kaya._tx)
     with app.radio_group("Sort", value=1):
         kaya.option("Name")
@@ -871,9 +848,8 @@ with app.build():
 # the module-global _app pointed at what these blocks assert.
 app_menu = kaya.App()
 
-# Append-at-any-time: a retained grouping handle reopens in a LATER
-# transaction; the reopen queues exactly the child's create + its
-# append under the RETAINED parent — and never re-anchors the bar.
+# Append-at-any-time: the reopen queues exactly the child's create + its
+# append under the RETAINED parent, and never re-anchors the bar.
 with app_menu.build():
     with app_menu.menu("File") as file_menu:
         kaya.item("Save", shortcut="primary+s")
@@ -898,9 +874,8 @@ with app_menu.build():
         all(_rec_kind(r) != kaya.wire.TX_MENUBAR_APPEND for r in queued),
     )
 
-# Handler scoping, direct vs stamped: on_activate rides the item into
-# the MENU table (its own id space), a bar item's activation passes
-# bare, and a stamped copy's carries the copy's keys FIRST.
+# Handler scoping: on_activate rides the item into the MENU table (its
+# own id space), and a stamped copy's activation carries the keys FIRST.
 hits = []
 with app_menu.build():
     with app_menu.menu("Edit"):
@@ -933,8 +908,7 @@ check("direct activation dispatches bare", ("direct",) in hits)
 check("stamped activation carries the keys first", ("stamped", "g2", "a") in hits)
 check("toggle payload lands after the keys", ("toggle", True) in hits)
 
-# The reopened subtree's records die with an aborted transaction, and the
-# abort disarms any open menu scope — the next transaction must not
+# An abort disarms any open menu scope — the next transaction must not
 # inherit a seat.
 _shipped = []
 _real_submit2 = kaya.runtime.submit
@@ -966,10 +940,9 @@ with app_menu.build():
 
 # ---- undo: naming a step, and the step that comes back --------------
 #
-# The ambient tier names its transaction from INSIDE, because a handler
-# does not open one (App._dispatch does). Three rules that spelling has
-# to keep — head of batch, one name per step, and a name — plus what an
-# `undone` occurrence does to the mirrors (docs/undo-plan.md D2, D5).
+# Three rules the ambient spelling has to keep — head of batch, one name
+# per step, and a name — plus what an `undone` occurrence does to the
+# mirrors (docs/undo-plan.md D2, D5).
 
 
 @dataclass
@@ -1037,10 +1010,7 @@ try:
 except RuntimeError:
     check("undoable needs an ambient transaction", True)
 
-# Five steps come back: the entry goes; it comes back at the end, the way
-# a re-inserted key lands; a delta that names nothing still reaches the
-# handler; an orders run restates the whole instance order; the last one
-# lands on a window with NO handler at all.
+# Five steps come back, the last on a window with NO handler at all.
 _undo_occs = [
     (kaya.wire.OCC_UNDONE, 0, [],
      ("add milk", [(undo_sig.id, "before")], [(7, "milk")],
@@ -1095,14 +1065,9 @@ check(
 
 # ---- the window construct: one attribute set, two spellings ---------
 #
-# A window attribute rides the window construct and lives nowhere else
-# (DESIGN.md, Binding conventions), so Python's construct has to serve
-# the LIVE case too: it hangs off the App because that doubles as the
-# scene scope, so the same call means two things and `_tx` decides.
-#
-# THIS IS A SILENT FAILURE CLASS AND THAT IS WHY IT IS CHECKED HERE.
-# Watched 2026-08-06 with the live branch deleted: `app.window(dirty=
-# True)` inside a handler emitted nothing, raised nothing, printed
+# The same call means two things and `_tx` decides, so THE LIVE BRANCH IS
+# A SILENT FAILURE CLASS: watched 2026-08-06 with it deleted,
+# `app.window(dirty=True)` inside a handler emitted nothing, raised
 # nothing, and the mac leg failed three `expect_dirty true` steps while
 # every label assertion passed.
 app_win = kaya.App()
@@ -1118,8 +1083,7 @@ try:
         bool(_win_shipped)
         and kaya.wire.tx_set_window_dirty(0, True) in _win_shipped[0],
     )
-    # THE LIVE SPELLING SHIPS THE SAME RECORD, byte for byte: one prop
-    # emitter, reached two ways.
+    # THE LIVE SPELLING SHIPS THE SAME RECORD, byte for byte.
     with app_win.build():
         app_win.window(dirty=False)
     check(
@@ -1134,19 +1098,17 @@ try:
         "the live window construct names its surface",
         _win_shipped[2:3] == [[kaya.wire.tx_set_window_dirty(7, True)]],
     )
-    # `panes` IS AN INTEGER PROP AND PYTHON HAS NO TYPE TO CATCH IT: the
-    # keyword takes whatever it is handed, and a bool would ride the same
-    # `int()` as a count. Decoded from the bytes rather than asked about,
-    # so the ceiling that reaches the wire is the one the guest said
-    # (docs/multicolumn-plan.md).
+    # `panes` IS AN INTEGER PROP AND PYTHON HAS NO TYPE TO CATCH IT: a
+    # bool rides the same `int()` as a count, so the ceiling is decoded
+    # from the bytes rather than asked about (docs/multicolumn-plan.md).
     with app_win.build():
         app_win.window(panes=2)
     check(
         "the window construct ships the panes ceiling as an I64",
         _win_shipped[3:4] == [[kaya.wire.tx_set_window_panes(0, 2)]],
     )
-    # And the `with` form inside an open transaction is refused IN ITS
-    # OWN WORDS: "transactions do not nest" is true here and unhelpful.
+    # The `with` form inside an open transaction is refused IN ITS OWN
+    # WORDS: "transactions do not nest" is true here and unhelpful.
     with app_win.build():
         try:
             with app_win.window(dirty=True):
@@ -1161,11 +1123,9 @@ finally:
     kaya.runtime.submit = _real_submit5
 
 # EVERY ELEMENT-SOURCE ARM LOWERS TO SOURCE_ELEMENT, decoded from the
-# bytes rather than asked about (docs/sugar-pass-plan.md D3). Each
-# clause insists on the prop, the source kind, the level and the FIELD
-# INDEX: a constructor that takes the argument and drops it, or binds
-# the wrong field, fails here — the arm has to be REACHABLE, not merely
-# declared, which is all a `hasattr` check ever asked.
+# bytes rather than asked about (docs/sugar-pass-plan.md D3). Each clause
+# insists on the prop, the source kind, the level and the FIELD INDEX,
+# because the arm has to be REACHABLE and not merely declared.
 @dataclass
 class Row3:
     title: str
@@ -1196,8 +1156,7 @@ def _elem_bind(fn):
     or None if no element bind did.
 
     A RAISING ARM IS A FINDING, NOT A CRASH: an uncaught AttributeError
-    would end the run at the first bad arm, with no verdict on the ones
-    beside it. So it is caught and answered as a failed clause."""
+    would end the run at the first bad arm."""
     before = len(kaya._tx)
     try:
         fn()
@@ -1223,10 +1182,9 @@ def _never_const_from_a_tracer(fn, prop):
     """True when handing a tracer to `prop` either raised or bound the
     element — anything but a CONSTANT.
 
-    Whether an argument grows an element arm is undecided; what is
-    decided is that a per-row source must never quietly become ONE value
-    for every row. `progress(indeterminate=el)` wrote a constant True and
-    said nothing, because an object with no `__bool__` is true."""
+    A per-row source must never quietly become ONE value for every row:
+    `progress(indeterminate=el)` wrote a constant True and said nothing,
+    because an object with no `__bool__` is true."""
     before = len(kaya._tx)
     try:
         fn()
@@ -1267,8 +1225,7 @@ with app_src.window():
                 got == {"prop": prop, "level": 0, "field": index},
             )
 
-        # The const-only arms, handed the same tracer. Each coerces —
-        # float(), int(), bool(), the UTF-8 wall — and a coercion that
+        # The const-only arms, handed the same tracer: a coercion that
         # SUCCEEDS is the silent failure this file exists for.
         for what, fn, prop in (
             ("entry text", lambda: kaya.entry(text=el.title),
@@ -1304,8 +1261,7 @@ with app_src.window():
             )
 
     # THE LEVEL IS COMPUTED, NOT ASSUMED, and every clause above would
-    # pass with it hard-coded to 0. `FieldRef._level()` counts the open
-    # Fors, so an OUTER element read from inside an inner For is one up.
+    # pass with it hard-coded to 0.
     with kaya.for_each(groups3) as group3:
         with kaya.for_each(rows3) as item3:
             check(
@@ -1321,8 +1277,7 @@ with app_src.window():
 
     # `bind=` is the one source argument Python cannot type, so it needs
     # a floor: a value that is not a Signal, an Element or a FieldRef
-    # must not fall out of the ladder and bind NOTHING. The seven typed
-    # bindings get this from their compilers.
+    # must not fall out of the ladder and bind NOTHING.
     with kaya.for_each(feed3) as cases3:
         with cases3.case(Note3) as note3:
             check(
@@ -1346,11 +1301,10 @@ with app_src.window():
                 == {"prop": kaya.wire.PROP_SOURCE, "level": 0, "field": 0},
             )
 
-    # AND THE ZONE WALL UNDER `button(bind=)`: a bound caption is a
-    # TEMPLATE-zone constructor in all eight (docs/tpl-props-plan.md F5).
-    # The other seven refuse it live by having no such overload; Python's
-    # ambient transaction gives one function to both zones, so the
-    # refusal is a ZONE CHECK and this is the only place to watch it.
+    # THE ZONE WALL UNDER `button(bind=)`: a bound caption is a
+    # TEMPLATE-zone constructor (docs/tpl-props-plan.md F5), and Python's
+    # one function serves both zones, so the refusal is a ZONE CHECK and
+    # this is the only place to watch it.
     sig_live = kaya.signal("live")
     before_live = len(kaya._tx)
     try:
@@ -1363,15 +1317,11 @@ with app_src.window():
         )
     _rewind(before_live)
 
-# TEMPLATE-NODE PROPS (docs/tpl-props-plan.md §1). The a11y trio,
-# `accepts` and `on_paste` sit on the `_Handle` base both handle classes
-# share, so the same call names a live widget and a stamped copy.
-#
-# WHAT MAKES IT WORTH CHECKING RATHER THAN READING: the surface is
+# TEMPLATE-NODE PROPS (docs/tpl-props-plan.md §1). The surface is
 # `hasattr`-shaped, so a reader cannot tell a method that reaches the
-# wire from one that reaches the wrong id or the wrong source. The paste
-# clause reads the TABLE the handler landed in, because one filed under
-# a widget id never fires for a row.
+# wire from one that reaches the wrong id or the wrong source; the paste
+# clause reads the TABLE the handler landed in, because one filed under a
+# widget id never fires for a row.
 
 
 def _const_str_prop(fn, prop):
@@ -1429,9 +1379,8 @@ def _const_num_prop(fn, prop, value_type):
     """(target id, value) for one constant NUMERIC prop write, or None if
     that prop reached the wire any other way.
 
-    The TARGET is half of what it has to answer: a role or an inset that
-    reached the wire naming a LIVE widget id styles nothing a For will
-    ever stamp, and raises nowhere."""
+    The TARGET is half of the answer: a role or an inset naming a LIVE
+    widget id styles nothing a For stamps, and raises nowhere."""
     before = len(kaya._tx)
     try:
         fn()
@@ -1469,10 +1418,8 @@ with app_tpl.window():
         _const_str_prop(lambda: live5.a11y_id("search"), kaya.wire.PROP_A11Y_ID)
         == "search",
     )
-    # AND A LIVE SIGNAL SOURCE BINDS RATHER THAN COERCING — the one
-    # place this binding reaches further than the other seven, whose
-    # live a11y setters take a string. The alternative coercion wrote a
-    # Signal's repr onto the widget and said nothing.
+    # A LIVE SIGNAL SOURCE BINDS RATHER THAN COERCING: the alternative
+    # wrote a Signal's repr onto the widget and said nothing.
     live_sig5 = kaya.signal("Search")
     check(
         "a live a11y label follows a Signal instead of coercing it",
@@ -1544,17 +1491,15 @@ with app_tpl.window():
                 except Exception as exc:
                     # The exception TYPE is half the clause: without the
                     # refusal these coerce into `_accept_list`, whose
-                    # ValueError quotes the repr and so happens to
-                    # contain the type's name too — a true sentence about
-                    # the wrong problem.
+                    # ValueError happens to contain the type's name too —
+                    # a true sentence about the wrong problem.
                     ok = (isinstance(exc, TypeError)
                           and type(source).__name__ in str(exc))
                 _rewind(before_acc)
                 check(f"accepts refuses {what} as a per-row source", ok)
 
             # THE PASTE REGISTRAR. Python needs no dispatch arm — the
-            # loop branches on whether the record carried a key path, not
-            # on the occurrence kind.
+            # loop branches on whether the record carried a key path.
             node5 = kaya.entry()
             try:
                 node5.accepts(kaya.ACCEPT_TEXT).on_paste(lambda key, clip: None)
@@ -1569,17 +1514,12 @@ with app_tpl.window():
                 (kaya.wire.OCC_PASTED, node5.id) not in app_tpl._widget_handlers,
             )
 
-            # THE STYLING PROPS IN THE TEMPLATE ZONE, reached by two
-            # DIFFERENT lines, which is why they are checked apart:
-            # `role` is `_Handle.role`, shared by Widget and Node like
-            # the a11y trio; `inset` is the container constructors'
-            # kwarg, written onto whatever `_alloc_widget_or_node` hands
-            # back — a Node inside a For, so THE KWARG IS THIS ZONE'S
-            # SPELLING and `Widget.inset` stays live-only on purpose.
-            #
-            # BOTH CLAUSES READ THE TARGET ID: a prop that reaches the
-            # wire naming a WIDGET id styles something no For will ever
-            # stamp, and nothing raises.
+            # THE STYLING PROPS IN THE TEMPLATE ZONE reach it by two
+            # DIFFERENT lines, so they are checked apart: `role` from the
+            # `_Handle` base, `inset` from the container constructors'
+            # kwarg. BOTH CLAUSES READ THE TARGET ID, since a prop naming
+            # a WIDGET id styles something no For stamps and raises
+            # nothing.
             head5 = kaya.label(bind=row5.title)
             check(
                 "a template node's role reaches the wire, on the NODE's id",
@@ -1593,10 +1533,9 @@ with app_tpl.window():
                                 kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
                 == (head5.id, kaya.wire.ROLE_DESTRUCTIVE),
             )
-            # CONST-ONLY for `accepts`'s reason, not a missing encoder.
-            # The refusal has to NAME what it got: without it
-            # `_role_value`'s int arm is reached by anything with an
-            # `__index__` and the row's number becomes a role.
+            # CONST-ONLY, and the refusal has to NAME what it got:
+            # without it `_role_value`'s int arm is reached by anything
+            # with an `__index__` and the row's number becomes a role.
             for what, source in (("a field", row5.title),
                                  ("the element", row5),
                                  ("a Signal", name5)):
@@ -1643,9 +1582,7 @@ with app_tpl.window():
                             kaya.wire.VALUE_F64, 8.0),
             )
             # AND THE DYNAMIC SETTER STAYS LIVE-ONLY: a template is
-            # declared once and never mutated, so moving `inset` down to
-            # the base would give a blueprint a write with no moment to
-            # happen in.
+            # declared once and never mutated.
             check("and the dynamic setter is not on a template node",
                   not hasattr(bar5, "inset") and hasattr(live5, "inset"))
 
@@ -1669,13 +1606,10 @@ with app_tpl.window():
                 _rewind(before5)
 
 # THE STYLING TIER (docs/styling-plan.md slice 1), checked where this
-# file can see: WHAT REACHED THE WIRE, and what the binding refuses. It
-# cannot see the core — no transaction is applied here — so the pairings
-# are the ROOT's and are probed against a running core instead.
-#
-# A styling argument that is accepted and dropped changes nothing on
-# screen and raises nothing, and neither a screenshot nor an
-# accessibility read can tell that from a platform ignoring it.
+# file can see: WHAT REACHED THE WIRE, and what the binding refuses. A
+# styling argument that is accepted and dropped changes nothing on screen
+# and raises nothing, and no screenshot can tell that from a platform
+# ignoring it.
 app_style = kaya.App()
 with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     window_records = list(kaya._tx)
@@ -1692,8 +1626,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     check("window inset= reaches the records",
           _window_prop(kaya.wire.WPROP_INSET, kaya.wire.VALUE_F64))
     # AS AN F64 AND NOT AN I64, and the int is WRITTEN rather than
-    # assumed: `inset=0` reaching the core as an I64 would be refused for
-    # its TYPE, a true complaint about the wrong mistake.
+    # assumed: an I64 is refused by the root for its TYPE.
     before_int = len(kaya._tx)
     app_style.window(inset=0)
     int_records = list(kaya._tx[before_int:])
@@ -1709,8 +1642,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
              if _rec_kind(r) == kaya.wire.TX_SET_BRAND_ACCENT]
     check("brand_accent reaches the records", len(brand) == 1)
     # NOT `if brand:` — watched: behind the guard, a missing record makes
-    # the two field clauses VANISH instead of going red. A missing record
-    # answers the sentinel and both clauses fail.
+    # the two field clauses VANISH instead of going red.
     seed, mask, light, dark = (
         tuple(int.from_bytes(brand[0][8 + 4 * i:12 + 4 * i], "little")
               for i in range(4))
@@ -1755,11 +1687,9 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         _rewind(before)
         check(f"brand_accent refuses {what}", ok)
 
-    # THE BINDING REFUSES THE u32 DOMAIN ONLY — its spelling of what the
-    # other bindings' parameter type refuses at compile time. The 24-bit
-    # rule is deliberately the ROOT's (crates/kaya/src/scene.rs,
-    # an_alpha_carrying_seed_dies): a binding-local copy of a root wall
-    # was once the only wall in eight (invariant 1).
+    # THE BINDING REFUSES THE u32 DOMAIN ONLY. The 24-bit rule is
+    # deliberately the ROOT's (crates/kaya/src/scene.rs,
+    # an_alpha_carrying_seed_dies).
     for what, kwargs in (("a negative seed", {"seed": -1}),
                          ("a seed beyond u32", {"seed": 0x1_0000_0000})):
         before = len(kaya._tx)
@@ -1782,11 +1712,10 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and int.from_bytes(argb[0][8:12], "little") == 0xFF3584E4)
     _rewind(before)
 
-    # THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b), and the half
-    # that cannot be seen any other way: every platform's font API
-    # renders SOMETHING for a family it does not have, so a per-platform
-    # row that never left this guest is indistinguishable from a lowering
-    # that applied.
+    # THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b): every
+    # platform's font API renders SOMETHING for a family it does not
+    # have, so a row that never left this guest is indistinguishable from
+    # a lowering that applied.
 
     # THE CLASS IS HAND-WRITTEN AND THE CONSTANTS ARE GENERATED, so the
     # first clause is the census holding them together: add a platform to
@@ -1847,8 +1776,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     check("brand_typeface reaches the records", len(typefaces) == 1)
     # NOT `if typefaces:`, and the difference was MEASURED: under a
     # perturbation that queued the record and dropped it, the two clauses
-    # below VANISHED instead of going red. A missing record now answers
-    # the sentinel and both clauses fail.
+    # below VANISHED instead of going red.
     mask, family, pairs, font_kind = (
         _typeface(typefaces[0]) if len(typefaces) == 1
         else (None, None, None, None))
@@ -1882,9 +1810,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and _typeface(rows[0])[3] == kaya.wire.VALUE_BLOB)
     _rewind(before)
 
-    # THE CLOSED SET AND THE TWO TYPES, where the other seven bindings
-    # have `Platform`, `&str` and `Option<&[u8]>`. The bool key is the
-    # coercion that would otherwise pass: `{True: ...}` reads as mac.
+    # THE CLOSED SET AND THE TWO TYPES. The bool key is the coercion
+    # that would otherwise pass: `{True: ...}` reads as mac.
     for what, kwargs, kind, fragment in (
         ("an unknown platform name",
          {"family": "Georgia", "platforms": {"bsd": "Charter"}},
@@ -1943,10 +1870,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           "pass through for the ROOT to refuse", passed_through == 3)
     _rewind(before)
 
-    # THE APP IDENTITY (docs/app-identity-plan.md), the typeface's
-    # failure shape one tier up: every platform draws SOMETHING where an
-    # app's mark goes. The mask and the slot are the pair that goes
-    # silently wrong.
+    # THE APP IDENTITY (docs/app-identity-plan.md): the mask and the slot
+    # are the pair that goes silently wrong.
 
     def _identity(rec):
         """The TX_SET_APP_IDENTITY record, field by field: 8 header,
@@ -1998,8 +1923,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           == (0, "Aurora Notes", kaya.wire.VALUE_STR, 0))
     _rewind(before)
 
-    # THE TWO WIRE-DOMAIN TYPES, where the other seven bindings have
-    # `&str` and `Option<&[u8]>`: the path-instead-of-bytes slip would
+    # THE TWO WIRE-DOMAIN TYPES: the path-instead-of-bytes slip would
     # otherwise reach the core as a name-shaped blob.
     for what, kwargs, fragment in (
         ("icon= that is not bytes",
@@ -2039,11 +1963,9 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     _rewind(before)
 
     # ------------------------------------------------------------------
-    # ASSETS (docs/assets-plan.md). The only tier that can assert the
-    # asset path's RECORD-level claim headlessly: a VALUE_BLOB in the
-    # slot with the mask bit set, INDISTINGUISHABLE from bytes the app
-    # read itself, which is the point — the wire learns nothing about
-    # assets (A3).
+    # ASSETS (docs/assets-plan.md): a VALUE_BLOB in the slot with the mask
+    # bit set, INDISTINGUISHABLE from bytes the app read itself — the wire
+    # learns nothing about assets (A3).
     font = kaya.asset("fonts/sora-wght.ttf")
     check("asset() opens the vendored font the build shipped",
           len(font) == 111400)
@@ -2077,7 +1999,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
 
     # THE THIRD CONSUMER: an image built from an asset, whose record has
     # to be the one bytes produce — same prop, same const source, same
-    # Blob — because the wire learns nothing about assets.
+    # Blob.
     before = len(kaya._tx)
     with kaya.column():
         kaya.image(kaya.asset("icons/kaya-mark.png"))
@@ -2089,9 +2011,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and int.from_bytes(last[24:28], "little") == kaya.wire.VALUE_BLOB)
     _rewind(before)
 
-    # THE WALLS, REFUSED IN THE CORE AND NOT HERE: this binding
-    # contributes no prose of its own, so the check is that the core's
-    # sentence ARRIVED.
+    # THE WALLS, REFUSED IN THE CORE AND NOT HERE: the check is that the
+    # core's sentence ARRIVED.
     for what, name, fragment in (
         ("a name that escapes the root", "../Cargo.toml", "climbs out of the asset root"),
         ("an absolute path", "/etc/passwd", "is an absolute path"),
@@ -2140,8 +2061,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
               == kaya.wire.ROLE_DESTRUCTIVE)
         _rewind(before)
 
-        # THE CLOSED SET, where the other bindings have an enum. The
-        # coercions matter: `role(True)` would read as 1, destructive.
+        # THE CLOSED SET. The coercions matter: `role(True)` would read
+        # as 1, destructive.
         role_signal = kaya.signal("heading")
         for what, value, kind, fragment in (
             ("an unknown name", "shouty", ValueError, "must be one of"),
@@ -2159,14 +2080,13 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
             _rewind(before_bad)
             check(f"role refuses {what}", ok)
 
-    # THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6). Same two
-    # halves as the role above; the PAIRINGS stay the root's.
+    # THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6); the
+    # PAIRINGS stay the root's.
 
     # THE CLASS IS HAND-WRITTEN AND THE CONSTANTS ARE GENERATED, so the
     # first clause is the census holding them together: without it Python
-    # is silently the one binding that cannot say a new word, which is
-    # how the window prop then spelled `list_detail` (now `panes`)
-    # shipped unsayable here (invariant 2).
+    # is silently the one binding that cannot say a new word, which is how
+    # the window prop now spelled `panes` shipped unsayable here.
     generated = {
         name[len("SYMBOL_"):].lower(): value
         for name, value in vars(kaya.wire).items()
@@ -2195,8 +2115,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
 
     # EVERY CONSTRUCTOR THAT TAKES `icon=` TAKES `symbol=` AND EMITS IT.
     # A census, not a spot check: the fan-out that grows `item` and
-    # forgets `option` is invisible to a scene, which asserts only the
-    # items it names.
+    # forgets `option` is invisible to a scene.
     with app_style.menu("File") as bar_menu:
         surfaces = [
             ("kaya.item", lambda: kaya.item("Save", symbol=kaya.Symbol.DONE)),
@@ -2268,9 +2187,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     check("add_section takes symbol= and it reaches the wire",
           section_symbols == [kaya.wire.SYMBOL_HOME])
 
-    # THE CLOSED SET, where the other bindings have an enum. A bool is
-    # excluded BEFORE int, which it subclasses: `symbol(True)` would
-    # otherwise read as 1, the `add` glyph.
+    # THE CLOSED SET. A bool is excluded BEFORE int, which it
+    # subclasses: `symbol(True)` would otherwise read as 1, `add`.
     symbol_signal = kaya.signal(5)
     with app_style.menu("File3"):
         bad_item = kaya.item("Save")
@@ -2315,20 +2233,11 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
 
 # ---- a mutation costs the same at 32,000 entries as at 2,000 --------
 #
-# THE ONLY GUARD AVAILABLE IS A MEASUREMENT. The defect this replaces
-# was a whole-model dict copy taken per mutation for the rollback
-# journal (`_journal_instances` now takes it once per transaction):
-# every insert was O(entries), so N inserts cost N²/2 and the
-# transactions view's 15,000 rows cost 385ms of pure bookkeeping
-# (docs/deferred.md, "the Python binding's insert is quadratic").
-# Python has no compiler to refuse the eager copy the way Swift's
-# `private` refuses its own bypass, and no deterministic observable
-# distinguishes one snapshot from N — both leave ONE restore in the
-# journal. So the clause measures per-row cost at two sizes 16x apart:
-# quadratic shows up as growth (measured 9.7-12.6x with the old body
-# spliced back in), linear as none (measured 0.97-1.01x). The bound has
-# ~3x headroom on both sides, and the numbers print on every run so a
-# red says what was measured.
+# THE ONLY GUARD AVAILABLE IS A MEASUREMENT: no deterministic observable
+# tells one rollback snapshot from N, so per-row cost is measured at two
+# sizes 16x apart and growth is the refusal (old body spliced back:
+# 9.7-12.6x; fixed: 0.97-1.01x; docs/deferred.md, "the Python binding's
+# insert is quadratic").
 BULK_SMALL = 2_000
 BULK_LARGE = 32_000
 BULK_GROWTH = 3.0
@@ -2342,8 +2251,8 @@ class Bulk:
 def _bulk_per_row_ms(n):
     """ms per insert into a fresh collection, the transaction abandoned.
 
-    The rows are built BEFORE the clock starts: what is being timed is
-    the binding's accumulation path, not Python's f-strings."""
+    The rows are built BEFORE the clock starts: what is timed is the
+    binding's accumulation path, not Python's f-strings."""
     class _Stop(Exception):
         pass
 
@@ -2375,11 +2284,10 @@ check(
 
 # ---- the capability query ------------------------------------------
 #
-# crates/kaya/src/app.rs carries the canonical note. These clauses cover
-# the two halves a bit test cannot: that the surface hands out NAMED
-# BOOLEANS, and that the symbol being called is really kaya_capabilities
-# rather than something that resolved to a zero. No transaction and no
-# window needed.
+# crates/kaya/src/app.rs carries the canonical note. The two halves a bit
+# test cannot cover: the surface hands out NAMED BOOLEANS, and the symbol
+# called is really kaya_capabilities rather than one that resolved to a
+# zero.
 caps = kaya.capabilities()
 
 check("capabilities() answers with a Capabilities", isinstance(caps, kaya.Capabilities))
@@ -2394,8 +2302,7 @@ check(
         for f in cap_fields),
 )
 
-# FROZEN: a capability a guest can assign is a lie it told itself, and
-# an app that "turned one on" sails straight into the core's wall.
+# FROZEN: a capability a guest can assign is a lie it told itself.
 try:
     caps.aux_windows = not caps.aux_windows
     frozen = False

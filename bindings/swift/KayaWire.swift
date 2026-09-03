@@ -1501,15 +1501,12 @@ struct KayaTx {
 
 let kayaShortcutNamedKeys: Set<String> = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]
 
-/// The one binding-tier shortcut parser (DESIGN.md, Menus).
-/// Canonicalize a shortcut spelling to the wire form: lowercase
-/// '+'-joined tokens, modifiers ordered primary, shift, alt, then one
-/// key (a-z, 0-9, or the closed named set). Accepts ASCII case
-/// variants and any modifier order; traps on whitespace, empty tokens,
+/// The one binding-tier shortcut parser (DESIGN.md, Menus):
+/// canonicalize a spelling to the wire form — lowercase '+'-joined
+/// tokens, modifiers ordered primary, shift, alt, then one key (a-z,
+/// 0-9, or the closed named set). Traps on whitespace, empty tokens,
 /// repeated modifiers, aliases (ctrl/cmd/option), and unknown or
-/// multiple or missing keys. POLICY stays at the core: escape,
-/// shift-only and bare alphanumerics, and the reserved floor are
-/// validated there, on the canonical spelling, never rewritten.
+/// multiple or missing keys. POLICY stays at the core.
 func kayaCanonicalizeShortcut(_ spelling: String) -> String {
     if spelling.isEmpty {
         preconditionFailure("kaya: shortcut is empty")
@@ -1563,13 +1560,9 @@ enum KayaClipPart {
 }
 
 /// One representation as the decoder hands it over: the clip kind,
-/// and its parts with blobs already redeemed. The sum itself is the
-/// hand-written tier's — this is the taste-free shape the wire
-/// carries.
-///
-/// `kind` is a SINGLE member of the clip enum and never a mask (you
-/// offer many and you receive one); 0 with no parts is the universal
-/// empty answer.
+/// and its parts with blobs already redeemed. `kind` is a SINGLE
+/// member of the clip enum and never a mask (you offer many and you
+/// receive one); 0 with no parts is the universal empty answer.
 struct KayaClipValues {
     let kind: UInt32
     let parts: [KayaClipPart]

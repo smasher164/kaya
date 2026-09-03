@@ -70,19 +70,15 @@ if [ -f "$OUT" ] \
     exit 0
 fi
 
-# A FAILED BUILD MUST NOT LEAVE A USABLE ARTIFACT: compile to a scratch
-# path; on success the move REPLACES the old dylib atomically (readers
-# that mapped it keep their copy, and there is never a moment with no
-# dylib on disk — legs dlopen this path while a concurrent sweep
-# rebuilds, measured 2026-08-20 when a delete-first shape left a ~30s
-# hole and eight legs died in it); on FAILURE the old dylib is deleted,
-# which is the guarantee's whole point (docs/traps.md, "A failed build
-# must not leave a usable artifact").
+# A FAILED BUILD MUST NOT LEAVE A USABLE ARTIFACT (docs/traps.md):
+# compile to a scratch path, then REPLACE atomically on success — legs
+# dlopen this path while a concurrent sweep rebuilds, and a delete-first
+# shape left a ~30s hole that killed eight legs (2026-08-20). On FAILURE
+# the old dylib is deleted.
 #
-# -warnings-as-errors is a GUARD, not tidiness: a dropped return value
-# is only a warning, and that is how a clipboard seed discarded
-# osascript's exit status for the life of the scene (docs/traps.md §
-# the swift-typecheck sibling of this flag).
+# -warnings-as-errors is a GUARD: a dropped return value is only a
+# warning, and that is how a clipboard seed discarded osascript's exit
+# status for the life of the scene (docs/traps.md).
 if ! kaya_swiftc \
     -warnings-as-errors \
     -emit-library \

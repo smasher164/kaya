@@ -25,7 +25,7 @@ incomplete in three ways, and those three are the actual deliverable:
 2. **The core converts to each backend's native unit before lowering,
    in Rust, using its own copy of the text.** No interpreter ever sees
    a byte offset. The core already holds the authoritative text:
-   `crates/kaya/src/scene.rs:462 field_text: HashMap<WidgetId, String>`,
+   `crates/kaya/src/scene.rs:438 field_text: HashMap<WidgetId, String>`,
    kept current by `note_text_changed` (`:2285`), `absorb_text_writes`
    (`:2213`) and `note_native_undo` (`:2478`). Measured conversion cost
    for 50 ranges over a 34.8 KB mixed-script buffer: **39 µs one-pass**
@@ -64,7 +64,7 @@ This is the first offset in the protocol. There is no second convention
 to be consistent with — but there IS an existing doctrine about what
 text *is*, and the byte-offset choice is the one that agrees with it.
 
-- **The wire is UTF-8 and validates on decode.** `crates/kaya/src/wire.rs:276-279`
+- **The wire is UTF-8 and validates on decode.** `crates/kaya/src/wire.rs:267-270`
   decodes a `Str` value as `std::str::from_utf8(payload).expect("kaya:
   string value is not UTF-8")`. Ill-formed text from a guest is a
   loud panic today. **This is the precedent for the refusal shape:
@@ -80,20 +80,20 @@ text *is*, and the byte-offset choice is the one that agrees with it.
   names a position in that scalar sequence unambiguously; it is the
   same object the equality doctrine already talks about.
 - **The undo ledger's `texts` run carries whole strings, no offsets**:
-  `crates/kaya/src/spec.rs:336` — `texts: groups(i64 size, i64 id,
+  `crates/kaya/src/spec.rs:274` — `texts: groups(i64 size, i64 id,
   i64 path_len, path_len key values, str text)`. The restore is a
   statement of what the text now IS (`spec.rs:1576`). Nothing indexes.
 - **The harness verbs carry no offsets.** `set_text(target, text)`
   and `type_text(text)` (`harness.rs:541,594`); `type` is restricted
   to printable ASCII at parse (`harness.rs:1385-1400`,
-  `tools/check-steps.py:1333-1397`). `crates/kaya/src/scene.rs:691`
+  `tools/check-steps.py:1296-1352`). `crates/kaya/src/scene.rs:656`
   states outright: "kaya has no selection API".
 - **The two existing near-misses are both ASCII-safe by accident,
   and one is a latent unit bug**:
-  - `swift/KayaSwiftUI.swift:9274` carries the selection across a text
+  - `swift/KayaSwiftUI.swift:8395` carries the selection across a text
     push using `(text as NSString).length` — correct, that is UTF-16,
     which is what NSRange wants.
-  - `crates/kaya/src/winui/mod.rs:7472-7473` computes a caret with
+  - `crates/kaya/src/winui/mod.rs:5967-5968` computes a caret with
     `now.chars().count() as i32` (Rust **scalars**) and feeds it to
     `set_caret` → `TextDocument.Selection.SetRange(at, at)` /
     `SetSelectionStart`, both of which take **UTF-16 code units**
@@ -260,7 +260,7 @@ silently accept a split range and paint half an emoji.
   therefore guest-length + 1, and `r.End <= StoryLength - 1`.
 - **Line breaks are 1:1, so `lf()` does not shift offsets here.**
   Measured by the windows arm: `set 'a\nb' → GetText(AdjustCrlf) =
-  'a\rb'` (range-probe-windows.md:240), and `crates/kaya/src/winui/mod.rs:1901-1922`
+  'a\rb'` (range-probe-windows.md:240), and `crates/kaya/src/winui/mod.rs:1577-1598`
   documents the CR storage with `TextGetOptions::AdjustCrlf` on the
   read. One CR per LF, same count — unlike GTK, where the pair
   survives. **This asymmetry between the two CR-storing backends is
@@ -575,7 +575,7 @@ strings:**
 
 ## §9 — Findings in passing (for the depth arm)
 
-- **A live defect, one line**: `crates/kaya/src/winui/mod.rs:7472`
+- **A live defect, one line**: `crates/kaya/src/winui/mod.rs:5967`
   computes a caret with `chars().count()` (scalars) and passes it to
   `SetRange`/`SetSelectionStart` (UTF-16). ASCII-safe today because
   `type` is ASCII-only; wrong the moment a non-BMP character precedes

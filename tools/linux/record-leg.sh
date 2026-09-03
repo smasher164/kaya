@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# One recorded Linux leg, run INSIDE xvfb-run (DISPLAY is this leg's
-# private Xvfb): x11grab films the whole display, then per-step stills
-# are derived. One window per private display means the film IS the leg.
+# One recorded Linux leg, run INSIDE xvfb-run: x11grab films the whole
+# display, and one window per private display means the film IS the leg.
 #
 #   record-leg.sh <proto> <dir> <cmd...>
 #
-# For wayland a nested Weston (X11 backend) runs inside this same Xvfb,
-# so one x11grab films wayland rendering too, one compositor per leg.
-#
+# For wayland a nested Weston (X11 backend) runs inside this same Xvfb.
 # Anchor: ffmpeg finalizes on SIGINT, so video-end == stop time and
-# anchor = stop − duration (the scheme the Android runner uses).
+# anchor = stop − duration.
 set -uo pipefail
 
 proto="$1"

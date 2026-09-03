@@ -1,10 +1,5 @@
-/* The reorder scene from C, on the function floor: order as collection
- * data, each handler repositioning an entry BY KEY.
- *
- * THE ROOT IS A ROW so the For's container is the scene's only
- * column-kind widget: languages disagree on whether containers are
- * created before or after their children, and column#0 must name the
- * same widget everywhere. */
+/* The reorder scene (tools/scenes/reorder.steps). THE ROOT IS A ROW so the
+ * For's container is the only column, and column#0 names it everywhere. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -13,9 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one; collections count from 1 in their own
- * (DESIGN.md, Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the N_ run continues the
+ * W_ one; collections count from 1 in their own (tools/check-c-ids.py). */
 #define W_ROW 1
 #define W_ROTATE 2
 #define W_LIFT 3
@@ -25,8 +19,7 @@
 
 #define F_TITLE 0
 
-/* The model, hand-kept per C's no-binding-model decision: the keys in
- * collection order (each entry's title equals its key). */
+/* The keys in collection order; each title equals its key. */
 #define N_ITEMS 3
 static char order[N_ITEMS][2] = {"a", "b", "c"};
 
@@ -75,9 +68,6 @@ static void *app(void *arg) {
         if (!kaya_parse_click(rec, &id, keys, 2, &n_keys) || n_keys != 0)
             continue;
         if (id == W_ROTATE) {
-            /* First entry to the end. The model owns the order, so the
-             * handler asks it which key is first and never counts
-             * widgets: KEYS, never indices, on the wire. */
             char moved[2];
             memcpy(moved, order[0], sizeof moved);
             for (unsigned i = 0; i + 1 < N_ITEMS; i++)
@@ -89,7 +79,6 @@ static void *app(void *arg) {
             kaya_tx_collection_move(&tx, C_ITEMS, 0, 0, kaya_str(moved), 0, 0);
             kaya_submit(tx.buf, tx.len);
         } else if (id == W_LIFT) {
-            /* Last entry to the front, anchored by the first's key. */
             char moved[2], anchor[2];
             memcpy(moved, order[N_ITEMS - 1], sizeof moved);
             memcpy(anchor, order[0], sizeof anchor);

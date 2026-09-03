@@ -1,11 +1,5 @@
--- The split conformance scene, Haskell port — adaptive panes. The guest
--- asks for the presentation ONCE and does nothing adaptive ever again;
--- there is no prop for WHICH entries present.
---
--- TWO scripts drive this ONE app: split resizes and names the
--- presentation on each side, listdetail asserts the bare invariant at
--- whatever width its host gives. See guests/rust/split.rs,
--- tools/scenes/split.steps and tools/scenes/listdetail.steps.
+-- The split scene, Haskell port — guests/rust/split.rs,
+-- tools/scenes/split.steps.
 
 import Data.Word (Word64)
 import KayaApp
@@ -23,8 +17,8 @@ main = kayaMain $ \app -> do
       column
         []
         [ -- Authored ids so the REAL-TREE read can address these: an
-          -- index read passes whether or not anything reached the screen,
-          -- which once let a non-rendering split arm look green.
+          -- index read passes whether or not anything reached the
+          -- screen.
           labelBound s [A11yId "list"], -- label#0
           buttonOn "open detail"
             ( buildTx app $ do

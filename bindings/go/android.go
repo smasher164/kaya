@@ -1,21 +1,9 @@
-// Android's attach surface for a Go guest: the JNI entry a shim
-// Activity calls on the UI thread, and the two ways it learns what to
-// boot — a registration (AndroidMain) or the app's own `main`, pulled
-// out of the app's package by mainmain_android.go. The hosting is
-// inverted here (Android has no native process entry, so kaya_run
-// panics and the app enters at onCreate): docs/go-mobile-plan.md §D3.
-//
-// THE SYMBOL NAME IS THE WHOLE CONTRACT with
-// android/kaya/src/main/kotlin/dev/kaya/KayaGo.kt, resolved by name out
-// of the guest's own .so; tools/android/run-emulator.py checks it. The
-// short JNI name carries no argument mangling, so that class must
-// declare exactly ONE native `attach` — an overload makes both
-// unresolvable until the names carry their signatures.
-//
-// THIS FILE IS NOT BUILD-TAGGED, deliberately: untagged, every `go
-// build` on every platform type-checks the attach surface, at the cost
-// of one dead exported symbol off Android. Only the `//go:linkname`
-// pull had to be tagged, and it lives in mainmain_android.go.
+// Android's attach surface for a Go guest: the JNI entry a shim Activity
+// calls on the UI thread, and the two ways it learns what to boot — a
+// registration (AndroidMain) or the app's own `main` (mainmain_android.go,
+// docs/go-mobile-plan.md §D3). THE SYMBOL NAME IS THE WHOLE CONTRACT with
+// KayaGo.kt: the short JNI name carries no argument mangling, so exactly
+// ONE native `attach`. NOT BUILD-TAGGED, so every build type-checks this.
 package kaya
 
 /*
@@ -35,25 +23,19 @@ const presentGuest int32 = 1
 
 // androidApp is written once from an init(); androidAttached is the
 // build-once latch, read and written inside attach. No lock either way:
-// Go finishes every package init while the library is loading,
-// loadLibrary happens-before the onCreate that attaches, and every
-// onCreate runs on the one UI thread.
+// loadLibrary, which finishes every package init, happens-before the
+// onCreate that attaches, and every onCreate runs on the one UI thread.
 var (
 	androidApp      func()
 	androidAttached bool
 )
 
 // AndroidMain names the function kaya boots when the shim Activity
-// attaches. Only a library carrying SEVERAL apps needs it (one .so has
-// exactly one main.main); an ordinary app writes one main.go and kaya
-// finds its main. The two shapes: docs/go-mobile-plan.md §D3.
-//
-// Call it from an init(), not from main: `-buildmode=c-shared` never
-// calls the library's main, so a registration in main registers nothing.
-//
-//	func init() { kaya.AndroidMain(app) }
-//
-// `app` runs on the app thread and ends in App.Run().
+// attaches; only a library carrying SEVERAL apps needs it, since an
+// ordinary app writes one main.go and kaya finds its main
+// (docs/go-mobile-plan.md §D3). Call it from an init(), not from main:
+// `-buildmode=c-shared` never calls the library's main, so a
+// registration there registers nothing. `app` ends in App.Run().
 func AndroidMain(app func()) {
 	if app == nil {
 		panic("kaya: AndroidMain was handed a nil app")
@@ -65,8 +47,6 @@ func AndroidMain(app func()) {
 // from the app's own `main` rather than a registration. A REGISTRATION
 // WINS — guests/go/cmd's `main.main` is `func main() {}` beside its
 // init's AndroidMain call, so the other order boots an empty function.
-// Taking both sources as arguments is what makes the rule testable off
-// Android (app_test.go's TestAndroidEntryPrefersARegistration).
 func androidEntry(registered func(), fromMainMain func() func()) (app func(), fromMain bool) {
 	if registered != nil {
 		return registered, false
@@ -76,13 +56,9 @@ func androidEntry(registered func(), fromMainMain func() func()) (app func(), fr
 }
 
 // Java_dev_kaya_KayaGo_attach is Android's entry, called by the shim
-// Activity from onCreate ON THE UI THREAD. It starts the guest on a
-// thread of its own and returns that thread to the Looper.
-//
-// The three JNI arguments are accepted and unused: KayaRing.attach took
-// kaya's Android anchor on this same thread already, and a JNIEnv
-// belongs to the thread it was handed to, which is about to go back to
-// the Looper.
+// Activity from onCreate ON THE UI THREAD: it starts the guest on its
+// own thread and returns this one to the Looper. The three JNI arguments
+// are unused — a JNIEnv belongs to the thread it was handed to.
 //
 //export Java_dev_kaya_KayaGo_attach
 func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
@@ -102,9 +78,7 @@ func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
 	if androidAttached {
 		// A LATER onCreate RE-ATTACHES ONLY (docs/deferred.md's mount
 		// entry, ruled 2026-08-27): the guest is the PROCESS's and the
-		// Activity is only the current window. This used to panic, which
-		// killed the process on every rotation; the presentation was
-		// re-attached by KayaCompose.mount before this ran.
+		// Activity is only the current window.
 		return presentGuest
 	}
 	// The stale-artifact guard rides kaya_run on the desktops and so
@@ -115,17 +89,11 @@ func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
 		defer androidReport()
 		// The app thread must be a REAL OS THREAD: it parks inside a C
 		// call (kaya_wait_occurrences) and the ring is single-consumer.
-		// This is the ONLY LockOSThread on this host — the desktops get
-		// theirs from the binding's init (runtime.go), which is skipped
-		// here because a package init runs on the library's main
-		// goroutine, and that goroutine exits when initialization
-		// finishes, taking the locked thread with it.
+		// The ONLY LockOSThread on this host: a package init here runs on
+		// the library's main goroutine, which exits when initialization
+		// finishes and takes the locked thread with it.
 		runtime.LockOSThread()
 		app()
-		// An app that SERVED and then returned quit, which is ordinary.
-		// Returning without ever serving is `func main() {}` — a main
-		// package whose author expected something else to be the entry
-		// — and on Android nothing is watching, so kaya says it.
 		if !served.Load() {
 			shape := "kaya ran the app's own main (main.main) and it returned " +
 				"without serving"

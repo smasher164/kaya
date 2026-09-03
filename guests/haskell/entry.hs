@@ -2,17 +2,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The entry scene from Haskell: the uncontrolled contract end to end.
-   The field owns its text and reports each edit through onChange; the
-   app folds those into an IORef.
-
-   WHAT THIS SCENE DOCUMENTS IS THE OTHER EVENT SURFACE — the handlers
-   are registered on the APP after the build, not at the constructor.
-   Every leaf constructor for a widget that produces events takes its
-   handler as a REQUIRED argument, so this binding has no empty slot to
-   pass; the two widgets registered below use the generic constructor.
-
-   Build like milestone2.hs, then run with KAYA_SELFTEST=entry. -}
+-- The entry scene, Haskell port — guests/rust/entry.rs,
+-- tools/scenes/entry.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
@@ -31,9 +22,7 @@ main = kayaMain $ \app -> do
     status <- signal (VStr "no todos")
     todos <- collectionOf (Proxy :: Proxy Todo)
 
-    -- Built ahead of the tree so the handlers below have handles to
-    -- name; `pure` slots them into the column at the position they
-    -- occupy in every other language.
+    -- Built ahead of the tree so the handlers below have handles to name.
     entryField <- entry
     add <- button "add"
 
@@ -59,7 +48,6 @@ main = kayaMain $ \app -> do
         _ <- insertFresh todos (Todo draft)
         total <- count (recordHandle todos)
         writeSignal status (VStr ("added " ++ draft ++ ", " ++ show total ++ " total"))
-        -- Finish the form, atomically with the insert: the field answers
-        -- with text_changed "" and the fold above empties the draft.
+        -- The clear comes back as text_changed "", so the fold empties draft.
         clearWidget entryField
         focusWidget entryField

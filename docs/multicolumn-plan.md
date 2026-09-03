@@ -208,7 +208,7 @@ of room with all three columns still present, and kaya does not ride it.
 1. **WinUI has a third arrangement kaya cannot name, it is reachable
    today, and nothing catches it.** `TwoPaneView.Mode` is
    `Wide|Tall|SinglePane`; `MinTallModeHeight` defaults to 641 and
-   `crates/kaya/src/winui/mod.rs:2049-2069` never sets it **[REPO+DOC]**.
+   `crates/kaya/src/winui/mod.rs:1710-1729` never sets it **[REPO+DOC]**.
    `split.steps`'s narrow leg is `360x600`, so the Windows lane is green
    on a 41-DIP coincidence. At `360x700`: 360 <= 641 and 700 > 641, so
    `Tall` — the list renders ABOVE the detail with both visible, the back
@@ -222,7 +222,7 @@ of room with all three columns still present, and kaya does not ride it.
    column silently steals it** **[MEASURED, M1]**. At two columns the
    detail titles the window; at three the CONTENT column does and the
    detail's `navigationTitle` never reaches `NSWindow` at all. The
-   comment standing at `swift/KayaSwiftUI.swift:11734` — "THE WINDOW'S
+   comment standing at `swift/KayaSwiftUI.swift:10551` — "THE WINDOW'S
    TITLE HANGS OFF THE DETAIL COLUMN" **[REPO]** — is true of the form
    kaya ships and false of the one this milestone adds. The failure
    degrades to the process name, which is the bug that once reported

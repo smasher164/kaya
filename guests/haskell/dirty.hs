@@ -1,7 +1,4 @@
--- The dirty-state conformance scene, Haskell port — unsaved work as
--- window chrome (docs/dirty-plan.md). One boolean beside 'WTitle' and
--- 'WVetoClose': the app declares STATE and each backend spells its own
--- platform's affordance. See guests/rust/dirty.rs and
+-- The dirty scene, Haskell port — guests/rust/dirty.rs,
 -- tools/scenes/dirty.steps.
 
 import KayaApp
@@ -9,14 +6,12 @@ import KayaWire (Value (..), alertChoiceCancel)
 
 main :: IO ()
 main = kayaMain $ \app -> buildTx app $ do
-  -- The signals come first so the window construct can close over
-  -- `status`: Build is a pure state monad, so a handler riding a
-  -- construct can only see what is already bound.
+  -- The signals come first: Build is a pure state monad, so a handler riding
+  -- a construct can only see what is already bound.
   doc <- signal (VStr "notes")
   status <- signal (VStr "saved")
 
-  -- `WDirty` is absent here on purpose: the default False is the scene's
-  -- first assertion.
+  -- `WDirty` is absent on purpose: the default False is the first assertion.
   window
     0
     [ WTitle "dirty",

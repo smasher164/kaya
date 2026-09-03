@@ -1,30 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- THE BYTES HALF OF A CLIP. ClipData.Item carries text, html,
-             a Uri or an Intent and no byte array at any API level, so an
-             image, a custom format and a file all ride content:// URIs
-             into KayaClipProvider (docs/clipboard-plan.md §7).
-
-             HERE AND NOT IN THE APPS' MANIFESTS, which is the opposite
-             call from KayaHarnessAccessibility: that service is harness
-             machinery and a user's app must not carry it, while putting
-             an image on the clipboard is a product feature every kaya
-             app has.
-
-             THE AUTHORITY IS PER APPLICATION ID and cannot be a
-             constant. Both validation APKs live on the same emulator,
-             and two installed packages declaring one authority is
-             INSTALL_FAILED_CONFLICTING_PROVIDER on the second install —
-             which takes down every leg on that device, not just the
-             clipboard's. KayaClipProvider.authority(context) computes
-             the same string at runtime; the two spellings must agree.
-
-             exported=false with grantUriPermissions=true is the whole
-             permission story: no app may reach the provider on its own,
-             and ClipboardService issues the transient read grant to
-             whoever pastes (revoked the moment the clip changes, which
-             is why a consumer must read the bytes inside the paste). -->
+        <!-- The bytes half of a clip (docs/clipboard-plan.md §7), in the
+             LIBRARY's manifest because every kaya app has it, unlike the
+             harness service the validation apps declare.
+             THE AUTHORITY IS PER APPLICATION ID: two packages declaring
+             one is INSTALL_FAILED_CONFLICTING_PROVIDER on the second
+             install, and KayaClipProvider.authority(context) must keep
+             computing this same string. -->
         <provider
             android:name="dev.kaya.KayaClipProvider"
             android:authorities="${applicationId}.clip"

@@ -1,12 +1,7 @@
 // UndoProbe round 3 (iOS simulator) — WHICH STACK the shake gesture
-// drives, decided by a discriminator instead of by the alert's title.
-//
-// Round 2 could not prove it: `accessibilityActivate` on the alert's
-// Undo button returned false, so the only evidence was the title string
-// ("Undo Typing"), which is an inference. This round arms ONLY the
-// WINDOW's undoManager, with a name of its own, and shakes — so the
-// alert's title (or its absence) discriminates. K-labels below.
-//
+// drives, decided by a DISCRIMINATOR rather than by the alert's title:
+// it arms ONLY the window's undoManager, under a name of its own, so
+// the title (or its absence) answers. docs/undo-plan.md §0.
 // THROWAWAY. Nothing builds it but build3.sh beside it.
 import SwiftUI
 import UIKit

@@ -7,24 +7,13 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE WINDOWS ACCENT NEAR-NO-OP HAS A WALL. Fluent control styles never
-# read `SystemAccentColor` for a fill — they read the six derived stops
-# (`SystemAccentColorDark1..3`, `...Light1..3`), theme-crossed — so an
-# app that writes the bare key changes the text-selection highlight and
-# NOTHING ELSE, silently (microsoft-ui-xaml#6394; the measurement and
-# the crossed-stops table live on crates/kaya/src/winui/mod.rs's
-# brand_dictionary). The styling scene deliberately reads no pixels for
-# this, so no lane can catch the mistake — the ledger filed "this wants
-# a gate, not a comment" and this is that gate.
-#
-# THE DISCRIMINATOR IS THE ELEMENT MARKER: prose says SystemAccentColor
-# bare all the time, and the module's own unit test holds the bare key
-# as a forbidden NEEDLE (`"x:Key=\"SystemAccentColor\""` in a list) —
-# only EMITTED XAML spells `<Color x:Key="SystemAccentColor...`. Every
-# such element must carry one of the six derived suffixes, all six
-# present exactly once. That unit test is this wall's RENDERED-output
-# sibling on the windows guest's unit phase; this one runs in the fast
-# sweep on every host.
+# Fluent fills read the six DERIVED accent stops, never bare
+# SystemAccentColor, and no lane can see the bare key's near-no-op
+# (CLAUDE.md's gate list; microsoft-ui-xaml#6394, and the measurement
+# with the crossed-stops table is on winui/mod.rs's brand_dictionary).
+# THE ELEMENT MARKER IS THE DISCRIMINATOR: prose and the module's own
+# unit test both spell the bare key, so only EMITTED `<Color x:Key="...`
+# markup may be read here.
 
 import re
 
@@ -35,8 +24,7 @@ gate = Gate("check-accent")
 
 
 def check(text):
-    """(verdict, lines): 'refused' | 'bad' | 'ok'. Sentences verbatim
-    from the shell body this replaced."""
+    """(verdict, lines): 'refused' | 'bad' | 'ok'."""
     hits = re.findall(r'<Color x:Key=\\?"SystemAccentColor([A-Za-z0-9]*)\\?"',
                       text)
     if not hits:
@@ -80,8 +68,7 @@ if verdict == "bad":
     print("\n".join(out), file=sys.stderr)
     status = 1
 
-# THE GUARD GUARDS ITSELF, perturbed out of the real file, counts
-# printed (the prelude's doctor), the red demanded — both failure
+# Self-tests perturbed out of the real file, red demanded, both
 # directions.
 bare = gate.doctor(
     "N1 (bare key)", text,

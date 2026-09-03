@@ -1,8 +1,5 @@
-// The nav conformance scene, Go port — the serial navigation grammar
-// via the chain spelling. The covered root is RETAINED, and a
-// programmatic PopEntry does not echo entry_popped, so the settings
-// round's final status stays "back requested". See guests/rust/nav.rs
-// and tools/scenes/nav.steps.
+// The nav conformance scene (tools/scenes/nav.steps): a programmatic
+// PopEntry does NOT echo entry_popped.
 package nav
 
 import (
@@ -39,9 +36,7 @@ func App() *kaya.App {
 				tx.Write(status, "pushed detail")
 			})
 			tx.Button("open settings", func(tx *kaya.Tx) { // button#1
-				// The veto class: nothing has popped; agree and
-				// confirm. No entry_popped will fire, so this write
-				// is the round's final status.
+				// Nothing has popped, and no entry_popped will follow.
 				entry := tx.PushEntry(settings).
 					Title("settings").
 					InterceptBack(true).

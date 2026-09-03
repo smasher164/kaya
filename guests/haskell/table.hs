@@ -2,12 +2,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The table scene from Haskell: column headers and click-to-sort on
-   the For vocabulary (docs/tables-plan.md). A header click is a
-   REQUEST — this guest reorders its collection BY KEY (the reorder
-   scene's idiom) and re-declares the header with the new indicator;
-   the platform sorts nothing. The byte-frozen contract is
-   tools/scenes/table.steps. -}
+-- The table scene, Haskell port — guests/rust/table.rs,
+-- tools/scenes/table.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (sortBy)
@@ -24,23 +20,20 @@ instance KayaRecord TableItem
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The guest's sort policy — the platform never has one: clicking
-  -- the sorted column flips it, clicking another starts ascending.
+  -- The guest's sort policy; the platform never has one.
   sorted <- newIORef (Nothing :: Maybe (Int, Bool))
   (items, table) <- buildTx app $ do
     items <- collectionOf (Proxy :: Proxy TableItem)
     -- The root is a row so the For's container is the scene's only
-    -- column-kind widget (the reorder scene's rule). The table IS the
-    -- For, headers declared on the Widget forEach returns.
+    -- column-kind widget (the reorder scene's rule).
     (table, _) <-
       forEach (recordHandle items) $
         rowOf
           [ label (field @"name" @TableItem),
             label (field @"size" @TableItem)
           ]
-    -- Grown on purpose: this scene asserts the fill-and-scroll
-    -- viewport, the grown half of the empty-row ruling — ungrown
-    -- would hug its rows (tables-plan decision 8).
+    -- Grown on purpose: ungrown would hug its rows (docs/tables-plan.md
+    -- decision 8).
     setGrow table 1
     columns table ["Name", "Size"] sortNone
     root <- row [pure table]
@@ -60,8 +53,7 @@ main = kayaMain $ \app -> do
       let keyOf (_, item) = if column == 0 then name item else size item
           ordered0 = sortBy (comparing keyOf) entries
           ordered = if desc then reverse ordered0 else ordered0
-      -- Keys, never indices: moving each key to the end in the target
-      -- order leaves the collection sorted.
+      -- Keys, never indices.
       mapM_ (\(k, _) -> moveToEnd (recordHandle items) k) ordered
       columns table ["Name", "Size"] $
         if desc then sortDesc column else sortAsc column

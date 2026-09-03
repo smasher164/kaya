@@ -1,10 +1,5 @@
-// The adaptive conformance scene, Go port — see guests/rust/adaptive.rs
-// for the full rationale. row@dash flips by a HANDLER (D2's user-driven
-// toggle); row@narrow carries the breakpoint (D3, size classes ruled
-// 2026-08-31): StackWhen(kaya.SizeClassCompact) stacks it vertically
-// while the window's size class is compact (below 600 points on every
-// desktop) and reverts on leaving the class. tools/scenes/adaptive.steps is the
-// byte-frozen contract.
+// The adaptive conformance scene (tools/scenes/adaptive.steps): row@dash
+// flips by a HANDLER, row@narrow by the compact breakpoint.
 package adaptive
 
 import (
@@ -17,9 +12,7 @@ func App() *kaya.App {
 	var dash kaya.Widget
 	vertical := false
 	app.Build(func(tx *kaya.Tx) {
-		// Explicit size: the desktop start must sit ABOVE the
-		// breakpoint's threshold so the scene's resize half crosses it
-		// both ways deterministically.
+		// Must start ABOVE the breakpoint, so the resize crosses it.
 		tx.Window(0).Title("adaptive").Size(900, 600)
 
 		alpha := tx.Signal("alpha")
@@ -31,8 +24,7 @@ func App() *kaya.App {
 				tx.Label(alpha)  // label#0
 				tx.Label(longer) // label#1
 			}).A11yID("dash")
-			// column#1: the control group — its axis answers the
-			// creation kind's own and never moves.
+			// column#1: the control group, whose axis never moves.
 			tx.Column(func() {
 				tx.Label(steady) // label#2
 			}).A11yID("steady")
@@ -44,8 +36,7 @@ func App() *kaya.App {
 					tx.SetAxis(dash, kaya.AxisHorizontal)
 				}
 			})
-			// row#1: the BREAKPOINT subject (D3) — the handler never
-			// touches it.
+			// row#1: the BREAKPOINT subject; the handler never touches it.
 			tx.Row(func() {
 				one := tx.Signal("one")
 				two := tx.Signal("a wider two")

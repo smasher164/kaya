@@ -1,26 +1,5 @@
-"""Row windowing's VARIABLE-HEIGHT scene (docs/virtualization-plan.md
-§5): 300 rows whose heights differ by STRUCTURE, not by typography.
-
-Every row's template holds an inner For of k lines, k = 1..5 from the
-row's own index — so the same row is the same number of lines on every
-platform, while its pixel height is whatever that platform's text
-metrics make it. That is what lets one scene drive the correction path
-deterministically: the FIRST row is 2 lines, the SECOND is 5, so the
-presumption taken from row 0 is wrong by row 1 and the For moves to the
-corrected path immediately and permanently (plan §2).
-
-Nothing here is windowing code. There is no height to declare, no
-prototype to nominate and no callback to implement; this guest inserts
-1,200 rows of data and reads none of them back.
-
-AND ITS INNER LISTS ARE WRITTEN TO UNREALIZED ROWS: the table is seeded
-at a screenful, so every row past it has no widgets while this build
-runs and `lines.at("r200")` addresses model data alone (the ruling that
-closed docs/deferred.md's nested-collection-instance entry).
-
-Build the library first (cargo build), then:
-    KAYA_SELFTEST=varied python3 guests/python/varied.py
-"""
+"""Row windowing's VARIABLE-HEIGHT scene (docs/virtualization-plan.md §5):
+row 0 is 2 lines and row 1 is 5, so the correction path runs at once."""
 
 import sys
 from dataclasses import dataclass
@@ -30,9 +9,8 @@ import kaya
 
 @dataclass
 class Row:
-    # The row's key, carried as a field so the row's OWN inner For can be
-    # addressed by it: the copies of one template node share a node id, so
-    # a constant a11y_id would name three hundred containers at once.
+    # A field, because copies of one template node share a node id and a
+    # constant a11y_id would name three hundred containers at once.
     key: str
     name: str
 
@@ -70,25 +48,14 @@ with app.window(title="varied", width=520, height=600):
         with kaya.column(grow=1, align="stretch"):
             kaya.label(bind=census)  # label#0
             rows = kaya.collection(Row)
-            # A ONE-COLUMN TABLE, not a plain For: §6.2 windows the mac
-            # NATIVE TABLE tier, and a variable-height row exercises the
-            # delegate-height path exactly where correction lives. The
-            # plain-For band joins at breadth (§6.3).
+            # A ONE-COLUMN TABLE: this windows the mac NATIVE TABLE tier.
             for row in rows.columns("Row", a11y_id="varied", grow=1):
-                # The table wall wants a Row of one cell; the cell is
-                # the variable-height column of lines.
                 with kaya.row(), kaya.column(align="stretch"):
-                    # The row's ONE direct label: expect_rows reads a
-                    # row's own cells, so the band reads out as a list
-                    # of row identities WITH their line counts — band
-                    # membership by identity, which is the fact the
-                    # correction may not disturb.
+                    # The row's ONE direct label: expect_rows reads its cells.
                     kaya.label(bind=row.name)
                     lines = kaya.collection(Line)
-                    # The inner container's automation key is THE ROW'S OWN
-                    # KEY, so a scene can read one row's lines
-                    # (`expect_order column@r200 ...`) whether that row was
-                    # realized at build time or arrived with the band.
+                    # Keyed by THE ROW'S OWN KEY, so a scene can read one
+                    # row's lines whether or not it was realized.
                     for line in lines.rows(a11y_id=row.key):
                         kaya.label(bind=line.text)
     for i in range(N):

@@ -2,15 +2,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The reorder scene from Haskell: order as collection data. Each
-   handler repositions an entry BY KEY, never by index.
-
-   THE ROOT IS A ROW so the For's container is the scene's only
-   column-kind widget: languages disagree on whether a container is
-   created before or after its children, and column#0 must name the same
-   widget everywhere.
-
-   Build like milestone2.hs, then run with KAYA_SELFTEST=reorder. -}
+-- The reorder scene, Haskell port — guests/rust/reorder.rs,
+-- tools/scenes/reorder.steps.
 
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
@@ -28,14 +21,11 @@ main = kayaMain $ \app -> do
     items <- collectionOf (Proxy :: Proxy Item)
 
     let onRotate = submitTx app $ do
-          -- The MODEL owns the order, so the handler asks it which key
-          -- is first; it never counts widgets.
           entries <- recordItems items
           let (firstKey, _) = head entries
           moveToEnd (recordHandle items) firstKey
         onLift = submitTx app $ do
-          -- moveToFront is sugar for moveBefore the current first key —
-          -- the same wire op, keys never indices.
+          -- Keys, never indices.
           entries <- recordItems items
           let (lastKey, _) = last entries
           moveToFront (recordHandle items) lastKey

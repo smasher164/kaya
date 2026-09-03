@@ -45,12 +45,10 @@ let check_todo_ct_pic : (check_todo, bytes) Kaya_app.field = blob_field 1
 let () =
   (* ONE ID SPACE: a template node draws from the WIDGET counter, so an
      app hands out one number sequence and the core's two "already
-     exists" walls can never fire on an id this binding minted
-     (DESIGN.md, Binding conventions). Its own app, run first, so the
-     sequence starts at 1. THE CONTIGUOUS RUN IS THE ASSERTION, not
-     inequality — a private node counter restarted at 1 sits under the
-     live ids an app has already spent and passes a [<>] while being
-     exactly the defect. *)
+     exists" walls can never fire (DESIGN.md, Binding conventions). Its
+     own app, run first, so the sequence starts at 1. THE CONTIGUOUS RUN
+     IS THE ASSERTION, not inequality — a private node counter restarted
+     at 1 sits under the ids an app has spent and passes a [<>]. *)
   let id_app = create () in
   let ids =
     build id_app (fun () ->
@@ -569,13 +567,11 @@ let () =
         (String.concat ", " (List.map string_of_int l)));
 
   (* THE ROW'S OWN FIELDS. A nested table is FOR rows that carry named
-     fields, and until 2026-08-25 nothing narrowed a record collection to
-     one stamped copy — a guest had to rebuild the record by hand from
-     [record_handle] (docs/deferred.md, the nested-record-collection
-     gap). Both halves lie in ways that COMPILE: a collection born with
-     the scalar schema, and a narrowing that addresses the parent. So
-     both are read off the queued records, and the model read is the
-     half the wire cannot show. *)
+     fields (docs/deferred.md, the nested-record-collection gap). Both
+     halves lie in ways that COMPILE — a collection born with the scalar
+     schema, and a narrowing that addresses the parent — so both are read
+     off the queued records, and the model read is the half the wire
+     cannot show. *)
   let positions_rt =
     {
       rt_schema = [ Kaya_wire.value_str; Kaya_wire.value_str ];

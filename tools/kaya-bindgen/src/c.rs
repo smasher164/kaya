@@ -1,9 +1,7 @@
 //! C emitter: a header of static inline packers over a caller-owned
-//! buffer, plus the occurrence parser. C has no namespaces, so every
-//! identifier wears the kaya_ prefix and the validator carries the
-//! whole collision load. Constants are not emitted here — cbindgen
-//! already puts KAYA_TX_*/KAYA_KIND_*/... in kaya.h, which this header
-//! includes.
+//! buffer, plus the occurrence parser. Constants are NOT emitted here —
+//! cbindgen already puts KAYA_TX_*/KAYA_KIND_*/... in kaya.h, which this
+//! header includes.
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
@@ -17,8 +15,7 @@ pub const RESERVED: &[&str] = &[
     "union", "unsigned", "void", "volatile", "while",
     // NOT A KEYWORD — a local this generator EMITS, `size_t kaya_at =
     // kaya_wire_begin(...)`, which a spec field of the same name would
-    // redeclare in the same scope. See swift.rs's twin for the hour
-    // this cost.
+    // redeclare in the same scope. swift.rs has the twin.
     "kaya_at",
 ];
 
@@ -274,18 +271,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The set_property arms, one trio per property, spec-driven. The constant arm
-    // takes a KayaVal; strings stay the common case via kaya_str.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        // Blob setters take the u64 kaya_blob_register handle (kaya_blob).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (ty, ctor, param) = match kind {
             crate::PropKind::Str => ("const char *", "kaya_str", *prop),
             crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
-            // Enum props ride I64; the KAYA_<ENUM>_* constants are the
-            // domain, generated above from the spec enum.
             crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
         };
         c.line("");
@@ -322,12 +315,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root). The C floor is the ONE surface with no
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root). The C floor is the ONE surface with no
     // shortcut canonicalizer, BY DESIGN: it writes the canonical wire
-    // spelling itself and the core validates rather than rewrites
-    // (DESIGN.md, Menus).
+    // spelling itself and the core validates (DESIGN.md, Menus).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (ty, ctor, param) = match kind {
@@ -343,11 +334,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line(" * exists at the C floor by design: write the canonical wire spelling");
             c.line(" * yourself — lowercase '+'-joined tokens, modifiers in primary,");
             c.line(" * shift, alt order, then exactly one key (a-z, 0-9, or the closed");
-            c.line(" * named set: enter, delete, f1..f12, left, right, up, down), e.g.");
-            c.line(" * \"primary+shift+s\". The core validates spelling and policy at the");
-            c.line(" * root and REJECTS non-canonical forms rather than rewriting them —");
-            c.line(" * the same root errors every generated binding gets after its");
-            c.line(" * canonicalizer (DESIGN.md, Menus). */");
+            c.line(" * named set), e.g. \"primary+shift+s\". The core REJECTS non-canonical");
+            c.line(" * forms rather than rewriting them (DESIGN.md, Menus). */");
         } else {
             c.line(&format!("/* set_menu_prop with a constant {prop} value. */"));
         }
@@ -417,11 +405,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return 1;");
     c.line("}");
     c.line("");
-    // One parse helper per further click-shaped payload-less occurrence
-    // (menu_activated), DERIVED from the record shapes like the id-only
-    // branch elsewhere — a new click-shaped record reaches the C floor
-    // with zero emitter edits. button_clicked keeps its historic name,
-    // kaya_parse_click, above.
+    // DERIVED from the record shapes, so a new click-shaped record
+    // reaches the C floor with zero emitter edits. button_clicked keeps
+    // its historic name, kaya_parse_click, above.
     for name in crate::click_shaped_occurrence_names(spec)
         .iter()
         .filter(|n| **n != "button_clicked")
@@ -452,10 +438,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
-    // One parse helper per u32-slot occurrence (sort_requested): the
-    // click identity shape plus the named u32 the tag family's third
-    // slot carries — derived, so a future record of this family
-    // reaches the C floor with zero emitter edits.
+    // The click identity shape plus the named u32 the tag family's
+    // third slot carries. Derived, like the branch above.
     for r in spec
         .occurrence
         .iter()
@@ -492,9 +476,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
-    // One parse helper per payload-carrying occurrence, from the spec's
-    // Record::payload — the kind list derives rather than drifts. The
-    // payload lands in a KayaVal, kaya_parse_value's generic decode.
+    // From the spec's Record::payload, so the kind list cannot drift.
     for r in spec.occurrence.iter().filter(|r| r.payload.is_some()) {
         let name = r.name;
         let up = name.to_uppercase();
@@ -525,11 +507,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
-    // One parse helper per canvas ask (draw_requested, tick): the click
-    // identity shape, then a run of BARE values with no count in front of
-    // them — the assigned size, and a tick's frame time — read until the
-    // record ends (docs/canvas-plan.md §3.2.1). Derived, so a third ask
-    // of this family reaches the C floor with zero emitter edits.
+    // The canvas asks: a click identity shape, then BARE values with no
+    // count in front of them, read until the record ends
+    // (docs/canvas-plan.md §3.2.1). Derived, like the branches above.
     for name in crate::values_tail_occurrence_names(spec) {
         let up = name.to_uppercase();
         let pad = " ".repeat(31 + name.len());

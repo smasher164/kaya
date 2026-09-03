@@ -1,5 +1,5 @@
-(* The progress conformance scene, OCaml port. See
-   guests/rust/progress.rs and tools/scenes/progress.steps. *)
+(* The progress scene, OCaml port — guests/rust/progress.rs,
+   tools/scenes/progress.steps. *)
 
 open Kaya_app
 

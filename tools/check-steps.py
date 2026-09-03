@@ -7,15 +7,11 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# Lint the shared .steps scripts: container-kind targets index widgets
-# by CREATION order, which legitimately differs per language
-# (statement-shaped construction is parent-first, expression trees are
-# children-first — argument evaluation forces it). Leaf kinds are safe
-# (body order is screen order everywhere); containers are targetable
-# only through the blessed pattern — column#0, the For container that
-# the root-is-a-row convention keeps unique. Anything else would name
-# different widgets on different platforms, so it dies here, not in
-# one platform's leg.
+# Lint the shared .steps scripts. The first clause: container-kind
+# targets index widgets by CREATION order, which legitimately differs per
+# language (statement-shaped construction is parent-first, expression
+# trees are children-first — docs/traps.md's children-first family), so a
+# container is targetable only through a key or the blessed unique #0.
 
 import hashlib
 import platform
@@ -24,10 +20,9 @@ import shutil
 import subprocess
 import tempfile
 
-# The windows lane's tables — roster, order, drain structure — are DATA
-# since the runner conversion (docs/runner-conversion-plan.md §2); the
-# clauses that used to regex tools/deploy-win.py's text import what the
-# runner imports.
+# Every lane's roster, order and drain structure is DATA
+# (docs/runner-conversion-plan.md §2): the clauses below import what the
+# runner imports rather than reading its text.
 from lanes import android as android_lane
 from lanes import ios as ios_lane
 from lanes import mac as mac_lane
@@ -164,20 +159,12 @@ def lint(text, path):
                 continue
             if kind not in ("row", "column", "scroll", "grid"):
                 continue
-            # Index 0 of a container kind is the blessed pattern, on
-            # one convention: the scene ADDRESSES exactly one widget of
-            # that kind, so creation order cannot enter. column#0 is
-            # the For container in milestone2 (root-is-a-row keeps it
-            # unique); row#0 carries the horizontal grow contract in
-            # the grow scene; scroll#0 the one scroll viewport in the
-            # scroll scene. The convention is CHECKED, not assumed,
-            # below: a scene that also addresses a SECOND container of
-            # the kind has lost the uniqueness that made #0 stable —
-            # Haskell builds children first, so an outer container of a
-            # kind indexes AFTER the inner ones (measured 2026-08-22:
-            # the align scene put three columns on screen and column#0
-            # was the root everywhere but Haskell, where it was the
-            # innermost).
+            # Index 0 of a container kind is blessed on ONE convention:
+            # the scene addresses exactly one widget of that kind, so
+            # creation order cannot enter. The convention is CHECKED
+            # below, not assumed — a Haskell guest builds children first,
+            # so an outer container indexes AFTER the inner ones
+            # (docs/deferred.md's align-scene entry).
             if index == "0":
                 zero_at.setdefault(kind, []).append(lineno)
                 kinds_seen.setdefault(kind, set()).add("#0")
@@ -203,16 +190,14 @@ def selftest_fail(msg):
     raise SystemExit(1)
 
 
-# The guard guards itself: a known-bad sample must fail, or the lint is
-# a false green.
 if not lint('click row#1\nexpect column#2 "x"\n', "-"):
     selftest_fail("bad sample passed")
-# The uniqueness clause too: #0 beside an authored key of the same kind
-# is the exact shape that broke on Haskell (children-first creation).
+# #0 beside an authored key of the same kind is the shape that broke on
+# Haskell (children-first creation).
 if not lint('expect_aligned column#0 "stretch"\n'
             'expect_aligned column@x[brokerage] "center"\n', "-"):
     selftest_fail("column#0 beside column@x[brokerage] passed")
-# And the blessed lone #0 still passes, or every legacy scene reddens.
+# The blessed lone #0 still passes, or every legacy scene reddens.
 if lint("expect_fills column#0\nexpect_fills row#0\n", "-"):
     selftest_fail("lone column#0/row#0 refused")
 # Both authored forms and a deep string path pass.
@@ -236,8 +221,8 @@ for target in (
                for b in grammar_out):
         selftest_fail(f"{target} failed for another reason): "
                       + "\n".join(grammar_out))
-# Indexed targets preserve the sole legacy spelling; empty or repeated
-# separators cannot depend on one parser's split defaults.
+# Empty or repeated separators must not depend on one parser's split
+# defaults.
 if lint("click button#0\nclick button#last\n", "-"):
     selftest_fail("well-formed indexed targets were refused")
 for target in ("button#", "button##0", "button#0#1", "button#last#"):
@@ -259,9 +244,9 @@ for p in STEPS:
         print("\n".join(out), file=sys.stderr)
         status = 1
 
-# The keyed-target grammar has THREE parsers. The desktop scene reaches
-# two; this source wall keeps Compose on the same route before Android
-# carries that scene (docs/tables-plan.md, dynamic tables).
+# The keyed-target grammar has THREE parsers; the desktop scene reaches
+# two, so this source wall keeps Compose on the same route
+# (docs/tables-plan.md, dynamic tables).
 TARGET_HARNESS = "crates/kaya/src/harness.rs"
 TARGET_SWIFT = "swift/KayaSwiftUI.swift"
 TARGET_KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
@@ -1021,11 +1006,10 @@ else:
     print("check-steps: Swift selftest-admission runtime truth table "
           "SKIPPED (needs Darwin swiftc)")
 
-# The opening lint: a script must OPEN with an observation, giving
-# every interpreter a bounded render retry before its first action.
-# This is not Swift's transaction-admission wall: a vacuous expect can
-# pass against an empty model, so Swift admits only after a completed
-# mounted apply batch.
+# A script must OPEN with an observation, giving every interpreter a
+# bounded render retry before its first action. NOT Swift's
+# transaction-admission wall: a vacuous expect can pass against an empty
+# model, so Swift admits only after a completed mounted apply batch.
 def opening_lint(text, path):
     for line in text.splitlines():
         stripped = line.strip()
@@ -1040,7 +1024,6 @@ def opening_lint(text, path):
     return []
 
 
-# The guard guards itself.
 if not opening_lint('click button#0\nexpect label#0 "x"\n', "-"):
     selftest_fail("action-first script passed")
 
@@ -1053,20 +1036,14 @@ for p in STEPS:
         status = 1
 
 
-# WHICH WIDTHS AN expect_split MAY SAMPLE. The backends' platform
-# components disagree about where one pane becomes two — GNOME
-# collapses below 400sp, Material wants 840dp, TwoPaneView sits between
-# — so a width inside that band is legitimately one pane on one
-# platform and two on another, and the scripts are compared
-# byte-for-byte.
-#
-# THE TWO FORMS ARE POLICED DIFFERENTLY, by the claim each makes. A
-# LITERAL (`expect_split "regular/split"`) names WHICH arm ran, so it
-# needs a width the file itself set, outside the band. The BARE form
-# asserts the invariant and is legal at a width the file never names —
-# the only spelling a phone or tablet lane can run. A width the file
-# DOES name must clear the band in either form: in there the invariant
-# is not vacuous, it is WRONG.
+# WHICH WIDTHS AN expect_split MAY SAMPLE. The backends disagree about
+# where one pane becomes two (GNOME below 400sp, Material 840dp,
+# TwoPaneView between), so a width inside that band is legitimately one
+# pane on one platform and two on another. THE TWO FORMS ARE POLICED
+# DIFFERENTLY: a LITERAL names WHICH arm ran and needs a width the file
+# set outside the band, while the BARE form asserts the invariant and is
+# legal at a width the file never names — the only spelling a phone lane
+# can run. A width the file DOES name must clear the band either way.
 def _width_lint(text, path, verb, low, high, band_sentence):
     width = None
     bad = []
@@ -1109,15 +1086,14 @@ def split_width_lint(text, path):
 def panes_width_lint(text, path):
     # The band where the platforms legitimately disagree about THREE
     # panes; the middle rung is deliberately unsampleable by a shared
-    # scene — each lane's own gate holds its ladder
-    # (tools/check-pane-ladder.py on macOS).
+    # scene (tools/check-pane-ladder.py holds the macOS ladder).
     return _width_lint(text, path, "expect_panes", 400, 1400,
                        "about three panes (Material wants 1200dp, "
                        "GNOME 1075px at large text, the WinUI nest "
                        "more still)")
 
 
-# The guard guards itself, all four directions.
+# All four directions.
 if not split_width_lint(
         'expect_entries 0\nresize_window 500x600\n'
         'expect_split "regular/split"\n', "-"):
@@ -1147,7 +1123,7 @@ for p in STEPS:
         print("\n".join(out), file=sys.stderr)
         status = 1
 
-# The guard guards itself, the same four directions as the split lint.
+# The same four directions as the split lint.
 if not panes_width_lint(
         'expect_entries 0\nresize_window 700x600\n'
         'expect_panes "regular/1,2"\n', "-"):
@@ -1174,15 +1150,11 @@ for p in STEPS:
         status = 1
 
 
-# THE LINUX STAGES MUST FIT EVERY RESIZE, and the lane's text scale
-# must stay pinned. A resize wider than the Xvfb screen or the sway
-# output leaves the window at whatever the compositor allowed — the
-# breakpoints then legitimately show fewer panes and the leg reads as a
-# backend bug rather than a small stage. And libadwaita's sp unit
-# scales with the text factor (860sp is 1075px at large text), so a
-# byte-frozen width is reproducible only while the factor is 1.0 —
-# run-suites.sh unsets the env overrides, and this clause keeps both
-# facts from quietly rotting (docs/multicolumn-plan.md D4).
+# THE LINUX STAGES MUST FIT EVERY RESIZE, and the lane's text scale must
+# stay pinned (docs/multicolumn-plan.md D4): a resize wider than the Xvfb
+# screen leaves the window at whatever the compositor allowed, and
+# libadwaita's sp unit scales with the text factor (860sp is 1075px at
+# large text), so a byte-frozen width holds only while the factor is 1.0.
 def linux_stage_lint(step_files):
     runner = read_rel("tools/linux/run-suites.sh")
     stages = [int(m.group(1)) for m in
@@ -1218,22 +1190,19 @@ def linux_stage_lint(step_files):
     return bad
 
 
-# The guard guards itself, both directions: an oversized resize must be
-# caught, and the real roster must pass.
+# Both directions: an oversized resize must be caught, and the real
+# roster must pass.
 if not linux_stage_lint([("huge.steps", "expect_entries 0\n"
                           "resize_window 9999x800\nexpect_panes\n")]):
     selftest_fail("a resize wider than the linux stages passed")
 
 
-# EVERY TwoPaneView KILLS TALL MODE. TwoPaneView has a third mode no
-# other backend can produce: at compact width on a window TALLER than
-# 641, both panes stack top-over-bottom, the leading pane's WIDTH is
-# applied as a HEIGHT, and the back affordance disappears — while
-# expect_split reads "compact/split", which the bare invariant cannot
-# refuse. Every scene height happens to be 600, so the lane's green
-# rests on a 41-DIP coincidence unless every constructed view sets
-# MinTallModeHeight to infinity (the platform's own off switch). A
-# count, not a proximity match: the two must simply never diverge.
+# EVERY TwoPaneView KILLS TALL MODE (docs/multicolumn-plan.md §0e.1): a
+# third mode no other backend can produce, which expect_split reads as
+# "compact/split" while the panes stack and the back affordance
+# disappears. Without MinTallModeHeight = infinity the lane's green rests
+# on a 41-DIP coincidence. A count, not a proximity match: the two must
+# simply never diverge.
 def tall_lint(text, path):
     made = text.count("TwoPaneView::new")
     killed = text.count("SetMinTallModeHeight")
@@ -1253,8 +1222,8 @@ tall_out = tall_lint(winui_text, "crates/kaya/src/winui/mod.rs")
 if tall_out:
     print("\n".join(tall_out), file=sys.stderr)
     status = 1
-# The guard guards itself: a doctored copy with one kill removed must
-# fail, and the perturbation is PROVEN applied by the printed count.
+# A doctored copy with one kill removed must fail, the perturbation
+# PROVEN applied by the printed count.
 tall_count = winui_text.count("SetMinTallModeHeight")
 print(f"check-steps: tall self-test found {tall_count} kill call(s), "
       f"removing one")
@@ -1274,12 +1243,10 @@ if stage_out:
     status = 1
 
 
-# Raw CR bytes: the scripts are LF files by contract. The Swift
-# interpreter splits script text on "\n", and Swift's grapheme-based
-# split sees CRLF as ONE cluster — a CRLF-ended script would parse as
-# a single giant line there while parsing fine everywhere else
-# (docs/traps.md, the grapheme family). CR as DATA rides the \r
-# escape, never a raw byte.
+# Raw CR bytes: the scripts are LF files by contract, because Swift's
+# grapheme-based split sees CRLF as ONE cluster and a CRLF-ended script
+# parses as a single giant line there (docs/traps.md: "Swift graphemes:
+# CRLF is one Character"). CR as DATA rides the \r escape.
 def cr_lint(data, path):
     if b"\r" in data:
         return [f"{path}: raw CR byte — steps files are LF-only "
@@ -1287,7 +1254,6 @@ def cr_lint(data, path):
     return []
 
 
-# The guard guards itself.
 if not cr_lint(b'expect label#0 "x"\r\n', "-"):
     selftest_fail("CRLF sample passed")
 
@@ -1300,12 +1266,10 @@ for p in STEPS:
         status = 1
 
 
-# Entries are single-line controls: what a platform does with an
-# embedded line break in one is platform-defined input behavior (WinUI
-# strips, GTK filters, others vary), so a scene asserting it would pin
-# one platform's behavior against the rest. The multi-line round trip
-# belongs to the textarea. set_text into an entry must not carry \n or
-# \r.
+# Entries are single-line controls, and what a platform does with an
+# embedded line break in one is platform-defined (WinUI strips, GTK
+# filters, others vary). The multi-line round trip belongs to the
+# textarea.
 def entry_newline_lint(text, path):
     bad = []
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -1319,7 +1283,6 @@ def entry_newline_lint(text, path):
     return bad
 
 
-# The guard guards itself.
 if not entry_newline_lint('set_text entry#0 "a\\nb"\n', "-"):
     selftest_fail("entry-newline sample passed")
 
@@ -1332,24 +1295,19 @@ for p in STEPS:
         print("\n".join(out), file=sys.stderr)
         status = 1
 
-# THE TYPING VERB'S TWO RULES, both about `type` being REAL KEYSTROKES
-# at the FOCUSED widget (harness.rs Step::Type, docs/undo-plan.md A8).
-#
+# THE TYPING VERB'S TWO RULES, both about `type` being REAL KEYSTROKES at
+# the FOCUSED widget (harness.rs Step::Type, docs/undo-plan.md A8).
 # 1. THE PAYLOAD IS PRINTABLE ASCII: the keycode mapping is only
-#    platform-independent inside 0x20..0x7e, and Return is a COMMAND
-#    whose meaning depends on the widget it lands in. harness.rs
-#    refuses it at parse; this is the two-second answer with a file and
-#    a line.
-# 2. A SCRIPT THAT TYPES MUST HAVE ASSERTED FOCUS FIRST. The verb takes
-#    no target, and because expects are bounded retries while actions
-#    are not, that assertion is also the WAIT for focus to land.
+#    platform-independent inside 0x20..0x7e.
+# 2. A SCRIPT THAT TYPES MUST HAVE ASSERTED FOCUS FIRST — the verb takes
+#    no target, and that assertion is also the WAIT for focus to land,
+#    since expects are bounded retries while actions are not.
 def typing_lint(text, path):
     bad = []
     focused = False
     # The most recent `type` that is still the newest thing in the
-    # focused field native undo history: (lineno, step, payload). Any
-    # OTHER action pushes its own entry in front of it, which is why a
-    # click clears this.
+    # focused field's native undo history: (lineno, step, payload). Any
+    # OTHER action pushes its own entry in front of it.
     pending = None
     for lineno, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith("#"):
@@ -1365,11 +1323,9 @@ def typing_lint(text, path):
             if not m:
                 # HOW MUCH OF A TYPED RUN ONE UNDO SPENDS IS FRONTIER
                 # GRANULARITY, which a shared scene may not assert
-                # (docs/undo-plan.md §2, §5.2). One character is the
-                # floor every platform agrees on; more than one is a
-                # coin toss. Measured: a five-character run undone in
-                # one step passed on mac, where AppKit coalesces a
-                # burst whole, and failed on linux/x11 where
+                # (docs/undo-plan.md §2, §5.2). Measured: a five-character
+                # run undone in one step passed on mac, where AppKit
+                # coalesces a burst whole, and failed on linux/x11 where
                 # GtkTextHistory spends one per undo.
                 if re.match(r'menu_activate\s+"Edit>Undo"\s*$', s):
                     if pending is not None and len(pending[2]) > 1:
@@ -1388,9 +1344,8 @@ def typing_lint(text, path):
                     pending = None
                 elif not s.startswith("expect") \
                         and not s.startswith("settle"):
-                    # Anything else that acts — a click, a set_text,
-                    # another menu — becomes the newest history entry
-                    # itself.
+                    # Anything else that acts becomes the newest history
+                    # entry itself.
                     pending = None
                 continue
             payload = m.group(1)
@@ -1419,10 +1374,8 @@ def typing_lint(text, path):
     return bad
 
 
-# The guard guards itself, every direction: a line break must fail, a
-# composed character must fail, typing before focus is asserted must
-# fail, and the well-formed shape must PASS — or the three above are
-# failing for a reason that has nothing to do with what they claim.
+# Every direction, the well-formed shape included — without it the three
+# refusals could be failing for reasons of their own.
 if not typing_lint('expect_focused entry#0\ntype "a\\nb"\n', "-"):
     selftest_fail("a line break in a type payload passed")
 if not typing_lint('expect_focused entry#0\ntype "héllo"\n', "-"):
@@ -1432,9 +1385,7 @@ if not typing_lint('expect label#0 "x"\ntype "milk"\n', "-"):
 if typing_lint('expect_focused entry#0\ntype "milk 2"\n', "-"):
     selftest_fail("a well-formed type step was refused")
 # The frontier-granularity clause, all four directions. The two PASSING
-# shapes are the ones that make the failing one mean something: a
-# one-character run is the floor every platform agrees on, and an app
-# action between the typing and the undo makes the undo spend THAT.
+# shapes are what make the failing one mean something.
 if not typing_lint('expect_focused entry#0\ntype "tail"\n'
                    'expect_dirty true\nmenu_activate "Edit>Undo"\n',
                    "-"):
@@ -1445,9 +1396,8 @@ if typing_lint('expect_focused entry#0\ntype "z"\nexpect_dirty true\n'
 if typing_lint('expect_focused entry#0\ntype "milk"\nclick button#0\n'
                'menu_activate "Edit>Undo"\n', "-"):
     selftest_fail("an app action between typing and undo was refused")
-# AND THE CLAUSE MUST FIRE ON THE REAL FILE THAT PROVOKED IT: the
-# perturbation goes into a COPY of editor.steps, the substitution count
-# is printed and asserted, and an unchanged file is a FAILED test.
+# AND ON THE REAL FILE THAT PROVOKED IT, in a COPY: an unchanged file is
+# a FAILED test.
 editor_text = read_rel("tools/scenes/editor.steps")
 # The exact shape the lane caught: a multi-character run undone whole.
 patched, applied = sub_first(r'^type "z"$', 'type " tail"',
@@ -1464,16 +1414,11 @@ if not typing_lint(patched, "-"):
 
 
 # ── expect_title MAY NOT SIT INSIDE A DIRTY STRETCH ──────────────────
-#
-# docs/dirty-plan.md §2. The declared title is untouched by `dirty` on
-# every backend, but the WinUI arm composes its asterisk into the
-# RENDERED CAPTION, which is exactly what expect_title reads there. So
-# a title assertion made while the window is dirty reads "notes" on
-# four lanes and "*notes" on the fifth.
-#
-# THE DIRTY STRETCH IS THE SCENE'S OWN CLAIM about itself: from an
-# `expect_dirty true` up to the next `expect_dirty false`. A scene that
-# never asserts `dirty` has no stretch and is untouched.
+# docs/dirty-plan.md §2: the WinUI arm composes its asterisk into the
+# RENDERED CAPTION, which is what expect_title reads there, so a title
+# read while the window is dirty answers "notes" on four lanes and
+# "*notes" on the fifth. THE STRETCH IS THE SCENE'S OWN CLAIM: from an
+# `expect_dirty true` to the next `expect_dirty false`.
 def title_dirty_lint(src, path):
     bad = []
     dirty = None
@@ -1503,9 +1448,8 @@ def title_dirty_lint(src, path):
     return bad
 
 
-# Both directions, because a guard that only ever passes is not a
-# guard: a title read inside the stretch must FAIL, and the same read
-# after the mark comes down must PASS.
+# Both directions: a title read inside the stretch must FAIL, and the
+# same read after the mark comes down must PASS.
 if not title_dirty_lint('expect_dirty true\nexpect_title "notes"\n',
                         "-"):
     selftest_fail("expect_title inside a dirty stretch passed")
@@ -1515,9 +1459,8 @@ if title_dirty_lint('expect_dirty true\nexpect_dirty false\n'
 if title_dirty_lint('expect_title "window probe"\n', "-"):
     selftest_fail("a scene with no dirty claim at all was refused")
 # AND ON THE REAL FILE THAT NEEDS IT: the perturbation moves
-# editor.steps' own launch title read to just after an `expect_dirty
-# true`, the substitution count is printed and asserted, and an
-# unchanged file is a FAILED test.
+# editor.steps' own launch title read to just after an
+# `expect_dirty true`; an unchanged file is a FAILED test.
 patched, applied = sub_first(
     r"^expect_dirty true$",
     'expect_dirty true\nexpect_title "notes"', editor_text, flags=re.M)
@@ -1533,34 +1476,13 @@ if not title_dirty_lint(patched, "-"):
 
 
 # ── TWO ALERTS WITH THE SAME TITLE NEED `expect_alerts 0` BETWEEN ────
-#
-# MEASURED 2026-08-10 on the iOS lane, with editor.steps. The app
-# guards unsaved work at three doors under one alert title, so
-# `expect_alert "unsaved changes"` cannot tell a NEW dialog from the
-# one still on screen. The stretch that failed:
-#
-#   alert_choose cancel
-#   expect textarea#0 "scratch"   <- already true; passes instantly
-#   expect_dirty true             <- already true; passes instantly
-#   menu_activate "File>New"
-#   expect_alert "unsaved changes" <- matched the OLD alert, +0ms
-#
-# and the app's second show hit the core's one-alert-per-process
-# assertion and ABORTED the guest.
-#
-# WHAT THIS CLAUSE DELIBERATELY DOES NOT CATCH, because a guard that
-# fires on correct scripts gets deleted rather than obeyed. Two
-# conditions have to meet for the race to exist:
-#
-#  1. THE TITLES REPEAT. A stale "delete item?" can never satisfy
-#     `expect_alert "eject disk?"`.
-#  2. THE ANSWER WAS `cancel`. An ACTION's continuation does something
-#     the script can wait on; a CANCEL's continuation is by
-#     construction "leave everything as it was", so every assertion
-#     after it was already true before the dialog opened.
-#
-# So the clause fires on a cancel answered into a repeat of its own
-# title, the measured case and nothing wider.
+# docs/traps.md: "A cancelled alert satisfies the expect for the NEXT one
+# with the same title" (measured 2026-08-10, iOS, editor.steps).
+# WHAT THIS DELIBERATELY DOES NOT CATCH, since a guard that fires on
+# correct scripts gets deleted rather than obeyed — the race needs BOTH
+# (1) the titles repeating, and (2) the answer being `cancel`, whose
+# continuation leaves everything as it was, so every assertion after it
+# was already true.
 def alert_wait_lint(src, path):
     bad = []
     cancelled = None         # (line, title) of the last CANCELLED alert
@@ -1597,10 +1519,9 @@ def alert_wait_lint(src, path):
     return bad
 
 
-# Every direction. The cancelled repeat must FAIL; the same pair with
-# the count assertion between must PASS; a repeat after an ACTION must
-# pass (its continuation is waitable — confirm.steps); and two
-# DIFFERENT titles must pass.
+# Every direction, including the three that must PASS: the pair behind a
+# count assertion, a repeat after an ACTION (waitable — confirm.steps),
+# and two DIFFERENT titles.
 if not alert_wait_lint('expect_alert "x"\nalert_choose cancel\n'
                        'expect_alert "x"\n', "-"):
     selftest_fail("a cancelled same-title repeat with no wait passed")
@@ -1648,39 +1569,23 @@ for p in STEPS:
         print("\n".join(out), file=sys.stderr)
         status = 1
 
-# Every scene script must be reachable by name. An unregistered scene
-# does not fail — it silently runs a DIFFERENT script, and a leg that
-# passes then proves nothing about the scene it claims to be.
+# Every scene script must be reachable by name and WIRED into every
+# platform runner, which registration alone does not give. EVERY runner
+# is held to a STRUCTURAL signature and NEVER to the bare name: a
+# name-level check is satisfied by a COMMENT and by unrelated CODE
+# (`window` inside resize_window), which is how four pairs once claimed
+# wiring that did not exist.
 #
-# Every scene must be WIRED into every platform runner, not merely
-# registered: a scene can exist, parse and be registered yet run
-# nowhere. EVERY runner is held to a STRUCTURAL signature — mac and
-# linux to their leg spellings, windows, iOS and android to membership
-# in the lane modules their legs are generated from. NEVER the bare
-# name: the name-level check this
-# replaced was satisfied by a COMMENT (the only `background` in
-# run-sim.py sat in a sentence about shell jobs) and by unrelated CODE
-# (`window` inside resize_window), so four pairs claimed wiring that
-# did not exist — found by the 2026-08-19 comment sweep's gate survey.
-#
-# A runner may DECLARE a scene off instead: *_DESKTOP_ONLY_SCENES for
-# platform policy, IOS_UNWIRED_SCENES for ledgered gaps. Declarations
-# are checked too — one that names a scene the roster lacks, or a
-# scene that is ALSO wired, is a red, so a stale declaration cannot
-# linger.
-#
-# EXCEPT where the backend says it has not got there yet: a backend
-# left behind by a depth slice declares `depth_stub("<scene>")`, the
-# same call check-stubs reads from the other side. Between them the
-# two gates state one rule: a scene's legs are wired on a runner IF
-# AND ONLY IF that runner's backend has the feature.
+# A runner may DECLARE a scene off instead (*_DESKTOP_ONLY_SCENES,
+# IOS_UNWIRED_SCENES); a declaration naming a scene the roster lacks, or
+# one that is ALSO wired, is a red. EXCEPT where the backend declares
+# `depth_stub("<scene>")`, which check-stubs reads from the other side:
+# a scene's legs are wired IF AND ONLY IF that backend has the feature.
 #
 # THE EXEMPTION IS KEYED ON THE SCENE'S FEATURES, NOT ITS NAME, or the
-# two gates contradict each other. A scene can demand a feature it is
-# not named after — `todos.steps` activates Edit>Undo — so a stub on
-# `undo` that held only the `undo` legs off a runner would leave no
-# tree able to satisfy both gates. tools/lib/scene-features.py derives
-# the pairs and is the SAME predicate the cross-check uses.
+# two gates contradict each other — a scene can demand a feature it is
+# not named after (`todos.steps` activates Edit>Undo).
+# tools/lib/scene-features.py derives the pairs, for both gates.
 def wired():
     r = subprocess.run(
         ["python3", "tools/lib/scene-features.py", "--mode", "exempt"],
@@ -1692,10 +1597,8 @@ def wired():
     exempt = {tuple(line.split("\t"))
               for line in r.stdout.splitlines() if line.strip()}
 
-    # The iOS roster is the lane MODULE's since the runner conversion:
-    # every suite's scenes plus the declared-off lists come from the
-    # import, and the hand-queued regex died with the shell text (the
-    # rust suite is a module-driven loop now too).
+    # The iOS roster is the lane MODULE's: every suite's scenes plus the
+    # declared-off lists come from the import.
     ios_wired = sorted(ios_lane.wired_scenes())
     ios_declared = sorted(set(ios_lane.DESKTOP_ONLY_SCENES)
                           | set(ios_lane.UNWIRED_SCENES))
@@ -1741,9 +1644,8 @@ def wired():
     runner_texts = {
         "tools/linux/run-suites.sh":
             read_rel("tools/linux/run-suites.sh"),
-        # The windows, ios, android and mac rosters are read from the
-        # lane MODULES, not text; the keys match scene-features.py's
-        # RUNNERS rows so the depth-stub exemptions line up.
+        # Read from the lane MODULES, not text; the keys match
+        # scene-features.py's RUNNERS rows so the exemptions line up.
         "tools/lib/lanes/win.py": "",
         "tools/lib/lanes/ios.py": "",
         "tools/lib/lanes/android.py": "",
@@ -1807,26 +1709,11 @@ if wired():
 
 
 # THE ACCESSIBILITY BUS IS PART OF A LEG'S WIRING, on the one lane that
-# has to supply it. GTK publishes its tree over libdbus, which
-# AUTOLAUNCHES a session bus on X11 and needs no environment variable;
-# the harness READS that tree with the atspi/zbus crate, which finds a
-# session bus ONLY in DBUS_SESSION_BUS_ADDRESS. A plain leg exports
-# none, so publisher and reader land on different busses and every ax
-# read answers "<not in the accessibility tree>" — silently on x11,
-# behind a Gtk-WARNING about autolaunch on wayland.
-# tools/linux/a11y-leg.sh is what reconciles them: `eval $(dbus-launch
-# --sh-syntax)` puts the address in the environment.
-#
-# NOTHING ELSE CAN SEE THIS. The sentence names a missing NODE, so it
-# reads as a scene or lowering bug and sends the reader to the widget;
-# the scene passes on every other platform; and the leg is red from
-# the commit that wired it, so there is no regression to bisect.
-# Measured 2026-08-27 on the canvas leg — the fourteenth ax-asserting
-# scene and the only one wired without a bus (docs/traps.md).
-#
-# The bus-reading METHODS are pinned against gtk.rs rather than listed
-# here alone: a sixth one must name its verb or this gate quietly
-# stops covering the scenes that use it.
+# has to supply it (docs/traps.md: "On linux, GTK and the harness find
+# the session bus by DIFFERENT means"). tools/linux/a11y-leg.sh is what
+# reconciles them. The bus-reading METHODS are pinned against gtk.rs
+# rather than listed here alone: a sixth one must name its verb or this
+# gate quietly stops covering the scenes that use it.
 AX_VERB = {
     "ax": "expect_ax",
     "ax_hint": "expect_ax_hint",
@@ -1922,9 +1809,8 @@ if ax_out:
     status = 1
 
 
-# Watched negatives. Doctored COPIES of the real files — never the
-# tree — with the substitution count printed, because a perturbation
-# that did not apply is a test that passed vacuously.
+# Watched negatives on doctored COPIES of the real files, never the tree,
+# with the substitution count printed.
 def ax_bus_selftest(label, want, doctor):
     with tempfile.TemporaryDirectory() as td:
         d = pathlib.Path(td)
@@ -2025,24 +1911,18 @@ if not ax_bus_selftest("a bus reader AX_VERB does not name",
 
 
 # THE VERB-FEATURE CROSS-CHECK — the other half of the same predicate.
-# wired() above says when a stub HOLDS legs off a runner; this says
-# when a runner runs legs it must not, i.e. a scene whose verbs demand
-# a feature its backend still refuses. Keyed on the scene NAME that
-# question cannot be asked at all: a scene's name is not what a backend
-# has to implement.
-#
-# tools/lib/scene-features.py holds the derivation (verbs and menu
-# ROLES to features, with the role table pinned against MENU_ROLES so
-# a seventh role cannot ship without an answer).
+# wired() above says when a stub HOLDS legs off a runner; this says when
+# a runner runs legs it must not. Keyed on the scene NAME the question
+# cannot be asked at all: a scene's name is not what a backend has to
+# implement. tools/lib/scene-features.py holds the derivation.
 if subprocess.run(["python3", "tools/lib/scene-features.py", "--mode",
                    "check"], cwd=ROOT, check=False).returncode != 0:
     status = 1
 
 
-# The guard guards itself against a REAL scene corpus: the synthetic
-# root borrows tools/scenes, scene.rs and hand-rolled-stubs.py from
-# this tree and synthesizes only the runner and backend files, so the
-# derivation under test is the derivation that ships.
+# Against a REAL scene corpus: the synthetic root borrows tools/scenes,
+# scene.rs and hand-rolled-stubs.py from this tree and synthesizes only
+# the runner and backend files, so the derivation under test ships.
 def feature_selftest(scene, stub, extra=""):
     with tempfile.TemporaryDirectory() as td:
         d = pathlib.Path(td)
@@ -2062,8 +1942,8 @@ def feature_selftest(scene, stub, extra=""):
                       "swift/KayaSwiftUI.swift"):
             (d / empty).write_text("", encoding="utf-8")
         # The lane modules are IMPORTED with a roster floor, so the
-        # fixture's "runner that runs nothing" is a module whose
-        # scenes are real enough to pass the floor and match nothing.
+        # fixture's "runner that runs nothing" is a module whose scenes
+        # pass the floor and match nothing.
         for lane_stub in ("tools/lib/lanes/win.py",
                           "tools/lib/lanes/ios.py",
                           "tools/lib/lanes/mac.py"):
@@ -2091,10 +1971,8 @@ def feature_selftest(scene, stub, extra=""):
 
 
 # 1. THE EXACT SHAPE §8 RECORDS: the android runner running todos while
-#    Compose stubs undo. It must fail, and it must NAME todos — a
-#    message naming only `undo` would send the reader to the scene that
-#    is not the problem, and the whole defect was that nobody was
-#    looking at todos.
+#    Compose stubs undo. It must fail, and it must NAME todos — naming
+#    only `undo` sends the reader to the scene that is not the problem.
 rc, selftest_out = feature_selftest(
     "todos", 'internal fun x(): Nothing = depthStub("undo")')
 if rc == 0 or not re.search(
@@ -2104,9 +1982,8 @@ if rc == 0 or not re.search(
           "stubbing undo was not named):", file=sys.stderr)
     print(selftest_out, file=sys.stderr)
     raise SystemExit(1)
-# 2. ...and the SAME stub with the legs pulled must PASS, or the
-#    interim state of a depth slice is inexpressible and this clause is
-#    a wall across the only road out of it.
+# 2. ...and the SAME stub with the legs pulled must PASS, or the interim
+#    state of a depth slice is inexpressible.
 rc, _ = feature_selftest(
     "menus", 'internal fun x(): Nothing = depthStub("undo")')
 if rc != 0:
@@ -2117,11 +1994,10 @@ rc, _ = feature_selftest("todos", "")
 if rc != 0:
     selftest_fail("todos legs on an unstubbed backend were refused")
 # 4/5. THE CLIPBOARD ROWS FIRING CROSS-SCENE, which nothing in the tree
-#    can show: `clipboard.steps` is NAMED after the feature it needs,
-#    so a dead verb row and a live one look identical from outside. A
-#    probe scene carries the verb under a name that implies nothing,
-#    and each derivation gets its own run — the VERB row and the ROLE
-#    row.
+#    can show: `clipboard.steps` is NAMED after the feature it needs, so
+#    a dead verb row and a live one look identical from outside. A probe
+#    scene carries the verb under a name that implies nothing, once per
+#    derivation — the VERB row and the ROLE row.
 for probe in ('expect_clipboard text "x"', 'menu_activate '
               '"Edit>Paste"'):
     rc, selftest_out = feature_selftest(
@@ -2135,11 +2011,10 @@ for probe in ('expect_clipboard text "x"', 'menu_activate '
         print(selftest_out, file=sys.stderr)
         raise SystemExit(1)
 
-# The Android per-leg setup has an ORDER, and every step's place
-# matters — enabling the accessibility service before the force-stop
-# kills it, and before the logcat clear erases the evidence it
-# started. None of that is visible at the call site, and the failure
-# surfaces much later as "the picker never appeared".
+# The Android per-leg setup has an ORDER and every step's place matters
+# (docs/traps.md: "An ordering constraint nothing enforces is a comment
+# waiting to rot"). None of it is visible at the call site, and the
+# failure surfaces much later as "the picker never appeared".
 if subprocess.run(["python3", "tools/lib/android-leg-order.py"],
                   cwd=ROOT, check=False).returncode != 0:
     status = 1
@@ -2147,8 +2022,7 @@ if subprocess.run(["python3", "tools/lib/android-leg-order.py"],
 # SCENES MEANS "THE LANGUAGE SWEEP LANDED". Each desktop runner derives
 # its mechanical per-scene surfaces from SCENES — the source scp, the
 # taskkill list — so a rust-only scene added there sends the runner
-# looking for guests that do not exist. DEPTH_SCENES is the variable
-# for that case, in all three runners.
+# looking for guests that do not exist. DEPTH_SCENES is that case.
 def sweep_guests():
     LANGS = [
         ("go", "guests/go/{s}/{s}.go"),
@@ -2159,11 +2033,9 @@ def sweep_guests():
         ("ocaml", "guests/ocaml/{s}.ml"),
         ("haskell", "guests/haskell/{s}.hs"),
     ]
-    # The JVM and CLR guests are NOT one file per scene: one package
-    # plus a selector with irregular class names, so a path pattern
-    # cannot see them. Check what decides reachability — that the
-    # selector dispatches it. A class wired into no switch is as broken
-    # as a missing file.
+    # The JVM and CLR guests are NOT one file per scene: one package plus
+    # a selector with irregular class names, so a path pattern cannot see
+    # them. What decides reachability is the selector dispatching it.
     SELECTORS = [
         ("java",
          "guests/java/dev/kaya/guests/Main.java"),
@@ -2201,10 +2073,8 @@ def sweep_guests():
     for lang, selector in SELECTORS:
         text = read_rel(selector)
         for scene in sorted(scenes):
-            # milestone2 is the DEFAULT arm in both selectors,
-            # reachable without a case of its own — verified, not
-            # assumed: both files end in `default:` dispatching
-            # Milestone2.
+            # milestone2 is the DEFAULT arm in both selectors, reachable
+            # without a case of its own — verified below, not assumed.
             if scene == "milestone2":
                 continue
             if f'case "{scene}"' not in text:
@@ -2213,15 +2083,10 @@ def sweep_guests():
                     f"{lang} selector never dispatches it — the guest "
                     f"is unreachable")
     # A GUEST THAT EXISTS BUT NO LEG RUNS IS INVISIBLE TO EVERY OTHER
-    # GATE: wired() above demands only that a scene has SOME leg, so
-    # one language covers for all of them.
-    #
-    # mac only, deliberately: this lane names every leg
-    # `<scene>-<lang>-swiftui`, so the expectation is exact — and it
-    # is the lane MODULE's leg list now, with a floor, closing the
-    # bare `if m:` vacuity the stage-1 record flagged. The other
-    # runners have their own naming and their own backend-stub
-    # carve-outs.
+    # GATE: wired() above demands only that a scene has SOME leg, so one
+    # language covers for all of them. mac only, deliberately — this lane
+    # names every leg `<scene>-<lang>-swiftui`, so the expectation is
+    # exact.
     mac_leg_names = {name for name, _s, _l in mac_lane.legs()}
     if len(mac_leg_names) < 100:
         bad.append(f"tools/lib/lanes/mac.py: the mac queue lists "
@@ -2254,16 +2119,11 @@ if out:
     status = 1
 
 
-# AND THE C FLOOR IS SWEPT LIKE EVERY OTHER LANGUAGE, but on its own
-# terms. It cannot be a row in the sweep above: that sweep demands a
-# mac leg for every scene whose guest file exists, and the C floor
-# deliberately does not carry every scene on every lane — it is the
-# explicit-tier demonstration, not a breadth guest.
-#
-# THE BINARY PATH IS THE LEG SIGNATURE, because the three runners
-# spell a C leg three ways and the binary they execute is what all
-# three share — the thing that cannot be present while the leg is
-# dead.
+# AND THE C FLOOR IS SWEPT LIKE EVERY OTHER LANGUAGE, on its own terms:
+# it cannot be a row in the sweep above, which demands a mac leg for every
+# scene whose guest file exists, because the floor is the explicit-tier
+# demonstration and not a breadth guest. THE BINARY PATH IS THE LEG
+# SIGNATURE: the three runners spell a C leg three ways.
 def sweep_c_floor():
     RUNNERS = ("tools/linux/run-suites.sh",
                "tools/deploy-win.py", "tools/ios/run-sim.py",
@@ -2278,9 +2138,8 @@ def sweep_c_floor():
 
     bad = []
     runs = {}   # scene -> the runners that execute its C binary
-    # The mac lane's C legs are the lane MODULE's, imported: the stem
-    # of every `c` leg in the queue. A queue with no C legs at all is
-    # a moved table, not a shrunk floor.
+    # The stem of every `c` leg in the imported queue. A queue with no C
+    # legs at all is a moved table, not a shrunk floor.
     mac_c = sorted({mac_lane.guest_stem(scene)
                     for _n, scene, lang in mac_lane.legs()
                     if lang == "c"})
@@ -2299,8 +2158,8 @@ def sweep_c_floor():
         text = read_rel(runner)
         for name in re.findall(r"c-guests/([A-Za-z0-9_]+)", text):
             # A leg pointing at a binary the Makefile never builds runs
-            # nothing at all: `make` succeeds, the file is absent, and
-            # the leg dies at exec time on whichever lane owns it.
+            # nothing: `make` succeeds, the file is absent, and the leg
+            # dies at exec time.
             if name not in built:
                 bad.append(f"{runner}: runs c-guests/{name}, which "
                            f"guests/c/Makefile never builds (SCENES "
@@ -2308,11 +2167,9 @@ def sweep_c_floor():
                 continue
             runs.setdefault(name, []).append(runner)
 
-    # 1. EVERY C GUEST THE FLOOR SHIPS IS RUN SOMEWHERE. This is the
-    #    clause the gap was about: a leg that falls out of a runner
-    #    leaves a guest that compiles, ships, and is executed by
-    #    nobody — the exact shape that hid working OCaml and Haskell
-    #    clipboard guests for a milestone.
+    # 1. EVERY C GUEST THE FLOOR SHIPS IS RUN SOMEWHERE: a leg that
+    #    falls out of a runner leaves a guest that compiles, ships and is
+    #    executed by nobody.
     for scene in built:
         if scene not in runs:
             bad.append(f"guests/c/{scene}.c is built by "
@@ -2321,10 +2178,9 @@ def sweep_c_floor():
                        f"module or one of: " + ", ".join(RUNNERS) + ")")
 
     # 2. A RUNNER THAT NAMES THE C SCENES IT BUILDS RUNS THEM: a build
-    #    with no leg is a binary compiled for nothing. The mac lane's
-    #    build list is the module's C_SCENES (what build_c passes to
-    #    make); runners that build the whole floor (linux) declare
-    #    nothing here and are covered by clause 1.
+    #    with no leg is a binary compiled for nothing. Runners that build
+    #    the whole floor (linux) declare nothing here and are covered by
+    #    clause 1.
     for scene in mac_lane.C_SCENES:
         if scene not in mac_c:
             bad.append(f'tools/lib/lanes/mac.py: builds the C '
@@ -2334,9 +2190,8 @@ def sweep_c_floor():
         text = read_rel(runner)
         for at in (mm.end() for mm in
                    re.finditer(r"make\s+-C\s+guests/c\b", text)):
-            # The logical line, continuations joined: the SCENES=
-            # assignment and the make it belongs to are routinely
-            # split across two.
+            # Continuations joined: the SCENES= assignment and its make
+            # are routinely split across two lines.
             line = ""
             for raw in text[at:].splitlines():
                 line += raw
@@ -2360,17 +2215,12 @@ if sweep_c_floor():
     status = 1
 
 
-# EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win schedules
-# C:\kaya\run_<leg>.cmd on the VM and those .cmd files are CHECKED IN
-# under tools/guest. A leg whose launcher does not exist does not
-# fail: schtasks starts nothing, no output appears, and the runner
-# waits out its full 300s timeout before calling it a hang.
-# NO LEG RUNS TWICE. deploy-win submits by name, and a name submitted
-# twice runs the scene twice against the same output file — the second
-# verdict silently replaces the first, and a duplicate looks exactly
-# like a leg. Both clauses read the lane module's roster — the same
-# list the runner iterates — so the prose-vs-call trap the old text
-# roster carried is gone with the text.
+# EVERY WINDOWS LEG NEEDS ITS LAUNCHER: the .cmd files deploy-win
+# schedules are CHECKED IN under tools/guest, and a leg whose launcher is
+# missing does not fail — schtasks starts nothing and the runner waits out
+# its full 300s timeout. NO LEG RUNS TWICE: a name submitted twice runs
+# the scene twice against one output file, the second verdict silently
+# replacing the first.
 def duplicate_legs(legs, path):
     counts = {}
     for n in legs:
@@ -2379,7 +2229,7 @@ def duplicate_legs(legs, path):
             for n, c in counts.items() if c > 1]
 
 
-# The guard guards itself, both directions.
+# Both directions.
 if not duplicate_legs(["nav_rust", "nav_rust"], "-"):
     selftest_fail("duplicate leg passed")
 if duplicate_legs(["nav_rust", "nav_python"], "-"):
@@ -2398,8 +2248,7 @@ def launchers():
     failed = 0
     for leg in win_lane.legs():
         # The module roster covers the milestone2 bare legs too
-        # (run_rust.cmd and kin), which the old text roster's
-        # <scene>_<lang> shape never could.
+        # (run_rust.cmd and kin), which a <scene>_<lang> pattern cannot.
         if not (ROOT / "tools" / "guest"
                 / win_lane.launcher(leg)).is_file():
             print(f'check-steps: the win lane wires leg "{leg}" but '
@@ -2414,13 +2263,12 @@ if launchers():
     status = 1
 
 
-# EVERY JS LAUNCHER HAS ONE SHAPE (2026-09-01): CRLF (cmd.exe reads a
-# lone LF as part of the command, docs/traps.md), the pinned node on
-# PATH by the version deploy-win.py records, KAYA_LIB naming the shipped
+# EVERY JS LAUNCHER HAS ONE SHAPE: CRLF (cmd.exe reads a lone LF as part
+# of the command), the pinned node on PATH, KAYA_LIB naming the shipped
 # dll, KAYA_SELFTEST naming the scene (1 for the bare milestone2 leg),
-# the flat guest (split for listdetail) run into the leg's own out file.
-# Generated once and checked in; this is what keeps a hand edit from
-# drifting one of forty near-identical files.
+# and the flat guest run into the leg's own out file. Generated once and
+# checked in, so a hand edit cannot drift one of forty near-identical
+# files.
 def js_launchers(files, node_version):
     bad = []
     if not files:
@@ -2447,12 +2295,11 @@ def js_launchers(files, node_version):
     return bad
 
 
-# NO `if exist X rmdir X & mkdir Y` IN ONE cmd STRING (2026-09-01): cmd
-# runs everything after the `&` INSIDE the if, so a directory that never
-# existed is never created — the JS binding's staging died on it, and
-# two older staging lines carried the same latent shape. Statements are
-# read whole (a python string continues across lines), so a shape split
-# over two source lines is still one command.
+# NO `if exist X rmdir X & mkdir Y` IN ONE cmd STRING: cmd runs
+# everything after the `&` INSIDE the if, so a directory that never
+# existed is never created (measured 2026-09-01, the JS binding's
+# staging). Statements are read whole (a python string continues across
+# lines), so a shape split over two source lines is still one command.
 STRING_PIECE = re.compile(r"'([^']*)'|\"([^\"]*)\"")
 SSH_STATEMENT = re.compile(r"(?:must_ssh|run_ssh)\((?:[^()]|\([^()]*\))*\)")
 
@@ -2531,27 +2378,13 @@ if out:
     status = 1
 
 
-# The staged WinUI ruling (docs/traps.md), covering THREE scene
-# families that share one cause: the leg needs the DESKTOP to itself.
-#
-#   menus_*      shortcut injection is OS-global — the harness puts
-#                the real chord on the system input queue.
-#   filedialog_* a file dialog is modal, must hold the FOREGROUND to
-#                be driven, and the harness finds it by searching the
-#                desktop. Two up at once means BOTH legs fail.
-#   save_*       the same OS-global modal chrome: `live_dialog` walks
-#                the DESKTOP for a visible `#32770` and takes the
-#                first, so a picker up beside it eats the typing.
-#
-# So deploy-win must run each of these ALONE, between drains. The lane
-# module's ORDER is a list of BLOCKS with the pool draining between
-# them, so "alone between drains" IS "in a block of its own" — read
-# structurally, and a parallelizing refactor cannot re-pool a leg
-# without moving it into a wider block this refuses. `undo_` joined
-# the family here with the conversion: the old shell body's undo block
-# carried a comment saying the text pattern must grow an undo arm or a
-# refactor could re-pool it with nothing to say so, and the pattern
-# never did.
+# The staged WinUI ruling (docs/traps.md), covering THREE scene families
+# that share one cause: the leg needs the DESKTOP to itself — menus_*
+# puts a real chord on the system input queue, and filedialog_* and
+# save_* are OS-global modal chrome found by walking the desktop. Each
+# runs ALONE between drains, which in the lane module's ORDER is "a block
+# of its own" — read structurally, so a parallelizing refactor cannot
+# re-pool one without moving it into a wider block this refuses.
 def menu_serial(order, path):
     bad = []
     seen = 0
@@ -2570,7 +2403,7 @@ def menu_serial(order, path):
     return bad
 
 
-# The guard guards itself: a pooled leg of each family must fail.
+# A pooled leg of each family must fail.
 if not menu_serial([["layout_java", "menus_rust"]], "-"):
     selftest_fail("pooled menus leg passed")
 if not menu_serial([["layout_java", "filedialog_python"]], "-"):
@@ -2589,20 +2422,13 @@ if out:
     status = 1
 
 
-# THE LINUX RUNNER POOLS ITS CLIPBOARD, UNDO AND RANGES LEGS since
-# 2026-09-02, so the alone-between-drains clauses this file held for
-# tools/linux/run-suites.sh — one system clipboard per session; a virtual
-# keyboard whose seat was exclusive across the pooled legs (the
-# 2026-09-01 ranges-js miss, docs/measurements/js-binding-2026-09-01.md)
-# — are retired with their reason: every linux leg owns its session
-# now, an Xvfb or a headless sway claimed from a pool, so there is no
-# neighbour for a tap or a copy to reach (the runner's wayland-pool
-# comment). The mac and win lanes keep theirs below, since each shares
-# one desktop across its pool.
+# NO LINUX CLAUSE HERE, deliberately: every linux leg owns its own
+# session, an Xvfb or a headless sway claimed from a pool, so there is no
+# neighbour for a tap or a copy to reach. The mac and win lanes keep
+# theirs, since each shares one desktop across its pool.
 
-# The mac lane's serial families, in the module's own vocabulary since
-# the runner conversion: a block of its own per leg, read from the
-# same ORDER the runner walks (win_clipboard_serial's shape).
+# The mac lane's serial families: a block of its own per leg, read from
+# the same ORDER the runner walks (win_clipboard_serial's shape).
 def mac_family_serial(order_blocks, family, path):
     bad = []
     seen = 0
@@ -2621,7 +2447,7 @@ def mac_family_serial(order_blocks, family, path):
     return bad
 
 
-# The guard guards itself, on the mac spelling and the REASON.
+# The mac spelling, checked on the REASON.
 if not mac_family_serial(
         [["clipboard-rust-swiftui", "clipboard-python-swiftui"]],
         "clipboard", "-"):
@@ -2639,9 +2465,9 @@ if out:
     status = 1
 
 
-# The win lane's clipboard rule, in the module's own vocabulary: a
-# block of its own per leg. The same structural read as menu_serial,
-# with §0d's reason rather than the desktop's.
+# The win lane's clipboard rule: a block of its own per leg — the same
+# structural read as menu_serial, with §0d's reason rather than the
+# desktop's.
 def win_clipboard_serial(order, path):
     bad = []
     seen = 0
@@ -2673,31 +2499,19 @@ if out:
     status = 1
 
 # THE SAVE LEGS ARE MUTUALLY EXCLUSIVE ON THE MAC LANE, and the shared
-# thing is the PANEL rather than the scene: macOS remembers a save
-# panel's last directory as a USER PREFERENCE shared by every process,
-# so guests opening panels in one pool trample it (measured 2026-08-10
-# — a leg asserting its own kaya-save-<pid> directory was shown a
-# SIBLING's, and serialising them raised the mac ceiling to 560s).
-#
-# THE OTHER TWO DESKTOP RUNNERS ARE NOT IN THIS LOOP, and the omission
-# is the rule rather than a gap:
-#
-#   deploy-win  IS covered one clause up: its save legs ride the
-#               menus/filedialog barrier, because there the shared
-#               thing is the desktop's one modal `#32770`.
-#   linux       is DELIBERATELY pooled: GTK's save panel is driven
-#               over the PER-LEG accessibility bus, remembers no
-#               cross-process directory, and each leg's files live
-#               under $TMPDIR/kaya-save-<pid>. A barrier there could
-#               not fail for the reason it exists (CLAUDE.md
-#               invariant 4).
-# The guard guards itself: two save legs sharing a block must fail...
+# thing is the PANEL rather than the scene (the refusal below carries the
+# measurement). THE OTHER TWO DESKTOP RUNNERS ARE NOT IN THIS LOOP by
+# rule: deploy-win's save legs ride the menus/filedialog barrier one
+# clause up, and linux is DELIBERATELY pooled — GTK's panel remembers no
+# cross-process directory, so a barrier there could not fail for the
+# reason it exists (invariant 4).
+# Two save legs sharing a block must fail...
 if not mac_family_serial(
         [["save-rust-swiftui", "save-python-swiftui"]], "save", "-"):
     selftest_fail("pooled save legs passed")
-# ...a save leg sharing a block with another scene's leg, which is the
-# same trample from the other side: the sibling's panel is what wrote
-# the preference this leg is about to read...
+# ...a save leg sharing a block with another scene's leg, the same
+# trample from the other side: the sibling's panel wrote the preference
+# this leg is about to read...
 if not mac_family_serial(
         [["layout-java-swiftui", "save-rust-swiftui"]], "save", "-"):
     selftest_fail("undrained-before save leg passed")
@@ -2716,20 +2530,13 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
-# THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE.
-# §0d requires that a leg read the clipboard THAT LEG WROTE; this
-# lane's pool is separate emulators, each with its own ClipboardService
-# and the host bridge severed both ways (§7 finding 4), so a session
-# here is a DEVICE and run_apk's slot lock IS this runner's exclusion.
-#
-# A drain bracket on top would exclude nothing, and a gate satisfiable
-# without exercising the real thing is a bug in the gate (invariant
-# 4). So this checks the two things that CAN go wrong: a clipboard leg
-# that stops riding the slot-locked pool (the tablet is the live
-# temptation — one device, no lock), and a worker that stops claiming
-# a device. The roster is the lane MODULE's since the runner
-# conversion; the pool mechanics are read out of the python body,
-# exactly the ios clause's shape below.
+# THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE: its
+# pool is separate emulators, each with its own ClipboardService
+# (docs/clipboard-plan.md §0d, §7 finding 4), so run_apk's slot lock IS
+# this runner's exclusion and a drain bracket would exclude nothing. So
+# this checks the two things that CAN go wrong: a clipboard leg that
+# stops riding the slot-locked pool (the tablet is the live temptation —
+# one device, no lock), and a worker that stops claiming a device.
 def clipboard_device(text, path, mod):
     bad = []
     clip_legs = [leg for leg in mod.legs()
@@ -2766,12 +2573,9 @@ ANDROID_RUNNER_TEXT = read_rel("tools/android/run-emulator.py")
 ANDROID_LANE_TEXT = read_rel("tools/lib/lanes/android.py")
 
 
-# The guard guards itself in the ANDROID spelling, on the REAL runner
-# and lane module, and on the REASON rather than the exit code: a
-# negative test whose failure comes from somewhere else proves nothing
-# about the clause it covers. Counts printed; an unchanged copy is a
-# failed test. The executions sit with the iOS negatives below, after
-# load_lane_copy is defined.
+# The ANDROID negatives run on the REAL runner and lane module, and are
+# checked for their REASON rather than an exit code. Their executions sit
+# with the iOS negatives below, after load_lane_copy is defined.
 def android_device_selftest(sample, want, label, mod):
     out = clipboard_device(sample, "-", mod)
     if not out:
@@ -2791,22 +2595,15 @@ def android_applied(hits, label, want=1):
 
 # THE iOS LANE IS THE ANDROID SHAPE, FOR THE ANDROID REASON: two
 # simulators held two different clips at once while the host's stayed
-# untouched (docs/clipboard-plan.md §8 finding 5). A session is a
-# DEVICE, and the slot queue_leg claims IS this lane's exclusion.
-#
-# A clipboard leg must claim a simulator and ride run_swiftui_on: the
-# claim holds the device, run_swiftui_on starts the host-side watcher
-# that answers clipboard_seed and expect_clipboard — the guest cannot
-# spawn a child process here. It must not ride kaya-sim-pad, ONE
-# lockless device. The runner is python since the conversion
-# (tools/ios/run-sim.py) and its rosters are the lane module's
-# (tools/lib/lanes/ios.py), so membership is IMPORTED and the pool
-# mechanics are read out of the python body.
+# untouched (docs/clipboard-plan.md §8 finding 5). A clipboard leg claims
+# a simulator and rides run_swiftui_on, which starts the host-side watcher
+# that answers clipboard_seed and expect_clipboard (the guest cannot spawn
+# a child process here), and must not ride the ONE lockless pad.
 def clipboard_ios(text, path, mod):
     bad = []
 
-    # Which suites carry the clipboard scene — the module's lists, the
-    # same tables the runner derives its legs from.
+    # Which suites carry the clipboard scene, from the same module lists
+    # the runner derives its legs from.
     suites_with = []
     for label, scenes in (
             ("swift", [e.split(":")[0] for e in mod.SWIFT_ENTRIES]),
@@ -2819,18 +2616,14 @@ def clipboard_ios(text, path, mod):
         bad.append(f"{path}: no clipboard leg found (the scene must "
                    f"stay wired)")
 
-    # THE WRITER IS THE RESIDENT DRIVER (docs/xcuidrive-plan.md,
-    # 2026-09-02), which replaced the spawned holder processes, their
-    # release files and their census: the pasteboard daemon serves an
-    # item's DATA by fetching it from the setter, and a setter that has
-    # exited leaves a reader empty (docs/traps.md, 2026-09-01), so the
-    # writer must outlive every read — a process that never exits is the
-    # only shape with no window. Four things follow. The seed goes
-    # THROUGH the driver; the verdict is gated on a census of drivers
-    # still serving; a driver is told to QUIT before anything kills it,
-    # and never by process group (a group kill wedged the pasteboard
-    # daemon mid-serve); and the driver writes kaya's stage marker
-    # beside every seed, since the app's witness asks for it by name.
+    # THE WRITER IS THE RESIDENT DRIVER (docs/xcuidrive-plan.md): the
+    # pasteboard daemon fetches an item's DATA from the setter, and a
+    # setter that has exited leaves a reader empty (docs/traps.md), so the
+    # writer must outlive every read. Hence: the seed goes THROUGH the
+    # driver, the verdict is gated on a census of drivers still serving, a
+    # driver is told to QUIT before anything kills it and never by process
+    # group (a group kill wedged the daemon mid-serve), and it writes
+    # kaya's stage marker beside every seed.
     seed = " ".join(py_function_body(text, "clip_seed", path, bad).split())
     if 'xcuidrive(udid, f"pb_write {kind} {payload}")' not in seed:
         bad.append(f"{path}: clip_seed does not seed through the resident "
@@ -2917,10 +2710,8 @@ def clipboard_ios(text, path, mod):
 
     # AND THE BOARD MUST BELONG TO THE DEVICE BEFORE ANY LEG RUNS:
     # Simulator.app relays the macOS pasteboard into and out of every
-    # booted simulator while Automatically Sync Pasteboard is on, which
-    # is the default (§8 finding 7). The runner MEASURES the isolation
-    # inside prep_join, and queue_leg joins the preparation before it
-    # queues anything.
+    # booted simulator while Automatically Sync Pasteboard is on, which is
+    # the default (§8 finding 7).
     join_body = py_function_body(text, "prep_join", path, bad)
     if join_body and "clip_relay_check(UDIDS[0], PAD_UDID)" \
             not in join_body:
@@ -2941,11 +2732,10 @@ def clipboard_ios(text, path, mod):
                        f"lane that dies at leg 40 teaches nothing a "
                        f"lane that dies in five seconds does not")
 
-    # NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: the
-    # ratified shape is an on-device write by another principal (the
-    # resident driver, tools/ios/xcuidrive; clipctl before 2026-09-02),
-    # so the pasteboard tools may appear here only in comments
-    # explaining exactly this (§8 finding 6).
+    # NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: the ratified
+    # shape is an on-device write by another principal (the resident
+    # driver, tools/ios/xcuidrive), so the pasteboard tools may appear
+    # here only in comments explaining this (§8 finding 6).
     for n, raw in enumerate(text.splitlines(), 1):
         s = raw.strip()
         if s.startswith("#"):
@@ -2962,9 +2752,8 @@ def clipboard_ios(text, path, mod):
 
 
 def py_function_body(text, name, path, bad):
-    """One python function's body, # comments stripped — the shell
-    body reader's successor. An absent function is a finding, never a
-    silent skip."""
+    """One python function's body, # comments stripped. An absent
+    function is a finding, never a silent skip."""
     match = re.search(
         rf"(?ms)^def {re.escape(name)}\(.*?(?=^def |^class |^[A-Za-z_]"
         rf"[A-Za-z0-9_]* = |\Z)", text)
@@ -2976,11 +2765,11 @@ def py_function_body(text, name, path, bad):
                      if not line.lstrip().startswith("#"))
 
 
-# THE PICKER STACK MUST CLEAN, AIM AND EXPORT before any leg runs. A
-# live FileProvider pid does not prove its LocalStorage index can
-# materialize an export (docs/traps.md), so this checks the per-phone
-# admission wall and the tiny app that supplies its result — the
-# python spellings of the same walls the shell body carried.
+# THE PICKER STACK MUST CLEAN, AIM AND EXPORT before any leg runs: a live
+# FileProvider pid does not prove its LocalStorage index can materialize
+# an export (docs/traps.md: "A live iOS FileProvider can have a stale
+# LocalStorage item index"). This checks the per-phone admission wall and
+# the tiny app that supplies its result.
 def picker_ios(text, path, probe_text, probe_path):
     bad = []
 
@@ -3003,12 +2792,10 @@ def picker_ios(text, path, probe_text, probe_path):
                    f"verdict")
 
     # Exactly two warmed export attempts around one measured-failure
-    # reseed, cleanup first, no open-ended retry. Each attempt may run
-    # its probe ONCE MORE, on the slow-flow code (76) alone: under
-    # matrix load the flow that did not finish reads like the stale
-    # export, and a reseed on that reading erased a healthy device
-    # twice (2026-09-01), so the second read is of the device the first
-    # left warm — never a loop, never on any other code.
+    # reseed, cleanup first, no open-ended retry. Each attempt may re-run
+    # its probe ONCE, on the slow-flow code (76) alone: under matrix load
+    # a flow that did not finish reads like the stale export, and a reseed
+    # on that reading erased a healthy device twice (2026-09-01).
     order = []
     for token in ("picker_cleanup(udid)", "picker_warm(udid)",
                   "picker_export_probe(udid)", "picker_reseed(udid)"):
@@ -3140,10 +2927,8 @@ def picker_ios(text, path, probe_text, probe_path):
     return bad
 
 
-# THE GUARD GUARDS ITSELF, on the REAL runner and the REAL lane module
-# (docs/traps.md: the wayland seat guard passed VACUOUSLY TWICE). Each
-# perturbation prints its substitution count and the copy is refused
-# if it did not apply, and each refusal is checked for its REASON.
+# The negatives run on the REAL runner and lane module, each perturbation
+# proven applied and each refusal checked for its REASON.
 RUN_SIM = read_rel("tools/ios/run-sim.py")
 IOS_LANE_TEXT = read_rel("tools/lib/lanes/ios.py")
 EXPORT_PROBE = read_rel("tools/ios/exportprobe/main.swift")
@@ -3221,17 +3006,15 @@ ios_selftest(doc, "no longer runs the leg through run_swiftui_on",
              "a leg that bypasses the host-side bridge")
 
 # ...an unwired scene must fail, which takes EVERY suite's membership
-# away. The count is the number of suite lists carrying clipboard — 3
-# today — STATED rather than derived, so a fourth suite lands as a
-# loud "applied 4 times, want 3".
+# away. The count of suite lists carrying clipboard is STATED rather than
+# derived, so a fourth suite lands as a loud "applied 4 times, want 3".
 doc, hits = sub_count(r' "clipboard",', "", IOS_LANE_TEXT)
 ios_applied(hits, "the guest-list removal", 3)
 ios_selftest(RUN_SIM, "no clipboard leg found",
              "a lane with no clipboard leg", mod=load_lane_copy(doc))
 
-# ...and a live host-pasteboard line must fail: the seed once rode
-# host-side copy tools and raced both its own delivery window and
-# (under validate-all) the mac lane's legs.
+# ...and a live host-pasteboard line must fail: a host-side seed races
+# both its own delivery window and, under validate-all, the mac lane.
 doc, hits = sub_count(r'(?m)^KAYA_BUNDLE_PREFIX = "dev\.kaya\."$',
                       'KAYA_BUNDLE_PREFIX = "dev.kaya."\n'
                       'got = out_of(["pbcopy"])', RUN_SIM)
@@ -3321,9 +3104,9 @@ picker_selftest(doc, "exactly two warmed export attempts",
                 "a picker preparation that trusts its reseed without "
                 "probing")
 
-# The slow-flow re-run is on code 76 alone: a re-run on any failure
-# would turn the measured stale export into two probes of a stale
-# device and then a reseed of it anyway, quietly doubling the wait.
+# The slow-flow re-run is on code 76 alone: a re-run on any failure turns
+# a stale export into two probes of a stale device and a reseed anyway,
+# quietly doubling the wait.
 doc, hits = sub_count(r"if rc == 76:", "if rc != 0:", RUN_SIM)
 ios_applied(hits, "the unguarded slow re-run", want=2)
 picker_selftest(doc, "exactly two warmed export attempts",
@@ -3425,9 +3208,9 @@ ios_applied(hits, "the late-prepare insertion half")
 picker_selftest(doc, "not prepared once per phone pool UDID",
                 "a runner that admits LocalStorage too late")
 
-# The driver's discipline, four ways: the census no longer gating the
-# verdict, a seed that bypasses the driver, a stop that kills before it
-# asks, and a group kill anywhere.
+# The driver's discipline, four ways: a census that stops gating the
+# verdict, a seed bypassing the driver, a stop that kills before it asks,
+# and a group kill anywhere.
 doc, hits = sub_count(
     r"(?m)^if not xcuidrive_census\(\):\n    status = 1\n", "", RUN_SIM)
 ios_applied(hits, "the driver-census removal")
@@ -3449,9 +3232,8 @@ ios_applied(hits, "the group-kill insertion")
 ios_selftest(doc, "process group is killed",
              "a driver killed the measured-wrong way")
 
-# The accept direction is the real check itself, immediately below: a
-# rule that refused everything would fail here rather than pass
-# quietly.
+# The accept direction is the real check immediately below: a rule that
+# refused everything would fail there rather than pass quietly.
 out = clipboard_ios(RUN_SIM, "tools/ios/run-sim.py", ios_lane)
 if out:
     print("check-steps: an iOS clipboard leg must own its simulator "
@@ -3515,20 +3297,11 @@ if out:
     status = 1
 
 
-# EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK
-# hosts every scene, so the leg selects one through `--es
-# KAYA_SELFTEST <scene>` and the guest matches it. A name the match
-# does not carry used to fall through to the default scene: the leg
-# launched, a scene ran, and every step failed against labels from a
-# scene nobody selected. The guest now panics on an unknown name; this
-# makes it a two-second answer instead of an emulator boot.
-#
-# THREE APKs, EACH WITH ITS OWN SELECTOR, so the pair is an argument
-# rather than a constant.
-#
-# THE FLOOR IS THE ANTI-VACUITY CLAUSE: the selection comes from the
-# lane module's suite roster now, and a moved table answers few or no
-# scenes — a census that reads nothing agrees with everything.
+# EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
+# every scene, selected through `--es KAYA_SELFTEST <scene>`; the guest
+# panics on an unknown name, and this makes it a two-second answer instead
+# of an emulator boot. THREE APKs, each with its own selector, so the pair
+# is an argument. THE FLOOR IS THE ANTI-VACUITY CLAUSE.
 def android_selected(mod, suite):
     """The KAYA_SELFTEST value each of a suite's legs passes — the
     bare suite legs pass "1" (the unprefixed milestone2 arm)."""
@@ -3548,9 +3321,8 @@ def android_scenes(selected, source, guest_text, guest, arm,
             f"arm for" for name in missing]
 
 
-# The guard guards itself in every direction: an unarmed selector must
-# fail, an emptied selection must fail, and each ARM SHAPE gets its
-# own negative — a `match` arm and a map key are different text.
+# Every direction, and each ARM SHAPE gets its own negative: a `match`
+# arm and a map key are different text.
 if not android_scenes(
         {"entry", "ghostscene", "zzf1", "zzf2", "zzf3"}, "-",
         'Ok("entry") => entry::app(ctx),\n'
@@ -3582,9 +3354,9 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
-# The JVM APK's selector ends in `else -> Milestone2::app`, so an
-# unarmed name does not die — it SILENTLY RUNS MILESTONE2. "1" is
-# exempt because it IS that default arm, reached deliberately.
+# The JVM APK's selector ends in `else -> Milestone2::app`, so an unarmed
+# name does not die — it SILENTLY RUNS MILESTONE2. "1" is exempt because
+# it IS that default arm, reached deliberately.
 out = android_scenes(
     android_selected(android_lane, "jvm"),
     "tools/lib/lanes/android.py",
@@ -3599,10 +3371,9 @@ if out:
     print("\n".join(out), file=sys.stderr)
     status = 1
 
-# The Go APK. Its arms are a map literal, one key per line, which is
-# why the table in that file is a table and not a switch. THE SAME
-# TABLE SERVES THE DESKTOPS since the guests collapsed into one
-# binary, and the clause below reads it from the other three runners.
+# The Go APK's arms are a map literal, one key per line. THE SAME TABLE
+# SERVES THE DESKTOPS, since the Go guests are one binary, and the clause
+# below reads it from the other three runners.
 out = android_scenes(
     android_selected(android_lane, "go"),
     "tools/lib/lanes/android.py",
@@ -3616,21 +3387,13 @@ if out:
     status = 1
 
 
-# AND EVERY DESKTOP GO LEG, against the same table: the Go guests are
-# one binary now, so the NAME is the only thing that decides what
-# runs, and a name the table lacks panics after a build, a launch and
-# a window, on three lanes.
-#
-# THE THREE RUNNERS SPELL THE SELECTION DIFFERENTLY, so each gets its
-# own pattern: mac and linux put `KAYA_SELFTEST=<scene>` on the leg
-# line (often continued, so continuations are joined first) beside
-# go-guests/kaya-go; windows sets it in tools/guest/run_<leg>_go.cmd.
-#
-# AND THE DEFAULT IS A NAME LIKE ANY OTHER: the bare `run go-swiftui …`
-# leg passes nothing, so main_desktop.go falls back to `defaultScene`,
-# which has to be a key in this table.
-#
-# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, as above.
+# AND EVERY DESKTOP GO LEG, against the same table: the NAME is the only
+# thing that decides what runs, and a name the table lacks panics after a
+# build, a launch and a window, on three lanes. THE THREE RUNNERS SPELL
+# THE SELECTION DIFFERENTLY, so each gets its own pattern (mac and linux
+# on the leg line, often continued; windows in the .cmd). AND THE DEFAULT
+# IS A NAME LIKE ANY OTHER: a leg passing nothing falls back to
+# `defaultScene`, which has to be a key in this table.
 def go_desktop_scenes(table_text, table, runners):
     """`runners` is a list of (label, kind, payload): kind "runner"
     carries the runner's text, kind "cmd-dir" a list of (name, text)
@@ -3688,10 +3451,9 @@ def go_desktop_scenes(table_text, table, runners):
     return bad
 
 
-# Watched failing in every direction it can go wrong: an unarmed name,
-# a pattern that matches nothing, a default that is not a scene, and
-# the windows spelling — which is a different pattern over different
-# files and proves nothing about the shell one.
+# Every direction: an unarmed name, a pattern that matches nothing, a
+# default that is not a scene, and the windows spelling — a different
+# pattern over different files, which the others prove nothing about.
 SAMPLE_TABLE = ('var scenes = map[string]func() *kaya.App{\n'
                 '\t"entry": entry.App,\n}\n'
                 'const defaultScene = "entry"\n')
@@ -3757,19 +3519,16 @@ if out:
     status = 1
 
 
-# THE iOS PICKER'S SILENT WIRINGS. Each of these fails in a way that
-# looks like a backend bug rather than a harness one. (The file_mode
-# clause lives in tools/check-file-modes.py, which reads the numbers
-# out of crates/kaya/src/spec.rs rather than hard-coding them.)
+# THE iOS PICKER'S SILENT WIRINGS: each fails in a way that looks like a
+# backend bug rather than a harness one. (The file_mode clause lives in
+# tools/check-file-modes.py, which reads the numbers out of spec.rs.)
 def ios_picker():
     bad = []
     # 1. THE DRIVER NAMES THE PICKER BY THE TWO IDENTIFIERS ITS CONTRACT
-    #    RESTS ON (tools/ios/xcuidrive, which replaced simdrive's private
-    #    accessibility bridge on 2026-09-02): the picker's navigation bar
-    #    and the save sheet's filename field, both measured on iOS 26.5
+    #    RESTS ON: the picker's navigation bar and the save sheet's
+    #    filename field, both measured on iOS 26.5
     #    (docs/xcuidrive-plan.md §1). Lose either and every picker verb
-    #    answers "no picker" for a picker that is on screen — a failure
-    #    that reads as the guest never presenting it.
+    #    answers "no picker" for a picker that is on screen.
     driver = read_rel("tools/ios/xcuidrive/KayaDrive.swift")
     for ident in ("FullDocumentManagerViewControllerNavigationBar",
                   "DOCPicker.filenameTextField", "File View"):
@@ -3777,10 +3536,9 @@ def ios_picker():
             bad.append(f"tools/ios/xcuidrive/KayaDrive.swift no longer "
                        f"names {ident!r}, the identifier its picker "
                        f"verbs find the sheet by")
-    # 2. THE BUNDLE MUST PUBLISH ITS DOCUMENTS. Without both keys the
-    #    document picker cannot see the app own files at all, and a
-    #    picker aimed at them opens somewhere else with no error
-    #    anywhere.
+    # 2. THE BUNDLE MUST PUBLISH ITS DOCUMENTS: without both keys the
+    #    picker cannot see the app's own files at all, and one aimed at
+    #    them opens somewhere else with no error anywhere.
     plist = read_rel("tools/ios/Info.plist.in")
     for key in ("UIFileSharingEnabled",
                 "LSSupportsOpeningDocumentsInPlace"):
@@ -3800,13 +3558,11 @@ if out:
     status = 1
 
 
-# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. gen-bindings.py
+# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED (docs/traps.md: "A
+# generator edited and never rerun compiles perfectly"). gen-bindings.py
 # stamps a hash of tools/kaya-bindgen/src/*.rs beside the bindings it
-# wrote; if the generator moved since, the checked-in bindings are
-# stale and everything downstream is a lie that COMPILES
-# (docs/traps.md). `gen-bindings.py --check` is the authoritative
-# answer and regenerates to get it; this is the cheap one, so it can
-# be asked constantly.
+# wrote. `gen-bindings.py --check` is the authoritative answer and
+# regenerates to get it; this is the cheap one, asked constantly.
 def generator_stamp(root):
     root = pathlib.Path(root)
     h = hashlib.sha256()
@@ -3824,7 +3580,7 @@ def generator_stamp(root):
     return None
 
 
-# The guard guards itself: a moved generator must be caught.
+# A moved generator must be caught.
 with tempfile.TemporaryDirectory() as td:
     d = pathlib.Path(td)
     (d / "tools/kaya-bindgen/src").mkdir(parents=True)

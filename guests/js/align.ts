@@ -1,10 +1,5 @@
-// The align conformance scene, JS port — see guests/rust/align.rs and
-// tools/scenes/align.steps for the full rationale. The stretched root
-// spans two container children across the window; column#1 centers
-// children of three different natural widths; the row aligns baselines
-// across a label, a button, and a tall no-baseline image whose bottom
-// sits ON the baseline (the CSS replaced-element rule); and row#1 hosts
-// the grown, stretched nested column the ruling's own construction pins.
+// The align conformance scene (tools/scenes/align.steps). The tall image
+// has no baseline: its bottom sits ON the text baseline.
 
 import * as kaya from "kaya-gui";
 
@@ -26,7 +21,6 @@ app.window(() => {
 
   const root = kaya.column({ align: "stretch" }, () => {
     const centered = kaya.column({ align: "center" }, () => {
-      // the center trio
       kaya.label({ bind: probe }); // label#0
       kaya.button("mid");
       kaya.row({ align: "baseline" }, () => {

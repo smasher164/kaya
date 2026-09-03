@@ -1,16 +1,9 @@
 // ClipProbe — what does iOS charge for a clipboard read, and does the
-// harness's seeding count as "another app"?
-//
-// THE QUESTION THAT DECIDES THE iOS ARM: since iOS 16 a programmatic
-// read of the pasteboard prompts when the content came FROM ANOTHER APP,
-// and the lane's only way to seed from outside is `xcrun simctl pbcopy`.
-// If that counts as another app, the paste leg has to DRIVE A PERMISSION
-// PROMPT — tools/ios/simdrive again, as with the document picker. The
-// questions and their answers are docs/clipboard-plan.md; the Q-labels
-// below mark which reading is which.
-//
-// Answers land on stdout under "PROBE". Not a lane; nothing builds it
-// but build.sh beside it.
+// harness's seeding count as "another app"? Since iOS 16 a programmatic
+// read prompts when the content came FROM ANOTHER APP, and the lane's
+// only outside seed is `xcrun simctl pbcopy`. Questions and answers:
+// docs/clipboard-plan.md; the Q-labels are in the log lines below.
+// THROWAWAY; nothing builds it but build.sh beside it.
 import UIKit
 import UniformTypeIdentifiers
 

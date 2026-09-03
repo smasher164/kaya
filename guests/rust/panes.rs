@@ -1,8 +1,5 @@
-//! The panes conformance scene: a THREE-pane ceiling as assertions
-//! (docs/multicolumn-plan.md D1/D5). Nothing here is panes-specific
-//! except `panes(3)`, asked for ONCE — the stack is the ordinary
-//! navigation stack, and how many of the three fit is the platform's
-//! re-decision at every width.
+//! The panes scene (tools/scenes/panes.steps): nothing here is
+//! panes-specific except `panes(3)`, asked for ONCE.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;

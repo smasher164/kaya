@@ -8,17 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The scheme-derivation wall (docs/deferred.md's M3 entry, ruled
- * 2026-08-31): a branded scheme follows its seed EVERYWHERE Material's
- * own derivation would — the four non-primary palettes included — and
- * NEVER on the error family, which is fixed by design (red means
- * destructive under any brand).
- *
- * Runs on the host JVM through check-compose, so the emulator is never
- * the first thing to prove the brand scheme. The seed-following half
- * was WATCHED RED against the pre-materialkolor code (secondary,
- * tertiary and the neutrals stayed Material baseline) before the
- * palettes landed.
+ * The scheme-derivation wall (docs/deferred.md's M3 entry): a branded
+ * scheme follows its seed everywhere Material's derivation would, and
+ * NEVER on the error family. Runs on the host JVM through
+ * check-compose, so the emulator never proves the brand scheme first.
  */
 class KayaColorSchemesTest {
 
@@ -59,7 +52,7 @@ class KayaColorSchemesTest {
     private val seedHue = hueOf(Color(0xFF000000.toInt() or seed))!!
 
     /** The blue seed's hint: on a tinted near-grey the blue channel
-     * leads the red one. Robust where RGB hue on a near-grey is not. */
+     * leads the red one, which RGB hue on a near-grey does not. */
     private fun assertCoolHint(name: String, color: Color) {
         val argb = color.argb()
         val r = (argb shr 16) and 0xFF
@@ -154,8 +147,8 @@ class KayaColorSchemesTest {
 
     @Test
     fun primaryFamilyStillFollowsTheSeed() {
-        // The pre-existing half of the derivation, held so the four new
-        // palettes cannot land by replacing it.
+        // The pre-existing half of the derivation, held so the four
+        // palettes beside it cannot land by replacing it.
         for (dark in listOf(false, true)) {
             val s = branded(dark)
             val hue = hueOf(s.primary)!!
@@ -173,9 +166,7 @@ class KayaColorSchemesTest {
     @Test
     fun contrastStillLiftsRoleTones() {
         // The reason the role machinery is kaya's own: a static scheme
-        // ignores the contrast slider (MDC #3524). At full contrast the
-        // on-role must clear its container by at least the normal-level
-        // ratio it was allowed to relax to at contrast 0.
+        // ignores the contrast slider (MDC #3524).
         val normal = branded(dark = false, contrast = 0f)
         val high = branded(dark = false, contrast = 1f)
         fun luminance(c: Color): Double {
@@ -196,10 +187,8 @@ class KayaColorSchemesTest {
         // WHAT THE SLIDER PROMISES is the container clearing its PAGE
         // (the container curve's high value is 4.5 against surface); a
         // foreground against a mid-tone container CANNOT reach its
-        // curve's 11 and Material clamps to the best reachable side —
-        // kayaRoleTone's own doc measured onPrimaryContainer at ~5.4:1
-        // in exactly this state, so demanding 7:1 of that pair was this
-        // test's first draft being wrong, watched red.
+        // curve's 11 and Material clamps to the best reachable side, so
+        // 7:1 is not available of that pair (kayaRoleTone's own doc).
         val normalPage = ratio(normal.secondaryContainer, normal.surface)
         val highPage = ratio(high.secondaryContainer, high.surface)
         assertTrue(

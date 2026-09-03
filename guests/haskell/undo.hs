@@ -2,15 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The undo scene from Haskell: two tiers, one Edit menu, and one ledger
-   that orders them.
-
-   The transaction is ambient in this binding, so the scope that opens
-   it is where the step is named — 'undoableTx' takes the name
-   (docs/undo-plan.md D2).
-
-   Canonical semantics in guests/rust/undo.rs; the byte-frozen contract
-   in tools/scenes/undo.steps. -}
+-- The undo scene, Haskell port — guests/rust/undo.rs, tools/scenes/undo.steps.
 
 import Data.Int (Int64)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -26,13 +18,11 @@ data Todo = Todo {title :: String} deriving (Generic)
 
 instance KayaRecord Todo
 
--- | An unnamed step is a typing episode; kaya invents no label for one,
--- so the app spells it (docs/undo-plan.md D8).
+-- | kaya invents no label for a typing episode (docs/undo-plan.md D8).
 what :: String -> String
 what label = if null label then "typing" else label
 
--- | The app's collection mirror, rendered: every key it holds, in the
--- order it holds them.
+-- | Every key the collection holds, in order.
 keyList :: RecordCollection Todo -> Build String
 keyList todos = do
   entries <- recordItems todos
@@ -60,9 +50,7 @@ noteAt key text
   | null text = Map.delete key
   | otherwise = Map.insert key text
 
--- | One texts run, folded into the app's two mirrors of widget-owned
--- text. The empty path is the draft; a path names a row. The run is
--- walked whole: one step can restore both kinds at once.
+-- | The empty path is the draft, a path names a row; the run is walked whole.
 foldTexts :: IORef String -> IORef Notes -> [UndoText] -> IO ()
 foldTexts draftRef notesRef = mapM_ one
   where
@@ -78,22 +66,21 @@ main = kayaMain $ \app -> do
   (notes, noteNode) <- buildTx app $ do
     status <- signal (VStr "no todos")
     history <- signal (VStr "history empty")
-    -- The shared script reads labels BY INDEX, so the declaration order
-    -- of these two is contract; see the markers in the column below.
+    -- The shared script reads labels BY INDEX, so the declaration order of
+    -- these two is contract.
     keys <- signal (VStr "no keys")
     notes <- signal (VStr "no notes")
     todos <- collectionOf (Proxy :: Proxy Todo)
 
-    -- Restoring an episode is a programmatic write and never echoes, so
-    -- the delta is the ONLY notification of the text it put back (D5).
+    -- Restoring never echoes, so the delta is the ONLY notification (D5).
     let walked verb label delta = do
           foldTexts draftRef notesRef (undoTexts delta)
           noted <- noteList <$> readIORef notesRef
           submitTx app $ do
             total <- count (recordHandle todos)
             writeSignal history (VStr (verb ++ " " ++ what label ++ ", " ++ show total ++ " total"))
-            -- One transaction with the history label above: the script
-            -- reads them in that order.
+            -- ONE transaction with the history label above: the script reads
+            -- them in that order.
             list <- keyList todos
             writeSignal keys (VStr list)
             writeSignal notes (VStr noted)
@@ -114,8 +101,7 @@ main = kayaMain $ \app -> do
       ]
 
     -- Built before the buttons that close over it: Build is a PURE state
-    -- monad, so nothing can reach back for it later. `pure` slots it into
-    -- the column at the position every other language puts it.
+    -- monad, so nothing can reach back for it later.
     entryField <- entryOn (writeIORef draftRef) [A11yId "draft"]
 
     let onAdd = do
@@ -131,15 +117,12 @@ main = kayaMain $ \app -> do
                 writeSignal status (VStr ("added " ++ draft ++ ", " ++ show total ++ " total"))
                 list <- keyList todos
                 writeSignal keys (VStr list)
-                -- A pure effect rides along and is not restored: undo
-                -- restores state, not where you were looking (A2).
+                -- A pure effect rides along and is not restored (A2).
                 focusWidget entryField
-              -- Its own transaction: finishing the form is not part of
-              -- the step, and `clearWidget` inside a group is refused at
-              -- apply (docs/undo-plan.md D4).
+              -- 'clearWidget' inside a group is refused at apply (D4).
               submitTx app (clearWidget entryField)
-        -- Two transactions because the name is the scope's here: a label
-        -- that quotes the model is read BEFORE the group it names opens.
+        -- Two transactions: a label that quotes the model is read BEFORE the
+        -- group it names opens.
         onRemove = do
           first <- buildTx app $ do
             entries <- recordItems todos
@@ -160,9 +143,8 @@ main = kayaMain $ \app -> do
         onStar = undoableTx app "star" (writeSignal status (VStr "starred"))
         onFocus = submitTx app (focusWidget entryField)
 
-    -- 'forEach' rather than 'each': Build is a pure state monad with no
-    -- App inside the template, so the node escapes it and the change
-    -- handler is registered centrally against that node (bottom of file).
+    -- 'forEach' rather than 'each': the node escapes the template, so the
+    -- change handler is registered centrally against it (bottom of file).
     (todoRows, noteNode) <- forEach (recordHandle todos) $ do
       note <- entry
       _ <- rowOf [label (field @"title" @Todo), pure note]
@@ -186,8 +168,7 @@ main = kayaMain $ \app -> do
     mount root
     return (notes, noteNode)
 
-  -- Not an undoable group: an ordinary edit is the platform's step, not
-  -- the ledger's.
+  -- Not an undoable group: an ordinary edit is the platform's step.
   onChange app noteNode $ \path text -> do
     modifyIORef' notesRef (noteAt (rowKey path) text)
     noted <- noteList <$> readIORef notesRef

@@ -1,8 +1,6 @@
-# The undo probe's AX dump: name every element UI Automation can see in
-# the probe process's top-level windows — the context menu popups
-# included, since a WinUI flyout is its own top-level
-# Microsoft.UI.Content.PopupWindowSiteBridge window.
-#
+# The undo probe's AX dump: every element UI Automation can see in the
+# probe's top-level windows — context menu popups included, since a WinUI
+# flyout is its own top-level PopupWindowSiteBridge window.
 # OUT OF PROCESS on purpose (crates/kaya/Cargo.toml records why kaya's
 # own backend may not host a UIA client), and Windows PowerShell 5.1,
 # where the UIAutomationClient assemblies ship in the box.

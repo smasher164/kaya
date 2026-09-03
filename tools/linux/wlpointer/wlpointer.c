@@ -1,26 +1,17 @@
 // A VIRTUAL POINTER FOR THE HEADLESS WAYLAND SESSIONS, wtype's twin.
-//
-// The lane's sway runs with no input devices, so its seat advertises no
-// pointer and no client ever binds one; sway's own `seat - cursor
-// press` then returns success and delivers NOTHING (docs/traps.md,
-// measured 2026-09-02). A drag is a pointer grab on a real button
-// press, so the pointer has to be a device on the seat, and this is the
-// one client in the image that adds one: zwlr_virtual_pointer_v1, the
-// protocol wtype uses for the keyboard, one interface over. The device
-// exists for the life of the process — the seat is deviceless again the
+// The lane's sway has no input devices, so its seat advertises no
+// pointer and sway's own `seat - cursor press` returns success while
+// delivering NOTHING (docs/traps.md, measured 2026-09-02). A drag is a
+// grab on a real button press, so this adds a zwlr_virtual_pointer_v1
+// device for the life of the process — the seat is deviceless again the
 // moment it exits, which is the rule the pool runs under.
-//
-// C rather than python because it is a Wayland protocol client: the
-// glue is wayland-scanner's, generated at build from the vendored XML
-// beside this file, and the image has no python wayland module.
 //
 //   wlpointer set X Y | move DX DY | press BTN | release BTN
 //             | click BTN | sleep MS ...           (BTN: left right middle)
 //
 // Coordinates are output pixels; every command is followed by a frame
-// and a roundtrip, so the compositor has seen it before the next one.
-// Built by run-suites.sh into /tmp/wlpointer/wlpointer, and proven on
-// every lane run by tools/linux/dragprobe.py before the first leg.
+// and a roundtrip. Built by run-suites.sh, proven every lane run by
+// tools/linux/dragprobe.py before the first leg.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

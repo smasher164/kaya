@@ -3,15 +3,10 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The menus conformance scene, JVM port: the command vocabulary (a
- * File/View/Sort menu bar, context menus on a live label and on stamped
- * rows), the uncontrolled-menu echo doctrine, and a late
- * rename/append/promotion rework. Canonical semantics in
- * guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
+ * The menus scene from the JVM — guests/rust/menus.rs, tools/scenes/menus.steps.
  */
 public final class Menus {
-    // Java lambdas cannot assign captured locals; these live here for the
-    // seed and the Remove fold.
+    // Java lambdas cannot assign captured locals.
     private static KayaApp.Collection groups;
     private static KayaApp.Collection items;
 
@@ -29,8 +24,7 @@ public final class Menus {
 
             KayaApp.WindowRef win = tx.window(0).title("menus");
             KayaApp.MenuItem file = win.menu("File").enabled(canExport);
-            // Symbols are CONCEPTS, drawn per platform: the vocabulary
-            // has no `save`, so `DONE` is the checkmark idiom
+            // No `save` in the symbol vocabulary; DONE is the checkmark idiom
             // (docs/styling-plan.md D6).
             file.item("Save")
                     .symbol(KayaApp.Symbol.DONE)
@@ -66,16 +60,11 @@ public final class Menus {
                 tx.button("enable export", t -> // button#0
                         t.write(canExport, true));
                 tx.button("reset menu state", t -> { // button#1
-                                        // The folds never echo the user's pick, so these
-                                        // writes are real records (never coalesced) that
-                                        // reset the backend's user-state mirror.
                     t.write(details, false);
                     t.write(sort, 0.0);
                     t.write(status, "ready");
                 });
                 tx.button("extend menus", t -> { // button#2
-                    // Append-only: rename the retained File, move the
-                    // promotion hint, grow the bar by Tools.
                     t.menu(share).primary(false);
                     t.menu(file).label("Document")
                             .item("Publish").primary(true)
@@ -104,7 +93,7 @@ public final class Menus {
             return null;
         });
 
-        // Seed after mount: the stamp path attaches the shared catalog and keys.
+        // Seeded after the mount, so the copy stamps from a closed template.
         app.build(tx -> {
             tx.insert(groups, "g2", "Home");
             tx.insert(items.at("g2"), "a", "water plants");

@@ -1,18 +1,11 @@
-// ScopeProbe — a hand-run probe for iOS behaviour NO LANE CAN WITNESS.
-//
-// The simulator does not enforce the app sandbox (docs/traps.md), so
-// every scope-related assertion passes there for free. Anything whose
-// answer depends on the sandbox DENYING something has to be measured on
-// hardware, by hand, which is what this app is for.
-//
-// It is NOT part of any lane and never will be: it needs a paired
-// device, a developer account, and a human to tap a picker. Run it with
-// tools/ios/scopeprobe/build.sh.
+// ScopeProbe — a hand-run probe for iOS behaviour NO LANE CAN WITNESS:
+// the simulator enforces no app sandbox (docs/traps.md), so anything
+// whose answer depends on a DENIAL has to be measured on hardware. NOT
+// part of any lane and never will be; run it with build.sh beside it.
 //
 // THE SHAPE TO COPY when adding a measurement: step 1 is a VACUITY
-// GUARD. It opens the picked file with no scope at all and requires the
-// denial. A device that also failed to enforce would say so there,
-// instead of handing back a row of green ticks that mean nothing.
+// GUARD — it opens the picked file with no scope at all and requires the
+// denial, so a device that also failed to enforce says so there.
 import UIKit
 import UniformTypeIdentifiers
 

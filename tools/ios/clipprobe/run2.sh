@@ -12,18 +12,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 
 # ClipProbe II, the campaign the iOS clipboard arm is written from
-# (main2.swift has the cell list).
+# (main2.swift has the cell list; docs/clipboard-plan.md §8 the answers).
 #
 #   run2.sh [a|b|c|s|all] [udid]
 #
-#  A  the app writes the union clip, is TERMINATED, pbsync device->host,
-#     the host reads every kind back.
-#  B  the host seeds each kind, the app's recv mode lists types WITHOUT
-#     touching data.
-#  C  the paste prompt, photographed and driven through simdrive.
-#  S  a simctl-spawned reader against the app's union clip.
-#
-# Throwaway; nothing in the validation ladder calls this. Results on
+# THROWAWAY; nothing in the validation ladder calls this. Results on
 # stdout plus screenshots in target/ios-clipprobe2/.
 set -uo pipefail
 

@@ -1,20 +1,9 @@
-// ClipProbe II — the cells the iOS ARM turns on, each measured before
-// a line of arm code, the way every platform's second campaign was.
-// The first campaign (main.swift) measured the PROMPT; this one
-// measures the WRITE PATH, the sync bridge, and the prompt's mechanics
-// under the reads the arm will actually issue.
-//
-// Three modes, and the cells each measures are docs/clipboard-plan.md §8:
-//   W (mode=write) the union write on the arm's own path, then the host
-//     terminates the app and pbsyncs device->host, so persistence past
-//     process exit is measured in the same stroke.
-//   R (mode=recv)  the prompt-free queries against host-seeded content,
-//     NO data touch.
-//   P (mode=read)  the prompted read, on the arm's thread plan — the
-//     read on a BACKGROUND queue while the main thread heartbeats.
-//
-// Answers land on stdout under "PROBE". Not a lane; nothing builds it
-// but run2.sh beside it.
+// ClipProbe II — the WRITE PATH, the sync bridge and the prompt's
+// mechanics under the reads the arm actually issues (main.swift measured
+// the PROMPT). Three modes, and the cells each measures, are
+// docs/clipboard-plan.md §8: W write, R prompt-free recv, P prompted
+// read on a background queue.
+// THROWAWAY; nothing builds it but run2.sh beside it.
 import UIKit
 
 func say(_ s: String) {

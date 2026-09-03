@@ -1,14 +1,5 @@
-//! The adaptive conformance scene, depth half
-//! (docs/adaptive-layout-plan.md §2): the arrangement axis is a
-//! PROPERTY on one node with two constructor spellings, flipped here by
-//! a HANDLER — D2's user-driven toggle, the breakpoint mechanism's
-//! effect without its trigger. The subject stays addressed as `row#0`
-//! through both states: identity is the creation kind, presentation is
-//! the prop. The byte-frozen contract is tools/scenes/adaptive.steps.
-//!
-//! The two labels' naturals DIFFER on purpose: the flip then always
-//! moves the container's box, so the geometry reader re-records on
-//! every crossing (its axis-change hook covers the equal-box corner).
+//! The adaptive conformance scene (tools/scenes/adaptive.steps). The two
+//! labels' naturals DIFFER, so every flip moves the container's box.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
@@ -18,9 +9,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let dash = ctx.apply(|tx| {
-        // Explicit size: the desktop start must sit ABOVE the
-        // breakpoint's threshold so the scene's resize half crosses it
-        // both ways deterministically.
+        // Must start ABOVE the breakpoint, so the resize crosses it.
         tx.window(kaya::DEFAULT_WINDOW).title("adaptive").size(900.0, 600.0);
         let alpha = tx.signal("alpha");
         let longer = tx.signal("a longer label");
@@ -37,19 +26,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_id("dash")
                     .id();
                 dash_id = Some(dash);
-                // column#1: the control group — its axis answers the
-                // creation kind's own and never moves.
+                // column#1: the control group, whose axis never moves.
                 tx.column(|tx| {
                     tx.label(steady); // label#2
                 })
                 .a11y_id("steady");
                 let flip = tx.button("flip").id(); // button#0
                 msgs.on_click(flip, Msg::Flip);
-                // row#1: the BREAKPOINT subject (D3) — declared data,
-                // core-evaluated: while the window's size class is
-                // compact its axis goes vertical, and leaving the class
-                // it reverts to the creation kind's own. The handler
-                // never touches it.
+                // row#1: the BREAKPOINT subject; the handler never touches it.
                 tx.row(|tx| {
                     let one = tx.signal("one");
                     let two = tx.signal("a wider two");

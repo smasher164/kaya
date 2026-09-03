@@ -10,13 +10,13 @@ and the repo was never modified.
 
 ## 0. What the tree pins, and what the lane actually runs
 
-- [REPO] `crates/kaya/Cargo.toml:151` — `gtk4 = { version = "0.11.4", features = ["v4_10"] }`.
+- [REPO] `crates/kaya/Cargo.toml:87` — `gtk4 = { version = "0.11.4", features = ["v4_10"] }`.
   The `v4_10` feature is the API level the Rust bindings compile: anything added
   after GTK 4.10 is invisible through the crate as configured even when the
   runtime library has it. (Relevant below: `gdk_wayland_toplevel_set_application_id`
   is old enough to be in; the Wayland icon path is a 4.20 runtime thing that
   needs no new crate API at all.)
-- [REPO] `crates/kaya/Cargo.toml:175` — `adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }`.
+- [REPO] `crates/kaya/Cargo.toml:107` — `adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }`.
 - [MEASURED] versions inside the image
   (`docker run --rm kaya-linux:latest bash -lc 'pkg-config --modversion gtk4 libadwaita-1; dpkg -l | …'`):
   ```
@@ -25,7 +25,7 @@ and the repo was never modified.
   sway 1.10.1-2      weston 14.0.2-1           xvfb 2:21.1.16-1.3
   wayland-protocols 1.44-1        (arm64, Debian trixie pinned by digest)
   ```
-- [REPO] `crates/kaya/src/gtk.rs:7041` — the app is a real `GtkApplication`:
+- [REPO] `crates/kaya/src/gtk.rs:6676` — the app is a real `GtkApplication`:
   `gtk4::Application::builder().application_id("dev.kaya.Milestone2").build()`,
   and the window (7056) is a `GtkApplicationWindow` titled `"kaya milestone 2"`.
   **No icon call exists anywhere in gtk.rs** — grepping `set_icon` finds only the

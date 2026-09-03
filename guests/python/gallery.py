@@ -1,9 +1,5 @@
-"""The gallery scene: a row with a checkbox and its status label, and a
-row with a slider and its volume label. Both controls own their state
-and report each change; the app answers by writing the paired signal —
-the entry scene's uncontrolled contract, with a bool and a float.
+"""The gallery scene, a bool and a float (tools/scenes/gallery.steps).
 
-Build the library first (cargo build), then:
     KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 """
 
@@ -27,13 +23,12 @@ def on_toggle(checked):
 
 
 def on_volume(value):
-    # Integer percent, so every language's formatting agrees.
+    # Integer percent, so every language's formatting agrees byte for byte.
     volume.set(f"volume: {round(value * 100)}%")
 
 
 def on_quarter():
-    # A programmatic write fans out to the control and must NOT come back
-    # as an on_volume occurrence: only the user path and commands emit.
+    # A programmatic write must NOT echo an on_volume occurrence.
     pos.set(0.25)
 
 
@@ -51,8 +46,7 @@ with app.window():
             kaya.label(bind=volume)
             kaya.button("quarter", on_click=on_quarter)
         with kaya.row():
-            # Deliberately invalid bytes read 0x0: decode failure is the
-            # placeholder class, never a crash, on every backend.
+            # A decode failure is the placeholder class, never a crash.
             kaya.image(TEST_PNG)
             kaya.image(b"not an image")
 

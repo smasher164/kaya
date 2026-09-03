@@ -45,26 +45,26 @@ kaya's macOS windows are SwiftUI `WindowGroup`-hosted. The interpreter reaches
 the hosting `NSWindow` through a registry filled by an `NSViewRepresentable`
 that hooks AppKit's attachment signal:
 
-- `swift/KayaSwiftUI.swift:1916` — `var kayaNSWindows: [UInt64: NSWindow]`,
+- `swift/KayaSwiftUI.swift:1681` — `var kayaNSWindows: [UInt64: NSWindow]`,
   the surface-id -> NSWindow registry (macOS only).
-- `swift/KayaSwiftUI.swift:1938` — `private struct KayaWindowAccessor:
+- `swift/KayaSwiftUI.swift:1705` — `private struct KayaWindowAccessor:
   NSViewRepresentable`, whose `AttachView.viewDidMoveToWindow` (`:1943`) fires
   `register(_:)` (`:1961`). Registration installs the close-veto delegate proxy
   and then calls `kayaApplyWindowSize(windowId)` (`:1979`).
-- `swift/KayaSwiftUI.swift:2244` — `kayaApplyWindowSize(_:)`, the archetype of
+- `swift/KayaSwiftUI.swift:1978` — `kayaApplyWindowSize(_:)`, the archetype of
   a window prop lowered THROUGH the bridge: it reads the model and calls
   `window.setContentSize(...)` on the real NSWindow.
-- `swift/KayaSwiftUI.swift:3448` — `kayaTitleWindow(_:)`, and `:3436`
+- `swift/KayaSwiftUI.swift:3082` — `kayaTitleWindow(_:)`, and `:3436`
   `kayaAwaitWindow(_:timeoutMs:)`, the event-driven wait for materialization
   the harness verbs use.
-- The apply arm for window props: `swift/KayaSwiftUI.swift:2294`
+- The apply arm for window props: `swift/KayaSwiftUI.swift:2017`
   (`case applySetWindowProp`), with `(wpropTitle, valueStr)` at `:2305`,
   `wpropWidth`/`wpropHeight` at `:2318`/`:2322` (both call
   `kayaApplyWindowSize`), `wpropVetoClose` at `:2326`.
 
 Note the asymmetry a `dirty` prop inherits: **title does NOT go through the
 bridge**. On macOS the title is applied declaratively, `.navigationTitle(...)`
-at `swift/KayaSwiftUI.swift:8291`, `:8301`, `:8340`, `:8362`, `:8601` — the
+at `swift/KayaSwiftUI.swift:7544`, `:8301`, `:8340`, `:8362`, `:8601` — the
 model is the source and SwiftUI pushes it into the window. Only size (and the
 close veto, via the delegate) touch NSWindow directly.
 
@@ -133,18 +133,18 @@ kaya's macOS accessibility read is IN-PROCESS but through the CLIENT API
 (`AXUIElementCreateApplication(getpid())`), run inside
 `DispatchQueue.main.sync`:
 
-- `swift/KayaSwiftUI.swift:3034` `kayaAxRead(_:)` — awaits the window, then
+- `swift/KayaSwiftUI.swift:2692` `kayaAxRead(_:)` — awaits the window, then
   `DispatchQueue.main.sync { kayaAxReadOnMain(identifier) }`.
-- `swift/KayaSwiftUI.swift:3064` `kayaAxReadOnMain(_:)` — announces
+- `swift/KayaSwiftUI.swift:2722` `kayaAxReadOnMain(_:)` — announces
   `AXEnhancedUserInterface` + `AXManualAccessibility` once per process
   (the tree is lazy: docs/traps.md "macOS builds the accessibility tree
   lazily"), sets a 2s messaging timeout, then walks.
-- `swift/KayaSwiftUI.swift:3126` `kayaAxHintRead(_:)` — same shape for AXHelp.
+- `swift/KayaSwiftUI.swift:2784` `kayaAxHintRead(_:)` — same shape for AXHelp.
 - The walk helper `kayaAxKids` (`:3001`) already merges `kAXWindowsAttribute`,
   so window elements are reachable from the application element.
 
 Two live doc bugs worth flagging to the coordinator (not mine to fix here):
-the comment above `expect_ax` at `swift/KayaSwiftUI.swift:4629-4637` still
+the comment above `expect_ax` at `swift/KayaSwiftUI.swift:4210-4211` still
 says the AX read "runs on the harness thread ON PURPOSE", which the code at
 `:3061` contradicts and docs/traps.md:1039 records as the deadlock that cost a
 day. Same stale claim is not in `expect_ax_hint`.
@@ -224,7 +224,7 @@ neither does writing `window.title` (kaya pushes the title declaratively via
 The one thing that WILL lose it is a new NSWindow: the flag lives on the
 AppKit object, so an aux surface that is dismissed and re-opened comes back
 clean. That is the same hazard `kayaApplyWindowSize` already handles by being
-called from `register()` (`swift/KayaSwiftUI.swift:1976-1979`), and a `dirty`
+called from `register()` (`swift/KayaSwiftUI.swift:1734-1737`), and a `dirty`
 prop needs the identical re-application — a scene that sets the prop before
 the surface materializes otherwise loses it silently.
 
@@ -258,14 +258,14 @@ The "Do you want to save the changes?" sheet everyone remembers belongs to
 `NSDocument`, not to `NSWindow.isDocumentEdited`. So on mac the flag is a
 DISPLAY signal with no behavior attached, and any confirmation is kaya's own —
 which the existing `veto_close` prop plus the `close_requested` event
-(`swift/KayaSwiftUI.swift:1993-2013`) already expresses. Nothing about `dirty`
+(`swift/KayaSwiftUI.swift:1751-1771`) already expresses. Nothing about `dirty`
 needs to change that grammar, and `dirty` and `veto_close` are orthogonal:
 either can be set without the other.
 
 ### 2.5 Per-window, including aux surfaces
 
 `mode=aux` opened a second `WindowGroup` surface through the same
-`openWindow(value:)` path kaya uses (`swift/KayaSwiftUI.swift:8631`) and set
+`openWindow(value:)` path kaya uses (`swift/KayaSwiftUI.swift:7831`) and set
 dirty on the AUX one only:
 
 ```
@@ -335,7 +335,7 @@ That is the read a harness leg makes: window element -> `AXCloseButton` ->
    nothing that kaya announces once per process anyway.
 2. **Works under `.accessory`, on a window that is neither key nor active** —
    exactly the mac lane's condition, since `KAYA_SELFTEST` sets `.accessory`
-   (`swift/KayaSwiftUIEntry.swift:39-43`). Measured: `key=false active=false
+   (`swift/KayaSwiftUIEntry.swift:36-41`). Measured: `key=false active=false
    policy=1`, `close.AXEdited = NSNumber(1)`.
 3. **Synchronous.** The pass labelled `C/dirty/immediate` read the AX value
    with no settle between the property write and the read, and already saw
@@ -347,7 +347,7 @@ That is the read a harness leg makes: window element -> `AXCloseButton` ->
 
 Thread discipline is the existing one and is NOT optional: same-process AX
 reads run AppKit code inline on the calling thread, so the read goes inside
-`DispatchQueue.main.sync` like `kayaAxRead` (`swift/KayaSwiftUI.swift:3061`)
+`DispatchQueue.main.sync` like `kayaAxRead` (`swift/KayaSwiftUI.swift:2719`)
 after `kayaAwaitWindow`. The probe followed that shape and never hung across
 four runs.
 
@@ -375,7 +375,7 @@ precedent for both:
    the REAL window, indexed by surface id with no matching problem. This is
    exactly the rung `expect_title` sits on today: it reads `window.title` off
    the platform object and falls back to the model only where no window
-   exists (`swift/KayaSwiftUI.swift:3958-3990`).
+   exists (`swift/KayaSwiftUI.swift:3565-3597`).
 2. `AXEdited` off that window's close button, for the stronger claim that the
    CHROME published it. Reachable without the identity problem by walking
    `kAXWindows` and matching the AX frame/title against the NSWindow kaya
@@ -394,7 +394,7 @@ prop that makes a window non-closable today.
 - The mac arm CAN implement `dirty` and can assert it. No carve-out.
 - It lowers through the NSWindow bridge, not through SwiftUI: a new
   `(wpropDirty, valueBool)` arm in `applySetWindowProp`
-  (`swift/KayaSwiftUI.swift:2294`) writing `kayaNSWindows[wid]?
+  (`swift/KayaSwiftUI.swift:2017`) writing `kayaNSWindows[wid]?
   .isDocumentEdited`, plus re-application from `register()` next to
   `kayaApplyWindowSize(windowId)` (`:1979`) so a prop set before
   materialization is not lost. iOS compiles the same arm to nothing (no

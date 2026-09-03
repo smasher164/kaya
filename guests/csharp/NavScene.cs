@@ -1,8 +1,4 @@
-// The nav conformance scene, C# port — the serial navigation grammar.
-// The covered root is RETAINED (status keeps taking writes while
-// covered), and a programmatic PopEntry does not echo entry_popped, so
-// the settings round's final status stays "back requested". See
-// guests/rust/nav.rs and tools/scenes/nav.steps.
+// The nav scene, C# port — guests/rust/nav.rs, tools/scenes/nav.steps.
 
 static class NavScene
 {
@@ -36,8 +32,7 @@ static class NavScene
                 });
                 tx.Button("open settings", onClick: inner => // button#1
                 {
-                    // The veto class: nothing has popped yet. No
-                    // entry_popped will follow the PopEntry below.
+                    // Nothing has popped yet, so no entry_popped follows this pop.
                     inner.PushEntry(Settings, title: "settings", interceptBack: true,
                         onBackRequested: tx2 =>
                         {

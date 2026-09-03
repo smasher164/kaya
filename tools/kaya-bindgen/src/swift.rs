@@ -1,8 +1,6 @@
 //! Swift emitter: a KayaTx struct of mutating packers over a Data
-//! buffer, a KayaValue enum, and the occurrence parser. Struct and enum
-//! scope namespace everything; the encoder methods live on KayaTx, so
-//! parameters cannot shadow them (method calls are self-qualified).
-//! Constants come from kaya.h via the bridging header.
+//! buffer, a KayaValue enum, and the occurrence parser. Constants come
+//! from kaya.h via the bridging header.
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
@@ -16,14 +14,10 @@ pub const RESERVED: &[&str] = &[
     "repeat", "return", "switch", "where", "while",
     // NOT A KEYWORD — a local this generator EMITS. A record helper
     // opens with `let kayaAt = self.begin(...)`, so a spec field of the
-    // same name would be shadowed inside its own helper and the record
-    // would carry the buffer offset where the field's value belongs.
-    // That is not hypothetical: the field was called `start` for about
-    // an hour, and `self.u64(start)` cheerfully wrote the record offset
-    // (the C generator had the same local and at least failed to
-    // compile). The local is kaya-prefixed so nothing an author writes
-    // can reach it, and it is named here so the generator refuses if
-    // anyone tries.
+    // same name is shadowed inside its own helper and the record carries
+    // the buffer offset where the field's value belongs — silently, in
+    // Swift. docs/traps.md: a spec field named like an emitted local
+    // packs the buffer offset
     "kayaAt",
 ];
 
@@ -163,11 +157,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
-        // Blob setters take the u64 kaya_blob_register handle (KayaValue.blob).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
@@ -209,8 +202,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The window-prop duos: const + signal, element sources being
-    // rejected by the wire.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
@@ -243,8 +235,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
@@ -275,8 +267,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
@@ -308,9 +300,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root). The shortcut setter routes through
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root). The shortcut setter routes through
     // kayaCanonicalizeShortcut, so no call site can bypass it.
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = pascal(prop);
@@ -370,15 +361,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(", ");
     c.line(&format!("let kayaShortcutNamedKeys: Set<String> = [{named_keys}]"));
     c.line("");
-    c.line("/// The one binding-tier shortcut parser (DESIGN.md, Menus).");
-    c.line("/// Canonicalize a shortcut spelling to the wire form: lowercase");
-    c.line("/// '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
-    c.line("/// key (a-z, 0-9, or the closed named set). Accepts ASCII case");
-    c.line("/// variants and any modifier order; traps on whitespace, empty tokens,");
+    c.line("/// The one binding-tier shortcut parser (DESIGN.md, Menus):");
+    c.line("/// canonicalize a spelling to the wire form — lowercase '+'-joined");
+    c.line("/// tokens, modifiers ordered primary, shift, alt, then one key (a-z,");
+    c.line("/// 0-9, or the closed named set). Traps on whitespace, empty tokens,");
     c.line("/// repeated modifiers, aliases (ctrl/cmd/option), and unknown or");
-    c.line("/// multiple or missing keys. POLICY stays at the core: escape,");
-    c.line("/// shift-only and bare alphanumerics, and the reserved floor are");
-    c.line("/// validated there, on the canonical spelling, never rewritten.");
+    c.line("/// multiple or missing keys. POLICY stays at the core.");
     c.line("func kayaCanonicalizeShortcut(_ spelling: String) -> String {");
     c.line("    if spelling.isEmpty {");
     c.line("        preconditionFailure(\"kaya: shortcut is empty\")");
@@ -422,10 +410,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key");
     c.line("}");
     c.line("");
-    // The occurrence blob table. A blob in an OCCURRENCE is a table
-    // handle, not the apply channel's batch-local index, and nothing
-    // retires one here — so the decoder redeems and releases it, which
-    // is what keeps a handle from ever reaching an app.
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index, and nothing retires one here — so the
+    // decoder redeems and releases it, which keeps a handle from ever
+    // reaching an app.
     c.line("/// One value of a representation. Its own type rather than a case");
     c.line("/// on KayaValue, because bytes reach a guest ONLY here — nothing");
     c.line("/// else on the occurrence channel has ever carried them.");
@@ -436,13 +424,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("}");
     c.line("");
     c.line("/// One representation as the decoder hands it over: the clip kind,");
-    c.line("/// and its parts with blobs already redeemed. The sum itself is the");
-    c.line("/// hand-written tier\'s — this is the taste-free shape the wire");
-    c.line("/// carries.");
-    c.line("///");
-    c.line("/// `kind` is a SINGLE member of the clip enum and never a mask (you");
-    c.line("/// offer many and you receive one); 0 with no parts is the universal");
-    c.line("/// empty answer.");
+    c.line("/// and its parts with blobs already redeemed. `kind` is a SINGLE");
+    c.line("/// member of the clip enum and never a mask (you offer many and you");
+    c.line("/// receive one); 0 with no parts is the universal empty answer.");
     c.line("struct KayaClipValues {");
     c.line("    let kind: UInt32");
     c.line("    let parts: [KayaClipPart]");
@@ -509,11 +493,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
     c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil, [])");
     c.line("        }");
-    // The picker's answer: the one occurrence whose payload is a LIST
-    // OF RECORDS, which no single KayaValue can carry — hence the
-    // tuple's `files` member. The generic tail reads a KEY PATH, and
-    // would take the file count as a path length and start eight bytes
-    // early.
+    // The picker's answer is a LIST OF RECORDS, which no single
+    // KayaValue can carry — hence the tuple's `files` member. Its own
+    // arm: the generic tail would take the file count for a key-path
+    // length and start eight bytes early.
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {");
     c.line("            // id, a count, then three Values per file");
     c.line("            // (handle, name, local_path). EMPTY IS CANCEL.");
@@ -541,9 +524,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            return (kind, id, [], nil, files, nil, [])");
     c.line("        }");
-    // The privileged read's one answer, in its own arm: the generic
-    // tail would take the CLIP KIND for a path length, so a text answer
-    // would read the values header as a key.
+    // Its own arm: the generic tail would take the CLIP KIND for a path
+    // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!(
             "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
@@ -605,7 +587,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("        var payload: KayaValue? = nil");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read from its fixed offset.
+    // these — read from its fixed offset.
     for name in crate::u32_slot_occurrence_names(spec) {
         c.line(&format!(
             "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
@@ -623,8 +605,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("            || {cond}"));
     }
     c.line("        {");
-    // Type-generic payload decode, same shape as the key loop: no
-    // per-kind logic left to drift.
     c.line("            let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
     c.line("            let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
     c.line("            switch ptype {");
@@ -641,8 +621,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("        }");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     c.line("        var clip: KayaClipValues? = nil");
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()
@@ -657,10 +636,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            clip = kayaParseClip(raw, at).clip");
         c.line("        }");
     }
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1). Its own
-    // tuple member because the run is 2 values for a redraw and 3 for a
-    // tick, and `payload` is one.
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
+    // Its own tuple member because the run is 2 values for a redraw and
+    // 3 for a tick, and `payload` is one.
     c.line("        var tail: [KayaValue] = []");
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()

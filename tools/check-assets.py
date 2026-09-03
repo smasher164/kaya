@@ -7,51 +7,36 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6, gates 2 and 3).
-# `asset(name)` holds one rule in one Rust module, which is true only
-# while nothing else resolves an asset and every lane carries the WHOLE
-# root — neither checkable by the core, which reads none of those
-# files.
+# THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6, gates 2 and 3;
+# CLAUDE.md's gate list). `asset(name)` holds one rule in one Rust
+# module, true only while nothing else resolves an asset and every lane
+# carries the WHOLE root — neither checkable by the core.
 #
-# THE CLAUSES.
-#
-#   C1 PROVENANCE   Every family under the root carries a README saying
+# THE CONTRACT.
+#   C1 PROVENANCE   every family under the root carries a README saying
 #                   what the files are, where they came from, their
 #                   licence, and how to regenerate them.
-#   C2 CENSUS       The listing is printed with its count, every name
-#                   is legal as an asset name, and the count may not
-#                   fall below a floor: a census that reads two files
-#                   agrees with everything.
-#   C3 ONE RESOLVER Nothing outside the core resolves an asset path for
-#                   itself. Table-driven, and the table's own claim is
-#                   checked: an exemption carries a reason and the
-#                   reason has to be about a file that still exists.
-#   C4 EVERY LANE   Each of the five lanes either stages the root or
-#                   says why it needs nothing, BOTH halves stated
-#                   rather than inferred. A lane that stages one FILE
-#                   is the shape this convention replaced.
-#   C5 WHAT ARRIVED The staging lanes verify what they staged by HASH:
-#                   a size check misses a same-length corruption.
-#   C6 THE FROZEN    tools/scenes/assets.steps expects the miss
-#      CENSUS        sentence's first line, which names every asset the
-#                    package carries — the one run-time observation
-#                    that a lane staged the WHOLE root. Adding an asset
-#                    reddens five lanes, so this clause turns that into
-#                    ONE gate failure naming the .steps file.
-#   C7 THE APK'S     Android packages assets into `assets/<prefix>/`,
-#      PREFIX        read back through AssetManager. Three files spell
-#                    that prefix and this holds them equal. THE BYTES
-#                    are checked where they are packaged, by
-#                    `apk_assets_verify` in run-emulator.py.
-#   C8-C11           The market family: the artifacts are DERIVED and
-#                    regenerated into scratch for comparison, the
-#                    ledger nets to the guest's BOOK, the history ends
-#                    on it, and the scene's frozen lines are re-derived
-#                    from the artifact (each clause's prose below).
-#
-# NO FIXTURE ANYWHERE. Every negative below doctors a shadow of the
-# REAL tree (docs/traps.md: the wayland seat guard passed vacuously
-# twice against a pattern that matched nothing).
+#   C2 CENSUS       the listing is printed with its count, every name is
+#                   legal, and the count may not fall below a floor.
+#   C3 ONE RESOLVER nothing outside the core resolves an asset path for
+#                   itself; an exemption carries a reason, and the
+#                   reason must be about a file that still exists.
+#   C4 EVERY LANE   each lane stages the root or says why it needs
+#                   nothing, BOTH halves stated rather than inferred.
+#   C5 WHAT ARRIVED the staging lanes verify what they staged by HASH.
+#   C6 THE FROZEN   tools/scenes/assets.steps freezes the miss
+#      CENSUS       sentence's first line, the one run-time observation
+#                   that a lane staged the WHOLE root — so adding an
+#                   asset is ONE gate failure naming the .steps file.
+#   C7 THE APK'S    three files spell Android's `assets/<prefix>/` and
+#      PREFIX       this holds them equal; THE BYTES are checked by
+#                   `apk_assets_verify` in run-emulator.py.
+#   C8-C11          the market family: artifacts DERIVED and regenerated
+#                   into scratch to compare, the ledger netting to the
+#                   guest's BOOK, the history ending on it, and the
+#                   scene's frozen lines re-derived from the artifact.
+# NO FIXTURE ANYWHERE: every negative doctors a shadow of the REAL tree
+# (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
 import ast as ast_mod
 import os
@@ -159,20 +144,15 @@ def code_only(text, ext):
 # what it staged). The token differs per lane because the mechanism
 # does: iOS needs no variable at all.
 STAGES = {
-    # The windows runner is python since the runner conversion; the
-    # staging behaviour lives in the BODY, so this reads the .py.
     "tools/deploy-win.py": (
         "the VM has no repo; the deploy copies the root into the "
         "mirror path every run, outside the deploy stamp",
         "KAYA_ASSET_DIR"),
-    # Python since the runner conversion; the staging behaviour lives
-    # in the BODY, so this reads the .py.
     "tools/android/run-emulator.py": (
         "a device has no repo; the root is pushed to /data/local/tmp "
         "and named in each leg's intent",
         "KAYA_ASSET_DIR"),
-    # Python since the runner conversion; the token is the python
-    # constant the bundle copy reads.
+    # The ios token is the python constant the bundle copy reads.
     "tools/ios/run-sim.py": (
         "an app in the simulator has no repo and its cwd is /; the "
         "root goes into the bundle, which is both this lane's staging "
@@ -377,9 +357,9 @@ def check(root):
                        f"the compile-time repo path it does not have")
         # A COPY of one file under the root, never a mere mention of
         # one: the deploy hashes the resource index by path, which is a
-        # READ. The python spellings joined with the runner
-        # conversion — a converted lane copying one file would match
-        # none of the shell verbs and the ban would go vacuous.
+        # READ. Both the shell and the python spellings are listed —
+        # a lane copying one file in the language this ban did not name
+        # would go vacuous.
         COPY = ("scp ", "adb push", "cp ", "copyTo", "install ",
                 "rsync", "copy2", "copytree", "copyfile")
         for line in text.splitlines():
@@ -567,22 +547,14 @@ def check(root):
                                    f"tools/gen-market.py --ensure`")
 
     # -------------------------------------------------------------- C9
-    # THE SCENE IS DERIVED FROM THE ARTIFACT TOO. C8 holds the CSV to
-    # its generator; nothing held the transactions view's byte-frozen
-    # scene to the CSV, so retuning the generator left it asserting
-    # last month's ledger — a red that would arrive on every windowed
-    # lane at once, with five failing strings and no file named. This
-    # re-derives every expectation that comes from the artifact and
-    # prints the line the CSV asks for.
-    #
-    # THE SCENE SEES THE LEDGER AFTER THE TICK, so the derivation is
-    # the CSV plus what "Day tick" posts. POSTED, RECENT, BOOK, TICK
-    # and FILTERS are READ OUT OF THE GUEST by ast (importing it would
-    # build a window at import time); a second copy here would be one
-    # more thing to drift. The money rule is the one line still written
-    # twice, and a guest that moves it reddens this clause naming the
-    # file. C10 rides in the same block because it wants the same five
-    # tables.
+    # THE SCENE IS DERIVED FROM THE ARTIFACT TOO: C8 holds the CSV to its
+    # generator, and nothing held the transactions view's byte-frozen
+    # scene to the CSV, so retuning the generator left it asserting last
+    # month's ledger — five failing strings on every windowed lane, no
+    # file named. The scene sees the ledger AFTER THE TICK, so the
+    # derivation is the CSV plus what "Day tick" posts; POSTED, RECENT,
+    # BOOK, TICK and FILTERS are read out of the guest by ast (importing
+    # it would build a window). C10 rides here for the same five tables.
     PF_SCENE = "tools/scenes/portfolio.steps"
     GUEST = "guests/python/portfolio.py"
     pf_scene_path = root / PF_SCENE
@@ -680,13 +652,10 @@ def check(root):
             # ------------------------------------------------------ C10
             # THE TIE-OUT (ruled 2026-08-26): an account's holdings ARE
             # the sum of its transactions. The generator holds that at
-            # write time and refuses itself if it slips; this holds the
-            # ARTIFACT ON DISK to it, which is the half a doctored or
-            # half-written CSV can break with the generator innocent.
-            # Then it derives the `label@net` lines the scene freezes,
-            # and requires the MONEY in each to be a string the
-            # dashboard also says — a tie-out asserted nowhere is not a
-            # guard (invariant 3).
+            # write time; this holds the ARTIFACT ON DISK to it — the
+            # half a doctored or half-written CSV breaks with the
+            # generator innocent — and requires each derived `label@net`
+            # money to be a string the dashboard also says (invariant 3).
             holdings = {a: {t: q for t, q, _ in hs}
                         for a, (_n, hs) in BOOK.items()}
             anchors = {t: c for _n, hs in BOOK.values()
@@ -718,13 +687,9 @@ def check(root):
             # THE HISTORY TIES TO THE SAME BOOK, one column over
             # (2026-08-27, docs/canvas-plan.md §10): prices.csv's LAST
             # DAY is the dashboard's live prices, so the chart's right
-            # edge is the money label#0 shows. Held here on the
-            # ARTIFACT ON DISK, the half a doctored or half-written
-            # file breaks with the generator innocent — and then the
-            # scene's own chart lines are DERIVED from that artifact,
-            # C9's rule for the ledger applied to the chart: retuning
-            # the walk without moving the scene is a red naming this
-            # file instead of three failing lanes.
+            # edge is the money label#0 shows. Held on the ARTIFACT ON
+            # DISK, and the scene's chart lines are DERIVED from it —
+            # C9's rule for the ledger, applied to the chart.
             CHART_DAYS = _const("CHART_DAYS")
             if not hist.is_file():
                 pass  # C8 already named the missing artifact.

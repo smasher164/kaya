@@ -8,17 +8,11 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 # Every dependency this repo resolves over the network names an exact
-# version. Gradle, NuGet, SwiftPM, the container's opam index and the
-# Windows App SDK curl have no lockfile the way cargo and nix do, so one
-# dynamic version (`1.9.+`, `latest.release`, `*`, a range) and the lane
-# depends on what a server chose today. NOT a lockfile mechanism — the
-# guard that keeps the existing exact versions exact.
-#
-# The fifth clause carries a second rule the other four do not: a curl
-# names bytes as well as a version, so tools/fetch-winappsdk.sh records
-# each package's sha256 and this gate holds BOTH, plus the verification
-# itself — cut out of that script and run against wrong bytes on every
-# sweep.
+# version: gradle, NuGet, SwiftPM, the container's opam index and the
+# Windows App SDK curl have no lockfile the way cargo and nix do. NOT a
+# lockfile mechanism — the guard that keeps the existing pins exact.
+# The curl clauses hold BYTES as well as a version, and cut the verifier
+# out of its script to run it against wrong bytes on every sweep.
 
 import hashlib
 import re
@@ -39,11 +33,8 @@ def concrete(v):
 
 def logical_lines(text):
     """Shell continuations joined, each yielded with its FIRST physical
-    line number. A scanner that reads physical lines judges a
-    backslash-continued command and its flags as separate statements —
-    which is how a flag two lines down reads as a flag that is not
-    there. Not hypothetical: this clause shipped that way for ten
-    minutes and reported OK on an invocation missing its flag."""
+    line number (docs/traps.md: "A gate that reads PHYSICAL lines cannot
+    see a continued command")."""
     joined, start, buf = [], None, []
     for n, line in enumerate(text.splitlines(), 1):
         if start is None:
@@ -99,9 +90,8 @@ for f in sorted(root.rglob("*.csproj")):
                            f"not a fixed version")
 
 # --- opam: the container's OCaml packages ------------------------------
-# opam-repository is a ROLLING index: every name must carry its version
-# (pkg.version), and the index itself must be pinned to a commit — the
-# version pins alone do not constrain transitive resolution.
+# opam-repository is a ROLLING index, so the index itself must be pinned
+# to a commit: version pins alone do not constrain transitive resolution.
 dockerfile = root / "tools/linux/Dockerfile"
 text = dockerfile.read_text(encoding="utf-8")
 # Join continuations so a wrapped install line reads as one.
@@ -120,9 +110,8 @@ if not re.search(r"opam-repository/archive/[0-9a-f]{40}\.tar\.gz", text):
     out.append(f"{dockerfile}: the opam index is not pinned to a commit")
 
 # --- SwiftPM: Package.resolved is the pin, so it must be honoured -----
-# Package.swift declares RANGES, so Package.resolved is the pin. Two
-# halves: it is checked in, and every invocation refuses to resolve
-# around it.
+# Package.swift declares RANGES. Two halves: the resolved file is checked
+# in, and every invocation refuses to resolve around it.
 for f in sorted(root.rglob("Package.swift")):
     if ".build" in f.parts:
         continue
@@ -141,14 +130,11 @@ for f in sorted(root.glob("tools/**/*.sh")):
                        "(want --disable-automatic-resolution)")
 
 # --- NuGet flat container: the Windows App SDK arrives by curl --------
-# tools/fetch-winappsdk.sh resolves five packages straight out of
-# nuget's flat container. No lockfile covers a curl and the
-# PackageReference clause above cannot see it — the .csproj files in
+# The PackageReference clause above cannot see it: the .csproj files in
 # this tree are guest-side and tooling, not the backend
-# (docs/canvas-plan.md §3.1) — so until this clause the Windows
-# dependency door was guarded by nobody. Three rules: an exact version,
-# a recorded sha256, and a script that still checks the hash it
-# recorded, cache included.
+# (docs/canvas-plan.md §3.1). Three rules — an exact version, a recorded
+# sha256, and a script that still checks the hash it recorded, cache
+# included.
 FETCHER = root / "tools/fetch-winappsdk.sh"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 CALL = re.compile(r"^fetch\s+\S")
@@ -185,8 +171,8 @@ def shell_body(text, name):
 
 
 def scan_fetcher(path, text):
-    """Findings for one fetch script. A function because the watched
-    negatives below run it against doctored copies of the real file."""
+    """Findings for one fetch script. A function so the watched negatives
+    below can run it against doctored copies."""
     bad, packages = [], 0
     for n, line in logical_lines(text):
         s = line.strip()
@@ -195,7 +181,7 @@ def scan_fetcher(path, text):
         parts = s.split()
         if len(parts) != 4:
             # A call this cannot read is a finding naming the site,
-            # never a skip: silence would read as clean.
+            # never a skip.
             bad.append(f"{path}:{n}: `{s[:90]}` is not "
                        f"`fetch <Id> <version> <sha256>`")
             continue
@@ -265,9 +251,9 @@ else:
     fetch_text = FETCHER.read_text(encoding="utf-8")
     out += scan_fetcher(FETCHER, fetch_text)
 
-# THE VERIFIER ITSELF, CUT OUT AND RUN. Static text says a hash is
-# compared; only running it says the comparison refuses. Both outcomes,
-# and the refusal must print what it MEASURED (invariant 3).
+# THE VERIFIER ITSELF, CUT OUT AND RUN: static text saying a hash is
+# compared is not the comparison refusing. Both outcomes, and the refusal
+# must name what it measured (invariant 3).
 verify_body = shell_body(fetch_text, "verify_sha256") if fetch_text else None
 if verify_body is not None:
     payload = b"the bytes a download would have brought"
@@ -303,14 +289,13 @@ if verify_body is not None:
                        "or the next reader chases a sentence that cannot "
                        f"discriminate: {said.strip()[:200]}")
 
-# A NEW DOOR. This clause reads ONE script by name, so a second script
-# that resolves a package from the same flat container would be
-# invisible to it — the shape the whole finding is about.
+# A NEW DOOR: this clause reads ONE script by name, so a second script
+# resolving from the same flat container would be invisible to it.
 KNOWN_FETCHERS = {"tools/fetch-winappsdk.sh"}
 for f in sorted(root.glob("tools/**/*.sh")):
     rel = f.relative_to(root).as_posix()
-    # This file names the host in its own clause; a gate that scans a
-    # directory scans itself (docs/traps.md).
+    # A gate that scans a directory scans itself (docs/traps.md: "A gate
+    # that reads PHYSICAL lines…", its closing paragraph).
     if rel in KNOWN_FETCHERS or rel == "tools/check-pins.py":
         continue
     if "api.nuget.org" in f.read_text(encoding="utf-8"):
@@ -321,10 +306,8 @@ for f in sorted(root.glob("tools/**/*.sh")):
                    "add it to KNOWN_FETCHERS, or route the download "
                    "through the existing fetcher")
 
-# WATCHED NEGATIVES, on doctored copies of the real file: every
-# perturbation is proven to have applied (counts printed) and every one
-# must be refused. A hash rule believed but never watched failing is the
-# shape invariant 3 forbids.
+# WATCHED NEGATIVES on doctored copies of the real file: every
+# perturbation proven applied (counts printed), every one refused.
 NEGATIVES = [
     ("version loosened",
      "fetch Microsoft.WindowsAppSDK.WinUI 2.2.1",
@@ -354,10 +337,8 @@ NEGATIVES = [
      "    if ! verify_sha256",
      "before verify_sha256"),
     # The full line, not the bare tool name: `shasum -a 256` also spells
-    # the dev-shell fingerprint at the top of the file, and a
-    # first-match replace landed there with the count still reading 1 —
-    # a perturbation that applies SOMEWHERE ELSE is the vacuous negative
-    # this rule exists to catch.
+    # the dev-shell fingerprint above (docs/traps.md: "A substitution
+    # count of 1 does not say WHERE it applied").
     ("hash swapped for a size check",
      'got=$(shasum -a 256 "$path" | cut -d\' \' -f1)',
      'got=$(wc -c < "$path")',
@@ -372,10 +353,8 @@ NEGATIVES = [
 counts, refused = [], 0
 if fetch_text:
     for label, old, new, expect in NEGATIVES:
-        # AMBIGUITY IS A FAILED TEST TOO: a pattern matching twice would
-        # let a first-match replace doctor a line nobody meant, with the
-        # count still reading 1 (measured while writing this clause —
-        # `shasum -a 256` also spells the dev-shell fingerprint above).
+        # AMBIGUITY IS A FAILED TEST TOO (docs/traps.md: "A substitution
+        # count of 1 does not say WHERE it applied").
         sites = fetch_text.count(old)
         counts.append(f"{min(sites, 1)}")
         if sites != 1:
@@ -399,11 +378,10 @@ if fetch_text:
 
 # --- The zips the Windows VM fetches: go and node arrive by ------------
 # Invoke-WebRequest inside tools/guest/fetch-zip.ps1, called from
-# tools/deploy-win.py with a version and a sha256 recorded beside it.
-# The inline `powershell -Command` route is refused by name: through ssh
-# and cmd it arrives as one quoted string PowerShell PRINTS instead of
-# running — the go1.27.0 pin was echoed and never installed while the go
-# legs built with the VM's system Go (2026-09-01, docs/traps.md).
+# tools/deploy-win.py with a version and a sha256 beside it. The inline
+# `powershell -Command` route is refused by name: through ssh and cmd it
+# arrives as a string PowerShell PRINTS, which is how the go1.27.0 pin was
+# echoed and never installed (docs/traps.md).
 DEPLOY_WIN = root / "tools/deploy-win.py"
 FETCH_ZIP = root / "tools/guest/fetch-zip.ps1"
 
@@ -434,10 +412,9 @@ def scan_zip_pins(deploy_text, ps1_text):
                    f"constants")
     code = "\n".join(ln for ln in deploy_text.splitlines()
                      if not ln.strip().startswith("#"))
-    # The inline shape is `powershell -Command \"...\"` NESTED in a
-    # `cmd /c "..."` string — the escaped quotes are the tell; a direct
-    # `ssh host 'powershell -Command "..."'` (verify_deployed's hash read)
-    # arrives as a command and is not this defect.
+    # The escaped quotes are the tell: only the shape NESTED in a
+    # `cmd /c "..."` string is the defect. A direct
+    # `ssh host 'powershell -Command "..."'` arrives as a command.
     if 'powershell -Command \\\\"' in code:
         bad.append(f"{DEPLOY_WIN}: an inline `powershell -Command "
                    f"\\\"...\\\"` nested in a cmd /c string survives — "

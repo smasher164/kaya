@@ -1,19 +1,5 @@
-{- The milestone-2 scene from Haskell, on the construction sugar.
-   Template bodies are Tpl and the live zone is Build, and the two
-   element types (Node vs Widget) make mixing the zones a type error.
-
-   WHAT THIS SCENE DOCUMENTS IS HOW A STAMPED WIDGET'S CLICK COMES BACK.
-   The remove button is ONE declaration, so its handler is registered
-   CENTRALLY after the build ('onClick app removeButton' — one name, and
-   the Node instance is what adds the keys), and each
-   click arrives naming the copy by its key path. Both Fors therefore
-   keep their results: 'forEach' hands the body's result back, where
-   'each' discards it.
-
-   Build the library first (cargo build), then:
-       ghc -threaded -O -ibindings/haskell -o milestone2-hs \
-           bindings/haskell/kaya_hs_stubs.c guests/haskell/milestone2.hs \
-           -L target/debug -lkaya -optl-Wl,-rpath,<abs path to target/debug> -}
+-- The milestone2 scene, Haskell port — guests/rust/milestone2.rs,
+-- tools/scenes/milestone2.steps.
 
 import Data.IORef (atomicModifyIORef', newIORef)
 
@@ -30,16 +16,11 @@ main = kayaMain $ \app -> do
 
     (banner, _) <- when_ extras (label "extras on")
 
-    -- Both collections are scalar — the element IS the value — which is
-    -- what 'element' addresses in the two templates below (a record's
-    -- twin is 'field @"title" @Todo').
     groups <- collection
     (groupList, (items, removeButton)) <- forEach groups $ do
       items <- collection
       (itemList, removeButton) <- forEach items $ do
-        -- Realized ahead of its row so the central registration has a
-        -- handle to name; 'pure' slots it into the column where it
-        -- stands.
+        -- Realized ahead of its row so the central registration has a handle.
         removeButton <- button "remove"
         _ <- columnOf [label element, pure removeButton]
         return removeButton

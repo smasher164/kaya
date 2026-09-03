@@ -1,9 +1,6 @@
 //! The brand-accent derivation (docs/styling-plan.md D1): one seed hex
 //! in, per-appearance VALUES out, computed here once so no backend
-//! re-derives.
-//!
-//! Everything is computed in f64 and returned as packed 0xRRGGBB u32s,
-//! the wire's color word.
+//! re-derives. Packed 0xRRGGBB u32s, the wire's color word.
 
 /// One appearance's derived values, all packed sRGB.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,16 +46,13 @@ const BAND_HI: f64 = 76.1;
 
 fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
     let lstar = cie_lstar(rgb);
-    // The clamp aims PAST the band edge, not at it: u8 quantization can
-    // land an aimed-at-60 fill at L* 60.2 — inside the open band — and
-    // the very first run of the property sweep caught it doing exactly
-    // that (seed ffffff). Aiming half a unit clear survives rounding,
-    // and the correction loop below is the belt for the pathological
-    // cases the margin cannot prove away.
+    // The clamp aims PAST the band edge, not at it: u8 quantization landed
+    // an aimed-at-60 fill at L* 60.2 on the property sweep's first run
+    // (seed ffffff). Half a unit clear survives rounding; the correction
+    // loop covers the cases the margin cannot prove away.
     let fill = match appearance {
-        // Light: clamp DOWN below the band floor. 60 is the
-        // native-matching line (WinUI's own Dark1 stop sits at L* 46;
-        // libadwaita's standalone clamp is the same shape).
+        // Light: clamp DOWN below the band floor, the native-matching
+        // line (WinUI's Dark1 stop sits at L* 46).
         Appearance::Light => {
             if lstar > BAND_LO {
                 let mut target = BAND_LO - 0.5;
@@ -72,9 +66,8 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
                 rgb
             }
         }
-        // Dark: a fill INSIDE the band is pushed up past it (the
-        // Material tone-80 / WinUI Light2 model — dark UIs want
-        // lighter accents); below the band it is left alone.
+        // Dark: a fill INSIDE the band is pushed up past it (the Material
+        // tone-80 / WinUI Light2 model); below the band it is left alone.
         Appearance::Dark => {
             if lstar >= BAND_LO && lstar < BAND_HI {
                 let mut target = BAND_HI + 0.5;
@@ -96,8 +89,7 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
         Appearance::Light => clamp_oklab_l_max(rgb, 0.5),
         Appearance::Dark => clamp_oklab_l_min(rgb, 0.85),
     };
-    // The interaction ramp: darker in light, lighter in dark — the
-    // direction every platform's own ramp takes.
+    // Darker in light, lighter in dark — every platform's own direction.
     let (d_hover, d_pressed) = match appearance {
         Appearance::Light => (-4.0, -8.0),
         Appearance::Dark => (4.0, 8.0),
@@ -110,9 +102,6 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
         pressed: shift_lstar(fill, d_pressed),
     }
 }
-
-// --- color math -------------------------------------------------------
-// sRGB <-> linear, CIE L* (via relative luminance), and Oklab L.
 
 fn srgb_channels(rgb: u32) -> (f64, f64, f64) {
     (
@@ -166,21 +155,17 @@ fn lstar_to_y(lstar: f64) -> f64 {
     }
 }
 
-/// Re-light a color to a target L* by scaling in linear space toward
-/// black or white. Darkening preserves chromaticity exactly; lightening
-/// blends toward white, which desaturates gently.
+/// Re-light a color to a target L* by scaling in linear space. Darkening
+/// preserves chromaticity exactly; lightening blends toward white.
 fn set_lstar(rgb: u32, target: f64) -> u32 {
     let y = rel_luminance(rgb).max(1e-6);
     let ty = lstar_to_y(target);
     let (r, g, b) = srgb_channels(rgb);
     let (lr, lg, lb) = (linearize(r), linearize(g), linearize(b));
     if ty <= y {
-        // Darken: pure scale, chromaticity preserved.
         let k = ty / y;
         pack(delinearize(lr * k), delinearize(lg * k), delinearize(lb * k))
     } else {
-        // Lighten: blend toward white in linear space by the factor
-        // that lands the luminance on target.
         let k = (ty - y) / (1.0 - y);
         pack(
             delinearize(lr + (1.0 - lr) * k),
@@ -205,8 +190,7 @@ pub fn oklab_l(rgb: u32) -> f64 {
 }
 
 fn clamp_oklab_l_max(rgb: u32, max: f64) -> u32 {
-    // Binary-search the L* re-light that lands the Oklab L on target;
-    // 20 iterations is far past u8 precision.
+    // The search's 20 iterations are far past u8 precision.
     if oklab_l(rgb) <= max {
         return rgb;
     }
@@ -241,9 +225,8 @@ mod tests {
     use super::*;
 
     /// No fill, in either appearance, from any seed, rests inside the
-    /// danger band. Swept over the whole hue circle rather than a few
-    /// hand-picked hexes: the failure mode is a specific (hue,
-    /// lightness) pair nobody hand-picks.
+    /// danger band. Swept over the whole hue circle: the failure mode is a
+    /// specific (hue, lightness) pair nobody hand-picks.
     #[test]
     fn no_fill_ever_rests_in_the_danger_band() {
         for rgb in sweep() {
@@ -275,8 +258,8 @@ mod tests {
         }
     }
 
-    /// libadwaita's rule: at most 0.5 Oklab L in light, at least 0.85
-    /// in dark (small tolerance for u8 quantization).
+    /// libadwaita's rule: at most 0.5 Oklab L in light, at least 0.85 in
+    /// dark (small tolerance for u8 quantization).
     #[test]
     fn standalone_obeys_the_libadwaita_clamp() {
         for rgb in sweep() {
@@ -294,8 +277,7 @@ mod tests {
         }
     }
 
-    /// An authored per-appearance override is still clamped: a brand
-    /// book cannot put a fill in the band either.
+    /// An authored per-appearance override is still clamped.
     #[test]
     fn overrides_are_clamped_too() {
         // #76B9ED is the research's named failure: L* ~71, mid-band.
@@ -321,8 +303,7 @@ mod tests {
     }
 
     /// 8 of 9 GNOME accents and both Apple blues take white — the
-    /// empirical anchor for the on_fill threshold, pinned here so a
-    /// threshold change has to look these in the eye.
+    /// empirical anchor for the on_fill threshold.
     #[test]
     fn the_platform_pairings_reproduce() {
         // libadwaita 1.7 accent-bg values: blue, teal, green, orange,
@@ -345,8 +326,7 @@ mod tests {
         assert_eq!(derive(0x0A84FF, None, None).light.on_fill, 0xFFFFFF);
     }
 
-    /// 12 hues x 3 saturations x 20 lightness steps, plus the u8
-    /// corners, so a band leak has nowhere to hide between samples.
+    /// 12 hues x 3 saturations x 20 lightness steps, plus the u8 corners.
     fn sweep() -> Vec<u32> {
         let mut out = vec![0x000000, 0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF];
         for h in 0..12 {

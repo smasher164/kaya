@@ -23,11 +23,10 @@ const OVERSCAN: usize = 1;
 pub(crate) struct RowWindow {
     /// The backend's last reported visible range, `(first, count)`.
     reported: Option<(usize, usize)>,
-    /// The SEED: the band a windowed-capable For starts life in when the
-    /// backend has declared that it windows rows, until the first report
-    /// replaces it (docs/deferred.md, the declares-windowing entry). A
-    /// seed is not a report — it is what the backend knows before any
-    /// layout: nothing, and a screenful is a safe nothing.
+    /// The SEED: the band a windowed-capable For starts life in until the
+    /// first report replaces it (docs/deferred.md, the declares-windowing
+    /// entry). Not a report — it is what the backend knows before any
+    /// layout, which is nothing.
     seed: Option<usize>,
     /// The realized rows in band order — what the For's container holds.
     /// scene.rs's `reconcile_window` is its only writer.
@@ -90,16 +89,13 @@ impl RowWindow {
         self.realized = rows;
     }
 
-    /// The band this site's rows are realized in: the visible range plus
-    /// one viewport of overscan each side, clamped to the collection.
+    /// The band this site's rows are realized in: the visible range plus one
+    /// viewport of overscan each side, clamped to the collection.
     ///
-    /// A NON-EMPTY COLLECTION ALWAYS REALIZES ITS FIRST VISIBLE ROW. A
-    /// band holding no rows can never be measured and therefore can never
-    /// grow, so a `(0, 0)` report at first layout would be a permanently
-    /// blank list rather than a temporarily empty one.
-    /// THE SEED IS THE FLOOR, NOT A VIEWPORT: it takes no overscan,
-    /// because there is no measured range to overscan around. The first
-    /// report replaces it outright.
+    /// A NON-EMPTY COLLECTION ALWAYS REALIZES ITS FIRST VISIBLE ROW — a band
+    /// holding none can never be measured and so can never grow. THE SEED IS
+    /// THE FLOOR, NOT A VIEWPORT: no overscan, and the first report replaces
+    /// it outright.
     pub(crate) fn band(&self, total: usize) -> Range<usize> {
         let Some((first, count)) = self.reported else {
             return match self.seed {
@@ -171,10 +167,9 @@ impl RowWindow {
     /// ONE row's height: what it measured, else the presumption, else 0
     /// before anything has been measured at all.
     ///
-    /// The tier that asks AppKit's question — a row height per row,
-    /// realized or not (docs/virtualization-plan.md §4) — reads it here
-    /// rather than keeping a cache of its own, which would be the second
-    /// estimator §2 exists to remove.
+    /// The tier that asks AppKit's question (docs/virtualization-plan.md
+    /// §4) reads it here rather than keeping a cache of its own, which
+    /// would be the second estimator §2 exists to remove.
     pub(crate) fn row_extent(&self, order: &[Key], index: usize) -> f64 {
         let Some(key) = order.get(index) else {
             return 0.0;
@@ -188,11 +183,9 @@ impl RowWindow {
     /// Park the viewport on the row at `first`: its identity, and the
     /// position it has right now.
     ///
-    /// NOT BEFORE THERE IS GEOMETRY. Until a measurement lands, every
+    /// NOT BEFORE THERE IS GEOMETRY: until a measurement lands every
     /// position is the placeholder 0.0, and parking against it would read
-    /// the first measurement as one enormous correction. The backend
-    /// reports again after its first layout, which is when the anchor
-    /// gets its coordinate.
+    /// the first measurement as one enormous correction.
     pub(crate) fn park(&mut self, order: &[Key], first: usize) {
         if self.pitch.is_none() {
             return;

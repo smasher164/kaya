@@ -19,14 +19,14 @@ All **[MEASURED]** from the tree and this machine's gradle cache.
 | compileSdk | **35** | `android/kaya/build.gradle.kts:9`, `android/rusthost/build.gradle.kts:9` |
 | targetSdk (the apps) | **35** | `android/rusthost/build.gradle.kts:15` |
 | minSdk | **26** | `android/kaya/build.gradle.kts:19` |
-| Compose BOM | **2024.10.01** | `android/kaya/build.gradle.kts:53` |
+| Compose BOM | **2024.10.01** | `android/kaya/build.gradle.kts:49` |
 | → material3 resolved | **1.3.1** | `~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/1.3.1/` |
 | → compose-ui resolved | **1.7.5** | `~/.gradle/caches/.../androidx.compose.ui/ui-android/1.7.5/` |
-| material3-adaptive | **1.0.0** (adaptive + adaptive-layout) | `android/kaya/build.gradle.kts:65-66` |
-| material-icons core/extended | **1.7.8** (frozen; last release) | `android/kaya/build.gradle.kts:96-97 (gone)` |
-| activity-compose | **1.9.3** | `android/kaya/build.gradle.kts:52` |
+| material3-adaptive | **1.0.0** (adaptive + adaptive-layout) | `android/kaya/build.gradle.kts:57-57` |
+| material-icons core/extended | **1.7.8** (frozen; last release) | `android/kaya/build.gradle.kts:67-68 (gone)` |
+| activity-compose | **1.9.3** | `android/kaya/build.gradle.kts:49` |
 | AGP / Kotlin | **8.7.3 / 2.0.21** | `android/build.gradle.kts` |
-| emulator system image | **`system-images;android-35;google_apis;arm64-v8a`** (Android 15) | `tools/android/run-emulator.py:114` |
+| emulator system image | **`system-images;android-35;google_apis;arm64-v8a`** (Android 15) | `tools/android/run-emulator.py:100` |
 | manifest theme | `@android:style/Theme.Material[.Light][.NoActionBar]`, day/night pair — **platform theme, not AppCompat, not a Material Components theme** | `android/kaya/src/main/res/values/themes.xml`, `values-night/themes.xml` |
 
 The three validation apps differ: the Rust guest app uses
@@ -322,7 +322,7 @@ what kaya draws today.
 
 `targetSdk = 35` **[MEASURED: android/rusthost/build.gradle.kts:15]**
 running on `system-images;android-35` **[MEASURED:
-tools/android/run-emulator.py:114]** is precisely the enforcement
+tools/android/run-emulator.py:100]** is precisely the enforcement
 combination: *"Apps are edge-to-edge by default on devices running
 Android 15 if the app is targeting Android 15 (API level 35)"*, the
 status bar is transparent, *"the top offset is disabled so content
@@ -552,7 +552,7 @@ short-circuits for promoted items precisely because *"a promoted
 primary is a real bar action — composed whenever the bar is"*. The
 menus scene promotes `File>Share`, then moves the hint to
 `Document>Publish` and asserts `expect_menu_symbol "Document>Publish"
-"copy"` on the bar button **[MEASURED: tools/scenes/menus.steps:73
+"copy"` on the bar button **[MEASURED: tools/scenes/menus.steps:60
 ("the primary hint moves from Share to Publish") and :79, plus the
 KayaCompose sources above]**. Since a merged node has ONE
 content-description list, adding "Save" alongside "done" yields

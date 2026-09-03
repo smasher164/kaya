@@ -7,36 +7,21 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE HARNESS LOSES LEGIBLY. Every step is entered with a CEILING, and
-# once a verdict is published the process leaves within the EXIT GRACE
-# whether or not the platform's exit path ever runs.
-#
-# The bug this replaces: a step's retry deadline is read only AFTER the
-# step returns, and every step blocks in a hop to the platform's UI
-# thread with no timeout of its own. A saturated app therefore printed
-# NOTHING — no verdict, no timeout sentence — until something outside
-# killed it. Measured on macOS, Linux, Windows and iOS 2026-08-24
-# (docs/measurements/choke-*-2026-08-24.txt); on the mac lane the
-# something is `timeout 120`, a KILL that takes the log with it.
-#
-# NO SCENE CAN FAIL THIS. A scene that wedges the UI thread would have
-# to wedge it on every platform at once and would then measure nothing
-# else, so — like the native-undo pair — a gate is the only wall
-# available.
-#
-# THE CLAUSES:
-#
+# THE HARNESS LOSES LEGIBLY: every step is entered with a CEILING, and a
+# published verdict leaves within the EXIT GRACE whether or not the
+# platform's exit path runs (CLAUDE.md's gate list; the four-platform
+# measurement is docs/measurements/choke-*-2026-08-24.txt). NO SCENE CAN
+# FAIL THIS — a wedge would have to happen on every platform at once.
 #   A  STATIC, all three harnesses: the same two numbers, an arm inside
 #      the script runner whose argument is the step (not a fixed
 #      string), a publish over the exit, an exit primitive on the fire
-#      path, and ONE sentence — compared flattened, so Rust's line
-#      continuations and Swift's and Kotlin's `+` splices are the same
-#      text or the gate says which file drifted.
+#      path, and ONE sentence compared FLATTENED, since Rust's line
+#      continuations and the interpreters' `+` splices spell it three
+#      ways.
 #   B  RUNTIME, macOS only: the interpreter's OWN watchdog source, cut
-#      out of swift/KayaSwiftUI.swift here and compiled with
-#      tools/checks/swiftui-wedge.swift, against a REAL wedged main
-#      thread. Clause A is what says the watchdog is wired into the
-#      step loop; this is what says it fires.
+#      out here and compiled with tools/checks/swiftui-wedge.swift
+#      against a REAL wedged main thread. A says the watchdog is wired
+#      into the step loop; B says it fires.
 
 import os
 import platform
@@ -207,23 +192,16 @@ def check(harness, swiftui, compose):
                            f"the other harnesses carry — one wedge "
                            f"reads one way everywhere. Wanted: {want!r}")
 
-    # A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH. Android's
-    # two dialog arms retried on the generic step deadline, which is the
-    # budget for an assertion waiting on a FRAME — and DocumentsUI is
-    # another process, whose COLD start the FIRST dialog in a scene pays
-    # while every later one is warm. Measured 2026-08-30
-    # (docs/traps.md): save-jvm's picker was Displayed +4s603ms and
-    # a11y-readable at 6983ms, 511ms past the deadline, while the two
-    # save panels after it took 160ms and 74ms. NO SCENE CAN HOLD THIS —
-    # the leg is green whenever the emulator is quiet, so it fails only
-    # under a full matrix and only for whichever dialog expect happens
-    # to be first in the .steps file.
+    # A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH: DocumentsUI
+    # is another process, and the FIRST dialog in a scene pays its COLD
+    # start while every later one is warm (measured 2026-08-30,
+    # docs/traps.md). NO SCENE CAN HOLD THIS — the leg is green whenever
+    # the emulator is quiet, so it fails only under a full matrix and
+    # only for whichever dialog expect is first in the .steps file.
     compose_text = texts.get("KayaCompose.kt")
     if compose_text is not None:
         # Each arm's own block, so a sibling arm's extension cannot
-        # answer for a missing one — the block reader
-        # check-canvas-blit's first draft got wrong by stopping at the
-        # first bracket it found.
+        # answer for a missing one.
         arm_starts = [(m.start(), m.group(1))
                       for m in re.finditer(r'^ {20}"(\w+)" ->',
                                            compose_text, re.M)]

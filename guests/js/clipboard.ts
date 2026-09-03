@@ -1,15 +1,5 @@
-// The clipboard conformance scene, JS port — one clip in several
-// representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md).
-//
-// Assertions cross a process boundary: a FOREIGN tool seeds and reads the
-// clipboard, because a check where kaya reads what kaya wrote parses its
-// own malformed header happily. The custom format is the one exception (no
-// stock tool writes an app-defined type), and the image is asserted as a
-// DECODED SIZE, never bytes — every host re-encodes freely.
-//
-// Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
-// contract in tools/scenes/clipboard.steps.
+// The clipboard conformance scene (tools/scenes/clipboard.steps): a FOREIGN
+// tool seeds and reads, because kaya reading its own bytes proves nothing.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,16 +9,12 @@ import * as kaya from "kaya-gui";
 
 const app = new kaya.App();
 
-// Guest and interpreter compute this identically, with no runner
-// involvement; the pid keeps parallel legs from colliding. `os.tmpdir()`
-// and NEVER `TMPDIR` — see docs/traps.md, the POSIX-spelling trap that
-// wrote a guest's files to the root of the current drive on Windows.
+// `os.tmpdir()` and NEVER `TMPDIR` — docs/traps.md, the POSIX-spelling
+// trap that wrote to the root of a Windows drive.
 const sceneDir = join(tmpdir(), `kaya-clip-${process.pid}`);
 mkdirSync(sceneDir, { recursive: true });
 
-// A real encoded 4x4 PNG, spelled out rather than generated: the scene
-// asserts "4x4" through a foreign decoder. Written to disk for the
-// seeding tool AND handed to copy() as bytes.
+// A real 4x4 PNG: the scene asserts "4x4" through a FOREIGN decoder.
 const PIXEL_PNG = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // signature
   0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -42,13 +28,9 @@ const PIXEL_PNG = new Uint8Array([
   0x44, 0xae, 0x42, 0x60, 0x82, // IEND + crc
 ]);
 
-// Reverse-DNS and space-free: this id reaches every platform's own
-// registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 target atom,
-// an Android MIME type).
+// Reverse-DNS and space-free: it reaches every registry VERBATIM.
 const NOTE_ID = "dev.kaya/note";
-// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and \\
-// with no \" (crates/kaya/src/harness.rs), so a quoted byte could not be
-// spelled in the expectation.
+// NO QUOTES IN THE PAYLOAD: the step grammar has no \" escape.
 const NOTE_BYTES = new TextEncoder().encode("note=1");
 
 writeFileSync(join(sceneDir, "pixel.png"), PIXEL_PNG);
@@ -56,15 +38,12 @@ writeFileSync(join(sceneDir, "pasted.txt"), "pasted bytes", { encoding: "utf-8" 
 
 function copyRich(): void {
   // One clip, four representations; kaya derives none from any other.
-  // Wire order is kaya's.
   kaya.copy({ text: "kaya clip", html: "<b>kaya</b> clip", image: PIXEL_PNG, custom: { [NOTE_ID]: NOTE_BYTES } });
   status.set("copied");
 }
 
 function answered(clip: kaya.Clip | null): void {
-  // Empty is the universal no; its four causes (denied, unfocused,
-  // absent, nothing accepted) are not distinguishable — the platforms
-  // decline to say, so the guest does not guess.
+  // EMPTY IS THE UNIVERSAL NO; no platform says which cause.
   if (clip === null) {
     status.set("empty");
     return;
@@ -82,8 +61,7 @@ function answered(clip: kaya.Clip | null): void {
     return;
   }
   if (clip instanceof kaya.Representation.Image) {
-    // Straight back out: the assertion that matters is a foreign
-    // decoder's size, not a byte count.
+    // A foreign DECODER's size: byte counts differ per host.
     kaya.copy({ image: clip.bytes });
     status.set("image");
     return;
@@ -93,10 +71,7 @@ function answered(clip: kaya.Clip | null): void {
     status.set("files none");
     return;
   }
-  // A pasted file is a picked file arriving through a second door, so it
-  // is redeemed the same way (guests/js/filedialog.ts): the read happens
-  // here and the ANSWER is posted, which is what the python version's
-  // thread posts.
+  // A pasted file is redeemed like a picked one (guests/js/filedialog.ts).
   const file = files[0]!;
   const name = file.name;
   let text: string;
@@ -110,8 +85,7 @@ function answered(clip: kaya.Clip | null): void {
   status.set("reading");
 }
 
-// Each read is a promise of the clip; the continuation after the await
-// is its own transaction (docs/js-plan.md §4).
+// The continuation after an await is its own transaction (js-plan §4).
 async function readCustom(): Promise<void> {
   answered(await kaya.readClipboard([NOTE_ID]));
 }
@@ -134,9 +108,7 @@ function pasted(clip: kaya.Clip | null): void {
 }
 
 function rowPasted(row: kaya.RowHandle<string>, clip: kaya.Clip | null): void {
-  // The copy's own row rides in front of the payload, as a handle;
-  // printing its key is what proves the paste dispatched as an INSTANCE
-  // occurrence.
+  // Printing the key proves this dispatched as an INSTANCE occurrence.
   if (clip instanceof kaya.Representation.Text) rowStatus.set(`row ${row.key} pasted ${clip.text}`);
   else rowStatus.set(`row ${row.key} pasted ${String(clip)}`);
 }
@@ -168,13 +140,10 @@ app.window({ title: "clipboard" }, () => {
     // Declares what it takes, so a paste lands in the hook.
     rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).onPaste(pasted);
     rich.a11yId("rich"); // entry#0
-    // Declares nothing, so the platform inserts and the field's ordinary
-    // change path reports it.
+    // Declares nothing, so the platform inserts and onChange reports.
     plain = kaya.entry().a11yId("plain"); // entry#1
 
-    // A STAMPED paste target: the accept list comes from the TEMPLATE
-    // (docs/tpl-props-plan.md P1) and the paste arrives as an INSTANCE
-    // occurrence carrying the copy's key.
+    // On a STAMPED copy the accept list rides the TEMPLATE.
     kaya.label({ bind: rowStatus }).a11yId("row-status"); // label#1
     const rows = kaya.collection();
     for (const _row of rows) {

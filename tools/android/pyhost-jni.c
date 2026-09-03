@@ -1,11 +1,6 @@
-/* The Android python-host shim (docs/python-mobile-plan.md §D4): one
- * JNI entry that runs CPython to completion on the calling thread —
- * the Kotlin shell calls it from a background Thread it started, so
- * the UI thread stays the host's. Signal handlers off (the worker is
- * Python's main thread, docs/probes/mobilepkg-cpython-2026.md §7).
- * Built per-ABI by tools/android/run-emulator.py with the NDK clang,
- * linked against libpython3.15.so; loading libkaya_pyhost.so pulls
- * libpython in by DT_NEEDED from the same jniLibs namespace. */
+/* The Android python-host shim (docs/python-mobile-plan.md §D4): one JNI
+ * entry running CPython to completion on the CALLING thread, so the UI
+ * thread stays the host's. Signal handlers off. */
 #include <Python.h>
 #include <jni.h>
 #include <stdio.h>

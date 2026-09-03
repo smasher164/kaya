@@ -476,7 +476,7 @@ kaya already has the three verbs a confirmation needs — `expect_alert "<title>
 `alert_choose <0|1|cancel>`, `expect_alerts <n>` — exercised by
 `tools/scenes/confirm.steps`. Their implementations reveal the constraint:
 
-**SwiftUI** (`swift/KayaSwiftUI.swift:4396`) reads the real presented object:
+**SwiftUI** (`swift/KayaSwiftUI.swift:3993`) reads the real presented object:
 
 ```swift
 return kayaLiveAlertController?.title ?? ""
@@ -536,7 +536,7 @@ measured charge on each.
 kaya's window vocabulary **already ratified this territory**, and a mobile
 `dirty` on the WINDOW tier collides with two standing rules:
 
-- `veto_close` (`crates/kaya/src/spec.rs:209`) already carries the verdict:
+- `veto_close` (`crates/kaya/src/spec.rs:176`) already carries the verdict:
   *"Inert on mobile by physics: no chrome close, and back is not close."*
 - DESIGN.md, Presentation contexts: *"**Back never touches windows.** At the
   primary surface's root the back gesture belongs to the system (leave the app);

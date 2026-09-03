@@ -1,6 +1,4 @@
-// The dirty-state conformance scene, C# port — unsaved work as window
-// chrome (docs/dirty-plan.md). kaya never infers it, so the app declares
-// it on both edges. See guests/rust/dirty.rs and tools/scenes/dirty.steps.
+// The dirty scene, C# port — guests/rust/dirty.rs, tools/scenes/dirty.steps.
 
 static class DirtyScene
 {
@@ -14,8 +12,7 @@ static class DirtyScene
             doc = tx.Signal("notes");
             status = tx.Signal("saved");
 
-            // dirty: and vetoClose: are orthogonal. No dirty: here: the
-            // clean state is the scene's first assertion.
+            // No dirty: here — the clean state is the first assertion.
             tx.Window(title: "dirty", vetoClose: true, onCloseRequested: t =>
             {
                 t.ShowAlert(
@@ -24,9 +21,8 @@ static class DirtyScene
                     action0: "Discard", cancel: "Keep Editing",
                     onResult: (inner, choice) =>
                     {
-                        // The scene always answers cancel: this arm
-                        // ABORTS if it ever runs (docs/traps.md, "An app
-                        // can VETO a close but cannot AGREE to one").
+                        // Aborts if it ever runs (docs/traps.md, an app can VETO a
+                        // close but cannot AGREE to one).
                         if (choice == KayaWire.AlertChoiceCancel)
                             inner.Write(status, "kept editing");
                         else

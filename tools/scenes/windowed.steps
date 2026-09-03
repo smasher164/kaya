@@ -1,14 +1,8 @@
-# The windowed conformance scene (docs/virtualization-plan.md §6.3):
-# the ONE scene that exercises a real narrowed band on all five lanes,
-# because its guest is compiled (guests/rust/windowed.rs) where
-# ledger/varied are Python and stop at the desktops. 400 uniform rows
-# in a grown table overflow every tier's band; the guest writes no
-# windowing code.
-#
-# expect_window says the FIRST VISIBLE row and the DECLARED TOTAL,
-# both data (ruled 2026-08-25); after scroll_to_row the first visible
-# row IS the scrolled-to row. Every number here is data; the band's
-# width belongs to the core's tests and the table-tier probe.
+# docs/virtualization-plan.md §6.3: the ONE scene exercising a real
+# narrowed band on all five lanes, because its guest is compiled where
+# ledger/varied are Python and stop at the desktops. Every number here
+# is DATA — the band's width belongs to the core's tests and the
+# table-tier probe.
 expect_columns column#0 "Name|Size"
 expect_column_edges column#0 2
 # The whole collection is data behind a band of widgets.

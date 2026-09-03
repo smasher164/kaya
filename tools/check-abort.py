@@ -7,13 +7,11 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The uniform-abort gate: every binding's negative test that a handler
-# abort rolls the model mirror back, ships nothing, and lets the app
-# continue. Headless — the core loop is never entered.
-#
+# Uniform abort semantics: every binding's negative test that a handler
+# abort rolls the model mirror back and ships nothing. Headless.
 # Not here: Rust's pin is in `cargo test -p kaya`, Python's in
-# kaya_app_checks.py, JS's in bindings/js/kaya_app_checks.ts (the
-# js-app-checks gate), and C has no mirror to roll back.
+# kaya_app_checks.py, JS's in bindings/js/kaya_app_checks.ts, and C has
+# no mirror to roll back.
 
 import glob
 import os
@@ -45,12 +43,10 @@ def step(name, argv, log, *, env=ENV, cwd=ROOT):
 
 
 with scratch_dir("check-abort-") as tmp:
-    # Go: the in-package test (also pins Build-in-Build misuse and the
-    # derived-registration non-leak).
     step("go", ["go", "test", "dev.kaya/bindings/go"], tmp / "go.log")
 
-    # Swift: one module with the bindings, so internal mirrors are
-    # assertable.
+    # Built as ONE module with the bindings: the internal mirrors are
+    # assertable only from inside it.
     find = subprocess.run(["xcrun", "--find", "swiftc"], env=NO_XCODE,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           text=True, check=False)
@@ -70,11 +66,9 @@ with scratch_dir("check-abort-") as tmp:
          tmp / "swift.log", env=NO_XCODE)
     step("swift", [str(tmp / "swift-abort")], tmp / "swift.log")
 
-    # C#: the KAYA_CHECK=abort branch of the guest binary. Built
-    # UNCONDITIONALLY like every other arm: an [ -f ] guard ran a dll
-    # older than the edited binding and called it green (measured
-    # 2026-08-22, the TX 45 adaptation — invariant 4's exact shape;
-    # dotnet's own incremental build makes the unconditional call cheap).
+    # Built UNCONDITIONALLY, like every arm here: an `[ -f ]` guard ran a
+    # dll older than the edited binding and called it green (2026-08-22,
+    # invariant 4). dotnet's incremental build makes it cheap.
     step("csharp-build",
          ["dotnet", "build", "--nologo", "-v", "q",
           "guests/csharp/kaya-guests.csproj"], tmp / "cs.log")
@@ -82,7 +76,7 @@ with scratch_dir("check-abort-") as tmp:
          ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
          tmp / "cs.log", env=dict(ENV, KAYA_CHECK="abort"))
 
-    # Java: pure JVM against the ring stub — no natives, so mutating
+    # Pure JVM against the ring stub — no natives, so mutating
     # transactions always abort (AbortCheck.java's header has the shape).
     shutil.rmtree(tmp / "java", ignore_errors=True)
     step("java-build",
@@ -94,7 +88,6 @@ with scratch_dir("check-abort-") as tmp:
     step("java", ["java", "-cp", str(tmp / "java"), "AbortCheck"],
          tmp / "java.log")
 
-    # OCaml: the checks/ executable beside the binding.
     step("ocaml-build",
          ["dune", "build", "--root", ".",
           "./bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
@@ -102,17 +95,12 @@ with scratch_dir("check-abort-") as tmp:
          ["dune", "exec", "--root", ".",
           "bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
 
-    # Haskell: the kaya-abort-check executable beside the scene guests.
-    # This gate builds in its OWN build tree, never the shared
-    # dist-newstyle: the repo is mounted into the linux container, so
-    # wiping the shared one destroys the docker lane's freshly built
-    # Haskell guests mid-run (caught by the matrix, 2026-07-24).
-    #
-    # Inside that private tree the component's build directory goes EVERY
-    # run, so the library and the executable genuinely recompile and LINK
-    # here: cabal skips a link whose inputs are unchanged and trusts its
-    # plan cache over the artifact's existence, so neither deleting the
-    # binary nor -fforce-recomp forces it (docs/traps.md).
+    # A PRIVATE build tree, never the shared dist-newstyle: the repo is
+    # mounted into the linux container, so wiping the shared one destroys
+    # the docker lane's Haskell guests mid-run (2026-07-24). The build
+    # directory goes every run because cabal trusts its plan cache over
+    # the artifact's existence (docs/traps.md: An ad-hoc `cabal build`
+    # poisons the shared dist-newstyle for the whole mac lane).
     hs_dist = ROOT / "target/hs-abort-dist"
     for stale in glob.glob(str(hs_dist / "build/*/*/kaya-guests-0")):
         shutil.rmtree(stale, ignore_errors=True)
@@ -129,9 +117,9 @@ with scratch_dir("check-abort-") as tmp:
         text=True, check=False)
     step("haskell", [where.stdout.strip()], tmp / "hs.log")
 
-    # Haskell's mirror-read guard is the Build/Tpl monad wall itself,
-    # pinned by a must-not-compile fixture. The check insists on the TYPE
-    # error — a syntax error must not pass as "didn't compile".
+    # The Build/Tpl monad wall, pinned by a must-not-compile fixture. The
+    # TYPE error is demanded: a syntax error must not pass as "didn't
+    # compile".
     with (tmp / "hs-guard.log").open("w", encoding="utf-8") as out:
         guard = subprocess.run(
             ["ghc", "-fno-code", "-XGHC2021", "-ibindings/haskell",

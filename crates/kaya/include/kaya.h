@@ -244,15 +244,10 @@
 /**
  * The three text-range records (docs/ranges-plan.md). Bodies:
  * HIGHLIGHT_RANGES { u64 widget; u32 count; u32 reserved; Values of
- * 2*count I64 offsets — start then end }; SELECT_RANGE and
- * REVEAL_RANGE { u64 widget; u64 start; u64 end }.
- *
- * THE OFFSETS ARE UTF-8 BYTE OFFSETS into the widget's current text, on
- * this channel and in every binding. Both ends must be inside the text
- * and on a code-point boundary; the core refuses otherwise, naming the
- * character it splits. An end inside a GRAPHEME cluster is legal — the
- * platforms disagree about what a grapheme is — and a platform may
- * widen what it paints to the whole cluster.
+ * 2*count I64 offsets — start then end }; SELECT_RANGE and REVEAL_RANGE
+ * { u64 widget; u64 start; u64 end }. THE OFFSETS ARE UTF-8 BYTE OFFSETS
+ * into the widget's current text, both ends inside it and on a code-point
+ * boundary; an end inside a GRAPHEME cluster is legal and may be widened.
  */
 #define KAYA_TX_HIGHLIGHT_RANGES 38
 
@@ -263,17 +258,10 @@
 /**
  * Request the platform's save dialog over a live window (0 = primary).
  * Body: { u64 window; u64 dialog; Str suggested_name; Values filters —
- * the picker's alternating label/extensions pairs }.
- *
- * THE PICKER'S GRAMMAR AND THE PICKER'S ANSWER: dialog ids come out of
- * the same guest-chosen space, one dialog of either kind may be live per
- * process, and the result arrives as a FILE_DIALOG_RESULT occurrence
- * carrying one file (or none, for cancel) whose id retires there.
- *
- * THE HANDLE IT ANSWERS WITH OPENS WITH CREATE (docs/save-plan.md D1):
- * the open succeeds on every platform and FILE_MODE_WRITE yields an
- * empty file. There is no FILE_MODE_CREATE, deliberately — creation
- * belongs to the destination the dialog promised, not to the caller.
+ * the picker's alternating label/extensions pairs }. THE PICKER'S GRAMMAR
+ * AND THE PICKER'S ANSWER: one dialog of either kind live per process, and
+ * a FILE_DIALOG_RESULT carrying one file or none. ITS HANDLE OPENS WITH
+ * CREATE (docs/save-plan.md D1); there is no FILE_MODE_CREATE.
  */
 #define KAYA_TX_SHOW_SAVE_DIALOG 41
 
@@ -378,15 +366,12 @@
 #define KAYA_SORT_DESC 1
 
 /**
- * Host capability bits, queryable any time (like kaya_spec_hash).
- * Platform-static per build: the phones' systems own surface geometry,
- * so KAYA_CAP_AUX_WINDOWS is unset there and create_window is a
- * deterministic scene error (DESIGN.md, Presentation contexts).
- *
- * A LITERAL, because cbindgen turns this line into the header's
- * `#define` and a `#define` naming a Rust path is a header no C
- * compiler reads. The static assert under `kaya_capabilities` is what
- * keeps the literal honest.
+ * Host capability bits, queryable any time. Platform-static per build:
+ * the phones' systems own surface geometry, so KAYA_CAP_AUX_WINDOWS is
+ * unset there and create_window is a deterministic scene error (DESIGN.md,
+ * Presentation contexts). A LITERAL, because cbindgen turns this line into
+ * the header's `#define` and one naming a Rust path is unreadable C; the
+ * static assert under `kaya_capabilities` keeps it honest.
  */
 #define KAYA_CAP_AUX_WINDOWS 1
 
@@ -886,15 +871,11 @@
 #define KAYA_ROLE_CAPTION 4
 
 /**
- * The SEMANTIC ICON VOCABULARY (spec enum "symbol";
- * docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
- * A closed set of CONCEPTS: each backend maps a value to its own
- * platform's symbol set. Both the menu-item slot (KAYA_MPROP_SYMBOL)
- * and the section slot (KAYA_SPROP_SYMBOL) take these values.
- *
- * APPEND-ONLY. These numbers are wire facts in eight generated bindings
- * and every backend's glyph table; renumbering silently redraws shipped
- * menus. New concepts start at 21.
+ * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
+ * D6). A closed set of CONCEPTS each backend maps to its own platform's
+ * symbol set; both KAYA_MPROP_SYMBOL and KAYA_SPROP_SYMBOL take them.
+ * APPEND-ONLY: these numbers are wire facts in eight generated bindings
+ * and every backend's glyph table. New concepts start at 21.
  */
 #define KAYA_SYMBOL_ADD 1
 
@@ -997,12 +978,10 @@ typedef struct KayaRingInfo {
 } KayaRingInfo;
 
 /**
- * ONE REPRESENTATION, as C sees it: the kind names which arm, and
- * exactly the fields that arm uses are read. `text` carries text and
- * html; `id` plus `bytes`/`len` carry a custom format; `bytes`/`len`
- * alone carry an image; `locators`/`names`/`count` carry files, in the
- * picker's own parallel-array shape.
- *
+ * ONE REPRESENTATION, as C sees it: the kind names which arm, and exactly
+ * that arm's fields are read. `text` carries text and html; `id` plus
+ * `bytes`/`len` a custom format; `bytes`/`len` alone an image;
+ * `locators`/`names`/`count` files, in the picker's parallel-array shape.
  * A STRUCT AND NOT NINE PARAMETERS TWICE: the read's answer and a paste
  * carry the identical payload.
  */
@@ -1052,11 +1031,10 @@ typedef struct KayaRecordHeader {
 } KayaRecordHeader;
 
 /**
- * The button-clicked record as it appears on the wire. `id` is a widget
- * id when `path_len` is 0 and a template node id otherwise, with
- * `path_len` key values — the copy's key path, outermost first, each
- * encoded as { u32 type; u32 len; payload padded to 8 } — following the
- * fixed part.
+ * The button-clicked record on the wire. `id` is a widget id when
+ * `path_len` is 0 and a template node id otherwise, followed by `path_len`
+ * key values — the copy's key path, outermost first, each encoded as
+ * { u32 type; u32 len; payload padded to 8 }.
  */
 typedef struct KayaRecordButtonClicked {
   struct KayaRecordHeader header;
@@ -1067,13 +1045,10 @@ typedef struct KayaRecordButtonClicked {
 
 /**
  * The presentation-side functions handed to a guest-language backend.
- * next_commands blocks until a transaction resolves, then borrows out
- * that batch's apply-op records (KAYA_APPLY_*): it writes a core-owned
- * pointer and returns the byte length, 0 (pointer NULLed) on shutdown.
- * blob_data resolves a blob value's u64 handle to (pointer, length),
- * NULL for a dead handle. BOTH BORROWS DIE AT THE NEXT next_commands
- * call — the batch's bytes and its blob table together — so fetch and
- * decode within the batch. THERE IS NO SIZE CAP on either.
+ * next_commands blocks until a transaction resolves, then borrows out that
+ * batch's apply-op records; blob_data resolves a blob handle to (pointer,
+ * length), NULL for a dead one. BOTH BORROWS DIE AT THE NEXT next_commands
+ * call, so fetch and decode within the batch. THERE IS NO SIZE CAP.
  */
 typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
@@ -1156,21 +1131,14 @@ typedef struct KayaHostApi {
   void (*emit_clipboard_result)(uint64_t, const struct KayaRepresentation*);
   void (*emit_pasted)(const uint8_t*, uintptr_t, const struct KayaRepresentation*);
   /**
-   * THE UNDO TIER (docs/undo-plan.md §3). `undo_route`/`redo_route`
-   * take the window, the focused widget (0 for none) and A4's one named
-   * query (the focused field's own CanUndo), and answer 0 nothing / 1
-   * the field's native stack / 2 the core's ledger. Asked once and used
-   * twice — enablement and activation are the same call — so a greyed
-   * Edit>Undo and an inert one cannot drift.
-   *
-   * `undo`/`redo` return nothing: the inverse's ops reach the backend
-   * through next_commands like any other apply, and the occurrence
-   * reaches the app through the sink.
-   *
-   * `note_native_undo` is the reconciliation sample after a NATIVE undo
-   * the backend routed — the field, the text the walk landed on, and
-   * whether it can still undo. The text_changed the same undo provokes
-   * carries the ledger-quiet flag, so one change is reported once.
+   * THE UNDO TIER (docs/undo-plan.md §3). `undo_route`/`redo_route` take
+   * the window, the focused widget (0 for none) and the field's own
+   * CanUndo, and answer 0 nothing / 1 the field's native stack / 2 the
+   * core's ledger — asked once and used twice, so a greyed Edit>Undo and
+   * an inert one cannot drift. `undo`/`redo` return nothing.
+   * `note_native_undo` is the reconciliation sample after a NATIVE undo:
+   * the same undo's text_changed carries the ledger-quiet flag, so one
+   * change is reported once.
    */
   uint32_t (*undo_route)(uint64_t, uint64_t, uint8_t);
   uint32_t (*redo_route)(uint64_t, uint64_t, uint8_t);
@@ -1206,14 +1174,11 @@ typedef struct KayaHostApi {
    */
   void (*fault_watch)(void);
   /**
-   * ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing
-   * and never app surface. `window_moved` is the report that narrows a
-   * For's band — before the first one the band is unbounded and every
-   * row realizes; `rows_measured` is the verify half, one extent per
-   * realized row; `scroll_to_row_*` map a row KEY to its index in the
-   * collection's current order (KAYA_ROW_NOT_FOUND for no answer), one
-   * entry per key type; `window_geometry` reads the band, the total
-   * and the arithmetic the core owns.
+   * ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing and
+   * never app surface. `window_moved` narrows a For's band (unbounded
+   * until the first report); `rows_measured` is the verify half;
+   * `scroll_to_row_*` map a row KEY to its index, one entry per key type
+   * (KAYA_ROW_NOT_FOUND for no answer); `window_geometry` reads the band.
    */
   void (*window_moved)(uint64_t, uint64_t, uint64_t);
   void (*rows_measured)(uint64_t, uint64_t, const double*, uintptr_t);
@@ -1237,15 +1202,12 @@ typedef struct KayaHostApi {
   void (*presentation)(double, bool);
   uintptr_t (*canvas_probe)(uint64_t, uint8_t*, uintptr_t);
   /**
-   * THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` is
-   * the report that says what layout assigned one canvas, in points —
-   * window_moved's shape, one widget over, and the report the stretch
-   * defect was missing. `frame` is the platform's frame drive at its
-   * OWN timestamp; `harness_frame` is the deterministic step a scene
-   * verb advances, kept in the core so three harnesses share one
-   * number. `canvas_raster_shape` is the harness's read of WHICH size
-   * the raster is, which is the only canvas observable a size policy
-   * can move.
+   * THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` reports
+   * what layout assigned one canvas, in points. `frame` is the platform's
+   * frame drive at its OWN timestamp; `harness_frame` is the
+   * deterministic step a scene verb advances, kept in the core so three
+   * harnesses share one number. `canvas_raster_shape` is the harness's
+   * read of WHICH size the raster is.
    */
   void (*canvas_track)(uint64_t, double, double);
   /**
@@ -1308,18 +1270,10 @@ uint64_t kaya_blob_register(const uint8_t *bytes, uintptr_t len);
 /**
  * Open an asset by name and get the handle its bytes are held under.
  * `name` is a relative path under the asset root, spelled with `/`, as
- * UTF-8 of `name_len` bytes — not NUL-terminated, so every binding
- * hands its own string type's bytes without a copy through C.
- *
- * ZERO IS THE MISS, and a value rather than a panic on purpose: a panic
- * inside an `extern "C"` frame is an uncatchable process abort in every
- * guest language (docs/traps.md). The BINDING raises in its own idiom,
- * carrying the sentence `kaya_asset_why_not` hands it.
- *
- * READ-ONLY, STRUCTURALLY: there is no mode argument, so the
- * check-file-modes bug class cannot exist on this surface at all.
- *
- * EACH CALL READS. No cache, no watch, no reload (wall 4).
+ * UTF-8 of `name_len` bytes — not NUL-terminated. ZERO IS THE MISS, a
+ * value rather than a panic, because a panic in an `extern "C"` frame is
+ * an uncatchable abort (docs/traps.md); the BINDING raises with
+ * `kaya_asset_why_not`'s sentence. No mode argument; each call reads.
  */
 uint64_t kaya_asset_open(const uint8_t *name, uintptr_t name_len);
 
@@ -1340,15 +1294,12 @@ const uint8_t *kaya_asset_bytes(uint64_t handle, uintptr_t *len);
 uintptr_t kaya_asset_len(uint64_t handle);
 
 /**
- * THE BLOB REDEMPTION: register this asset's bytes into the pending
- * table and get the handle a record will carry. The `Arc` is cloned,
- * not the bytes, which is what makes this a different thing from
- * `bytes()` plus `kaya_blob_register`.
- *
- * The handle obeys the pending table's lifetime (wall 5): valid for
- * exactly one submit, drained whether referenced or not. 0 for a dead
- * asset handle, so a redemption of something never opened cannot
- * register empty bytes that would sail through a lowering.
+ * THE BLOB REDEMPTION: register this asset's bytes into the pending table
+ * and get the handle a record will carry. The `Arc` is cloned, not the
+ * bytes, which is what makes this different from `bytes()` plus
+ * `kaya_blob_register`. The handle obeys the pending table's lifetime; 0
+ * for a dead asset handle, so a redemption of something never opened
+ * cannot register empty bytes that would sail through a lowering.
  */
 uint64_t kaya_asset_blob(uint64_t handle);
 
@@ -1360,17 +1311,12 @@ uint64_t kaya_asset_blob(uint64_t handle);
 void kaya_asset_release(uint64_t handle);
 
 /**
- * Why `kaya_asset_open(name)` would answer 0 — the whole sentence, in
- * UTF-8, written into `out` and truncated to `cap`; the return value is
- * the length the sentence actually has, so a caller that got a short
- * buffer can size one and ask again.
- *
- * An EMPTY sentence (return 0) means the asset resolves. That is what
- * makes this total rather than a failure path.
- *
- * THE PROSE IS NOT WRITTEN HERE. crates/kaya/src/assets.rs's
- * `asset_why_not` is the one author, so every binding's raise is the
- * same bytes and a scene can freeze them once.
+ * Why `kaya_asset_open(name)` would answer 0 — the whole sentence in UTF-8,
+ * written into `out` and truncated to `cap`, returning the length it really
+ * has so a caller can size a buffer and ask again. An EMPTY sentence
+ * (return 0) means the asset resolves, which is what makes this total.
+ * THE PROSE IS NOT WRITTEN HERE: crates/kaya/src/assets.rs's
+ * `asset_why_not` is the one author, so a scene can freeze the bytes once.
  */
 uintptr_t kaya_asset_why_not(const uint8_t *name, uintptr_t name_len, uint8_t *out, uintptr_t cap);
 
@@ -1408,26 +1354,13 @@ void kaya_occurrence_blob_release(uint64_t handle);
 void kaya_submit(const uint8_t *records, uintptr_t len);
 
 /**
- * Function-floor consumption: block until the next occurrence and hand
- * back one complete record — header included, exactly the ring's bytes.
- * Writes the borrowed pointer to `record` and returns its size, or
- * `KAYA_OCCURRENCE_SHUTDOWN` when the core has shut down, or
- * `KAYA_OCCURRENCE_WOKEN` when a background thread rang the doorbell for
- * work of the caller's own. Call from a single app thread, and do not
- * mix with direct ring access.
- *
- * BOTH SENTINELS NULL THE POINTER rather than leaving it as it was: a
- * caller that forgets the WOKEN case would otherwise re-parse the
- * buffer it still held and dispatch the PREVIOUS occurrence a second
- * time, silently.
- *
- * THE CORE OWNS THE BYTES, and there is no size cap. Copying into a
- * caller-sized buffer aborted the process from inside an `extern "C"`
- * frame above 208 bytes of payload (docs/traps.md); a limit on how much
- * content may reach a guest is not something kaya gets to have.
- *
- * The bytes stay valid until this thread's NEXT call — copy out what you
- * keep, exactly as `kaya_blob_data` and `kaya_occurrence_blob` ask.
+ * Function-floor consumption: block until the next occurrence and hand back
+ * one complete record — header included, the ring's own bytes — or
+ * `KAYA_OCCURRENCE_SHUTDOWN` / `KAYA_OCCURRENCE_WOKEN`. One app thread, not
+ * mixed with direct ring access. BOTH SENTINELS NULL THE POINTER, so a
+ * forgotten WOKEN cannot re-dispatch the last occurrence; THE CORE OWNS THE
+ * BYTES, no size cap, until this thread's NEXT call (docs/traps.md, "A
+ * caller-sized occurrence buffer").
  *
  * # Safety
  * `record` must be a valid place to write a pointer.
@@ -1436,16 +1369,10 @@ uintptr_t kaya_next_occurrence(const uint8_t **record);
 
 /**
  * Wake this process's app thread from wherever it is parked waiting for
- * occurrences. SAFE FROM ANY THREAD — the only entry here that is.
- *
- * In the sugar languages the BINDING calls it, inside its post, and a
- * guest never names it. A C guest has no binding, so it owns its queue
- * and calls this itself.
- *
- * EITHER WAY, CLOSURES DO NOT CROSS THIS ABI: all the core owes a
- * posting thread is the wake-up.
- *
- * Calling it with nothing queued is harmless.
+ * occurrences. SAFE FROM ANY THREAD — the only entry here that is, and
+ * harmless with nothing queued. In the sugar languages the BINDING calls it
+ * inside its post; a C guest owns its queue and calls it itself. CLOSURES
+ * DO NOT CROSS THIS ABI: all the core owes a posting thread is the wake-up.
  */
 void kaya_wake(void);
 
@@ -1457,18 +1384,11 @@ void kaya_wake(void);
 uint64_t kaya_stalled_ms(void);
 
 /**
- * The latched fault's sentence — the whole thing, in UTF-8, written
- * into `out` and truncated to `cap`; the return value is the length the
- * sentence actually has, so a caller that got a short buffer can size
- * one and ask again. `kaya_asset_why_not`'s shape exactly.
- *
- * ZERO MEANS NO FAULT, which is what makes this a poll rather than a
- * failure path: the interpreter harnesses ask once per step, and a
- * scene whose transaction died inside `Scene::apply` then reddens
- * carrying that sentence instead of waiting out every remaining
- * expect (crates/kaya/src/fault.rs).
- *
- * A PEEK, NOT A TAKE: a harness asks again after its last step, and a
+ * The latched fault's sentence — the whole thing in UTF-8, written into
+ * `out` and truncated to `cap`, returning the length it really has;
+ * `kaya_asset_why_not`'s shape exactly. ZERO MEANS NO FAULT, which makes
+ * this a poll rather than a failure path (crates/kaya/src/fault.rs), and it
+ * is A PEEK, NOT A TAKE: a harness asks again after its last step and a
  * consuming read would let that second look report a green leg.
  *
  * # Safety
@@ -1533,17 +1453,12 @@ void kaya_emit_section_selected(uint64_t window, uint64_t section);
 void kaya_emit_back_requested(uint64_t entry);
 
 /**
- * Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS
- * SAFE FROM ANY THREAD, alongside kaya_wake.
- *
- * Returns 0 on success and writes `out_fd` plus `out_seekable`; returns
- * the errno-shaped failure otherwise. The open is FALLIBLE in ways the
- * pick is not: no picker on any platform lets you request write, so a
- * read-only document refuses here.
- *
- * RESOLVE UNDER THE LOCK, RELEASE, THEN OPEN. Holding it across the open
- * would serialize every concurrent open and undo the parallelism the
- * guest created by spawning threads.
+ * Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS SAFE
+ * FROM ANY THREAD, alongside kaya_wake. Returns 0 on success and writes
+ * `out_fd` plus `out_seekable`, the errno-shaped failure otherwise: the
+ * open is FALLIBLE in ways the pick is not, since no picker lets you
+ * request write. RESOLVE UNDER THE LOCK, RELEASE, THEN OPEN — holding it
+ * across the open would serialize every concurrent open.
  */
 int32_t kaya_open_picked(uint64_t handle,
                          uint32_t mode,
@@ -1551,18 +1466,12 @@ int32_t kaya_open_picked(uint64_t handle,
                          uint32_t *out_seekable);
 
 /**
- * Presentation side: the file picker's one answer. `locators` and
- * `names` are parallel arrays of `count` NUL-terminated UTF-8 strings;
- * an EMPTY count is cancel, which every platform reports the same way
- * because none can confirm an empty selection.
- *
- * LOCATORS AND NOT PATHS: a locator is whatever the platform's picker
- * says a file IS. macOS and iOS answer with a filesystem path; Android
- * answers with a `content://` URI into a document provider that may not
- * be a filesystem at all.
- *
- * THE CORE MINTS THE HANDLES, not the backend: it wraps each locator in
- * the platform's source, registers it, and hands the guest integers.
+ * Presentation side: the file picker's one answer. `locators` and `names`
+ * are parallel arrays of `count` NUL-terminated UTF-8 strings; an EMPTY
+ * count is cancel. LOCATORS AND NOT PATHS: a locator is whatever the
+ * platform's picker says a file IS — a path on macOS and iOS, a
+ * `content://` URI on Android. THE CORE MINTS THE HANDLES, not the
+ * backend.
  *
  * # Safety
  * `locators` and `names` must each point to `count` valid
@@ -1574,13 +1483,10 @@ void kaya_emit_file_dialog_result(uint64_t dialog,
                                   uintptr_t count);
 
 /**
- * Presentation side: the save dialog's one answer, on the picker's
- * result grammar (docs/save-plan.md D2) — the occurrence, the live slot
- * and the retire gate are all the picker's.
- *
- * ONE LOCATOR, NOT AN ARRAY, and that is the type doing the work: no
- * platform's save dialog names two destinations. A NULL `locator` is
- * cancel.
+ * Presentation side: the save dialog's one answer, on the picker's result
+ * grammar (docs/save-plan.md D2) — the occurrence, the live slot and the
+ * retire gate are all the picker's. ONE LOCATOR, NOT AN ARRAY, and that is
+ * the type doing the work; a NULL `locator` is cancel.
  *
  * # Safety
  * `locator` and `name` must be valid NUL-terminated UTF-8 outliving the
@@ -1599,14 +1505,10 @@ void kaya_emit_save_dialog_result(uint64_t dialog, const char *locator, const ch
 void kaya_emit_clipboard_result(uint64_t request, const struct KayaRepresentation *rep);
 
 /**
- * Presentation side: content arriving at a widget because the user
- * pasted. `tag` is the widget's stored click tag — the same identity
- * bytes every other occurrence rides on, so a stamped row's paste needs
- * no second entry.
- *
- * A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE: `rep` must name a
- * representation. The empty answer belongs to the read, which asked and
- * may be refused.
+ * Presentation side: content arriving at a widget because the user pasted.
+ * `tag` is the widget's stored click tag, so a stamped row's paste needs no
+ * second entry. A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE: `rep`
+ * must name a representation; the empty answer belongs to the read.
  *
  * # Safety
  * `tag` must point to `tag_len` valid bytes and `rep` to a valid
@@ -1658,26 +1560,12 @@ void kaya_emit_toggled(const uint8_t *tag, uintptr_t tag_len, uint8_t checked);
 void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value);
 
 /**
- * Presentation side: emit an entry edit, exactly as a backend's change
- * handler would — `tag` is the tag bytes delivered with the entry's
- * CREATE record, `text`/`text_len` the field's current UTF-8 content.
- * Do not combine with kaya_run.
- *
- * THE LAST THREE ARGUMENTS ARE THE UNDO LEDGER'S (docs/undo-plan.md §3),
- * and they ride HERE rather than on a second entry point because the
- * alternative was two ABI crossings per keystroke to carry facts the
- * backend is already standing on:
- *
- * - `window`: which surface's ledger this run of typing belongs to. The
- *   core cannot derive it (a scene keeps no widget-to-window map).
- * - `focused`: whether the field this event names holds focus. An event
- *   on an UNFOCUSED field closes the episode as it stands. A backend
- *   that cannot tell passes 0.
- * - `quiet`: LEDGER-QUIET. A backend that ROUTES a native undo reports
- *   it once through `kaya_note_native_undo`; the ordinary text_changed
- *   the same undo provokes is bracketed with this flag so the change is
- *   not banked twice, in either order. The occurrence still goes to the
- *   app — only the BANKING is suppressed.
+ * Presentation side: emit an entry edit — `tag` the entry's CREATE tag,
+ * `text`/`text_len` its current UTF-8 content. Do not combine with kaya_run.
+ * THE LAST THREE ARE THE UNDO LEDGER'S (docs/undo-plan.md §3): `window` the
+ * ledger this typing belongs to, `focused` whether this field holds focus
+ * (an UNFOCUSED event closes the episode; pass 0 if you cannot tell), and
+ * `quiet` for the text_changed a native undo this backend routed provokes.
  */
 void kaya_emit_text_changed(const uint8_t *tag,
                             uintptr_t tag_len,
@@ -1746,17 +1634,11 @@ void kaya_undo(uint64_t window);
 void kaya_redo(uint64_t window);
 
 /**
- * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3): the
- * field the backend sent the platform's own undo to, the text the walk
- * landed on, and whether that field can still undo.
- *
- * The ordinary text_changed the same undo provokes carries the
- * ledger-quiet flag on `kaya_emit_text_changed`, so this change is
- * banked once no matter which of the two the platform delivers first.
- *
- * Usually there is nothing to apply. The exception is a platform that
- * exhausted its stack short of the episode's before-image, which falls
- * back to the coarse restore.
+ * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3): the field
+ * the backend sent the platform's own undo to, the text the walk landed on,
+ * and whether that field can still undo. The ordinary text_changed the same
+ * undo provokes carries the ledger-quiet flag, so the change is banked once
+ * whichever arrives first. Usually there is nothing to apply.
  *
  * # Safety
  * `text`/`text_len` must describe a valid UTF-8 byte range, or be
@@ -1779,10 +1661,9 @@ void kaya_note_native_undo(uint64_t window,
 void kaya_window_moved(uint64_t for_target, uint64_t first_index, uint64_t visible_count);
 
 /**
- * The extents a backend measured for the realized rows at
- * `first_index..`, one per row (§3.4). Produces no applies: a height
- * moves the ARITHMETIC, never the band, which is a position over the
- * order.
+ * The extents a backend measured for the realized rows at `first_index..`,
+ * one per row (§3.4). Produces no applies: a height moves the ARITHMETIC,
+ * never the band, which is a position over the order.
  *
  * # Safety
  * `heights` must point at `count` readable doubles, or be NULL with
@@ -1795,13 +1676,10 @@ void kaya_rows_measured(uint64_t for_target,
 
 /**
  * `scroll_to_row` for a STRING-keyed collection: the row's index in the
- * collection's current order, for the backend to scroll to.
- * [`KAYA_ROW_NOT_FOUND`] when there is no answer.
- *
- * TWO ENTRIES, ONE PER KEY TYPE, because `protocol::Key` is exactly
- * I64|Str and a `kind` integer beside the payload is the file-modes trap
- * (tools/check-file-modes.py): five hand-written sites decoding a number
- * nobody re-checks. The type is in the name instead.
+ * collection's current order. [`KAYA_ROW_NOT_FOUND`] when there is no
+ * answer. TWO ENTRIES, ONE PER KEY TYPE, because a `kind` integer beside
+ * the payload is the file-modes trap (tools/check-file-modes.py) — the type
+ * is in the name instead.
  *
  * # Safety
  * `key`/`key_len` must describe a valid UTF-8 byte range, or be NULL/0.
@@ -1825,98 +1703,68 @@ void kaya_window_geometry(uint64_t for_target, struct KayaWindowGeometry *out);
 
 /**
  * One row's height in the core's arithmetic — measured if that row has
- * been, presumed from the pitch otherwise, and 0 before this For has
- * been measured at all.
- *
- * A ROW-HEIGHT DELEGATE ASKS PER ROW, over the whole collection and not
- * just the band (the macOS native tier, §4), so the geometry read cannot
- * serve: a backend without this would keep a height cache of its own,
- * which is the second estimator §2 exists to remove.
+ * been, presumed from the pitch otherwise, and 0 before this For has been
+ * measured at all. A ROW-HEIGHT DELEGATE ASKS PER ROW over the whole
+ * collection (the macOS native tier, §4), so the geometry read cannot serve
+ * and a backend without this would keep the second estimator §2 removes.
  */
 double kaya_row_extent(uint64_t for_target, uint64_t index);
 
 /**
  * THE WINDOW'S SCALE AND APPEARANCE, reported by the backend; the core
- * re-rasters every canvas at them (docs/canvas-plan.md §5, §6). That is
- * the platforms' own rescale-then-re-render mechanism, not an
- * invention: `backingScaleFactor` plus `windowDidChangeBackingProperties:`
- * on macOS, `WM_DPICHANGED` on Windows, fractional-scale's
- * `preferred_scale` on Wayland.
- *
- * `scale` is the TRUE scale, never the rounded one — GTK is the backend
- * that can hand back a fraction, and `gdk_surface_get_scale` is the
- * double to read rather than `gtk_widget_get_scale_factor`'s integer.
- * `dark` is the ONLY thing a platform contributes to a drawing: no
- * platform colour reaches one.
- *
- * A report that changes nothing emits nothing.
- *
- * LATCHED BEFORE IT IS APPLIED (`PRESENTATION_REPORTED`): the backends
- * report at their first layout, which can precede the scene, and a
- * report the scene never saw is a canvas rastered at the wrong palette
- * for the process's whole life.
+ * re-rasters every canvas at them (docs/canvas-plan.md §5, §6). `scale` is
+ * the TRUE scale, never the rounded one — GTK can hand back a fraction, and
+ * `gdk_surface_get_scale` is the double to read. `dark` is the ONLY thing a
+ * platform contributes to a drawing. A report that changes nothing emits
+ * nothing, and every report is LATCHED (`PRESENTATION_REPORTED`).
  */
 void kaya_presentation(double scale, bool dark);
 
 /**
- * THE TRACK LAYOUT ASSIGNED ONE CANVAS, in device-independent points,
- * reported by the backend exactly as `kaya_window_moved` reports a For's
- * visible band (docs/canvas-plan.md §3.2.1). This is the report the
- * stretch defect was missing: without it the core could only ever raster
- * at the viewbox and leave the backend to stretch the picture.
- *
- * What happens next is the canvas's SIZE POLICY: `scale` re-rasterizes
- * the held display list under a uniform fit, `redraw` and `tick` are
- * asked for a drawing at this size, and `fixed` records the number and
- * changes nothing. A report that changes nothing emits nothing.
  * THE WINDOW'S CONTENT SIZE in device-independent points plus the
- * platform's own SIZE CLASS, reported by the backend whenever either
- * changes — the facts every declared breakpoint evaluates against
- * (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31).
- * `size_class` is wire::SIZE_CLASS_COMPACT / _REGULAR where the
- * platform defines one (iOS alone today), SIZE_CLASS_NONE everywhere
- * else — the core then derives the class from the width at the
- * kaya-owned 600 boundary. One call carries both so a rotation never
- * evaluates a stale (width, class) pair. A report that changes
- * nothing emits nothing. Height rides along for the day a height
- * threshold is ruled; nothing reads it yet.
+ * platform's own SIZE CLASS, whenever either changes — what every declared
+ * breakpoint evaluates against (docs/adaptive-layout-plan.md D3; classes
+ * ruled 2026-08-31). `size_class` is SIZE_CLASS_NONE except on iOS, and the
+ * core then derives it from the width at the kaya-owned 600 boundary. One
+ * call carries both so a rotation never evaluates a stale pair.
  */
 void kaya_window_metrics(uint64_t window, double width, double height, int64_t size_class);
 
+/**
+ * THE TRACK LAYOUT ASSIGNED ONE CANVAS, in device-independent points,
+ * reported exactly as `kaya_window_moved` reports a For's visible band
+ * (docs/canvas-plan.md §3.2.1). What happens next is the canvas's SIZE
+ * POLICY: `scale` re-rasterizes the held display list under a uniform fit,
+ * `redraw` and `tick` are asked for a drawing at this size, `fixed` records
+ * the number. A report that changes nothing emits nothing.
+ */
 void kaya_canvas_track(uint64_t widget, double width, double height);
 
+/**
+ * A FRAME, at the platform's own frame time in seconds (§15.4): every `tick`
+ * canvas is handed the size it was assigned and that time. THE TIME IS THE
+ * PLATFORM'S — CADisplayLink's `targetTimestamp`, Choreographer's frame time
+ * — never one read here, which re-imports the jitter they removed.
+ */
 void kaya_frame(double time);
 
 /**
  * THE HARNESS'S FRAME CLOCK: advance by exactly one frame at
- * `KAYA_HARNESS_FRAME_HZ` and drive it. Wall clock never reaches a tick
- * under the harness, so a leg's frame count is what the scene's `frame`
- * verbs advanced and not a fact about the machine's load.
- *
- * BYPASSES `kaya_frame`'s MONOTONE GUARD deliberately: this clock
- * starts at one sixtieth while a platform's starts at a timestamp
- * decades wide, so a stray platform frame would silence every harness
- * frame for the rest of the run. Under the harness no platform driver
- * is attached, so the two clocks never both run — and this counter is
- * monotone on its own.
+ * `KAYA_HARNESS_FRAME_HZ` and drive it, so a leg's frame count is what the
+ * scene's `frame` verbs advanced and not a fact about the machine's load.
+ * BYPASSES `kaya_frame`'s MONOTONE GUARD deliberately — this clock starts
+ * at one sixtieth while a platform's starts decades wide, and under the
+ * harness no platform driver is attached, so the two never both run.
  */
 void kaya_harness_frame(void);
 
 /**
- * WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's
- * hash and the two legible facts, as one ASCII line
+ * WHAT THE HARNESS READS BACK ABOUT ONE CANVAS: the CANONICAL raster's hash
+ * and the two legible facts, as one ASCII line
  * `"<16 hex> <ops>/<l>,<t>,<r>,<b>"` (docs/canvas-plan.md §7.1, §7.2).
- *
- * Canonical means scale 1.0 and the light palette, pinned HERE rather
- * than read from the lane's display, which is what lets one frozen
- * string hold on five platforms. It is a read of an ARTIFACT — the
- * output of validation, the fold, shaping, font resolution, the palette
- * and the rasterizer — never of the declaration, so it is not the
- * forbidden shape where the scene agrees with itself.
- *
- * Writes at most `cap` bytes to `out` and returns how many it wrote; 0
- * means `widget` names no canvas that has been drawn. Never NUL
- * terminates: the caller has the length.
+ * Canonical means scale 1.0 and the light palette, pinned HERE rather than
+ * read from the lane's display. Writes at most `cap` bytes and returns how
+ * many; 0 means no canvas has been drawn there. Never NUL terminates.
  *
  * # Safety
  * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
@@ -1925,19 +1773,11 @@ uintptr_t kaya_canvas_probe(uint64_t widget, uint8_t *out, uintptr_t cap);
 
 /**
  * WHICH SIZE ONE CANVAS'S RASTER IS — `expect_raster`'s observation
- * (docs/canvas-plan.md §3.2.1). `"track"` when it is the size the
- * BACKEND reported, `"viewbox"` when it is the one the GUEST declared,
- * and on disagreement all three numbers rather than a guess about which
- * is wrong (invariant 3: a diagnostic prints what it measured).
- *
- * This is the only canvas read the size policy can move. `kaya_canvas_probe`
- * rasterizes at the viewbox by definition — that is what makes its hash
- * one string on five platforms — so the hash and the ink bounds are
- * policy-blind, and a canvas that stretched its buffer instead of
- * re-rastering at the track would answer both of them identically.
- *
- * Writes at most `cap` bytes to `out` and returns how many it wrote; 0
- * means `widget` names no canvas that has been drawn.
+ * (docs/canvas-plan.md §3.2.1). `"track"` when it is the size the BACKEND
+ * reported, `"viewbox"` when the GUEST's, and on disagreement all three
+ * numbers rather than a guess (invariant 3). The only canvas read the size
+ * policy can move: `kaya_canvas_probe` rasterizes at the viewbox by
+ * definition. Writes at most `cap` bytes and returns how many.
  *
  * # Safety
  * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
@@ -1945,26 +1785,13 @@ uintptr_t kaya_canvas_probe(uint64_t widget, uint8_t *out, uintptr_t cap);
 uintptr_t kaya_canvas_raster_shape(uint64_t widget, uint8_t *out, uintptr_t cap);
 
 /**
- * Presentation side: block until the next transaction, resolve it
- * through the scene, and hand back that batch's apply-op records.
- * Writes the borrowed pointer to `batch` and returns the byte length,
- * or 0 when the core has shut down. Call from a single pump thread.
- *
- * THE CORE OWNS THE BYTES, and there is no size cap — kaya_next_occurrence's
- * ruling, reached the same way one direction over: a caller-sized buffer
- * makes the batch a wall, and 161 four-column rows in one transaction
- * aborted the interpreter platforms from inside this `extern "C"` frame
- * (docs/traps.md, "A caller-sized occurrence buffer"; docs/measurements/
- * choke-{macos,ios,android}-2026-08-24.txt). Splitting is not the
- * alternative: a batch is one recomposition, so only the producer can
- * size it.
- *
- * The bytes — and this batch's blob table — stay valid until this
- * thread's NEXT call here. Copy out what you keep, exactly as
- * `kaya_blob_data` asks.
- *
- * SHUTDOWN NULLS THE POINTER rather than leaving it as it was, so a
- * caller that forgets the case cannot re-apply the previous batch.
+ * Presentation side: block until the next transaction, resolve it through
+ * the scene, and hand back that batch's apply-op records — the borrowed
+ * pointer into `batch`, the byte length returned, 0 and a NULL pointer on
+ * shutdown, one pump thread. THE CORE OWNS THE BYTES, no size cap, valid
+ * until this thread's NEXT call: a caller-sized buffer aborted three
+ * platforms on one 161-row batch (docs/traps.md, "A caller-sized occurrence
+ * buffer").
  *
  * # Safety
  * `batch` must be a valid place to write a pointer.

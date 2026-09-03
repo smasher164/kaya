@@ -13,17 +13,9 @@ import android.widget.TextView
 
 // ClipProbe — what does Android charge for a clipboard read, and what
 // does it PUT ON SCREEN when one happens? The host cannot ask: there is
-// no `cmd clipboard`, and Android 10+ gives an unfocused reader
-// nothing, which the shell always is. Findings:
-// docs/clipboard-plan.md §7.
-//
-//  Q1 Does a FOCUSED app read what it wrote?
-//  Q2 Does it still read after it LOSES focus?
-//  Q3 WHAT APPEARS ON SCREEN — an overlay would sit on top of the
-//     guest while the harness asserts against it.
-//  Q4 Does a read see content the app did NOT write?
-//
-// Answers go to logcat under the "kayaprobe" tag.
+// no `cmd clipboard`, and Android 10+ gives an unfocused reader nothing.
+// Findings: docs/clipboard-plan.md §7; the Q-labels are in the log lines
+// below. Answers go to logcat under the "kayaprobe" tag.
 class ProbeActivity : Activity() {
     private val tag = "kayaprobe"
     private fun say(s: String) = Log.i(tag, "PROBE $s")

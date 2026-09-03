@@ -8,30 +8,14 @@ from kaya_gate import Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # THE ROLE VOCABULARY REACHES EVERY BACKEND. `MENU_ROLES`
-# (crates/kaya/src/scene.rs) is one line, it is not in the spec hash,
-# and adding an entry regenerates nothing, so the four sites are a
-# matched set nobody is reminded of:
-#
-#   crates/kaya/src/gtk.rs        role_enabled / perform_role
-#   crates/kaya/src/winui/mod.rs  role_enabled / perform_clipboard_role
-#   swift/KayaSwiftUI.swift       kayaRoleEnabled / kayaPerformClipboardRole
-#   android/…/KayaCompose.kt      kayaRoleEnabled / kayaPerformClipboardRole
-#
-# A role a backend does not know enables by default and falls through to
-# plain action dispatch: the item looks live, does nothing, and reports
-# a menu_activated the app never asked for.
+# (crates/kaya/src/scene.rs) is one line, it is not in the spec hash, and
+# adding an entry regenerates nothing, so the four backends are a matched
+# set nobody is reminded of. RED BY DESIGN across a fan-out.
 #
 # THIRD CLAUSE (docs/undo-plan.md D6): both Rust backends refresh
 # enablement through a hard-coded role set, and an item outside it never
-# has its enablement recomputed — on GTK that is an item nothing can
-# activate. Written about the SETS THAT EXIST, because a backend with no
-# such set has nothing to fall behind.
-#
-# `settings` is a PLACEMENT role — it moves an item into macOS's
-# application menu and every other host leaves it alone — so it has no
-# enablement question and no command to perform, and is exempt from the
-# first two clauses. The exemption is guarded in turn: a placement role
-# no backend names AT ALL fails.
+# has its enablement recomputed. Written about the SETS THAT EXIST — a
+# backend with no such set has nothing to fall behind.
 
 import re
 
@@ -45,12 +29,11 @@ gate = Gate("check-roles")
 
 
 def span(text, i, opener="{", closer="}"):
-    """From the bracket at `i` to its match, comments and string
-    literals skipped so a bracket inside either cannot end it early —
-    which is not hypothetical: `matches!(item.role.as_str(), …)` closes
-    a paren three tokens in, and a non-greedy regex reads the filter as
-    ending there, naming no role and passing vacuously. The self-test
-    below is what found that."""
+    """From the bracket at `i` to its match, comments and string literals
+    skipped so a bracket inside either cannot end it early:
+    `matches!(item.role.as_str(), …)` closes a paren three tokens in, and a
+    non-greedy regex reads the filter as ending there and passes
+    vacuously."""
     depth, j, n = 0, i, len(text)
     while j < n:
         c = text[j]
@@ -94,19 +77,16 @@ def braced(text, pattern, at=0, opener="{", closer="}"):
 
 
 # A PLACEMENT role names where an item goes, not what it does: no
-# enablement question, no command to perform. Everything else is a
-# GESTURE role — it acts on the focused widget and computes its own
-# enablement — and gesture roles are what the four backends must know.
+# enablement question, no command to perform, so it is exempt from the
+# first two clauses (and guarded instead by the last one). Everything else
+# is a GESTURE role, which every backend must know.
 PLACEMENT = {"settings"}
 
 # Each backend's PAIR: the enablement question and the perform path.
-# Anchors are regexes, not literal names — a backend may SPLIT either
-# half across several functions (the mac arm answers cut/copy/paste in
-# kayaPerformClipboardRole and undo/redo in kayaPerformUndoRole), so
-# each half is the UNION of the functions matching its anchor.
-#
-# The union does NOT prove the arm is reached; that is the scene's job
-# (tools/scenes/undo.steps). This gate's job is the vocabulary.
+# Anchors are regexes because a backend may SPLIT either half across
+# several functions, so each half is the UNION of the functions matching
+# its anchor. The union does NOT prove the arm is reached — that is
+# tools/scenes/undo.steps' job; this gate's job is the vocabulary.
 BACKENDS = [
     (GTK, "role_enabled", r"\bfn +role_enabled\b",
      "perform_role", r"\bfn +perform[a-z_]*_role\b"),
@@ -121,7 +101,7 @@ BACKENDS = [
 
 def check(texts):
     """texts: {site: text}. ('refused', msg) | ('bad', lines) |
-    ('ok', None). Sentences verbatim from the shell body this replaced."""
+    ('ok', None)."""
     bad = []
 
     # --- The vocabulary, from the one line that owns it. -------------
@@ -162,9 +142,8 @@ def check(texts):
                     f"reports a menu_activated the app never asked for")
 
     # --- The hard-coded role SETS. -----------------------------------
-    # A `matches!` naming at least one gesture role is a role FILTER,
-    # and it must be total. A backend with no such set is not failing
-    # this clause.
+    # A `matches!` naming at least one gesture role is a role FILTER and
+    # must be total. A backend with no such set is not failing this clause.
     for path in (GTK, WINUI):
         text = texts[path]
         for m in re.finditer(r"matches!\(", text):
@@ -192,11 +171,9 @@ def check(texts):
     for role in roles:
         if role not in PLACEMENT:
             continue
-        # ROLE-SHAPED LINES ONLY, not a bare substring: the symbol
-        # vocabulary put "settings" into every backend's symbol TABLE
-        # (2026-08-16), a whole-file search counted those rows as the
-        # role being named, and the settings-drop self-test could not
-        # fire.
+        # ROLE-SHAPED LINES ONLY, not a bare substring: "settings" is
+        # also a row in every backend's symbol TABLE, and a whole-file
+        # search counted those as the role being named.
         def names_role(p, role=role):
             for line in texts[p].splitlines():
                 if f'"{role}"' in line and re.search(r"(?i)role", line):
@@ -218,11 +195,8 @@ def check(texts):
 REAL = {p: gate.read(p) for p in (SCENE, GTK, WINUI, SWIFTUI, COMPOSE)}
 
 
-# THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES rather
-# than on synthetic samples (docs/traps.md, the wayland seat guard).
-# Every perturbation goes through the prelude's doctor — its count
-# printed, an unapplied one refused — and every refusal is checked for
-# its REASON.
+# The self-tests doctor COPIES OF THE REAL FILES, and each refusal is
+# checked for its REASON (CLAUDE.md's watch-the-negative-fail rule).
 def refuses(texts, fragment, label):
     verdict, payload = check(texts)
     if verdict == "ok":
@@ -237,8 +211,8 @@ def refuses(texts, fragment, label):
 
 
 def drop_role(label, site_text, role):
-    """Every quoted mention goes, since a body that still names the role
-    would satisfy the clause honestly. The count is the file's own."""
+    """Every quoted mention goes: a body that still names the role
+    elsewhere would satisfy the clause honestly."""
     want = site_text.count(f'"{role}"')
     if want < 1:
         print(f"check-roles: SELF-TEST FAIL ({label} applied 0 times, "
@@ -262,11 +236,10 @@ def narrow(scene_text, roles):
 
 
 # THE ACCEPT DIRECTION IS ITS OWN SELF-TEST, deliberately not "the live
-# tree passes": this gate is DESIGNED to be red across a milestone, with
-# a role joining MENU_ROLES first and the four arms following. So it
+# tree passes": this gate is DESIGNED to be red across a fan-out. So it
 # runs the REAL backends against a scene.rs holding only the vocabulary
-# they have ALREADY fanned out to — decided BY THIS CHECKER, one role at
-# a time, never by a second implementation of "is it there".
+# they have ALREADY reached — decided BY THIS CHECKER, one role at a time,
+# never by a second implementation of "is it there".
 m = re.search(r"MENU_ROLES\s*:\s*&\[&str\]\s*=\s*&\[([^\]]*)\]",
               REAL[SCENE])
 vocabulary = re.findall(r'"([a-z_]+)"', m.group(1)) if m else []
@@ -327,8 +300,7 @@ refuses({**SETTLED, COMPOSE: drop_role("the compose paste-drop "
         "a Compose arm that forgot paste")
 
 # A HARD-CODED ROLE SET THAT FELL BEHIND MUST FAIL. The pattern must
-# match gtk.rs's filter as it IS — when it lagged the fan-out the
-# self-test refused an unchanged copy, which is exactly its job.
+# match gtk.rs's filter as it IS.
 short_set = gate.doctor(
     "the gtk role-set perturbation", REAL[GTK],
     r'matches!\(item\.role\.as_str\(\), "cut" \| "copy" \| "paste" \| '

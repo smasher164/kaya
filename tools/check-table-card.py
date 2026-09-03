@@ -8,35 +8,13 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 # A TABLE BOUNDS ITS OWN EXTENT — one semantics, four spellings
-# (docs/deferred.md's table-card entry, ruled 2026-08-25). The mac's
-# NATIVE tier has it from the widget; GTK and WinUI each draw a flat card;
-# the iOS SYNTHESIZED tier draws the INSET-GROUPED one — the Settings
-# look, where a card is parted from its page by the grouped background
-# behind it and never by an outline — and COMPOSE draws Android's own
-# answer to the same sentence, the SEGMENTED GROUPED CONTAINER: a header
-# segment, androidx's 2dp gap, one container for every body row, corners
-# by position (16dp at the group's true ends, 4dp at the boundary), and
-# no stroke anywhere.
-#
-# NO SCENE CAN FAIL THIS. The card is pixels and nothing else: every
-# table observable — expect_columns, expect_rows, expect_column_edges,
-# expect_window — answers exactly the same with the card gone, which is
-# how the three backends shipped for months drawing a table's OPENING
-# grammar and never its close (the CASH row running into "Account
-# total"). So, like the native-undo pair, a gate is the only wall
-# available, and it holds three things a capture would otherwise be the
-# only witness to: the card is THERE, it is FLAT (the ruling: no shadow,
-# no blur, no elevation — and on iOS no stroke either), and its colours
-# come from the platform's own tokens rather than from literals.
-#
-# AND WHERE IT MAY NOT REACH: the mac. Its native tier delineates from
-# NSTableView's own interior and is not to be touched, so the iOS card
-# is the synthesized tier's alone, its numbers are zero on macOS, and
-# both halves are held here — a card wrapped around KayaNativeTable and
-# a macOS arm that draws are each watched being refused.
-#
-# WHAT IT DELIBERATELY DOES NOT HOLD: whether the card LOOKS right,
-# which is the capture sign-off the ledger entry still holds open.
+# (docs/deferred.md's table-card entry, ruled 2026-08-25; CLAUDE.md's
+# gate list has the four). NO SCENE CAN FAIL THIS: the card is pixels,
+# and every table observable answers the same with it gone. So a gate
+# holds the three things a capture would otherwise witness — the card is
+# THERE, it is FLAT, and its colours are platform tokens — plus the mac,
+# where the card MAY NOT REACH. It does NOT hold whether the card LOOKS
+# right, which is the capture sign-off the ledger entry keeps open.
 
 import re
 
@@ -59,12 +37,9 @@ FACE_HEAD = "private struct KayaTableCardFace: ViewModifier {"
 CLIP_HEAD = "ScrollView(.vertical) {"
 
 # --- THE CARD IS THERE -------------------------------------------------
-#
 # (label, file, needle, the perturbation that would otherwise be silent).
-# Every perturbation is a plausible bug — a token swapped for a literal,
-# a draw modifier that became a layout one, a card left unparented — and
-# never the deletion of the counted string, which would prove only that
-# str.count works.
+# Every perturbation is a plausible bug and never the deletion of the
+# counted string, which would prove only that str.count works.
 PRESENT = (
     ("gtk card fill", GTK,
      ".kaya-table-card { background-color: @card_bg_color; border-radius: 12px;",
@@ -230,33 +205,23 @@ PRESENT = (
     ("mac card interior is zero", SWIFTUI,
      "let kayaTableCardInsetX: CGFloat = 0",
      "let kayaTableCardInsetX: CGFloat = 4"),
-    # AND THE MAC'S OWN CLOSE, which is the apron rather than a card: a
-    # SHAPESTYLE, resolved in the hierarchy, never a Color(nsColor:).
-    # `Color(nsColor:)` snapshots the dynamic NSColor OUTSIDE the window
-    # while the table view resolves the same colour inside it, so the
-    # perturbation below — the spelling that shipped — filled #1E1E1E
-    # under an interior that rendered #24292C: a 5pt bar across the
-    # bottom of every dark-mode table, and #FFFFFF both ways in light,
-    # so no lane and no light capture could see it (measured 2026-08-26,
-    # docs/traps.md).
+    # AND THE MAC'S OWN CLOSE, the apron rather than a card: a SHAPESTYLE
+    # resolved in the hierarchy, never a `Color(nsColor:)`, which
+    # snapshots the dynamic NSColor OUTSIDE the window and filled #1E1E1E
+    # under a #24292C interior — a dark-mode-only bar no lane and no
+    # light capture could see (measured 2026-08-26, docs/traps.md).
     ("mac apron resolved in the hierarchy", SWIFTUI,
      "return Rectangle().fill(.background)",
      "return Color(nsColor: .controlBackgroundColor)"),
 )
 
-# THE INTERIOR IS A NAMED NUMBER, not a literal at the use site. No
+# THE INTERIOR IS A NAMED NUMBER, not a literal at the use site: no
 # platform hands out a TOKEN for a card's content padding the way it does
-# for the fill and the stroke — Adwaita's lives in its row's own
-# stylesheet, Fluent's in a control's default style, Material's in its
-# spec — so the substitute is a constant whose comment carries the
-# provenance, and this holds the use sites to naming it.
-#
-# THE COMPOSE THREE ARE ANDROIDX'S OWN NUMBERS and the comment above them
-# carries the token each was read from — ListTokens.ContainerShape =
-# CornerLarge = 16, ItemContainerExpressiveShape = CornerExtraSmall = 4,
-# ListItemDefaults.SegmentedGap = 2. material3 1.3.1 (the pinned
-# compose-bom) has no SegmentedListItem to inherit them from, so they are
-# copied, which is check-file-modes' trap one surface over.
+# for the fill and the stroke, so the substitute is a constant whose
+# comment carries the provenance. THE COMPOSE THREE ARE ANDROIDX'S OWN
+# NUMBERS, copied because material3 1.3.1 (the pinned compose-bom) has no
+# SegmentedListItem to inherit them from — check-file-modes' trap one
+# surface over.
 NAMED = (
     ("winui card interior", WINUI, "const TABLE_CARD_PAD: f64 = 12.0;"),
     ("compose card interior x", COMPOSE, "private val KAYA_TABLE_CARD_PAD_X = 16.dp"),
@@ -273,12 +238,9 @@ NAMED = (
 )
 
 # --- AND IT IS FLAT ----------------------------------------------------
-#
-# Read out of the card's OWN BLOCK, never the file: all three of these
-# files legitimately name shadows and elevations elsewhere (a menu
-# popover has one, a dialog has one), so a file-wide grep would be a
-# sentence about the wrong widget. The ruling is flat HERE.
-#
+# Read out of the card's OWN BLOCK, never the file: all three files
+# legitimately name shadows and elevations elsewhere, so a file-wide grep
+# would be a sentence about the wrong widget.
 # (label, file, first line of the block, last line, forbidden spellings,
 #  the rule the spellings would break)
 FLAT = ("the ruling of 2026-08-25 is a FLAT card: fill, a 1px stroke and "
@@ -323,15 +285,11 @@ BLOCKS = (
 )
 
 # --- THE LAYER, AND THE MAC -------------------------------------------
-#
-# Four ways this could go wrong, each perturbed the way it really would.
-# THE FIRST IS THE ONE THAT ALREADY HAPPENED: the card was painted as the
-# scroll VIEWPORT's background, so a three-row grown table ran white to
-# the bottom of the phone's screen (the maintainer's capture, 2026-08-25)
-# while its rows stopped near the top. An inset-grouped card belongs to
-# the CONTENT: it ends with the last row, and on a tall table it spans the
-# whole extent and scrolls with the rows. No observable moves either way,
-# so the layer is a gate clause or nothing.
+# THE FIRST OF THE FOUR IS THE ONE THAT ALREADY HAPPENED: the card was
+# painted as the scroll VIEWPORT's background, so a three-row grown table
+# ran white to the bottom of the phone (capture, 2026-08-25). An
+# inset-grouped card belongs to the CONTENT, and no observable moves
+# either way, so the layer is a gate clause or nothing.
 # (label, file, needle, replacement, the sentence the census must say)
 ZONE = (
     # The fold's VStack (docs/adaptive-layout-plan.md D7) sits between the
@@ -546,15 +504,11 @@ def layers(text):
     the end, and they are the FIRST TWO PLACED, because placement order is
     draw order."""
     out = []
-    # AND NO HEADER RULE INSIDE A SEGMENT (ruled 2026-08-26, off the
-    # round-six capture): the phone drew TWO separators nine pixels apart
-    # and of different widths — the 1px hairline inset 16dp each side at
-    # y=48, 8px of orphaned header fill under it, then the full-bleed 2dp
-    # gap. In the grouped idiom the GAP is the separator and a segment
-    # carries no internal hairline. Read out of the table's own content
-    # lambda, because the file's four other HorizontalDividers are menu
-    # separators and section rules and are none of this rule's business —
-    # as are GTK's, WinUI's and iOS's, which are native grammar and stay.
+    # AND NO HEADER RULE INSIDE A SEGMENT (ruled 2026-08-26): the phone
+    # drew TWO separators nine pixels apart and of different widths, since
+    # in the grouped idiom the GAP is the separator. Read out of the
+    # table's own content lambda — the file's four other
+    # HorizontalDividers are menu separators and section rules.
     content = None
     at = text.find(CONTENT_HEAD)
     stop = text.find(CONTENT_END, at + len(CONTENT_HEAD)) if at >= 0 else -1
@@ -680,11 +634,8 @@ print(
 )
 
 # --- EVERY CLAUSE WATCHED FAILING -------------------------------------
-#
-# A doctored copy IN MEMORY, the substitution count printed, the REAL
-# census re-run against it, and the exact finding demanded. A clause
-# whose perturbation does not apply is a BROKEN SELF-TEST, not a pass:
-# the red below would otherwise be a green about an unperturbed file.
+# A doctored copy IN MEMORY, the REAL census re-run against it, and the
+# exact finding demanded.
 failures = 0
 for label, path, needle, replacement in PRESENT:
     applied = real[path].count(needle)

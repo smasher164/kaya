@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# THE WAYLAND HALF OF THE IDENTITY SCENE, ASSERTED AS THE GAP IT IS.
-#
-# identity.steps demands `expect_app_icon` twice and the scene files are
-# shared verbatim, but this lane's wayland ring cannot meet that demand
-# (docs/app-identity-plan.md ruling 5 and I4a). Rather than skip
-# silently, this witness asserts the gap's exact shape: the leg fails,
-# on the icon steps only, as many times as the SCENE reads an icon, with
-# the backend's measured sentence naming the GDK display object, and
-# with the lowering having run anyway. It refuses a verdict rather than
-# guessing — each clause below prints what it saw.
+# THE WAYLAND HALF OF THE IDENTITY SCENE, ASSERTED AS THE GAP IT IS
+# (docs/app-identity-plan.md ruling 5 and I4a): the leg must fail on the
+# icon steps ONLY, as many times as the scene reads an icon, with the
+# backend's sentence naming the GDK display object and the lowering
+# having run anyway. Each clause below prints what it saw.
 set -uo pipefail
 
 if [ "$#" -lt 1 ]; then

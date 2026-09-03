@@ -1,6 +1,3 @@
-/* The feed scene from C, on the function floor: sum-typed elements with
- * the discriminants spelled by hand. */
-
 #include <kaya.h>
 #include <kaya_wire.h>
 
@@ -8,10 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one — one run across both variant arms;
- * signals and collections each count from 1 in their own (DESIGN.md,
- * Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE (tools/check-c-ids.py), one
+ * run across both variant arms; the other spaces count from 1. */
 #define SIG_DONE 1
 #define W_ROW 1
 #define W_PROMOTE 2
@@ -29,7 +24,6 @@
 #define F_TODO_TITLE 0
 #define F_TODO_DONE 1
 
-/* The model, hand-kept per C's no-binding-model decision. */
 #define N_POSTS 3
 static struct {
     char key[8];
@@ -124,8 +118,6 @@ static void *app(void *arg) {
                 if (keys[0].s_len != strlen(posts[i].key) ||
                     memcmp(keys[0].s, posts[i].key, keys[0].s_len) != 0)
                     continue;
-                /* The variant check is the refinement; the write carries
-                 * it as the witness. */
                 if (posts[i].variant != V_TODO)
                     break;
                 posts[i].done = payload.i != 0;
@@ -144,8 +136,7 @@ static void *app(void *arg) {
             for (unsigned i = 0; i < N_POSTS; i++) {
                 if (posts[i].variant != V_NOTE)
                     continue;
-                /* Promote: the same key re-sent under the other
-                 * constructor; the core restamps its copy in place. */
+                /* The same key under another constructor restamps in place. */
                 posts[i].variant = V_TODO;
                 posts[i].done = 1;
                 uint8_t buf[512];

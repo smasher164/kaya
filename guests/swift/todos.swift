@@ -1,19 +1,5 @@
-// The todos scene from Swift, on the construction sugar: the struct is
-// the schema — kaya-swift-gen reads this declaration and generates
-// todos+Kaya.swift (the KayaRecord conformance, typed field tokens and
-// the collection factory).
-//
-// AND THE APP NAMES NO TODO: a title and a done flag identify nothing,
-// so the key comes from insertFresh (docs/fresh-key-plan.md). The row's
-// checkbox carries that key back out through the stamped path and into
-// patch, which is all this scene asks of a key.
-//
-// AND THE ITEMS-LEFT LABEL COMES BACK FROM AN UNDO WITH NOBODY PUTTING
-// IT BACK: the derive's write rides the add's own named batch, so the
-// core banks the label in both directions. That is why this file
-// registers no onUndone, and why a binding that recomputed the derive
-// while absorbing the payload would write a value the ledger never
-// banked (KayaApp.absorbUndo says so from the other side).
+// The todos scene, Swift port — guests/rust/todos.rs,
+// tools/scenes/todos.steps.
 
 import Foundation
 
@@ -24,12 +10,10 @@ struct Todo: KayaGen {
 
 let app = KayaApp()
 
-// The fold: widget-owned state arrives as occurrences.
 var draft = ""
 
 app.build { tx in
-    // THE GESTURE LAYER, and these two items are the whole of it: they
-    // act on what is focused and work out their own enablement
+    // The two items are the whole undo surface an app declares
     // (docs/undo-plan.md D1-D6).
     let edit = tx.menu(
         "Edit",
@@ -37,10 +21,8 @@ app.build { tx in
             tx.item("Undo", role: KayaAppTx.roleUndo),
             tx.item("Redo", role: KayaAppTx.roleRedo),
         ])
-        // The menubar rides the window construct because the LEDGER is per
-        // window. NO onUndone AND NO onRedone: this scene's whole state is
-        // the collection and the signal derived from it, both of which the
-        // core restores on its own.
+    // NO onUndone AND NO onRedone: this scene's whole state is the collection
+    // and the signal derived from it, both of which the core restores.
     tx.window(title: "todos", menus: [edit])
     let todos = todoCollection(tx)
     let itemsLeft = todos.derive(tx) { items in
@@ -52,17 +34,12 @@ app.build { tx in
         let field = tx.entry { _, text in draft = text }
         tx.button("Add") { tx in
             if draft.isEmpty { return }
-            // ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The derive's
-            // write is in THIS batch, so the step's inverse carries
-            // "0 items left" and its forward carries "1 item left".
+            // The derive's write is in THIS batch, so the step's inverse
+            // carries "0 items left".
             tx.undoable("add \(draft)")
-            // NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the
-            // name and hands it back; @discardableResult permits the drop.
+            // The binding mints the key (docs/fresh-key-plan.md).
             todos.insertFresh(tx, Todo(title: draft, done: false))
-            // FINISHING THE FORM IS NOT PART OF THE STEP, so it takes a
-            // transaction of its own; `clear` inside a group would be
-            // refused at apply anyway (docs/undo-plan.md D4). The field
-            // reports text_changed("") through its normal edit path.
+            // `clear` inside a group is refused at apply (docs/undo-plan.md D4).
             app.post { tx in
                 tx.clear(field)
                 tx.focus(field)
@@ -72,7 +49,6 @@ app.build { tx in
         for row in todos.rows {
             row.row {
                 row.checkbox(row.done) { tx, keys, checked in
-                    // One field's delta: the title never travels.
                     todos.patch(tx, keys[0]).set(\.done, checked)
                 }
                 row.label(row.title)

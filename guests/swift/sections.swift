@@ -1,18 +1,12 @@
-// The sections conformance scene, Swift port: two peer roots in the
-// primary window's section set — presentation context, not lifecycle.
-// The user's switch emits onSelected; a programmatic selectSection moves
-// the selection SILENTLY, and the visit count surviving switch round
-// trips proves retention. See guests/rust/sections.rs and
+// The sections scene, Swift port — guests/rust/sections.rs,
 // tools/scenes/sections.steps.
 
 import Foundation
 
 let FEED: UInt64 = 7
 let ARCHIVE: UInt64 = 8
-// The SIDEBAR half, in an AUX WINDOW so one shared scene covers BOTH
-// arms: it opens from a handler only the desktop tail's click reaches, so
-// createWindow never runs where the capability is absent. Reachability
-// is the gate; no capability read needed.
+// The SIDEBAR half rides an AUX WINDOW opened only from the desktop tail's
+// click, so createWindow never runs where the capability is absent.
 let LIBRARY: UInt64 = 1
 let SHELVES: UInt64 = 2
 let LOANS: UInt64 = 3
@@ -28,8 +22,7 @@ app.build { tx in
         sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_BAR))
     visits = tx.signal(.str("archive: 0 visits"))
 
-    // A semantic icon is a CONCEPT drawn per platform; no shared asset
-    // would be legal (SF Symbols are Apple-only). docs/styling-plan.md D6.
+    // A symbol names a CONCEPT (docs/styling-plan.md D6).
     tx.addSection(FEED, title: "Feed", symbol: .home)
     tx.addSection(
         ARCHIVE, title: "Archive", symbol: .star,

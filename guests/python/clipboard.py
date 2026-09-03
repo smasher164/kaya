@@ -1,16 +1,5 @@
-"""The clipboard conformance scene, Python port — one clip in several
-representations, and the privileged read that takes one back (DESIGN.md,
-Clipboard; docs/clipboard-plan.md).
-
-Assertions cross a process boundary: a FOREIGN tool seeds and reads the
-clipboard, because a check where kaya reads what kaya wrote parses its
-own malformed header happily. The custom format is the one exception (no
-stock tool writes an app-defined type), and the image is asserted as a
-DECODED SIZE, never bytes — every host re-encodes freely.
-
-Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
-contract in tools/scenes/clipboard.steps.
-"""
+"""The clipboard conformance scene (tools/scenes/clipboard.steps): a FOREIGN
+tool seeds and reads, because kaya reading its own bytes proves nothing."""
 
 import os
 import pathlib
@@ -22,17 +11,12 @@ import kaya
 
 app = kaya.App()
 
-# Guest and interpreter compute this identically, with no runner
-# involvement; the pid keeps parallel legs from colliding.
-# `tempfile.gettempdir()` and NEVER `TMPDIR` — see docs/traps.md, the
-# POSIX-spelling trap that wrote a guest's files to the root of the
-# current drive on Windows.
+# `tempfile.gettempdir()` and NEVER `TMPDIR` — docs/traps.md, the
+# POSIX-spelling trap that wrote to the root of a Windows drive.
 scene_dir = pathlib.Path(tempfile.gettempdir()) / f"kaya-clip-{os.getpid()}"
 scene_dir.mkdir(parents=True, exist_ok=True)
 
-# A real encoded 4x4 PNG, spelled out rather than generated: the scene
-# asserts "4x4" through a foreign decoder. Written to disk for the
-# seeding tool AND handed to copy() as bytes.
+# A real 4x4 PNG: the scene asserts "4x4" through a FOREIGN decoder.
 PIXEL_PNG = bytes([
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR length + type
@@ -46,13 +30,9 @@ PIXEL_PNG = bytes([
     0x44, 0xAE, 0x42, 0x60, 0x82,  # IEND + crc
 ])
 
-# Reverse-DNS and space-free: this id reaches every platform's own
-# registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 target atom,
-# an Android MIME type).
+# Reverse-DNS and space-free: it reaches every registry VERBATIM.
 NOTE_ID = "dev.kaya/note"
-# NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and \\
-# with no \" (crates/kaya/src/harness.rs), so a quoted byte could not be
-# spelled in the expectation.
+# NO QUOTES IN THE PAYLOAD: the step grammar has no \" escape.
 NOTE_BYTES = b"note=1"
 
 (scene_dir / "pixel.png").write_bytes(PIXEL_PNG)
@@ -61,7 +41,6 @@ NOTE_BYTES = b"note=1"
 
 def copy_rich():
     # One clip, four representations; kaya derives none from any other.
-    # Wire order is kaya's.
     kaya.copy(text="kaya clip", html="<b>kaya</b> clip",
               image=PIXEL_PNG, custom={NOTE_ID: NOTE_BYTES})
     status.set("copied")
@@ -69,9 +48,7 @@ def copy_rich():
 
 def answered(clip):
     match clip:
-        # Empty is the universal no; its four causes (denied, unfocused,
-        # absent, nothing accepted) are not distinguishable — the
-        # platforms decline to say, so the guest does not guess.
+        # EMPTY IS THE UNIVERSAL NO; no platform says which cause.
         case None:
             status.set("empty")
         case kaya.Representation.Text(text):
@@ -81,8 +58,7 @@ def answered(clip):
         case kaya.Representation.Custom(ident, body):
             status.set(f"custom {ident} {body.decode()}")
         case kaya.Representation.Image(data):
-            # Straight back out: the assertion that matters is a foreign
-            # decoder's size, not a byte count.
+            # A foreign DECODER's size: byte counts differ per host.
             kaya.copy(image=data)
             status.set("image")
         case kaya.Representation.Files(files):
@@ -91,8 +67,7 @@ def answered(clip):
                 return
 
             def worker():
-                # OFF THE APP THREAD: open() blocks, and a pasted file is
-                # a picked file arriving through a second door.
+                # OFF THE APP THREAD: open() blocks.
                 name = files[0].name
                 try:
                     handle, _seekable = files[0].open(kaya.wire.FILE_MODE_READ)
@@ -132,8 +107,7 @@ def pasted(clip):
 
 
 def row_pasted(key, clip):
-    # The copy's own key rides in front of the payload; printing it is
-    # what proves the paste dispatched as an INSTANCE occurrence.
+    # Printing the key proves this dispatched as an INSTANCE occurrence.
     match clip:
         case kaya.Representation.Text(text):
             row_status.set(f"row {key} pasted {text}")
@@ -164,13 +138,10 @@ with app.window(title="clipboard"):
         # Declares what it takes, so a paste lands in the hook.
         rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).on_paste(pasted)
         rich.a11y_id("rich")                               # entry#0
-        # Declares nothing, so the platform inserts and the field's
-        # ordinary change path reports it.
+        # Declares nothing, so the platform inserts and on_change reports.
         plain = kaya.entry().a11y_id("plain")              # entry#1
 
-        # A STAMPED paste target: the accept list comes from the TEMPLATE
-        # (docs/tpl-props-plan.md P1) and the paste arrives as an INSTANCE
-        # occurrence carrying the copy's key.
+        # On a STAMPED copy the accept list rides the TEMPLATE.
         kaya.label(bind=row_status).a11y_id("row-status")  # label#1
         rows = kaya.collection()
         for row in rows:

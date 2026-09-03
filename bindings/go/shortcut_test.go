@@ -1,8 +1,7 @@
 package kaya
 
-// The generated shortcut canonicalizer's table (DESIGN.md, Menus):
-// spelling is canonicalized here, POLICY dies at the core on the
-// canonical form. The vectors mirror kaya-bindgen's reference table
+// DESIGN.md, Menus: SPELLING is canonicalized here, POLICY dies at the core
+// on the canonical form. The vectors mirror kaya-bindgen's reference table
 // (tools/kaya-bindgen/src/main.rs).
 
 import (

@@ -1,11 +1,5 @@
-// The milestone-2 scene from JavaScript, on the tier-1 surface: ambient
-// transactions, container auto-parenting, co-located click handlers,
-// element proxies, handles with methods, and derived signals — the extras
-// banner's When binds `steps.eq(1)`, recomputed by the binding at write
-// time and batched into the same transaction. The counter itself is a
-// guest variable: signals are a render pipe, written and never read back.
-//
-// Build the library first (cargo build), then:
+// Signals are a render pipe, written and never read back: the counter
+// itself is a guest variable.
 //     KAYA_SELFTEST=1 node guests/js/milestone2.ts
 
 import * as kaya from "kaya-gui";
@@ -33,8 +27,7 @@ function onStep(): void {
 }
 
 function onRemove(item: kaya.RowHandle<string>): void {
-  // The innermost row's handle: its path is the group it sits in, its
-  // key the item, and removing it is its own verb.
+  // The innermost row's handle: its path is the group it sits in.
   const group = item.path[0]!;
   item.remove();
   status.set(`removed ${group}/${item.key}, ${items.at(group).size} left`);
@@ -53,9 +46,7 @@ app.window(() => {
   kaya.column(() => {
     kaya.button("step", { onClick: onStep });
     kaya.label({ bind: status });
-    // `steps.eq(1)` is a derived Bool signal. A plain `if (steps)` would
-    // take the branch on the HANDLE, never on the value: the branch must
-    // be traced, not taken, which is kaya.when.
+    // `if (steps)` would branch on the HANDLE, never on the value.
     kaya.when(steps.eq(1), () => {
       kaya.label("extras on");
     });

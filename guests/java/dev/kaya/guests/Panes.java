@@ -3,11 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The panes conformance scene from the JVM — a THREE-pane ceiling as
- * assertions (docs/multicolumn-plan.md D1/D5). Nothing here is
- * panes-specific except {@code panes(3)}, asked for ONCE; the stack is
- * the ordinary navigation stack. See guests/rust/panes.rs and
- * tools/scenes/panes.steps.
+ * The panes scene from the JVM — guests/rust/panes.rs, tools/scenes/panes.steps.
  */
 public final class Panes {
     private static final long CONTENT = 7;

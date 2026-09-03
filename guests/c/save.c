@@ -1,16 +1,5 @@
-/* The save scene from C, at the explicit wire floor: the save request
- * is kaya_tx_show_save_dialog, and BOTH dialogs answer with the one
- * occurrence the guest tells apart by the dialog id it chose itself
- * (docs/save-plan.md D1-D5). Semantics: guests/rust/save.rs. Contract:
- * tools/scenes/save.steps.
- *
- * NO NAME IN THIS SCENE CARRIES AN EXTENSION: a save panel may publish
- * its name field with the extension hidden, so `expect_save_dialog`
- * would read the stem on one machine and the whole name on another
- * (docs/deferred.md).
- *
- * THE WORK RUNS OFF THE APP THREAD, because `kaya_open_picked` blocks
- * and a cloud provider may download the whole file first. */
+/* The save round trip (tools/scenes/save.steps). NO NAME HERE CARRIES AN
+ * EXTENSION: a save panel may hide one (docs/deferred.md). */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -23,11 +12,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Guest-allocated ids, counted from 1 per space. CREATION ORDER IS
- * CONTRACT: the harness addresses by creation order within a kind and
- * the script names label#0 and button#0..3 = open, save, save as,
- * reopen. Swapping two buttons presses the wrong one rather than
- * failing. */
+/* Guest-allocated ids (tools/check-c-ids.py). CREATION ORDER IS CONTRACT:
+ * swapping two buttons presses the wrong one rather than failing. */
 #define SIG_STATUS 1
 
 #define W_COLUMN 1
@@ -37,11 +23,8 @@
 #define W_SAVE_AS 5 /* button#2 */
 #define W_REOPEN 6  /* button#3 */
 
-/* The guest writes the files and the interpreter aims the panel at
- * `$TMP/kaya-save-$PID`, so both halves must compute the same directory
- * with no runner involvement: `TMPDIR` or "/tmp", never Darwin's
- * per-user directory (docs/traps.md). The pid keeps parallel legs from
- * colliding; the script names only BASENAMES. */
+/* `TMPDIR` or "/tmp", never Darwin's per-user directory (docs/traps.md);
+ * both halves compute it identically. */
 static char scene_dir[512];
 
 static void write_scene_file(const char *name, const char *bytes) {
@@ -60,9 +43,7 @@ static void make_scene_files(void) {
     const char *tmp = getenv("TMPDIR");
     if (tmp == NULL || tmp[0] == '\0')
         tmp = "/tmp";
-    /* Trailing separators trimmed, as the harness's expander trims them:
-     * "…//kaya-save-N" is fine to POSIX and not to a reader that parses
-     * the name. */
+    /* Trimmed as the harness's expander trims them. */
     size_t len = strlen(tmp);
     while (len > 1 && tmp[len - 1] == '/')
         len--;
@@ -72,17 +53,14 @@ static void make_scene_files(void) {
         fprintf(stderr, "save: cannot make %s: %s\n", scene_dir, strerror(errno));
         exit(1);
     }
-    /* The file the scene opens, plus the DECOY the picker needs: with one
-     * file in the directory a dialog completes with it even when nothing
-     * was selected. "decoy" sorts FIRST, so a backend that selects
-     * nothing fails the byte assertion. */
+    /* THE DECOY: with one file in the directory a dialog completes with it
+     * having selected nothing, and "decoy" sorts FIRST (docs/traps.md). */
     write_scene_file("draft", "first draft");
     write_scene_file("decoy", "decoy");
 }
 
-/* `kaya_open_picked` is one of the two entries in the whole C API that
- * is SAFE FROM ANY THREAD (kaya_wake is the other), which is what lets
- * the worker below call it. It answers 0 or a POSITIVE errno. */
+/* `kaya_open_picked` BLOCKS and is safe from ANY thread (kaya_wake is the
+ * other one); it answers 0 or a POSITIVE errno. */
 static void read_back(uint64_t handle, char *out, size_t cap) {
     int64_t raw;
     uint32_t seekable;
@@ -110,16 +88,14 @@ static void read_back(uint64_t handle, char *out, size_t cap) {
     close(fd);
 }
 
-/* KAYA_FILE_MODE_WRITE truncates, on a picked file and on a save destination
- * alike; the destination only adds the create, which is the CORE's
- * (there is no FILE_MODE_CREATE to ask for — docs/save-plan.md D1). */
+/* KAYA_FILE_MODE_WRITE truncates; the create is the CORE's, and there is
+ * no FILE_MODE_CREATE to ask for (docs/save-plan.md D1). */
 static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap) {
     int64_t raw;
     uint32_t seekable;
     int rc = kaya_open_picked(handle, KAYA_FILE_MODE_WRITE, &raw, &seekable);
     if (rc != 0) {
-        /* Without the create this is where a save destination answers
-         * ENOENT, for a file the user just named. */
+        /* Without the create a save destination answers ENOENT here. */
         snprintf(out, cap, "save failed: %s", strerror(rc));
         return;
     }
@@ -136,14 +112,12 @@ static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap
         }
         at += (size_t)n;
     }
-    /* CLOSED BEFORE THE REOPEN, so the bytes read back are the FILE's
-     * and not this descriptor's. */
+    /* CLOSED BEFORE THE REOPEN, so the bytes read back are the FILE's. */
     close(fd);
     read_back(handle, out, cap);
 }
 
-/* The post queue, one status write wide (guests/c/background.c has the
- * long version). */
+/* The post queue; guests/c/background.c is the long version. */
 #define MAX_POSTED 4
 #define STATUS_CAP 600
 static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -155,8 +129,6 @@ static void post_status(const char *text) {
     if (posted_count < MAX_POSTED)
         snprintf(posted[posted_count++], STATUS_CAP, "%s", text);
     pthread_mutex_unlock(&post_lock);
-    /* Posted work is not an occurrence and never enters the ring, so a
-     * wake is the only way the parked app thread hears about it. */
     kaya_wake();
 }
 
@@ -177,8 +149,7 @@ static void drain_posted(void) {
     kaya_submit(tx.buf, tx.len);
 }
 
-/* One file operation as DATA rather than a closure — closures do not
- * cross the C ABI. */
+/* One file operation as DATA: closures do not cross the C ABI. */
 typedef struct {
     char prefix[16];
     uint64_t first;
@@ -204,8 +175,7 @@ static void *worker(void *arg) {
     return NULL;
 }
 
-/* Detached, because nothing joins it: the answer comes back through the
- * queue above, and kaya supplies no waiting primitive. */
+/* Detached: kaya supplies no waiting primitive. */
 static void work(const char *prefix, uint64_t first, uint64_t second,
                  const char *bytes) {
     SaveJob *job = malloc(sizeof *job);
@@ -226,11 +196,8 @@ static void work(const char *prefix, uint64_t first, uint64_t second,
     pthread_detach(thread);
 }
 
-/* `file_dialog_result` (spec.rs kind 14): u64 dialog, u32 count, u32
- * reserved, then ONE counted value list holding three values per file —
- * I64 handle, Str name, Str local_path. Cancel is count zero. The
- * generator emits no parser for this record, so the floor reads the
- * body. Only the first file is kept. */
+/* `file_dialog_result`, three values per file (crates/kaya/src/spec.rs
+ * kind 14): the generator emits no parser, so the floor reads the body. */
 typedef struct {
     uint64_t dialog;
     uint32_t count;
@@ -269,8 +236,7 @@ static void build_scene(void) {
     KayaTx tx = {buf, 0, sizeof buf};
 
     {
-        /* Packed by hand: the generated kaya_tx_set_window_prop closes
-         * the record BEFORE the value. */
+        /* Packed by hand: the generated setter closes the record first. */
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
         kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
@@ -284,7 +250,6 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_STATUS, SIG_STATUS);
-    /* Authored so the closing AX read can address it by identifier. */
     kaya_tx_set_a11y_id(&tx, W_STATUS, "status");
     kaya_tx_create_widget(&tx, W_OPEN, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_OPEN, "open");
@@ -309,19 +274,14 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
 
-    /* The file the user OPENED and the destination the user later NAMED,
-     * held as HANDLES and never as paths — the phones have no
-     * re-openable path. Zero is "none": the core mints handles from 1. */
+    /* HANDLES and never paths: the phones have no re-openable path. */
     uint64_t source = 0, destination = 0;
 
-    /* Both requests answer with the SAME occurrence, so the id is the
-     * only thing saying which question was asked. One live dialog per
-     * process; an id RETIRES when its result fires. */
+    /* Both requests answer with the SAME occurrence; the id tells them apart. */
     uint64_t next_dialog = 1, open_dialog = 0, save_dialog = 0;
 
     const uint8_t *rec;
     for (;;) {
-        /* Posted work first, then the ring, then park. */
         drain_posted();
         size_t size = kaya_next_occurrence(&rec);
         if (size == KAYA_OCCURRENCE_SHUTDOWN)
@@ -345,33 +305,25 @@ static void *app(void *arg) {
                 kaya_tx_show_file_dialog(&tx, 0, open_dialog, 0, NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_SAVE) {
-                /* Save-back needs no dialog: the handle the user chose
-                 * the file with is writable. */
+                /* No dialog: the handle the user chose with is writable. */
                 work("saved", source, 0, "second draft");
             } else if (id == W_SAVE_AS) {
-                /* THE EMPTY FILTER LIST MATTERS: with allowed content
-                 * types set, NSSavePanel appends the first allowed
-                 * extension to an extension-less name, and the panel
-                 * would answer a name this guest never asked for
-                 * (docs/deferred.md). */
+                /* THE EMPTY FILTER LIST MATTERS: with types set NSSavePanel
+                 * appends an extension (docs/deferred.md). */
                 save_dialog = next_dialog++;
                 kaya_tx_show_save_dialog(&tx, 0, save_dialog, kaya_str("copy"),
                                          NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_REOPEN) {
-                /* Both, in order: a save-as that wrote through the
-                 * ORIGINAL handle passes every earlier step and fails
-                 * here. */
+                /* A save-as through the ORIGINAL handle fails only here. */
                 work("reopened", source, destination, NULL);
             }
         } else if (parse_file_dialog_result(rec, &result)) {
-            /* `local_path` is touched exactly once, here: it is EMPTY ON
-             * BOTH PHONES, so everything below goes through the handle. */
+            /* `local_path` is EMPTY ON BOTH PHONES: use the handle. */
             (void)result.local_path;
             if (result.dialog == open_dialog) {
                 if (result.count == 0) {
-                    /* The empty answer IS cancel: no platform can
-                     * confirm an empty selection. */
+                    /* The empty answer IS cancel. */
                     KayaTx tx = {buf, 0, sizeof buf};
                     kaya_tx_write_signal(&tx, SIG_STATUS,
                                          kaya_str("open cancelled"));
@@ -382,17 +334,14 @@ static void *app(void *arg) {
                 work("opened", source, 0, NULL);
             } else if (result.dialog == save_dialog) {
                 if (result.count == 0) {
-                    /* Nothing is remembered for a cancel: no
-                     * destination, so the next save-as asks again. */
                     KayaTx tx = {buf, 0, sizeof buf};
                     kaya_tx_write_signal(&tx, SIG_STATUS,
                                          kaya_str("save cancelled"));
                     kaya_submit(tx.buf, tx.len);
                     continue;
                 }
-                /* `result.name` is asserted NOWHERE: it is the name the
-                 * dialog got, not the one this guest suggested (Android's
-                 * SAF appends an extension at creation). */
+                /* `result.name` is asserted NOWHERE: Android's SAF appends
+                 * an extension at creation. */
                 destination = result.handle;
                 work("saved", destination, 0, "third draft");
             }

@@ -1,16 +1,12 @@
-// The sections conformance scene, C# port: two peer roots in the
-// primary window's section set. The archive pane folds onSelected into
-// a visit count, pinning the echo doctrine from both sides — a user's
-// switch emits, a programmatic SelectSection does not. See
-// guests/rust/sections.rs and tools/scenes/sections.steps.
+// The sections scene, C# port — guests/rust/sections.rs,
+// tools/scenes/sections.steps.
 
 static class SectionsScene
 {
     const ulong Feed = 7;
     const ulong Archive = 8;
-    // The SIDEBAR half, in an AUX WINDOW so one shared scene covers both
-    // arms. It opens from a handler only the desktop tail's click
-    // reaches, so CreateWindow never runs where the capability is absent.
+    // The SIDEBAR half rides an AUX WINDOW, opened only from the desktop
+    // tail's click, so CreateWindow never runs where the capability is absent.
     const ulong Library = 1;
     const ulong Shelves = 2;
     const ulong Loans = 3;
@@ -27,8 +23,7 @@ static class SectionsScene
                 sectionsPresentation: KayaWire.SectionsPresentationBar);
             visits = tx.Signal("archive: 0 visits");
 
-            // A symbol names a CONCEPT; each platform draws it from its
-            // own set (docs/styling-plan.md D6).
+            // A symbol names a CONCEPT (docs/styling-plan.md D6).
             tx.AddSection(Feed, title: "Feed", symbol: Symbol.Home);
             tx.AddSection(Archive, title: "Archive", symbol: Symbol.Star,
                 onSelected: inner =>

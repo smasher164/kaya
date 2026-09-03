@@ -1,10 +1,5 @@
-"""The standard-commands scene, Python port: a chord on every leaf kind
-(a checkable command, one option of a group, a plain command), the
-punctuation keys those chords need, and the `settings` role — which
-macOS shows in the application menu while the item stays addressable
-where it was declared. Canonical semantics in guests/rust/commands.rs;
-the byte-frozen contract in tools/scenes/commands.steps.
-"""
+"""The standard-commands scene (tools/scenes/commands.steps): macOS moves
+the `settings` role but the item stays addressable where declared."""
 
 import sys
 
@@ -24,9 +19,7 @@ def on_sorted(index):
 
 
 def on_settings():
-    # Fires twice on purpose: once by the chord, once by activating the
-    # item at its DECLARED path — which on macOS lives in the
-    # application menu by then.
+    # Fires twice on purpose: the chord, then the item.
     global settings_count
     settings_count += 1
     status.set(f"settings {settings_count}")
@@ -42,7 +35,7 @@ with app.window(title="commands"):
         kaya.item("Settings…", shortcut="primary+comma",
                   role=kaya.ROLE_SETTINGS, on_activate=on_settings)
 
-    # Option order IS the index vocabulary: Name = 0, Date = 1.
+    # Option order IS the index.
     with app.menu("View"):
         kaya.toggle("Details", checked=details, shortcut="primary+backslash",
                     on_toggle=on_details)

@@ -1,10 +1,9 @@
 package kaya
 
-// The semantic-icon surface's guards (docs/styling-plan.md D6). Go
-// spells the closed vocabulary as plain int constants, so a caller can
-// hand Symbol a number in no vocabulary at all and only the ROOT can say
-// so — hence the re-exec shape styling_test.go explains: a headless
-// queue never reaches a declare-time wall.
+// docs/styling-plan.md D6. Go spells the closed vocabulary as plain int
+// constants, so a caller can hand Symbol a number in no vocabulary at all and
+// only the ROOT can say so — hence the re-exec shape styling_test.go
+// explains: a headless queue never reaches a declare-time wall.
 
 import (
 	"context"
@@ -27,15 +26,13 @@ var theVocabulary = []int64{
 	SymbolPaste, SymbolStar, SymbolLock, SymbolPerson, SymbolHome,
 }
 
-// The sentence the root prints for a value outside the vocabulary,
-// pinned whole so a spec change that grows it reddens this binding too.
+// Pinned whole, so a spec change that grows the vocabulary reddens this
+// binding too.
 const theWholeVocabulary = "is not a symbol — the vocabulary is " +
 	"add=1, remove=2, delete=3, edit=4, done=5, close=6, search=7, " +
 	"settings=8, refresh=9, info=10, warning=11, back=12, forward=13, " +
 	"more=14, copy=15, paste=16, star=17, lock=18, person=19, home=20"
 
-// A Symbol written through a transaction that has already shipped is a
-// lost write, not a late one.
 func TestMenuSymbolOutsideItsTransactionDies(t *testing.T) {
 	app := NewApp()
 	var item MenuItem
@@ -48,8 +45,7 @@ func TestMenuSymbolOutsideItsTransactionDies(t *testing.T) {
 	item.Symbol(SymbolDone)
 }
 
-// symbolTrap builds one scene through the ordinary sugar and pumps it
-// through the root. It returns only when the root ALLOWED the scene.
+// symbolTrap returns only when the root ALLOWED the scene.
 func symbolTrap(trap string) {
 	app := NewApp()
 	app.Build(func(tx *Tx) {
@@ -64,12 +60,10 @@ func symbolTrap(trap string) {
 		case "menu-negative":
 			win.Menu("File").Item("Save").Symbol(-1)
 		case "section-past-the-end":
-			// The same wall from the other surface.
 			tx.AddSection(7).Title("Feed").Symbol(21)
 		case "menu-whole-vocabulary":
-			// Every value on every kind that takes one. A Symbol that
-			// emitted nothing would sail through the dead cases too, so
-			// this is what tells those two apart.
+			// A Symbol that emitted nothing would sail through the dead cases
+			// too, so this is what tells those two apart.
 			file := win.Menu("File")
 			group := win.RadioGroup("Sort")
 			for i, s := range theVocabulary {
@@ -118,8 +112,7 @@ func runSymbolTrap(t *testing.T, trap string) (string, error) {
 }
 
 // Each case runs in a re-exec because a root refusal ends the process, not a
-// Go panic: it crosses an extern "C" frame and nothing here can recover
-// it.
+// Go panic: it crosses an extern "C" frame and nothing here can recover it.
 //
 // A SYMBOL ON A SEPARATOR IS ABSENT ON PURPOSE: Go's three Separator
 // spellings return nothing at all, so `.Separator().Symbol(…)` does not

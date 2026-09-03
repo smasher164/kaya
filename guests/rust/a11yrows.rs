@@ -1,21 +1,12 @@
-//! The stamped-accessibility scene: two entries stamped from one
-//! template, each carrying its OWN ROW's a11y identity, read back out
-//! of the platform's real accessibility tree. The byte-frozen contract
-//! is tools/scenes/a11yrows.steps.
-//!
-//! IT ASSERTS NO CONTAINER, and must not start: a For materializes as a
-//! column, so a scene with a For cannot also name containers ordinally
-//! (the a11y scene does, which is why this is separate).
+//! The stamped-a11y scene (tools/scenes/a11yrows.steps). IT ASSERTS NO
+//! CONTAINER, and must not start: a For materializes as a column.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
         let root = tx
             .column(|tx| {
-                // BOTH PROPS ELEMENT-SOURCED. The id is forced: expect_ax
-                // searches the real tree BY the authored identifier and
-                // refuses an ambiguous one, so copies may not share a
-                // const id (legal in the core, just unreadable here).
+                // expect_ax REFUSES copies that share one const id.
                 let notes = tx.collection::<String>();
                 for mut note in notes.rows(tx) {
                     let field = note.entry();
@@ -25,16 +16,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.insert_fresh(&notes, "First note");
                 tx.insert_fresh(&notes, "Second note");
 
-                // THE STAMPED STYLING PROPS, in a SECOND collection: a
-                // scalar row has one field to spend on an id, so a
-                // second readable copy needs its own strings. Both props
-                // are const in every binding.
+                // A SECOND collection: a scalar row has one field for an
+                // id, and both props below are CONST in every binding.
                 let heads = tx.collection::<String>();
                 for mut head in heads.rows(tx) {
-                    // BOTH TEMPLATE SURFACES, deliberately: `inset` off
-                    // the row trace, `role` off the `Tpl`. `Row` forwards
-                    // to `Tpl` by hand, so tools/tpl-surfaces.py is what
-                    // holds the pair level.
+                    // BOTH TEMPLATE SURFACES: `Row` forwards to `Tpl` by
+                    // hand, and tools/tpl-surfaces.py holds them level.
                     let (bar, _) = head.row(|t| {
                         let title = t.label(kaya::Field::element());
                         t.role(title, kaya::Role::Heading);

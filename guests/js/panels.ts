@@ -1,7 +1,4 @@
-// The panels conformance scene, JS port — the north-star
-// spelling for the auxiliary-window grammar: the inspector is one
-// `createWindow` scope, its veto class one handler. See
-// guests/rust/panels.rs and tools/scenes/panels.steps.
+// The panels conformance scene (tools/scenes/panels.steps).
 
 import * as kaya from "kaya-gui";
 
@@ -19,8 +16,7 @@ app.window({ title: "panels" }, () => {
 const INSPECTOR = 1;
 
 function closeAsked(): void {
-  // Bound to the inspector at its declaration, so it can only ever mean
-  // THIS window's close was vetoed.
+  // Bound at the inspector's declaration: only THIS window's close.
   status.set("close requested");
   kaya.destroyWindow(INSPECTOR);
 }

@@ -12,8 +12,7 @@ android {
         applicationId = "dev.kaya.gohost"
         // THE NDK API LEVEL FOLLOWS THIS NUMBER, not the other way
         // round: tools/android/run-emulator.py reads minSdk out of this
-        // file and picks aarch64-linux-android<minSdk>-clang to
-        // cross-build the Go guest.
+        // file and picks aarch64-linux-android<minSdk>-clang.
         minSdk = 26
         targetSdk = 35
         versionCode = 1

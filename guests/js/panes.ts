@@ -1,10 +1,5 @@
-// The panes conformance scene, JS port — a THREE-pane ceiling as
-// assertions (docs/multicolumn-plan.md D1/D5).
-//
-// Nothing here is panes-specific except `panes: 3`, asked for ONCE — the
-// stack is the ordinary navigation stack, and how many of the three fit is
-// the platform's re-decision at every width. See guests/rust/panes.rs and
-// tools/scenes/panes.steps.
+// The panes scene (tools/scenes/panes.steps): nothing here is
+// panes-specific except `panes: 3`, asked for ONCE.
 
 import * as kaya from "kaya-gui";
 
@@ -35,9 +30,7 @@ function openContent(): void {
 app.window({ title: "panes", panes: 3 }, () => {
   const caption = kaya.signal("root pane");
   kaya.column(() => {
-    // Authored ids so the REAL-TREE read can address these:
-    // `expect_ax label#N` reads the platform's own tree, where the
-    // model reads above pass for an arm that ran and drew nothing.
+    // Authored ids: an index read passes for an empty arm.
     kaya.label({ bind: caption }).a11yId("root"); // label#0
     kaya.button("open content", { onClick: openContent }); // button#0
   });

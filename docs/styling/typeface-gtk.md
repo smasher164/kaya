@@ -13,7 +13,7 @@ Platform under test: `kaya-linux` image (debian trixie
 @sha256:fac46bff…), GTK 4.18.6, libadwaita 1.7.6, Pango 1.56.3,
 fontconfig 2.15.0, on BOTH lane display backends — `GDK_BACKEND=x11`
 under `xvfb-run -a -s "-screen 0 1024x768x24"` and `GDK_BACKEND=wayland`
-under headless sway, matching tools/linux/run-suites.sh:305/323.
+under headless sway, matching tools/linux/run-suites.sh:227/323.
 
 ## The three answers in one paragraph
 

@@ -1,17 +1,11 @@
-// UndoProbe round 3 (macOS) — the decisive run, with the artifact that
-// spoiled rounds 1 and 2 removed.
-//
-// THE ARTIFACT: rounds 1-2 ran three modes back to back from one
-// script, so every difference between them tracked LAUNCH ORDER rather
-// than the hook mode — only the first launch became the active app, and
-// `NSApp.target(forAction: undo:)` came back nil in the others. This one
-// WAITS for the window to become key and says so, and reads at THREE
-// layers (the kaya model, the NSTextField's stringValue, the field
-// editor's string), because "the undo did not happen" and "the undo
-// happened and never reached the model" are different findings.
-//
-// One mode per process. Run it three times; see build3.sh.
-//
+// UndoProbe round 3 (macOS) — ONE MODE PER PROCESS, because rounds 1-2
+// ran three modes back to back and every difference tracked LAUNCH ORDER
+// rather than the hook mode: only the first launch became the active
+// app, and `NSApp.target(forAction: undo:)` came back nil in the others.
+// This one WAITS for the window to become key and reads at THREE layers
+// (kaya model, NSTextField.stringValue, field editor), because "the undo
+// did not happen" and "it happened and never reached the model" are
+// different findings.
 // THROWAWAY. Nothing builds it but build3.sh beside it.
 import AppKit
 import SwiftUI

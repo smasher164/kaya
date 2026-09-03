@@ -72,17 +72,12 @@ TMP = g.scratch()
 # it takes it away, on every exit path.
 atexit.register(lambda: [p.unlink() for p in ROOT.glob("javac.*.args")])
 
-# THE NESTED-TABLE EXERCISER, this language's answer to Rust's
-# doc-tests (docs/tables-plan.md, dynamic tables). No Java guest
-# declares a table inside a row template yet, so without this the
-# spelling would ship compiled by nothing. Both zones are here: the
-# untyped Collection's rows and the generated record surface's.
-#
-# NO SMUGGLE ANYWHERE IN IT, and that is the point of the shape it
-# checks: the nested For is a VALUE the loop is written over, so the
-# node its header bar and sort handler name is an ordinary local. The
-# callback form could not hand one out of a lambda — this file carried
-# a Stamped<Widget, Node> and a one-slot array to get it out.
+# THE NESTED-TABLE EXERCISER, this language's answer to Rust's doc-tests
+# (docs/tables-plan.md, dynamic tables): no Java guest declares a table
+# inside a row template, so without this the spelling ships compiled by
+# nothing. Both zones are here. NO SMUGGLE ANYWHERE IN IT: the nested For
+# is a VALUE the loop is written over, so the node its header bar and
+# sort handler name is an ordinary local.
 (TMP / "probe").mkdir()
 (TMP / "probe" / "NestedTableCheck.java").write_text('''\
 // IN THE GUESTS' PACKAGE so the generated record surface is in reach:
@@ -174,12 +169,10 @@ public final class NestedTableCheck {
 }
 ''', encoding="utf-8")
 
-# -Xlint:unchecked -Werror ON THE MAIN COMPILE ONLY (2026-08-31): an
-# unchecked warning is a compile failure here, so raw-generics slips
-# die at the gate instead of scrolling past as javac notes for weeks —
-# which is what the Signal<V> raw local and the generated eliminator's
-# raw Arm[] did. A legitimate erasure idiom carries its own
-# @SuppressWarnings at the site, which is the discipline.
+# -Xlint:unchecked -Werror ON THE MAIN COMPILE ONLY: an unchecked warning
+# is a compile failure here, so raw-generics slips die at the gate instead
+# of scrolling past as javac notes. A legitimate erasure idiom carries its
+# own @SuppressWarnings at the site.
 main_sources = (
     ["bindings/java-desktop/dev/kaya/KayaRing.java"]
     + sorted(str(p.relative_to(ROOT))
@@ -245,13 +238,11 @@ if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
          "reach the live onSort, whose handler has no key path to name "
          "a copy with (the tables plan's per-copy identity rule).")
 
-# A RECORD HAS NO SIZE CEILING, and this one is RUN rather than
-# compiled — the only clause in this file that is. The encoder's buffer
-# was a fixed ByteBuffer.allocate(4096), which capped every java
-# record: 4064 characters in any text prop, 252 wire values in a
-# drawing (docs/deferred.md, java-record-ceiling). Nothing else in the
-# tree can see it — no scene sets a 4KB label, and the ceiling is a
-# THROW, so a compile check is blind to it by construction.
+# A RECORD HAS NO SIZE CEILING, and this one is RUN rather than compiled
+# — the only clause in this file that is. A fixed ByteBuffer.allocate(4096)
+# capped every java record at 4064 characters of text or 252 wire values
+# (docs/deferred.md, java-record-ceiling), and nothing else in the tree can
+# see it: no scene sets a 4KB label, and the ceiling is a THROW.
 (TMP / "big").mkdir()
 (TMP / "big" / "LargeRecordCheck.java").write_text('''\
 import dev.kaya.KayaWire;
@@ -344,11 +335,8 @@ if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'bigclasses'}",
          "ByteBuffer caps every record, which is a text prop of 4064 "
          "characters and a drawing of 252 values.")
 
-# ITS WATCHED NEGATIVE. The growth is removed from a COPY — never the
-# tree (the perturb-from-copy rule) — the substitution is COUNTED, and
-# the same exerciser is required to throw for the RIGHT reason. Without
-# this the clause above only shows the encoder works, not that the
-# growth is what makes it work.
+# ITS WATCHED NEGATIVE: the growth removed from a COPY, the substitution
+# COUNTED, and the same exerciser required to throw for the RIGHT reason.
 (TMP / "fixedwire").mkdir()
 for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya")
                 .glob("*.java")):
@@ -403,16 +391,11 @@ if wire_after != wire_before:
          "the ceiling negative. It must only ever doctor the copy in "
          "the scratch directory.")
 
-# ONE APP PER PROCESS, AND THE REFUSAL MADE TO PRINT
-# (docs/deferred.md's mount entry). kaya's core is a process-global
-# singleton, so two Apps mint ids from two counters into one scene and
-# the core dies on the first collision — a crash three removes from the
-# mistake. NOTHING ELSE REACHES IT: no guest builds two, and on Android
-# kaya starts the app thread itself (KayaRing.startGuest), so the
-# platform's own relaunch can no longer produce a second entry either —
-# the shape this replaced, where the JVM shell spawned the thread, died
-# in requireAppThread naming a THREAD rather than the cause (measured
-# on the android lane 2026-08-27).
+# ONE APP PER PROCESS, AND THE REFUSAL MADE TO PRINT (docs/deferred.md's
+# mount entry): kaya's core is a process-global singleton, so two Apps
+# mint ids from two counters into one scene and the core dies on the first
+# collision, three removes from the mistake. NOTHING ELSE REACHES IT — no
+# guest builds two, and on Android kaya starts the app thread itself.
 (TMP / "once").mkdir()
 (TMP / "once" / "BuildOnceCheck.java").write_text('''\
 import dev.kaya.KayaApp;
@@ -457,11 +440,9 @@ if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'onceclasses'}",
          "mount entry); two Apps mint ids from two counters and the "
          "core dies on the first collision.")
 
-# ITS WATCHED NEGATIVE, the ceiling clause's shape one file over: the
-# latch is removed from a COPY of the binding — never the tree — the
-# substitution is COUNTED, and the same exerciser is required to report
-# that a second App got through. Without this the clause above only
-# shows that the probe runs.
+# ITS WATCHED NEGATIVE, the ceiling clause's shape: the latch removed
+# from a COPY, the substitution COUNTED, and the same exerciser required
+# to report that a second App got through.
 (TMP / "unlatched").mkdir()
 for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya")
                 .glob("*.java")):

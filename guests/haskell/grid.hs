@@ -1,5 +1,4 @@
--- The grid conformance scene, Haskell port. See
--- guests/rust/grid.rs and tools/scenes/grid.steps.
+-- The grid scene, Haskell port — guests/rust/grid.rs, tools/scenes/grid.steps.
 
 import KayaApp
 

@@ -11,7 +11,7 @@ see §6's "THE ONE LINK I COULD NOT VERIFY".
 
 ## 0. The pinned SDK
 
-[REPO] `tools/fetch-winappsdk.sh:89-98` pins the component packages by exact
+[REPO] `tools/fetch-winappsdk.sh:86-95` pins the component packages by exact
 version (comment on line 23-24: the component versions come from the
 `Microsoft.WindowsAppSDK` 2.2.0 meta-package's nuspec):
 
@@ -23,7 +23,7 @@ version (comment on line 23-24: the component versions come from the
 
 So: **Windows App SDK 2.2.0**, WinUI component 2.2.1.
 
-[REPO] `tools/winui-bindgen/src/main.rs:13-29` names the exact winmd inputs the
+[REPO] `tools/winui-bindgen/src/main.rs:14-28` names the exact winmd inputs the
 Rust bindings are generated from. [MEASURED] all of them are present on this
 machine, cached under `third_party/winappsdk/` (gitignored, 108 MB runtime
 installer alongside).
@@ -154,7 +154,7 @@ So the question reduces to: which `ImageSource` accepts an in-memory stream?
 
 ### kaya ALREADY DOES EXACTLY THIS, one layer over
 
-[REPO] `crates/kaya/src/winui/mod.rs:10438-10467` — the `Image` widget's
+[REPO] `crates/kaya/src/winui/mod.rs:8376-8398` — the `Image` widget's
 `Prop::Source` arm with a `Value::Blob`:
 
     let stream = InMemoryRandomAccessStream::new()?;
@@ -284,9 +284,9 @@ after a call to MddBootstrapInitialize().**"*
 [INFER] For kaya's Rust backend that means: a `LoadLibraryW("Microsoft.Internal.FrameworkUdk.dll")`
 + `GetProcAddress("Windowing_GetIconIdFromIcon")` pair — a hand-written
 `define_interface!`-style shim exactly like the `IWindowNative` one already at
-`crates/kaya/src/winui/mod.rs:11050-11062`. kaya already runs the bootstrapper
+`crates/kaya/src/winui/mod.rs:8856-8867`. kaya already runs the bootstrapper
 (it ships `Microsoft.WindowsAppRuntime.Bootstrap.dll`,
-[REPO] `tools/deploy-win.py:145`), so the ordering precondition is already met.
+[REPO] `tools/deploy-win.py:131`), so the ordering precondition is already met.
 The sibling `Windowing_GetWindowIdFromWindow` is available through the same
 shim, which is how you get a `WindowId`/`AppWindow` from an HWND if you ever need
 the non-XAML route.
@@ -379,7 +379,7 @@ embedded icon resource (id 32512) with `LoadIcon`, converts with
 
 [INFER] **This is the strongest argument for the runtime-blob design on this
 platform.** kaya's Windows guests do not run one executable: [REPO]
-`tools/deploy-win.py:674-684` kills `<scene>.exe` (Rust), `<scene>_go.exe` (Go),
+`tools/deploy-win.py:622-629` kills `<scene>.exe` (Rust), `<scene>_go.exe` (Go),
 `python.exe`, `dotnet.exe`, `kaya-guests.exe`, `java.exe`. The fallback chain
 above ends at *the host process's* icon — so with no runtime call the Python
 guest wears the Python icon, the Java guest the JVM's, and the Rust guest
@@ -470,7 +470,7 @@ window caption."* [INFER] the label alongside those comes from the window text;
 the shell has no other per-window name to read.
 
 **Which of those does kaya already set?** [REPO] The window caption — and
-deliberately, through exactly one writer. `crates/kaya/src/winui/mod.rs:2189-2197`:
+deliberately, through exactly one writer. `crates/kaya/src/winui/mod.rs:1835-1843`:
 
     fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
         let caption = HSTRING::from(window_caption(core, window));

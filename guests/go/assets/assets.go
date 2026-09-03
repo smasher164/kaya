@@ -1,24 +1,5 @@
-// The assets conformance scene from Go (docs/assets-plan.md, ratified
-// 2026-08-18). The byte-frozen contract is tools/scenes/assets.steps.
-//
-// THIS ONE PROVES THE BYTES. asset(name) has two redemptions and the
-// typeface scene already covers the other — a font whose bytes go from
-// the core's read straight to the platform's font API and never enter
-// Go's heap. Here the guest IS the consumer: it copies the mark out with
-// Bytes() and hands them to an Image, and the platform's own decoder
-// answers 64x64 off the real view.
-//
-// THE MISS IS A QUESTION, NOT A recover(). AssetMissSentence answers the
-// same sentence Tx.Asset would panic with, without panicking, and that
-// is the only shape all nine share — the C floor catches nothing at all
-// (docs/deferred.md, the assets entry). Go could recover here and
-// deliberately does not — one shape for the observation, in every
-// language.
-//
-// LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
-// and the route that chose it, which a bundle, a device directory and a
-// repo checkout spell three different ways; line 1 is the same
-// everywhere, so it is the line a scene can freeze.
+// The assets conformance scene (tools/scenes/assets.steps). THE MISS IS A
+// QUESTION, NOT A recover(), and LINE 1 ONLY: line 2 differs per host.
 package assets
 
 import (
@@ -29,20 +10,16 @@ import (
 )
 
 const (
-	// The asset that is deliberately not there. A LEGAL name —
-	// relative, /-spelled, one component deep — so what comes back is
-	// the census sentence and not a name-fault one.
+	// Absent, and deliberately LEGAL, so the miss is the census sentence.
 	missingName = "icons/nope.png"
 
-	// The one the mark is under, and the one the census must list.
 	markName = "icons/kaya-mark.png"
 
-	// The large asset: 111400 bytes, so a reader that truncated into a
-	// fixed buffer shows up here rather than passing quietly.
+	// 111400 bytes: a reader that truncated into a fixed buffer shows here.
 	fontName = "fonts/sora-wght.ttf"
 )
 
-// firstLine is the census half of the sentence. Empty in, empty out.
+// firstLine is the census half of the sentence.
 func firstLine(sentence string) string {
 	if at := strings.IndexByte(sentence, '\n'); at >= 0 {
 		return sentence[:at]
@@ -64,23 +41,18 @@ func App() *kaya.App {
 		census := firstLine(tx.AssetMissSentence(missingName))
 		verdict := "no complaint"
 		if complaint := tx.AssetMissSentence(fontName); complaint != "" {
-			// Never reached on a healthy lane, and it shows the
-			// sentence rather than a word about it: a failure here has
-			// to say what was measured.
+			// Shows the sentence: a failure must say what was measured.
 			verdict = firstLine(complaint)
 		}
 
 		title := tx.Signal("assets")
 		found := tx.Signal(census)
-		// %d renders a Go int with no separator and no padding, on
-		// every platform and under every environment.
+		// %d renders with no separator and no padding, everywhere.
 		sizes := tx.Signal(fmt.Sprintf("%s: %d bytes, %s", fontName, font.Len(), verdict))
 
 		tx.Mount(tx.Column(func() {
 			tx.Label(title) // label#0
-			// THE BYTES, not the blob handle: this scene is the
-			// consumer, so what reaches the decoder is what Bytes()
-			// handed back.
+			// THE BYTES, not the blob handle.
 			tx.Image(mark.Bytes()) // image#0
 			tx.Label(found)        // label#1
 			tx.Label(sizes)        // label#2

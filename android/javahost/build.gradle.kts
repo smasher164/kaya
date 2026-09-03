@@ -34,13 +34,13 @@ android {
     }
 }
 
-// KayaRecords reflects the canonical constructor when record metadata
-// is unavailable (D8 desugars records on Android, so ART never sees
-// record components); -parameters keeps the component names it needs.
+// D8 desugars records on Android, so ART never sees record components
+// and KayaRecords reflects the canonical constructor: -parameters is
+// what keeps the component names it needs.
 tasks.withType<JavaCompile> {
     options.compilerArgs.add("-parameters")
     // Main.java is the desktop entrypoint: KayaRing.run has no Android
-    // twin (crates/kaya/src/jvm.rs), and check-compose compiles this task.
+    // twin (crates/kaya/src/jvm.rs).
     exclude("dev/kaya/guests/Main.java")
 }
 

@@ -1,12 +1,7 @@
 //! THROWAWAY probe #2 for the WinUI undo arm — the two claims the
-//! byte-frozen scene CANNOT reach:
-//!
-//! 1. THE CHORD (chord theft, §1.1). No scene presses one — the undo
-//!    guest declares no shortcut — so this installs `primary+z` into the
-//!    live catalog table the hook consults and presses the REAL key.
-//! 2. A1's CLEAR. The scene passes with or without it on this lane, so
-//!    the clear needs a direct reading: type, commit a group with the
-//!    field focused, ask the field whether it can still undo.
+//! byte-frozen scene CANNOT reach: the CHORD (no scene presses one) and
+//! A1's CLEAR (the scene passes with or without it on this lane).
+//! docs/undo-plan.md §1.1.
 //!
 //! Wiring (temporary, reverted after the run):
 //!   crates/kaya/src/winui/mod.rs

@@ -9,7 +9,7 @@ the session scratchpad (`styling/typeprobe/`), deleted at the end.
 
 | fact | value |
 | --- | --- |
-| lane image | `system-images;android-35;google_apis;arm64-v8a` (tools/android/run-emulator.py:114) |
+| lane image | `system-images;android-35;google_apis;arm64-v8a` (tools/android/run-emulator.py:100) |
 | device | `emulator-5558`, one of the warm phone pool; API 35 / Android 15, arm64-v8a, 320x640 @ 160dpi |
 | compose | BOM 2024.10.01 → ui/foundation 1.7.5, material3 1.3.1 (the versions kaya ships) |
 | kaya's theme root | `KayaCompose.kt:7736 KayaTheme()`, landed in slice 1 — the typeface has a place to go |

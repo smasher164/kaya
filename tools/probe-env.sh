@@ -9,15 +9,10 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# One place that knows how to ask whether each test surface is ready.
-# Nothing here mutates state except `--warm`, which boots independently
-# warmable surfaces. The coupled Android phone+tablet pool is reported here
-# and owned by tools/android/run-emulator.py, including its snapshot identity.
-#
-#   tools/probe-env.sh          report readiness of every surface
-#   tools/probe-env.sh --warm   also boot independent simulator / VM
-#                               surfaces, and REFUSE (exit 1) naming any
-#                               surface it was asked to warm and could not
+# Is each test surface ready? Nothing here mutates state except `--warm`,
+# which boots the independently warmable ones and REFUSES (exit 1) naming
+# any it could not. The coupled Android phone+tablet pool is reported
+# here and owned by tools/android/run-emulator.py.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,10 +21,8 @@ cd "$ROOT" || exit 1
 WARM=0
 [ "${1:-}" = --warm ] && WARM=1
 status=0
-# Surfaces `--warm` was asked to warm and did not. A warm that skips one
-# in silence is worse than no warm: the next run pays the boot inside the
-# number it is measuring, and nothing said so. Retired at the foot of the
-# file, where --warm refuses rather than exiting 0.
+# Surfaces `--warm` was asked to warm and did not; retired at the foot of
+# the file, where --warm refuses rather than exiting 0.
 warm_skipped=""
 
 report() { # name state detail
@@ -52,10 +45,8 @@ fi
 # --- toolchain provenance --------------------------------------------
 # The dev-shell marker proves the env was exported, not that the PATH
 # still leads with it: a login profile's `brew shellenv` can re-prepend
-# /opt/homebrew on top of an inherited dev-shell PATH (Claude Code's
-# shell snapshots do exactly this), and any formula shadowing a pinned
-# tool then wins by order. A homebrew ocaml — same "5.4.1" version
-# string, different build — once drove nix dune/ppxlib into
+# /opt/homebrew over an inherited dev-shell PATH, and a homebrew ocaml —
+# same version string, different build — once drove nix dune/ppxlib into
 # "inconsistent assumptions over implementation Location". swiftc is
 # exempt: the flake reaches it through Apple's /usr/bin shim.
 shadowed=""
@@ -85,11 +76,9 @@ else
 fi
 
 # --- macOS file-panel view mode --------------------------------------
-# NSOpenPanel publishes a different accessibility identifier per view
-# mode, and the mode is MACHINE-WIDE (docs/traps.md). Reported, not
-# demanded: validate-mac rotates 1/2/3 across the filedialog legs and
-# restores this value. The one state that IS a problem is a fourth mode
-# the interpreter's KayaPanelShape cannot read.
+# The mode is MACHINE-WIDE (docs/traps.md). Reported, not demanded; the
+# one state that IS a problem is a fourth mode KayaPanelShape cannot
+# read.
 panel_mode=$(defaults read -g NSNavPanelFileListModeForOpenMode2 2>/dev/null || echo unset)
 panel_stamp=""
 # A stamp left behind means a validate-mac run died before putting the
@@ -107,10 +96,8 @@ esac
 
 # --- macOS accessibility trust ----------------------------------------
 # macOS 26.6.2 gates the AX hop into the open/save panel service on the
-# Accessibility grant: untrusted, the sheet's one bridged child answers
-# no attributes and every filedialog/save leg fails the same way
-# (docs/traps.md). The guests inherit this shell's TCC attribution, so
-# this read speaks for the lane.
+# Accessibility grant (docs/traps.md). The guests inherit this shell's
+# TCC attribution, so this read speaks for the lane.
 ax_trusted=$(python3 -c "
 import ctypes
 f = ctypes.CDLL('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
@@ -132,11 +119,10 @@ if ! xcrun simctl help >/dev/null 2>&1; then
         fi
     done
 fi
-# THE SAME DEFAULT tools/ios/run-sim.py USES. It read 2 against the
-# runner's 3 from 2026-07-17 (28b48c5) until 2026-08-24: the probe called
-# a two-sim pool warm and run-sim.py then created and booted the third
-# inside whatever run followed. check-gates holds this agreement for the
-# Android pool and not yet for this one.
+# THE SAME DEFAULT tools/ios/run-sim.py USES: a probe that called a
+# short pool warm left the runner booting the rest inside whatever run
+# followed. check-gates holds this agreement for the Android pool and
+# not yet for this one.
 IOS_POOL="${KAYA_IOS_SIMS:-3}"
 if xcrun simctl list devices >/dev/null 2>&1; then
     booted=$(xcrun simctl list devices booted 2>/dev/null | grep -c "kaya-sim-.*Booted" || true)
@@ -159,8 +145,7 @@ if xcrun simctl list devices >/dev/null 2>&1; then
             timeout 180 xcrun simctl bootstatus "$u" -b >/dev/null 2>&1 || true
         done
         # COUNTED AGAIN, not asserted: every create/boot/bootstatus above
-        # is deliberately non-fatal, so "warmed now" was a claim this arm
-        # had never measured.
+        # is deliberately non-fatal.
         booted=$(xcrun simctl list devices booted 2>/dev/null | grep -c "kaya-sim-.*Booted" || true)
         if [ "$booted" -ge "$IOS_POOL" ]; then
             report ios OK "sim pool booted ($booted/$IOS_POOL, warmed now)"
@@ -176,12 +161,10 @@ else
 fi
 
 # --- iOS clipboard isolation -----------------------------------------
-# Simulator.app relays the macOS pasteboard into and out of every booted
-# simulator by default (docs/clipboard-plan.md:1502), so the clipboard
-# legs would share one board with the mac lane. Early warning only —
-# run-sim.py MEASURES the relay per run and refuses. It names the APP,
-# not the pref: a running Simulator.app ignores a `defaults write` and
-# the pref can read NO while the relay is live.
+# Simulator.app relays the macOS pasteboard into every booted simulator
+# by default (docs/clipboard-plan.md:1502). Early warning only —
+# run-sim.py measures the relay per run and refuses. It names the APP,
+# not the pref: a running Simulator.app ignores a `defaults write`.
 if pgrep -qx Simulator; then
     pref=$(defaults read com.apple.iphonesimulator PasteboardAutomaticSync 2>/dev/null || echo unset)
     report ios-clip CHECK \
@@ -272,9 +255,8 @@ if docker info >/dev/null 2>&1; then
     # `docker images -q` over `image inspect`: the latter misreports
     # untagged lookups under some docker CLIs.
     if [ -n "$(docker images -q kaya-linux 2>/dev/null)" ]; then
-        # A cached image can predate a Dockerfile layer. The clipboard
-        # tools are the youngest layer, so probing them names the fix
-        # early instead of a clipboard leg failing on a missing tool.
+        # A cached image can predate a Dockerfile layer; the clipboard
+        # tools are the youngest, so probing them names the fix early.
         if docker run --rm kaya-linux bash -c \
             'command -v wl-copy && command -v xclip && command -v wtype && command -v identify' \
             >/dev/null 2>&1; then
@@ -311,12 +293,10 @@ else
 fi
 
 # --- what --warm did not do ------------------------------------------
-# `--warm` USED TO BOOT THE ANDROID POOL and cannot any more: the pool is
-# coupled (phones + the tablet + a snapshot identity) and
-# tools/android/run-emulator.py owns it. Until this refusal, --warm
-# reported the pool COLD and still exited 0, so a standalone benchmark
-# warmed first and paid 60-90s of emulator boot inside the number it was
-# measuring, with nothing saying the warm had not happened.
+# `--warm` CANNOT BOOT THE ANDROID POOL: it is coupled (phones + tablet +
+# a snapshot identity) and tools/android/run-emulator.py owns it. This
+# refusal exists because reporting COLD and exiting 0 let a benchmark pay
+# 60-90s of emulator boot inside the number it was measuring.
 if [ -n "$warm_skipped" ]; then
     echo "probe-env: --warm did not warm:$warm_skipped — the report line for each" >&2
     echo "  says what it needs. This exits 1 rather than 0 so a benchmark started" >&2

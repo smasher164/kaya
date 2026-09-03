@@ -1,20 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- THE CLIPBOARD SCENE'S FOREIGN APP, named here because a package
-         this one cannot SEE is a package it cannot broadcast to. On
-         targetSdk 30+ ActivityManagerService resolves receivers through
-         PackageManagerInternal.queryIntentReceivers WITH THE CALLER'S
-         UID, so app-visibility filtering applies to an explicit
-         component too and the broadcast simply finds nothing to deliver
-         to. Silently: an ordered broadcast with no receiver still runs
-         the sender's result receiver, with the initial code, which reads
-         exactly like a helper that answered nothing.
-
-         Every cell in docs/clipboard-plan.md §7 was measured from the
-         SHELL uid (adb), which holds QUERY_ALL_PACKAGES and never needed
-         this — app-to-app is the path the arm actually takes, and it is
-         the one this covers.
-
+    <!-- THE CLIPBOARD SCENE'S FOREIGN APP: a package this one cannot
+         SEE is a package it cannot broadcast to, explicit component or
+         not, and the failure is silent (docs/traps.md: "An explicit broadcast to a package the
+         sender cannot SEE is filtered out with no error").
          Harness-only, so it is declared here and not in the kaya
          library's manifest — the same call the accessibility service
          below makes, for the same reason. -->
@@ -22,13 +11,10 @@
         <package android:name="dev.kaya.cliphelper" />
     </queries>
     <!-- THE APP'S DECLARED IDENTITY, READ OUT OF ONE FILE
-         (docs/app-identity-plan.md ruling 4). `@mipmap/kaya_mark` is the
-         declared picture, copied verbatim into this module's generated
-         res by android/build.gradle.kts; `${kayaAppLabel}` is the
-         declared name, placed by the same reader. Neither is written
-         here, because the label WAS written here — three times, once per
-         app — and a fourth copy is how "one mark, one name" stops being
-         true without anybody editing it. -->
+         (docs/app-identity-plan.md ruling 4): both the mark and the
+         label are placed by android/build.gradle.kts. Neither is
+         written here, because one more copy of the label is how "one
+         mark, one name" stops being true without anybody editing it. -->
     <application
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
@@ -41,13 +27,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- THE HARNESS'S EYES OUTSIDE THIS APP, declared here and not
-             in the kaya library's manifest so a user's app never carries
-             an accessibility service it did not ask for. Android's file
-             picker is DocumentsUI, a separate APK, and this is what lets
-             the scene read and drive it without moving the lane to
-             instrumentation. The runner enables it over adb; it starts
-             on its own never. -->
+        <!-- THE HARNESS'S EYES OUTSIDE THIS APP: DocumentsUI is a
+             separate APK and this is what lets a scene drive it.
+             Declared by the validation apps and never by the kaya
+             library, so a user's app never carries it; the runner
+             enables it over adb. -->
         <service
             android:name="dev.kaya.KayaHarnessAccessibility"
             android:exported="false"

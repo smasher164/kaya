@@ -1349,13 +1349,10 @@ let shortcut_named_keys = [ "enter"; "escape"; "delete"; "left"; "right"; "up"; 
 
 (* Canonicalize a shortcut spelling to the wire form: lowercase
    '+'-joined tokens, modifiers ordered primary, shift, alt, then one
-   key (a-z, 0-9, or the closed named set). Accepts ASCII case
-   variants and any modifier order; raises Invalid_argument on
+   key (a-z, 0-9, or the closed named set). Raises Invalid_argument on
    whitespace, empty tokens, repeated modifiers, aliases
-   (ctrl/cmd/option), and unknown or multiple or missing keys.
-   POLICY stays at the core: escape, shift-only and bare
-   alphanumerics, and the reserved floor are validated there, on the
-   canonical spelling, never rewritten. *)
+   (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY
+   stays at the core, validated on the canonical spelling. *)
 let canonicalize_shortcut spelling =
   if String.length spelling = 0 then invalid_arg "kaya: shortcut is empty";
   String.iter

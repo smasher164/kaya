@@ -1,9 +1,4 @@
-// The panes conformance scene, C# port — a THREE-pane ceiling as
-// assertions (docs/multicolumn-plan.md D1/D5). Nothing here is
-// panes-specific except panes: 3, asked for ONCE — the stack is the
-// ordinary navigation stack, and how many of the three fit is the
-// platform's re-decision at every width. See guests/rust/panes.rs and
-// tools/scenes/panes.steps.
+// The panes scene, C# port — guests/rust/panes.rs, tools/scenes/panes.steps.
 
 static class PanesScene
 {
@@ -21,9 +16,8 @@ static class PanesScene
 
             tx.Mount(tx.Column(() =>
             {
-                // Authored ids so the REAL-TREE read can address these: an
-                // index read passes whether or not anything reached the
-                // screen.
+                // Authored ids: an index read passes whether or not anything
+                // reached the screen.
                 tx.SetA11yId(tx.Label(bind: caption), "root"); // label#0
                 tx.Button("open content", onClick: OpenContent); // button#0
             }));

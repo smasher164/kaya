@@ -1,8 +1,4 @@
--- The panes conformance scene, Haskell port — a THREE-pane ceiling as
--- assertions (docs/multicolumn-plan.md D1/D5). Nothing here is
--- panes-specific except 'WPanes 3', asked for ONCE; the stack is the
--- ordinary navigation stack, and how many of the three fit is the
--- platform's re-decision at every width. See guests/rust/panes.rs and
+-- The panes scene, Haskell port — guests/rust/panes.rs,
 -- tools/scenes/panes.steps.
 
 import Data.Word (Word64)

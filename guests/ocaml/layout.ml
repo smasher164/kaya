@@ -1,9 +1,5 @@
-(* The layout scene, OCaml port — the native-default observation
-   vehicle; see guests/rust/layout.rs for the axes it stresses. The two
-   label expects (KAYA_SELFTEST=layout) only prove the tree built; the
-   scene asserts no geometry — container targets index by creation
-   order, which legitimately differs per language. The grow contract is
-   asserted in the grow scene instead. *)
+(* The layout scene, OCaml port — guests/rust/layout.rs,
+   tools/scenes/layout.steps. *)
 
 open Kaya_wire
 open Kaya_app

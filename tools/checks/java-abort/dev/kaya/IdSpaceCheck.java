@@ -1,13 +1,8 @@
-// ONE ID SPACE, Java arm: a template node draws from the WIDGET counter,
-// so an app hands out one number sequence and the core's two "already
-// exists" walls can never fire on an id this binding minted (DESIGN.md,
-// Binding conventions). Run from AbortCheck, on ITS app and FIRST, so
-// the run starts at 1 — one App per process is the rule KayaApp's
-// constructor holds, so this fixture cannot make one of its own.
-//
-// IN PACKAGE dev.kaya because Widget.id and Node.id are package-private
-// and this is the only thing that reads them; AbortCheck itself stays in
-// the default package.
+// ONE ID SPACE, Java arm: a template node draws from the WIDGET counter
+// (DESIGN.md, Binding conventions). Run from AbortCheck, on ITS app and
+// FIRST, so the run starts at 1 — one App per process is KayaApp's own
+// rule, so this fixture cannot make one. IN PACKAGE dev.kaya because
+// Widget.id and Node.id are package-private.
 package dev.kaya;
 
 import java.util.function.Consumer;

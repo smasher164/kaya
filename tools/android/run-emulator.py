@@ -10,22 +10,10 @@ dev_shell_or_die()
 # Build, install, and self-test the scenes in the Android emulator.
 # Usage: tools/android/run-emulator.py [compose|jvm|go|python|all]
 #
-# compose - the rust app on the Compose interpreter
-# jvm     - the JVM app itself as the guest, over the direct ring tier
-# go      - a Go guest as a c-shared .so on the same ring, loaded by a
-#           shell Activity (docs/go-mobile-plan.md D1)
-# python  - CPython embedded in one APK carrying every python scene
-#           (docs/python-mobile-plan.md)
-#
-# stdout is invisible to an Android app process, so selftest results
-# are read from logcat.
-#
-# The roster, the per-leg modifiers and the declared-off lists are
-# DATA: tools/lib/lanes/android.py, the one source the gates import too
-# (docs/runner-conversion-plan.md §2, stage 3). The split and panels
-# scenes are desktop-only BY DESIGN (resize_window / create_window on a
-# host where the system owns surfaces; DESIGN.md), declared there with
-# their reasons.
+# stdout is invisible to an Android app process, so selftest results are
+# read from logcat. The roster, the per-leg modifiers and the
+# declared-off lists (split and panels are desktop-only BY DESIGN) are
+# DATA: tools/lib/lanes/android.py, the source the gates import too.
 
 import atexit
 import hashlib
@@ -76,9 +64,8 @@ if run([str(ROOT / "tools/check-targets.py"), "android"]).returncode != 0:
     sys.exit(1)
 
 SUITE = sys.argv[1] if len(sys.argv) > 1 else "all"
-# An unknown suite name is refused rather than run as zero legs: the
-# shell body ran no blocks and printed ALL PASS (a stated upgrade,
-# docs/measurements/run-emulator-conversion-2026-08-31.md).
+# An unknown suite name is refused rather than run as zero legs, which
+# would print ALL PASS having run nothing.
 if SUITE not in (*lane.SUITES, "all"):
     die(f"run-emulator: unknown suite {SUITE!r} (one of: "
         f"{', '.join((*lane.SUITES, 'all'))})")
@@ -90,9 +77,8 @@ for gen in ("gen-header", "gen-bindings"):
 timing("preflight")
 
 # The emulator/snapshot state library stays SHELL: tools/probe-env.sh
-# still sources it, so its functions are called through this bridge
-# rather than ported into a second copy that would drift
-# (docs/runner-conversion-plan.md §6).
+# sources it too, so it is called through this bridge rather than
+# copied (docs/runner-conversion-plan.md §6).
 AESTATE = ROOT / "tools/lib/android-emulator-state.sh"
 
 
@@ -120,11 +106,9 @@ if _rc != 0 or "\n" not in _state.strip():
 EMULATOR_EXE, SYSTEM_IMAGE_DIR = _state.strip().split("\n", 1)
 # One tablet alongside the phone pool, for exactly one reason: every
 # pool device is 320dp wide, an unambiguously COMPACT window, and
-# Material's standard directive shows two panes only at 840dp — so
-# nothing else in this lane could observe the list-detail SPLIT arm,
-# and a wrong one compiled and passed everything. This is the iOS
-# lane's iPad: one device carrying one scene, form-factor coverage
-# rather than device-matrix breadth.
+# Material shows two panes only at 840dp — so nothing else in this lane
+# observes the list-detail SPLIT arm, and a wrong one compiled and
+# passed everything.
 TABLET_AVD = "kaya-tablet"
 
 _avds = out_of(["avdmanager", "list", "avd", "-c"]).splitlines()
@@ -142,13 +126,12 @@ if TABLET_AVD not in _avds:
          "-d", "medium_tablet"],
         input="no\n", stdout=subprocess.DEVNULL, **TEXT)
 
-# A pool of emulators (KAYA_ANDROID_EMUS wide) runs the legs in
-# parallel. All pool instances share the one AVD READ-ONLY — the
-# sharing rule is all-or-nothing, a read-write instance locks every
-# sibling out — and read-only instances quickboot from the snapshot in
-# ~2-4s. The snapshot itself can only be written by a read-write
-# instance. Pool instances stay warm across runs on purpose. See
-# docs/traps.md, "An Android toolchain move outlives its dev shell".
+# All pool instances share the one AVD READ-ONLY — the sharing rule is
+# all-or-nothing, a read-write instance locks every sibling out — and
+# read-only instances quickboot from the snapshot in ~2-4s. The snapshot
+# itself can only be written by a read-write instance. Pool instances
+# stay warm across runs on purpose (docs/traps.md, "An Android toolchain
+# move outlives its dev shell").
 if not os.environ.get("KAYA_ANDROID_EMUS", "4").isdigit():
     die("run-emulator: KAYA_ANDROID_EMUS must be a positive integer")
 POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "4"))
@@ -410,19 +393,12 @@ for i in range(POOL):
 if not launch_reader(TABLET_PORT, TABLET_AVD):
     sys.exit(1)
 
-# THE LANE'S FOREIGN CLIPBOARD APP. Every assertion in the clipboard
-# scene crosses a process boundary on purpose: a check where kaya reads
-# what kaya wrote parses its own malformed lowering perfectly happily.
-# This host has no `cmd clipboard`, so the outside process is an APK —
-# tools/android/cliphelper, which seeds from the BACKGROUND (writes
-# were never focus-gated) and reads back as the DEFAULT IME, whose
-# reads ClipboardService admits before it ever checks focus, so the
-# guest keeps window focus for the whole leg (docs/clipboard-plan.md §7
-# finding 1).
-#
-# A SEPARATE GRADLE BUILD from android/'s, deliberately: a harness-only
-# APK must never be one `assemble` away from the module graph the apps
-# ship. Built while the readers boot.
+# THE LANE'S FOREIGN CLIPBOARD APP: this host has no `cmd clipboard`, so
+# the outside process is an APK that seeds from the BACKGROUND and reads
+# back as the DEFAULT IME, whose reads ClipboardService admits before it
+# checks focus (docs/clipboard-plan.md §7 finding 1). A SEPARATE GRADLE
+# BUILD from android/'s: a harness-only APK must never be one `assemble`
+# away from the module graph the apps ship.
 CLIPHELPER_PKG = "dev.kaya.cliphelper"
 CLIPHELPER_IME = f"{CLIPHELPER_PKG}/.HelperIme"
 CLIPHELPER_APK = (ROOT / "tools/android/cliphelper/app/build/outputs/"
@@ -447,14 +423,12 @@ if not live_instance_current(TABLET_SERIAL, TABLET_AVD):
         f"instance")
 
 
-# THE DEVICE IS THIS LANE'S WIDTH, so it owes the rule a resize owes.
+# THE DEVICE IS THIS LANE'S WIDTH, so it owes the rule a resize owes:
 # check-steps forbids an expect_split between 400 and 840dp, the band
-# where GNOME, Material and TwoPaneView legitimately disagree about
-# pane count. Read the dp the apps actually see (`am get-config`'s
-# w<N>dp — the device's own answer, not width/density arithmetic a skin
-# could make a lie) and refuse a device inside the band. What this
-# catches: a tablet that came up portrait at 800dp, and a pool AVD that
-# grows into the band during some future retune.
+# where GNOME, Material and TwoPaneView legitimately disagree about pane
+# count. Read the dp the apps actually see (`am get-config`'s w<N>dp —
+# the device's own answer, not width/density arithmetic a skin could
+# make a lie) and refuse a device inside the band.
 def assert_outside_band(serial, label):
     m = re.search(r"-w([0-9]+)dp-",
                   adb_out(serial, "shell", "am", "get-config"))
@@ -484,24 +458,16 @@ if os.environ.get("KAYA_RECORD"):
             "--selftest"]).returncode != 0:
         sys.exit(1)
 
-# Legs run in a pool as wide as the device pool: each claims an
-# emulator, runs against it with adb -s, and reports through a verdict
-# file; drain() prints in submission order and closes the suite before
-# the next build and stage.
+# drain() closes the suite before the next build and stage.
 LEGS_DIR = pathlib.Path(tempfile.mkdtemp())
 
-# The flight recorder: one journal outside the build tree for every
-# leg, and a capture bundle for every FAIL — one failure is enough
-# evidence, but only if something keeps it.
-# tools/lib/flightrec_lane.py holds the rules since the runner
-# conversion; a runner that cannot open the journal prints the miss
-# once and still runs every leg.
+# The flight recorder (tools/lib/flightrec_lane.py holds the rules).
 FR = flightrec_lane.AndroidRecorder(ROOT)
 
 # THE POOL STAYS WARM ACROSS RUNS (nothing kills it at exit), so every
-# device-global switch this run flips has to come back off — a failed
-# leg, a ^C and an abort all leave the same mess, hence the exit path
-# and not the end of the script.
+# device-global switch this run flips has to come back off — on the EXIT
+# path and not at the end of the script, since a failed leg, a ^C and an
+# abort all leave the same mess.
 CLIPHELPER_IME_ON = []
 _torn = threading.Lock()
 
@@ -520,16 +486,12 @@ atexit.register(kaya_teardown)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 
-# THE HELPER LANDS ON EVERY POOL DEVICE BEFORE ANY LEG RUNS, and both
-# halves are VERIFIED rather than assumed. An absent helper turns every
-# clipboard leg into a seed whose latch times out with nothing naming
-# the cause; an `ime set` that did not take turns every foreign read
-# into a null — and null is also what an empty clipboard, a denied read
-# and a locked device answer.
-#
-# NOT ON THE TABLET: it carries one leg and no clipboard leg may land
-# there — it is the one device with no slot lock, so two legs on it
-# would share one clipboard. check-steps pins that.
+# THE HELPER LANDS ON EVERY POOL DEVICE BEFORE ANY LEG RUNS, both halves
+# VERIFIED: an absent helper times a seed's latch out naming nothing, and
+# an `ime set` that did not take turns every foreign read into a null —
+# which is also what an empty clipboard, a denied read and a locked
+# device answer. NOT ON THE TABLET: it is the one device with no slot
+# lock, so two legs there would share one clipboard (check-steps pins it).
 def cliphelper_prepare(serial):
     if adb(serial, "install", "-r", str(CLIPHELPER_APK),
            stdout=subprocess.DEVNULL).returncode != 0:
@@ -544,8 +506,8 @@ def cliphelper_prepare(serial):
         print("  reported success — every clipboard leg would seed into "
               "nothing", file=sys.stderr)
         return False
-    # BOUNDED WAIT, because the input method service is registered
-    # asynchronously after the install: `ime enable` on its heels
+    # BOUNDED WAIT: the input method service is registered
+    # asynchronously after the install, so `ime enable` on its heels
     # answers "Unknown id" and the `ime set` behind it silently keeps
     # the previous keyboard.
     for _ in range(50):
@@ -554,14 +516,12 @@ def cliphelper_prepare(serial):
         if f"{CLIPHELPER_PKG}/" in imes:
             break
         time.sleep(0.2)
-    # AND IT MUST ACTUALLY BE THE SELECTED ONE. `ime set` returns
-    # before the setting settles, and the gate that reads it is
-    # consulted much later, inside a leg — so poll the setting
-    # ClipboardService itself reads (Settings.Secure
-    # DEFAULT_INPUT_METHOD, compared by PACKAGE) rather than sleeping
-    # and hoping. enable/set RE-ISSUE inside the poll, non-fatal each
-    # time: a freshly restored snapshot's input method service drops a
-    # one-shot set (docs/traps.md 2026-08-28).
+    # AND IT MUST ACTUALLY BE THE SELECTED ONE: `ime set` returns before
+    # the setting settles, so poll the setting ClipboardService itself
+    # reads (Settings.Secure DEFAULT_INPUT_METHOD, compared by PACKAGE).
+    # enable/set RE-ISSUE inside the poll, non-fatal each time: a freshly
+    # restored snapshot's input method service drops a one-shot set
+    # (docs/traps.md 2026-08-28).
     current = ""
     for _ in range(50):
         adb(serial, "shell", "ime", "enable", CLIPHELPER_IME,
@@ -583,15 +543,12 @@ def cliphelper_prepare(serial):
     return False
 
 
-# THE SELECTION HALF OF THE ABOVE, ON ITS OWN, because the default
-# input method DOES NOT STAY PUT: measured 2026-08-06 on emulator-5554,
-# the selection reverted to the stock keyboard between runs with
-# nothing in this lane asking it to. The clipboard leg tolerates that;
-# the RANGES leg cannot — D4's whole assertion is that a composing
-# region is still open when the app's select arrives, and a third-party
-# input method finishes a composing region it did not create within
-# tens of milliseconds. So the ranges leg re-asserts this immediately
-# before it runs (the worker, after it claims a device).
+# THE SELECTION HALF, ON ITS OWN, because the default input method DOES
+# NOT STAY PUT: measured 2026-08-06 on emulator-5554, it reverted to the
+# stock keyboard between runs with nothing asking it to. The RANGES leg
+# cannot tolerate that — a third-party input method finishes a composing
+# region it did not create within tens of milliseconds — so it re-asserts
+# this immediately before it runs.
 def select_helper_ime(serial, out):
     current = ""
     for _ in range(50):
@@ -616,19 +573,13 @@ def select_helper_ime(serial, out):
     return False
 
 
-# THE ASSET ROOT, ON EVERY POOL DEVICE BEFORE ANY LEG RUNS: what a
-# device needs is the root, once (docs/assets-plan.md A2).
-# /data/local/tmp, MEASURED FROM THE APP rather than assumed: SELinux
-# stops untrusted_app reading shell_data_file on many images, and
-# `run-as` cannot answer — it runs as runas_app, a domain that may read
-# what the app itself may not. BY HASH AND NOT BY SIZE: a same-length
-# corruption passes a size check and then fails three removes away — a
-# resolved family that is not Sora, or declared bytes the decoder
-# refused, both reading as lowering bugs to anyone who did not push the
-# file. AND ONE FILE UNDER THE ROOT IS DERIVED, never committed
-# (guests/assets/market/README.md) — ensured here, ahead of BOTH
-# readers: the adb push below and the assembleDebug runs whose
-# configuration copies the root into the APK.
+# THE ASSET ROOT, ON EVERY POOL DEVICE BEFORE ANY LEG RUNS
+# (docs/assets-plan.md A2). Readability is MEASURED FROM THE APP:
+# SELinux stops untrusted_app reading shell_data_file on many images and
+# `run-as` cannot answer for it (runas_app may read what the app may
+# not). BY HASH AND NOT BY SIZE. AND ONE FILE UNDER THE ROOT IS DERIVED,
+# ensured here ahead of BOTH readers — the adb push and the
+# assembleDebug that copies the root into the APK.
 if run([sys.executable, str(ROOT / "tools/gen-market.py"),
         "--ensure"]).returncode != 0:
     print("run-emulator: python3 tools/gen-market.py --ensure failed — "
@@ -640,8 +591,7 @@ if run([sys.executable, str(ROOT / "tools/gen-market.py"),
     sys.exit(1)
 ASSET_SRC = ROOT / "guests/assets"
 ASSET_ON_DEVICE = "/data/local/tmp/kaya-assets"
-# The subdirectory of the APK's own `assets/` that IS kaya's asset
-# root. One string, three files: this, KayaAssets.kt's `ROOT`, and
+# One string, three files: this, KayaAssets.kt's `ROOT` and
 # android/build.gradle.kts's `kayaAssetPrefix` — tools/check-assets.py's
 # C7 refuses if the three disagree.
 APK_ASSET_PREFIX = "kaya"
@@ -704,8 +654,8 @@ ICON_REL = tomllib.loads(KAYA_IDENTITY_MANIFEST.read_text(
 if not isinstance(ICON_REL, str) or not ICON_REL.strip():
     die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares no `icon`, "
         f"so there is no mark to push to any device")
-# The declared mark on the HOST, where apk_icon_verify hashes it
-# against what gradle packaged — derived rather than retyped.
+# Derived rather than retyped: apk_icon_verify hashes it against what
+# gradle packaged.
 ICON_SRC = ROOT / ICON_REL
 
 
@@ -734,19 +684,15 @@ for _serial in SERIALS:
         sys.exit(1)
     # BIG LOG BUFFERS, so an on-FAIL dump holds the whole leg PLUS the
     # system's side: at the stock size a busy leg's window rotates out
-    # of `main` in about a minute (measured 2026-08-20 hunting the
-    # save-jvm WATCH — the sighting's window was gone half an hour
-    # later). Persists until the emulator reboots, hence per run rather
-    # than per boot.
+    # of `main` in about a minute (measured 2026-08-20). Persists until
+    # the emulator reboots, hence per run rather than per boot.
     for _buf, _size in (("main", "16M"), ("system", "16M"),
                         ("events", "8M")):
         adb(_serial, "logcat", "-b", _buf, "-G", _size,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # DocumentsUI's own debug logging (gated on Log.isLoggable of these
     # tags) and the WM_DEBUG_STATES text log — the save-jvm WATCH's
-    # instruments (docs/deferred.md carries the entry; scratch research
-    # 2026-08-20 traced the suspected race to
-    # ActivityRecord.finishActivityResults' mH.post on Android 14+).
+    # instruments (docs/deferred.md carries the entry).
     adb(_serial, "shell", "setprop", "log.tag.Documents", "DEBUG",
         stderr=subprocess.DEVNULL)
     adb(_serial, "shell", "setprop", "log.tag.DocumentsUI", "DEBUG",
@@ -756,17 +702,13 @@ for _serial in SERIALS:
         stderr=subprocess.DEVNULL)
 timing("cliphelper")
 
-# WHAT "BOUND" IS RECOGNISED BY, and why it is asserted rather than
-# assumed. `dumpsys accessibility` prints its bound set as
-# `Bound services:{Service[label=...]}` — a LABEL and no component — so
-# the only thing this runner can match on is a name the harness service
-# gives ITSELF. It used to match the bare word "kaya", which worked by
-# ACCIDENT (the service declared no label and inherited the
-# application's); the app identity slice took the accident away and the
-# bind check then failed on all three pool devices with nothing
-# anywhere naming the cause (MEASURED 2026-08-18). The two sides are
-# checked against each other here: the manifests cannot see this scan,
-# and this scan cannot see the manifests.
+# WHAT "BOUND" IS RECOGNISED BY: `dumpsys accessibility` prints its bound
+# set as `Bound services:{Service[label=...]}` — a LABEL and no component
+# — so the only match available is a name the harness service gives
+# ITSELF. A service with no label inherits the application's, and moving
+# that failed the bind check on all three pool devices with nothing
+# naming the cause (measured 2026-08-18), so the two sides are checked
+# against each other here.
 A11Y_LABEL = "kaya harness"
 
 
@@ -839,7 +781,7 @@ def a11y_disarm(serial, package, a11y, out=None):
 
 
 # Retire a service left by an interrupted run. One device read per run
-# replaces one read before every ordinary leg; picker legs keep the
+# rather than one before every ordinary leg; picker legs keep the
 # guarded per-leg retirement inside run_apk_on.
 def a11y_hygiene(serial):
     enabled = adb_out(serial, "shell", "settings", "get", "secure",
@@ -859,14 +801,13 @@ for _serial in [*SERIALS, TABLET_SERIAL]:
     if not a11y_hygiene(_serial):
         sys.exit(1)
 
-# THE STAGED INSTALLS HAVE A WALL. tools/validate-all.py starts the
-# gate sweep only after this lane's pid exits, so an `adb install` into
-# a wedged emulator no longer costs one leg — it costs the whole matrix
-# its verdict, at t0 of the suite. The deadline sits on the JOIN and
-# not in front of adb, so tools/lib/android-leg-order.py can pin the
-# disarm/install chain. 300s against a measured per-install band of
-# 0.73-0.88s median / 1.0-1.7s mean (docs/traps.md's install census):
-# it cannot fire on a device that is merely slow.
+# THE STAGED INSTALLS HAVE A WALL: tools/validate-all.py starts the gate
+# sweep only after this lane's pid exits, so an `adb install` into a
+# wedged emulator costs the whole matrix its verdict. The deadline sits
+# on the JOIN and not in front of adb, so tools/lib/android-leg-order.py
+# can pin the disarm/install chain. 300s against a measured per-install
+# band of 0.73-0.88s median / 1.0-1.7s mean (docs/traps.md's install
+# census): it cannot fire on a device that is merely slow.
 _deadline_raw = os.environ.get("KAYA_STAGE_DEADLINE", "300")
 if not _deadline_raw.isdigit() or int(_deadline_raw) < 1:
     die("run-emulator: KAYA_STAGE_DEADLINE must be a positive integer")
@@ -1000,16 +941,13 @@ def run_apk_on(serial, name, apk, component, script, extras,
         adb(serial, "shell", "am", "force-stop", picker,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     adb(serial, "logcat", "-c", stdout=log, stderr=log)
-    # THE HARNESS'S EYES OUTSIDE THIS APP: Android's file picker is
-    # DocumentsUI, a separate APK, and the platform stops one app
-    # reading another's UI — so picker scenes need an accessibility
-    # service, which only adb can enable. Armed AFTER force-stop and
-    # logcat -c, and the order is the whole trick: force-stop kills
-    # every component of the package including this service, and
-    # logcat -c wipes the connection message that proves it came up
-    # (docs/traps.md, "Package replacement can resurrect a service
-    # after force-stop"). DELETED BEFORE EACH SET: writing the value
-    # already there is a no-op, and a no-op notifies nobody.
+    # THE HARNESS'S EYES OUTSIDE THIS APP: the picker is a separate APK
+    # and the platform stops one app reading another's UI, so picker
+    # scenes need an accessibility service only adb can enable. Armed
+    # AFTER force-stop and logcat -c, which kill the service and wipe the
+    # connection message that proves it came up (docs/traps.md, "Package
+    # replacement can resurrect a service after force-stop"). DELETED
+    # BEFORE EACH SET: writing the value already there notifies nobody.
     if needs_a11y:
         ready = False
         bound = False
@@ -1084,13 +1022,10 @@ def run_apk_on(serial, name, apk, component, script, extras,
         stdout=subprocess.DEVNULL, stderr=log)
     # POLLED DUMPS, NEVER ONE STREAM: a streaming watch wedged for its
     # whole 60s with the verdict already sitting in the buffer it was
-    # reading (docs/traps.md 2026-08-28). Each try is a fresh
-    # `logcat -d`, which cannot wedge past its own timeout. (NO PER-LEG
-    # SCREENSHOT: 48 of 52 outputs were the launcher's WALLPAPER —
-    # measured 2026-07-27, `am start -W` already blocks until the first
-    # frame and the scene exits ~300ms after its verdict, so 2s, 1s and
-    # 0s all landed on wallpaper or launch splash. The recording
-    # pipeline is the visual record.)
+    # reading (docs/traps.md 2026-08-28). NO PER-LEG SCREENSHOT: 48 of
+    # 52 outputs were the launcher's WALLPAPER (measured 2026-07-27) —
+    # `am start -W` already blocks until the first frame and the scene
+    # exits ~300ms after its verdict.
     out = ""
     for _ in range(120):
         dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat",
@@ -1102,14 +1037,12 @@ def run_apk_on(serial, name, apk, component, script, extras,
         time.sleep(0.5)
     print(out, file=log)
     # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry):
-    # a green verdict does not say the relaunch happened — a count that
-    # outran the script, or a knob nothing read, leaves a leg that
-    # tested nothing and passed. Both sentences come out of the SAME
-    # process's harness thread, so the pair is the whole claim: two
-    # onCreates, one process, the remaining expects green after the
-    # second. AND THE PRESENTATION RE-REPORTED: the core LATCHES the
-    # last scale and appearance, so a composition that never reports
-    # again moves nothing observable.
+    # a green verdict does not say the relaunch happened. Both sentences
+    # come out of the SAME process's harness thread, so the pair is the
+    # whole claim: two onCreates, one process, the remaining expects
+    # green after the second. AND THE PRESENTATION RE-REPORTED: the core
+    # LATCHES the last scale and appearance, so a composition that never
+    # reports again moves nothing observable.
     if remount_expect:
         remount_log = adb_out(serial, "logcat", "-d", "-s",
                               "kaya:*").replace("\r", "")
@@ -1165,19 +1098,16 @@ def run_apk_on(serial, name, apk, component, script, extras,
                  stdout=log, stderr=log).returncode != 0:
             failed = True
     if "KAYA_SELFTEST: OK" not in out:
-        # The DEVICE, first: the dump below is only chaseable on the
-        # emulator that ran the leg, and nothing else in this log says
-        # which one that was.
+        # The DEVICE, first: nothing else in this log says which
+        # emulator ran the leg, and the dump below is only chaseable
+        # there.
         print(f"leg device: {serial}", file=log)
-        # A guest that never printed a verdict crashed before dispatch.
         # THREE TAGS, NOT ONE: AndroidRuntime carries JVM exceptions
-        # only, a Go panic goes under `Go` (a Go crash used to leave
-        # this branch printing NOTHING, measured 2026-08-07), and
+        # only, a Go panic goes under `Go` (measured 2026-08-07), and
         # DEBUG:F is the tombstone header. THE SENTENCE THAT NAMES THE
         # CAUSE COMES FIRST, AND WHOLE — a tombstone puts its `Abort
         # message:` ABOVE its frames, so a bare tail of a forty-frame
-        # stack drops exactly the line a reader needs (measured
-        # 2026-08-19).
+        # stack drops exactly the line a reader needs (2026-08-19).
         crash = out_of(["adb", "-s", serial, "logcat", "-d", "-b",
                         "crash,main", "-s", "AndroidRuntime:E", "Go:E",
                         "kaya:E", "DEBUG:F"])
@@ -1188,19 +1118,17 @@ def run_apk_on(serial, name, apk, component, script, extras,
         stack = out_of(["adb", "-s", serial, "logcat", "-d", "-s",
                         "AndroidRuntime:E", "Go:E", "DEBUG:F"])
         print("\n".join(stack.splitlines()[-30:]), file=log)
-        # AND THE HARNESS TRACE, since the save guests stopped
-        # crashing: a clean failure used to keep only crash-shaped
-        # lines, which is NOTHING — four save-dialog sightings were
-        # investigated off a one-line verdict because the step timings
-        # died with the buffer (2026-08-20).
+        # AND THE HARNESS TRACE: a failure with no crash keeps only
+        # crash-shaped lines otherwise, which is NOTHING — four
+        # save-dialog sightings were investigated off a one-line verdict
+        # because the step timings died with the buffer (2026-08-20).
         trace = out_of(["adb", "-s", serial, "logcat", "-d", "-s",
                         "kaya:*"])
         print("\n".join(trace.splitlines()[-60:]), file=log)
         # AND THE SYSTEM'S SIDE OF A LOST DIALOG RESULT, read AT FAIL
         # TIME because the main buffer rotates in about a minute on a
-        # busy leg (the save-jvm WATCH's seventh sighting; the events
-        # buffer still held the am_ timeline, which is why it rides
-        # along).
+        # busy leg. The events buffer still held the am_ timeline, which
+        # is why it rides along.
         sys_side = out_of(["adb", "-s", serial, "logcat", "-d", "-b",
                            "events,main"])
         wanted = [ln for ln in sys_side.splitlines()
@@ -1210,8 +1138,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
         print("\n".join(wanted[-60:]), file=log)
         # AND THE WHOLE BUFFER TO A FILE, because the NEXT leg on this
         # device starts with `logcat -c` — this dump is the only
-        # complete record the sighting will ever have. Passing legs
-        # write nothing.
+        # complete record the sighting will ever have.
         keep = ROOT / "target/validate-failures"
         keep.mkdir(parents=True, exist_ok=True)
         with open(keep / f"android-{name}-buffers.log", "w",
@@ -1225,9 +1152,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
                 **TEXT)
         print(f"full buffers kept at target/validate-failures/"
               f"android-{name}-buffers.log", file=log)
-        # AND THE INTERPRETER'S VERB TRACE, out of the app's private
-        # files dir through run-as (the debug APKs are debuggable), beside
-        # the leg's log for the flight recorder to adopt.
+        # THE VERB TRACE, out of the app's private files dir through
+        # run-as (the debug APKs are debuggable).
         pulled = subprocess.run(
             ["adb", "-s", serial, "exec-out", "run-as", package, "cat",
              f"files/verb-trace-{name}.txt"],
@@ -1341,10 +1267,9 @@ def drain():
         sfile = LEGS_DIR / f"{name}.secs"
         secs = (sfile.read_text(encoding="utf-8").strip()
                 if sfile.is_file() else "?")
-        # THE JOURNAL TAKES EVERY LEG, pass or fail; the bundle is
-        # collected on a failure alone (the leg's log plus the device
-        # roster — only the roster tells an offline emulator from a
-        # failed assertion).
+        # THE JOURNAL TAKES EVERY LEG, pass or fail; the bundle carries
+        # the device roster too, because only the roster tells an
+        # offline emulator from a failed assertion.
         FR.android_leg(name, verdict, secs, LEGS_DIR / f"{name}.log")
         print(f"{name}: {verdict} ({secs}s)", flush=True)
     _leg_names.clear()
@@ -1472,8 +1397,7 @@ def scene_script_drop(scene, verb, target, keep):
 # Every leg's script is PRECOMPUTED here, so a refused cut or drop — or
 # a missing .steps file — kills the lane before any device sees a leg:
 # measured 2026-08-16, three legs green-on-nothing ("script has no
-# expects") from an inline refusal. The cuts, drops and appends are
-# lanes/android.py's MODS.
+# expects") from an inline refusal.
 _scripts = {}
 
 
@@ -1513,13 +1437,11 @@ def kaya_write_compose_marker():
 
 
 def apk_icon_verify(apk):
-    """RULING 4'S BYTE EQUALITY, ASSERTED ON THE ARTIFACT ITSELF: the
-    bytes INSIDE the apk gradle just wrote against the bytes
-    guests/assets/identity.toml declares. HERE AND NOT IN A GATE:
-    invariant 3 puts the wall where someone walks into it by building,
-    so no leg ever installs an apk carrying a mark nobody declared.
-    (The entry name is android/build.gradle.kts's, which pins
-    isCrunchPngs = false so aapt cannot re-encode behind this.)"""
+    """The bytes INSIDE the apk gradle just wrote against the bytes
+    guests/assets/identity.toml declares. HERE AND NOT IN A GATE, so the
+    wall is on the path nobody can avoid (invariant 3). The entry name
+    is android/build.gradle.kts's, which pins isCrunchPngs = false so
+    aapt cannot re-encode behind this."""
     if run(["unzip", "-l", str(apk), "res/mipmap/kaya_mark.png"],
            stdout=subprocess.DEVNULL,
            stderr=subprocess.DEVNULL).returncode != 0:
@@ -1687,8 +1609,7 @@ def kaya_go_build(lib, jnilibs):
 
 
 def kaya_py_build(jnilibs):
-    """THE PYTHON SHIM'S ARTIFACT: tools/android/pyhost-jni.c as
-    libkaya_pyhost.so — kaya_go_build's refusals one guest tier over.
+    """tools/android/pyhost-jni.c as libkaya_pyhost.so.
     Java_dev_kaya_KayaPy_run is the one name binding KayaPy.kt to the
     shim and NO COMPILER ON EITHER SIDE CHECKS IT."""
     module = ROOT / "android/pyhost/build.gradle.kts"
@@ -1823,9 +1744,8 @@ def build_suite(suite):
     elif suite == "go":
         jnilibs = ROOT / "android/gohost/src/main/jniLibs/arm64-v8a"
         fresh_jnilibs(jnilibs)
-        # The same libkaya.so the JVM suite ships: the Go guest NEEDs
-        # it by SONAME and the app's linker resolves it out of this
-        # directory.
+        # The Go guest NEEDs libkaya.so by SONAME and the app's linker
+        # resolves it out of this directory.
         if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
                 "--lib"]).returncode != 0:
             return False
@@ -1836,8 +1756,8 @@ def build_suite(suite):
             return False
         # NO --verify ON THE GO .so: the build id lives inside libkaya,
         # and here libkaya is a SHARED library the guest merely names,
-        # so the guest carries no marker. (On iOS the same Go sources
-        # DO carry it — there kaya is a static archive linked in.)
+        # so the guest carries no marker. (On iOS the same Go sources DO
+        # carry it — there kaya is a static archive linked in.)
         if not kaya_go_build("gohost", jnilibs):
             return False
         kaya_write_compose_marker()
@@ -1916,8 +1836,7 @@ def run_suite_legs(suite):
         if flags.get("appearance"):
             extras += ["--es", "KAYA_APPEARANCE", flags["appearance"]]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under
-        # the app's own files dir (the one place run-as can read back);
-        # written on a failure alone and pulled at fail time
+        # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).
         extras += ["--es", "KAYA_VERB_TRACE", f"verb-trace-{leg}.txt"]
         queue_leg(leg, selftest,
@@ -1934,12 +1853,11 @@ for _suite in lane.SUITES:
         sys.exit(1)
     run_suite_legs(_suite)
 
-# The one-line verdict (run-suites.sh's rule, and the reason it
-# exists): suites accumulate failures rather than abort, so a truncated
-# log must still end with the answer — a killed lane or a lost pipe
-# otherwise reads exactly like a complete one, which is how an ios run
-# that reached no leg at all was read as a pass (2026-08-29).
-# tools/check-gates.py holds all five runners to this.
+# Suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer: a killed lane otherwise reads exactly like
+# a complete one, which is how an ios run that reached no leg at all was
+# read as a pass (2026-08-29). tools/check-gates.py holds all five
+# runners to this.
 if status == 0:
     print("run-emulator: ALL PASS")
 else:

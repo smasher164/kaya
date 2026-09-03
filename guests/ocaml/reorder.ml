@@ -1,11 +1,5 @@
-(* The reorder scene from OCaml: order as collection data. Each handler
-   repositions an entry by key and expect_order reads the toolkit's
-   actual child order back. The root is a row so the For's container is
-   the scene's only column-kind widget: languages disagree on whether
-   containers are created before or after their children, and column#0
-   must name the same widget everywhere.
-
-   Build like milestone2.ml, then run with KAYA_SELFTEST=reorder. *)
+(* The reorder scene, OCaml port — guests/rust/reorder.rs,
+   tools/scenes/reorder.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -18,15 +12,12 @@ let () =
   build app (fun () ->
      let items = collection_of item_record in
      let on_rotate () =
-       (* First entry to the end. The model owns the order, so the handler
-          asks it which key is first — it never counts widgets. *)
        let entries = record_items items in
        let first, _ = List.hd entries in
        move_to_end (record_handle items) first
      in
      let on_lift () =
-       (* Last entry to the front: move_to_front is sugar for move_before the
-          current first key — the same wire op, keys never indices. *)
+       (* Keys, never indices. *)
        let entries = record_items items in
        let last, _ = List.nth entries (List.length entries - 1) in
        move_to_front (record_handle items) last

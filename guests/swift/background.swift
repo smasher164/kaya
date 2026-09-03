@@ -1,14 +1,5 @@
-// The background conformance scene, Swift port — work off the app
-// thread, posted back (docs/background-work-plan.md).
-//
-// A WRONG IMPLEMENTATION MUST DEADLOCK RATHER THAN DISAGREE: the worker
-// parks until a CLICK releases it, and only a live app thread can
-// process a click, so a binding that let background work occupy the app
-// thread cannot reach the end of the script at all.
-//
-// The accumulators are the guest's own state, and need no lock:
-// everything that touches them runs on the app thread inside a posted
-// transaction.
+// The background scene, Swift port — guests/rust/background.rs,
+// tools/scenes/background.steps.
 
 import Foundation
 
@@ -30,8 +21,6 @@ app.build { tx in
     let root = tx.column {
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.setA11yId(tx.label(bind: alive), "alive")  // label#1
-        // Authored so the CLOSING read can address it: an index read
-        // passes for an arm that ran and drew nothing.
         tx.setA11yId(tx.label(bind: detail), "nested")  // label#2
 
         tx.button(
@@ -39,8 +28,6 @@ app.build { tx in
             onClick: { inner in  // button#0
                 Thread.detachNewThread {
                     released.wait()
-                    // Three posts, in order: the accumulator makes this
-                    // a test of ORDER, not of which one ran last.
                     for step in ["1", "2", "3"] {
                         app.post { tx in
                             posted += step
@@ -60,9 +47,6 @@ app.build { tx in
             onClick: { _ in  // button#2
                 released.signal()
             })
-        // A post from INSIDE a handler QUEUES for after; it never nests.
-        // So this commits "ac" and the posted closure then commits
-        // "acb". Nesting could only ever produce "abc".
         tx.button(
             "nest",
             onClick: { inner in  // button#3

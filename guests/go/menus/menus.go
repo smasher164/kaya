@@ -1,7 +1,5 @@
-// The menus conformance scene, Go port: the command vocabulary (a
-// File/View/Sort menu bar, context menus on a live label and on stamped
-// rows) and the uncontrolled-menu echo doctrine. Canonical semantics in
-// guests/rust/menus.rs; the contract in tools/scenes/menus.steps.
+// The menus conformance scene (tools/scenes/menus.steps). Canonical
+// semantics in guests/rust/menus.rs.
 package menus
 
 import (
@@ -28,9 +26,7 @@ func App() *kaya.App {
 
 		win := tx.Window(0).Title("menus")
 		file := win.Menu("File").BindEnabled(canExport)
-		// THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn by
-		// each platform in its own symbol set. The vocabulary has no
-		// save-specific glyph on purpose.
+		// The vocabulary has no save glyph, so `done` is the spelling.
 		file.Item("Save").Symbol(kaya.SymbolDone).Shortcut("primary+s").
 			OnActivate(func(tx *kaya.Tx) {
 				tx.Write(status, "saved")
@@ -48,7 +44,7 @@ func App() *kaya.App {
 				}
 			})
 
-		// Option order IS the index vocabulary: Name = 0, Date = 1.
+		// Option order IS the index.
 		sortGroup := win.RadioGroup("Sort")
 		sortGroup.Option("Name")
 		sortGroup.Option("Date")
@@ -75,15 +71,12 @@ func App() *kaya.App {
 				tx.Write(canExport, true)
 			})
 			tx.Button("reset menu state", func(tx *kaya.Tx) { // button#1
-				// The folds never echo the user's pick, so these two prop
-				// writes reset the user-state mirror.
+				// The folds never echo, so these reset the user-state mirror.
 				tx.Write(details, false)
 				tx.Write(sort, 0.0)
 				tx.Write(status, "ready")
 			})
 			tx.Button("extend menus", func(tx *kaya.Tx) { // button#2
-				// Append-only: rename the retained File, move the promotion
-				// hint from Share to Publish, grow the bar by Tools.
 				tx.Menu(share).Primary(false)
 				tx.Menu(file).Label("Document").
 					Item("Publish").Primary(true).Symbol(kaya.SymbolCopy).

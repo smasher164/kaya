@@ -1,12 +1,11 @@
 //! Runtime dispatch to the SwiftUI backend, the one backend on macOS and
 //! iOS. The Swift half is a dylib (tools/swiftui/build-dylib.sh) exporting
-//! kaya_swiftui_run, found via KAYA_SWIFTUI_LIB or the default dyld search.
+//! kaya_swiftui_run, found via KAYA_SWIFTUI_LIB or the dyld search.
 //!
-//! The host hands the backend an explicit table of function pointers
-//! (KayaHostApi) rather than letting the dylib bind kaya symbols through
-//! the dynamic linker: a host may carry kaya statically (a Rust
-//! executable) or load it RTLD_LOCAL (ctypes), so the vtable is what pins
-//! the one live kaya instance.
+//! The host hands the backend an explicit table of function pointers rather
+//! than letting the dylib bind kaya symbols through the dynamic linker: a
+//! host may carry kaya statically or load it RTLD_LOCAL, so the vtable is
+//! what pins the one live kaya instance.
 
 use std::ffi::{CString, c_char, c_int, c_void};
 
@@ -15,14 +14,13 @@ use crate::capi::{
     kaya_emit_value_changed, kaya_next_commands,
 };
 
-/// Redeem a picked file: the locator the backend answered the pick with,
-/// the mode, and out-parameters for seekability. Returns the descriptor
-/// the guest now owns, or -1 with `out_error` filled.
+/// Redeem a picked file: the locator, the mode, and out-parameters for
+/// seekability. Returns the descriptor the guest now owns, or -1 with
+/// `out_error` filled.
 ///
 /// The backend starts the security scope, opens, and stops it INSIDE this
-/// call: the scope is a kernel-tracked resource with a concurrency limit
-/// that leaks if held, and the descriptor outlives it (DESIGN.md,
-/// measurements 2 and 3).
+/// call — the scope is a kernel-tracked resource that leaks if held, and
+/// the descriptor outlives it (DESIGN.md, measurements 2 and 3).
 pub type PickedOpener = unsafe extern "C" fn(
     locator: *const c_char,
     mode: u32,
@@ -35,13 +33,11 @@ pub type PickedOpener = unsafe extern "C" fn(
 pub(crate) static PICKED_OPENER: std::sync::OnceLock<PickedOpener> = std::sync::OnceLock::new();
 
 /// A picked file on iOS: the locator the backend answered with, opened
-/// through the backend on every redemption — the same shape as Android's
-/// `UriSource`. iOS has a good-looking POSIX path for a picked file and it
-/// is a TRAP: re-opening it once the security scope drops fails with EPERM
-/// (DESIGN.md, measurement 4), so a `PathSource` here would work in the
-/// simulator, which enforces no sandbox, and fail on a device. What
-/// survives is the URL OBJECT, which re-acquires its scope (measurement
-/// 5), and only the backend can hold one.
+/// through the backend on every redemption — Android's `UriSource` shape.
+/// iOS's good-looking POSIX path is a TRAP: re-opening it once the
+/// security scope drops fails with EPERM (DESIGN.md, measurement 4), so a
+/// `PathSource` would work in the simulator and fail on a device. Only the
+/// URL OBJECT re-acquires its scope, and only the backend can hold one.
 #[cfg(target_os = "ios")]
 pub(crate) struct UrlSource {
     pub name: String,
@@ -105,13 +101,10 @@ impl crate::protocol::PickedSource for UrlSource {
 }
 
 /// The presentation-side functions handed to a guest-language backend.
-/// next_commands blocks until a transaction resolves, then borrows out
-/// that batch's apply-op records (KAYA_APPLY_*): it writes a core-owned
-/// pointer and returns the byte length, 0 (pointer NULLed) on shutdown.
-/// blob_data resolves a blob value's u64 handle to (pointer, length),
-/// NULL for a dead handle. BOTH BORROWS DIE AT THE NEXT next_commands
-/// call — the batch's bytes and its blob table together — so fetch and
-/// decode within the batch. THERE IS NO SIZE CAP on either.
+/// next_commands blocks until a transaction resolves, then borrows out that
+/// batch's apply-op records; blob_data resolves a blob handle to (pointer,
+/// length), NULL for a dead one. BOTH BORROWS DIE AT THE NEXT next_commands
+/// call, so fetch and decode within the batch. THERE IS NO SIZE CAP.
 #[repr(C)]
 pub struct KayaHostApi {
     pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
@@ -178,21 +171,14 @@ pub struct KayaHostApi {
         unsafe extern "C" fn(u64, *const crate::capi::KayaRepresentation),
     pub emit_pasted:
         unsafe extern "C" fn(*const u8, usize, *const crate::capi::KayaRepresentation),
-    /// THE UNDO TIER (docs/undo-plan.md §3). `undo_route`/`redo_route`
-    /// take the window, the focused widget (0 for none) and A4's one named
-    /// query (the focused field's own CanUndo), and answer 0 nothing / 1
-    /// the field's native stack / 2 the core's ledger. Asked once and used
-    /// twice — enablement and activation are the same call — so a greyed
-    /// Edit>Undo and an inert one cannot drift.
-    ///
-    /// `undo`/`redo` return nothing: the inverse's ops reach the backend
-    /// through next_commands like any other apply, and the occurrence
-    /// reaches the app through the sink.
-    ///
-    /// `note_native_undo` is the reconciliation sample after a NATIVE undo
-    /// the backend routed — the field, the text the walk landed on, and
-    /// whether it can still undo. The text_changed the same undo provokes
-    /// carries the ledger-quiet flag, so one change is reported once.
+    /// THE UNDO TIER (docs/undo-plan.md §3). `undo_route`/`redo_route` take
+    /// the window, the focused widget (0 for none) and the field's own
+    /// CanUndo, and answer 0 nothing / 1 the field's native stack / 2 the
+    /// core's ledger — asked once and used twice, so a greyed Edit>Undo and
+    /// an inert one cannot drift. `undo`/`redo` return nothing.
+    /// `note_native_undo` is the reconciliation sample after a NATIVE undo:
+    /// the same undo's text_changed carries the ledger-quiet flag, so one
+    /// change is reported once.
     pub undo_route: extern "C" fn(u64, u64, u8) -> u32,
     pub redo_route: extern "C" fn(u64, u64, u8) -> u32,
     pub undo: extern "C" fn(u64),
@@ -218,14 +204,11 @@ pub struct KayaHostApi {
     /// so an unwatched process still dies legibly while a watched leg
     /// reddens.
     pub fault_watch: extern "C" fn(),
-    /// ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing
-    /// and never app surface. `window_moved` is the report that narrows a
-    /// For's band — before the first one the band is unbounded and every
-    /// row realizes; `rows_measured` is the verify half, one extent per
-    /// realized row; `scroll_to_row_*` map a row KEY to its index in the
-    /// collection's current order (KAYA_ROW_NOT_FOUND for no answer), one
-    /// entry per key type; `window_geometry` reads the band, the total
-    /// and the arithmetic the core owns.
+    /// ROW WINDOWING (docs/virtualization-plan.md §3), backend plumbing and
+    /// never app surface. `window_moved` narrows a For's band (unbounded
+    /// until the first report); `rows_measured` is the verify half;
+    /// `scroll_to_row_*` map a row KEY to its index, one entry per key type
+    /// (KAYA_ROW_NOT_FOUND for no answer); `window_geometry` reads the band.
     pub window_moved: extern "C" fn(u64, u64, u64),
     pub rows_measured: unsafe extern "C" fn(u64, u64, *const f64, usize),
     pub scroll_to_row_str: unsafe extern "C" fn(u64, *const u8, usize) -> u64,
@@ -243,15 +226,12 @@ pub struct KayaHostApi {
     /// a string kaya wrote.
     pub presentation: extern "C" fn(f64, bool),
     pub canvas_probe: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
-    /// THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` is
-    /// the report that says what layout assigned one canvas, in points —
-    /// window_moved's shape, one widget over, and the report the stretch
-    /// defect was missing. `frame` is the platform's frame drive at its
-    /// OWN timestamp; `harness_frame` is the deterministic step a scene
-    /// verb advances, kept in the core so three harnesses share one
-    /// number. `canvas_raster_shape` is the harness's read of WHICH size
-    /// the raster is, which is the only canvas observable a size policy
-    /// can move.
+    /// THE SIZE POLICY (docs/canvas-plan.md §3.2.1). `canvas_track` reports
+    /// what layout assigned one canvas, in points. `frame` is the platform's
+    /// frame drive at its OWN timestamp; `harness_frame` is the
+    /// deterministic step a scene verb advances, kept in the core so three
+    /// harnesses share one number. `canvas_raster_shape` is the harness's
+    /// read of WHICH size the raster is.
     pub canvas_track: extern "C" fn(u64, f64, f64),
     /// The window's content size plus the platform's own size class
     /// (docs/adaptive-layout-plan.md D3; classes ruled 2026-08-31): the
@@ -275,17 +255,11 @@ const RTLD_NOW: c_int = 2;
 
 /// What the loader said, or the fact that it said nothing.
 ///
-/// A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED (invariant 3). The
-/// assertion below used to answer a `dlopen` failure with one sentence —
-/// "build it with tools/swiftui/build-dylib.sh and set KAYA_SWIFTUI_LIB"
-/// — which is a CAUSE, and it was printed for every cause it did not
-/// name. Measured 2026-08-18: fifty legs of a five-lane matrix died with
-/// that sentence while the dylib was on disk, current, and named by
-/// KAYA_SWIFTUI_LIB exactly as it asked for; the reader spent the next
-/// twenty minutes looking for a build that had never gone wrong. This
-/// asks the loader instead, and the loader's answer is the only thing
-/// that can tell an absent file from a bad architecture from a missing
-/// dependency from a process that has run out of file descriptors.
+/// A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED (invariant 3): measured
+/// 2026-08-18, fifty legs of a five-lane matrix died on the fixed sentence
+/// "build it and set KAYA_SWIFTUI_LIB" while the dylib was on disk and
+/// named exactly as it asked. Only the loader's own answer tells an absent
+/// file from a bad architecture from a missing dependency.
 fn loader_said() -> String {
     // dlerror() is one-shot and thread-local: it clears on read, so it
     // is read EXACTLY ONCE, right after the failing call.
@@ -305,10 +279,7 @@ pub(crate) fn run() -> i32 {
     let handle = unsafe { dlopen(cpath.as_ptr(), RTLD_NOW) };
     if handle.is_null() {
         // The loader's own sentence FIRST, then two facts about the path
-        // this process actually looked at — whether it is there and how
-        // big it is. Between them they separate "never built" from
-        // "half-written by a concurrent build" from "wrong architecture"
-        // from "the process is out of descriptors".
+        // this process looked at: whether it is there and how big it is.
         let said = loader_said();
         let seen = match std::fs::metadata(&path) {
             Ok(m) => format!("it is on disk, {} bytes", m.len()),
@@ -327,16 +298,12 @@ pub(crate) fn run() -> i32 {
         "kaya_swiftui_run not exported by {path:?}: {}",
         loader_said()
     );
-    // THE ONE CALL THAT RUNS THE OTHER WAY: the vtable carries functions
-    // the BACKEND calls on the core, and this is the core calling the
-    // backend, so it is resolved by symbol exactly as `run` is. Redeeming
-    // a picked handle on the phones means asking the backend, which holds
-    // the security-scoped URL — the path EPERMs the moment the scope drops
-    // (DESIGN.md, measurement 4).
-    //
-    // OPTIONAL BY DESIGN: a backend built before this existed still runs,
-    // and only a guest that opens a picked file meets the absence, which
-    // then says so.
+    // THE ONE CALL THAT RUNS THE OTHER WAY — the core calling the backend,
+    // so it is resolved by symbol exactly as `run` is: redeeming a picked
+    // handle on the phones means asking the backend, which holds the
+    // security-scoped URL (DESIGN.md, measurement 4). OPTIONAL BY DESIGN,
+    // so a backend built before this existed still runs and only a guest
+    // that opens a picked file meets the absence.
     let opener = unsafe { dlsym(handle, c"kaya_swiftui_open_picked".as_ptr()) };
     if !opener.is_null() {
         let opener: PickedOpener = unsafe { std::mem::transmute(opener) };
@@ -387,9 +354,8 @@ pub(crate) fn run() -> i32 {
         canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
-    // entry): both of its tiers do, and the declaration has to beat the
-    // first transaction rather than the first layout. One site serves mac
-    // and iOS — the same dylib, the same run.
+    // entry), and the declaration has to beat the first transaction rather
+    // than the first layout. One site serves mac and iOS.
     crate::capi::declare_windowing();
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

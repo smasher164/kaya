@@ -8,25 +8,14 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 dev_shell_or_die()
 
 # THE MACOS PANE LADDER (docs/multicolumn-plan.md MECHANICS AMENDMENTS).
-# macOS has no compact mode to defer to, so kaya's own arithmetic
-# decides how many of a three-pane window's columns fit — and no shared
-# scene can pin the middle rung, because the platforms legitimately
-# disagree at every width inside check-steps' panes band. This gate is
-# where the ladder lives or dies:
-#
-#   A  STATIC, any host: the interpreter never declares a column
-#      MINIMUM to SwiftUI. A declared minimum becomes the WINDOW's
-#      floor — the collapse rule can then never fire and resize_window
-#      turns into a silent no-op (measured; amendment 1). Ideal widths
-#      are fine.
-#   B  RUNTIME, macOS only — tools/checks/swiftui-pane-ladder.swift
-#      compiled INTO the interpreter's own module and run: the rung
-#      arithmetic (including content+detail < 600, which is what keeps
-#      the bare expect_panes invariant true at every regular width),
-#      the edge-triggered command rule the sidebar toggle depends on,
-#      and the REAL NSSplitView walked 1400 -> 700 -> 1400 with its
-#      visible columns counted at each rung. SKIPPED AND SAID SO on any
-#      other host.
+# No shared scene can pin the middle rung: the platforms legitimately
+# disagree at every width inside check-steps' panes band.
+#   A  STATIC, any host: no column MINIMUM declared to SwiftUI (amendment
+#      1 — a declared minimum becomes the WINDOW's floor, so collapse can
+#      never fire and resize_window silently no-ops). Ideal widths are fine.
+#   B  RUNTIME, macOS only, SKIPPED AND SAID SO elsewhere:
+#      tools/checks/swiftui-pane-ladder.swift compiled into the
+#      interpreter's own module and run.
 
 import os
 import platform
@@ -41,8 +30,8 @@ PROBE = "tools/checks/swiftui-pane-ladder.swift"
 
 
 def scan_min(path, text):
-    # Offender lines. Comments are not exempt: a commented example is
-    # what the next reader pastes.
+    # Comments are not exempt: a commented example is what the next
+    # reader pastes.
     bad = []
     for n, line in enumerate(text.splitlines(), 1):
         if "navigationSplitViewColumnWidth(min" in line.replace(" ", ""):
@@ -96,11 +85,8 @@ else:
               "what its gates read.", file=sys.stderr)
         sys.exit(1)
     with scratch_dir("check-pane-ladder-") as tmp:
-        # The probe compiles the interpreter's OWN source, so there is
-        # no interpreter artifact in this path to go stale. The
-        # toolchain resolution stays in tools/lib/swift-toolchain.sh —
-        # ONE copy; shell launches, python decides (the conversion
-        # ruling's boundary).
+        # The probe compiles the interpreter's OWN source, so no
+        # interpreter artifact in this path can go stale.
         build = subprocess.run(
             ["bash", "-c",
              'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '

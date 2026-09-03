@@ -1,5 +1,5 @@
-// The progress conformance scene, Swift port. See
-// guests/rust/progress.rs and tools/scenes/progress.steps.
+// The progress scene, Swift port — guests/rust/progress.rs,
+// tools/scenes/progress.steps.
 
 import Foundation
 

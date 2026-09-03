@@ -1,6 +1,5 @@
-//! The progress conformance scene: a determinate bar and an
-//! indeterminate one, both read back from the REAL control. The
-//! contract is tools/scenes/progress.steps.
+//! The progress conformance scene (tools/scenes/progress.steps): both bars
+//! are read back from the REAL control.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

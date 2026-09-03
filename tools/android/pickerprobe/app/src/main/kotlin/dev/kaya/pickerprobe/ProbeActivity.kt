@@ -21,36 +21,17 @@ import java.io.FileInputStream
 
 /**
  * Measures every Android assumption the Compose picker arm rests on, in
- * one install, and logs the answers under the tag `kayaprobe`. Not a
- * lane — see run.sh. The answers themselves are in
- * docs/file-dialogs-plan.md §6d and docs/traps.md.
- *
- * The questions, in the order they decide things:
- *
- *  Q1 Where can this process WRITE a directory that DocumentsUI can
- *     then browse?
- *  Q2 Does `java.io.tmpdir` agree with Rust's `std::env::temp_dir`?
- *  Q3 Does EXTRA_INITIAL_URI aim the picker, from an app?
- *  Q4 Can the picker be launched through activityResultRegistry AFTER
- *     the activity is RESUMED — which is when the apply pump runs?
- *  Q5 Does the accessibility service SEE the picker's tree, and does
- *     performAction(ACTION_CLICK) on a row answer the picker?
- *  Q6 Is the URI RE-OPENABLE, and off the main thread?
- *  Q7 Does the OPEN_DOCUMENT grant carry WRITE, and is the descriptor
- *     seekable?
+ * one install, logging under the tag `kayaprobe`. NOT A LANE — see
+ * run.sh. The questions are the Q-labels in the log lines below; the
+ * answers are docs/file-dialogs-plan.md §6d and docs/traps.md.
  */
 class ProbeActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
     private var picked: Uri? = null
 
     /**
-     * Which shape of the question this run asks — the scene needs four,
-     * and one run can only answer one because the picker is modal:
-     *
-     *  basic  one file, no filter, chosen by clicking its row
-     *  multi  ALLOW_MULTIPLE (the scene's first pick is pick_files)
-     *  filter EXTRA_MIME_TYPES from the scene's "txt" filter
-     *  cancel dismissed with BACK, the scene's second half
+     * One run answers ONE shape, because the picker is modal: basic /
+     * multi / filter / cancel, the four the scene needs.
      */
     private val variant: String by lazy { intent.getStringExtra("variant") ?: "basic" }
 

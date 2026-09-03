@@ -2,12 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
-{- The feed scene from Haskell: sum-typed elements, end to end. Each
-   constructor of the sum wraps ONE record type, so the schemas and
-   field tokens are the records' own. The template takes a product of
-   arms, checked complete at declaration.
-
-   Build like milestone2.hs, then run with KAYA_SELFTEST=feed. -}
+-- The feed scene, Haskell port — guests/rust/feed.rs, tools/scenes/feed.steps.
 
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
@@ -42,9 +37,8 @@ main = kayaMain $ \app -> do
             (key, Note t) : _ -> sumUpdate feed key (PTodo (Todo t True))
             [] -> pure ()
         onToggle keys checked = submitTx app $ do
-          -- The case is the refinement: the matched scrutinee is the
-          -- witness the patch carries, so a stale occurrence lands in
-          -- the other arm.
+          -- The case is the refinement, and the generated patch witnesses it:
+          -- a stale occurrence lands in the other arm.
           entry <- sumGet feed (head keys)
           case entry of
             Just p@(PTodo _) ->

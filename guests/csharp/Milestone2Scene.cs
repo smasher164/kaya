@@ -1,14 +1,5 @@
-// The milestone-2 scene from C#: how occurrences reach an app. A
-// stamped copy's handler is registered CENTRALLY after the build,
-// against the template node, and arrives carrying that copy's key path;
-// a live widget's handler rides its constructor.
-//
-// A C# lambda captures its enclosing locals by reference, so the two
-// handles the central registration needs are assigned to the scene's
-// own locals from inside the template bodies that build them.
-//
-// Build the library first (cargo build / cargo xwin build --release),
-// keep kaya.dll on PATH or set KAYA_LIB, then: dotnet run
+// The milestone2 scene, C# port — guests/rust/milestone2.rs,
+// tools/scenes/milestone2.steps.
 
 static class Milestone2Scene
 {
@@ -55,8 +46,6 @@ static class Milestone2Scene
                 {
                     group.Column(() =>
                     {
-                        // A scalar collection's element IS its one wire
-                        // field, so the row's label addresses field 0.
                         group.Label(KayaRecords.FieldAt<string>(0));
                         items = group.Collection();
                         group.Each(items, item =>

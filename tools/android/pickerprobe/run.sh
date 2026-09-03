@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
 
 # Build, install and run the picker probe on one emulator.
-# Usage: tools/android/pickerprobe/run.sh [serial]
-#
 # NOT A LANE and never to become one: it installs an app with an
-# accessibility service. Findings: docs/traps.md, "What DocumentsUI
-# publishes".
-#
-# THE RESET IS THE WHOLE POINT of having a script. Three ways a rerun
-# silently measures the LAST run instead of this one:
-#   - the picker is still up, so `am start` on the probe's component just
-#     brings that task forward and onCreate never runs again;
-#   - force-stop kills the accessibility service with the process, and
-#     the setting still NAMES it, so `dumpsys` must confirm it rebound;
-#   - logcat keeps the previous run's lines, so an empty run reads as a
-#     successful one.
+# accessibility service (docs/traps.md, "What DocumentsUI publishes").
+# THE RESET IS THE WHOLE POINT: without it a rerun measures the LAST run
+# — the picker still up so onCreate never runs, a service the setting
+# still names but force-stop killed, and logcat's previous lines.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

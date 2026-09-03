@@ -1,39 +1,26 @@
-(* The accessibility conformance scene from OCaml: the universal
-   [~a11y_id]/[~a11y_label] props, read back out of the PLATFORM'S OWN
-   accessibility tree rather than kaya's model.
-
-   EVERY WIDGET KIND APPEARS AND EXACTLY ONE CONTAINER OF EACH KIND:
-   container targets are ordinal, so they stay stable only while the
-   scene keeps one of each. See guests/rust/a11y.rs for the full note;
-   the byte-frozen contract is tools/scenes/a11y.steps. *)
+(* The a11y scene, OCaml port — guests/rust/a11y.rs, tools/scenes/a11y.steps. *)
 
 open Kaya_app
 
-(* The one the mark is under: the picture this app's own BUILD shipped. *)
 let mark_name = "images/a11y-logo.png"
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     (* THE BYTES NEVER ENTER THE OCAML HEAP — [~source_asset] hands the
-        core's own buffer to the blob table, and the close is safe
-        because that table keeps its own reference. *)
+     (* Safe: the blob table keeps its own reference. *)
      let mark = asset mark_name in
-     (* A spoken name that FOLLOWS A SIGNAL: [~a11y_label_bind], the
-        template zone's [?a11y_label_bind] in the live zone. *)
      let spoken = signal (Str "Before") in
      let root =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [
-           (* Caption-bearing controls: identified, but deliberately
-              NOT labelled — the platform must speak the caption. *)
+           (* Deliberately not labelled: the platform must speak the
+              caption. *)
            button ~a11y_id:"save" ~a11y_hint:"save the draft" ~text:"Save";
            checkbox ~a11y_id:"details" ~a11y_hint:"show more detail"
              ~text:"Details";
            button ~a11y_id:"reset" ~text:"Reset";
            label ~a11y_id:"status" ~text:"Ready";
-           (* Caption-less controls: an app MUST name these. *)
            entry ~a11y_id:"name" ~a11y_label:"Full name";
            textarea ~a11y_id:"notes" ~a11y_label:"Notes";
            slider ~a11y_id:"volume" ~a11y_label:"Volume" ~min:0.0 ~max:1.0

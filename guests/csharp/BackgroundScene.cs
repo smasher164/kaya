@@ -1,11 +1,5 @@
-// The background conformance scene, C# port — work off the app thread,
-// posted back (docs/background-work-plan.md).
-//
-// The odd shape is the point: a wrong implementation must DEADLOCK
-// rather than disagree. The worker parks until a CLICK releases it, and
-// only a live app thread can process a click. The accumulators need no
-// lock: everything that touches them runs on the app thread inside a
-// posted transaction.
+// The background scene, C# port — guests/rust/background.rs,
+// tools/scenes/background.steps.
 
 using System;
 using System.Threading;
@@ -35,8 +29,6 @@ static class BackgroundScene
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");  // label#0
                 tx.SetA11yId(tx.Label(bind: alive), "alive");    // label#1
-                // Authored because the AX read needs an identifier; an
-                // index read passes for an arm that drew nothing.
                 tx.SetA11yId(tx.Label(bind: detail), "nested");  // label#2
 
                 tx.Button("start", inner =>  // button#0
@@ -44,8 +36,6 @@ static class BackgroundScene
                     var worker = new Thread(() =>
                     {
                         released.Wait();
-                        // Three posts: the accumulator makes this a test
-                        // of ORDER, not of which one ran last.
                         foreach (var step in new[] { "1", "2", "3" })
                         {
                             var s = step;
@@ -63,9 +53,6 @@ static class BackgroundScene
                 });
                 tx.Button("ping", inner => inner.Write(alive, "alive"));  // button#1
                 tx.Button("release", _ => released.Set());                // button#2
-                // A post from inside a handler QUEUES for after; it never
-                // nests. So this commits "ac" and the posted closure then
-                // commits "acb" — nesting could only produce "abc".
                 tx.Button("nest", inner =>  // button#3
                 {
                     nested += "a";

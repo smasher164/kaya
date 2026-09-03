@@ -5,22 +5,11 @@ import dev.kaya.KayaGen;
 import dev.kaya.KayaRecords;
 
 /**
- * The todos scene from the JVM: the record type is the schema, and the
- * typed collection's checkbox hands its handler the stamped copy's key.
- *
- * <p>The DERIVED label survives an undo with nobody restoring it — the
- * derive's write rides the insert's named transaction — which is why
- * this file registers no {@code onUndone} (see
- * {@code KayaApp.absorbUndo}).
+ * The todos scene from the JVM — guests/rust/todos.rs, tools/scenes/todos.steps.
  */
 public final class Todos {
-        /**
-         * The annotation processor reads this and generates TodoKaya: the
-         * collection factory, the field tokens and the named-setter patch.
-         *
-         * <p>KEYED BY Long because the key comes from {@code insertFresh}
-         * and the minter's keys are I64.
-         */
+    /** The annotation processor reads this and generates TodoKaya. KEYED BY
+     * Long because the minter's keys are I64. */
     @KayaGen(key = "Long")
     record Todo(String title, boolean done) {}
 
@@ -40,16 +29,13 @@ public final class Todos {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // The two items are the whole undo surface an app declares;
-            // they work out their own enablement (docs/undo-plan.md).
+            // The two items are the whole undo surface an app declares.
             KayaApp.WindowRef win = tx.window(0).title("todos");
             KayaApp.MenuItem edit = win.menu("Edit");
             edit.item("Undo").role(KayaApp.ROLE_UNDO);
             edit.item("Redo").role(KayaApp.ROLE_REDO);
 
             var todos = TodoKaya.collection(tx);
-            // A derived signal: recomputed after every mutation, so no
-            // handler mentions it.
             KayaApp.Signal<String> itemsLeft = todos.derive(tx, Todos::itemsLeftText);
 
             tx.mount(tx.column(() -> {
@@ -58,14 +44,11 @@ public final class Todos {
                     if (draft.isEmpty()) {
                         return;
                     }
-                    // Naming the transaction is the whole undo surface;
-                    // the derive's write rides this same batch.
+                    // The derive's write rides this same batch.
                     t.undoable("add " + draft);
                     KayaRecords.insertFresh(t, todos, new Todo(draft, false));
-                    // FINISHING THE FORM IS NOT PART OF THE STEP, so
-                    // the clear goes in the NEXT transaction — and
                     // `clear` inside a named group is refused at apply
-                    // anyway (docs/undo-plan.md D4).
+                    // (docs/undo-plan.md D4).
                     app.post(t2 -> {
                         t2.clear(field);
                         t2.focus(field);
@@ -75,8 +58,6 @@ public final class Todos {
                 for (var row : TodoKaya.rows(tx, todos)) {
                     row.row(() -> {
                         row.checkbox(row.done, (t2, key, checked) -> {
-                            // One field's delta through the generated
-                            // named setter: the title never travels.
                             TodoKaya.patch(t2, todos, key).done(checked);
                         });
                         row.label(row.title);

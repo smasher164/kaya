@@ -1,7 +1,5 @@
-/* The menus scene from C, at the explicit wire floor. The shortcut is
- * in the CANONICAL wire spelling ("primary+s": lowercase, '+'-joined,
- * primary/shift/alt order) — the core REJECTS non-canonical spellings.
- * Semantics: guests/rust/menus.rs. Contract: tools/scenes/menus.steps. */
+/* The menus conformance scene (tools/scenes/menus.steps). The shortcut is
+ * the CANONICAL wire spelling; the core rejects any other. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -10,9 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids. WIDGETS AND TEMPLATE NODES SHARE ONE SPACE, so the
- * N_ run continues the W_ one; signals, collections and menu items each
- * count from 1 in their own (DESIGN.md, Binding conventions). */
+/* WIDGETS AND TEMPLATE NODES SHARE ONE SPACE (tools/check-c-ids.py); the
+ * other spaces each count from 1 in their own. */
 #define SIG_STATUS 1
 #define SIG_CAN_EXPORT 2
 #define SIG_DETAILS 3
@@ -58,8 +55,7 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_SORT, kaya_f64(0.0));
 
     {
-        /* Packed by hand: the generated kaya_tx_set_window_prop closes
-         * the record BEFORE the value. */
+        /* Packed by hand: the generated setter closes the record first. */
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
         kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
@@ -95,8 +91,7 @@ static void build_scene(void) {
     kaya_tx_menu_item_append(&tx, M_VIEW, M_DETAILS);
     kaya_tx_menubar_append(&tx, 0, M_VIEW);
 
-    /* Option order IS the index (Name = 0, Date = 1); value binds AFTER
-     * the options exist. */
+    /* Option order IS the index; value binds AFTER the options exist. */
     kaya_tx_menu_item_create(&tx, M_SORT, KAYA_MENU_KIND_RADIO_GROUP);
     kaya_tx_set_menu_label(&tx, M_SORT, "Sort");
     kaya_tx_menu_item_create(&tx, M_NAME, KAYA_MENU_KIND_RADIO_OPTION);
@@ -108,8 +103,7 @@ static void build_scene(void) {
     kaya_tx_bind_menu_value(&tx, M_SORT, SIG_SORT);
     kaya_tx_menubar_append(&tx, 0, M_SORT);
 
-    /* The context catalog is built LIVE; only the attachment happens
-     * inside the template below. */
+    /* Built LIVE: only the attachment happens inside the template. */
     kaya_tx_menu_item_create(&tx, M_REMOVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_REMOVE, "Remove");
     kaya_tx_set_menu_symbol(&tx, M_REMOVE, KAYA_SYMBOL_DELETE);
@@ -156,8 +150,7 @@ static void build_scene(void) {
     kaya_tx_mount(&tx, 0, W_COLUMN);
     kaya_submit(tx.buf, tx.len);
 
-    /* Seeded AFTER mount, so the stamp path attaches the shared catalog
-     * and the copy's keys. */
+    /* Seeded AFTER mount, so the stamp path attaches catalog and keys. */
     {
         uint8_t seed_buf[512];
         KayaTx seed = {seed_buf, 0, sizeof seed_buf};
@@ -198,8 +191,7 @@ static void *app(void *arg) {
                 kaya_tx_write_signal(&tx, SIG_CAN_EXPORT, kaya_bool(1));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_RESET) {
-                /* The checked/value writes reset the backend's user-state
-                 * mirror and echo no occurrence. */
+                /* These reset the user-state mirror and echo nothing. */
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_write_signal(&tx, SIG_DETAILS, kaya_bool(0));
@@ -207,8 +199,6 @@ static void *app(void *arg) {
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("ready"));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_EXTEND) {
-                /* Append-only: rename the RETAINED File, move the
-                 * promotion hint to Publish, grow the bar by Tools. */
                 uint8_t buf[1024];
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_set_menu_primary(&tx, M_SHARE, 0);
@@ -235,8 +225,6 @@ static void *app(void *arg) {
             } else if (n_keys == 0 && id == M_RENAME) {
                 write_status("renamed");
             } else if (n_keys == 2 && id == M_REMOVE) {
-                /* The keys ARE the noun: both levels straight into the
-                 * instance address. */
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_collection_remove(&tx, C_ITEMS, &keys[0], 1, keys[1]);

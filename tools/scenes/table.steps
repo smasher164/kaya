@@ -1,28 +1,12 @@
-# The table scene: column headers + click-to-sort on the For
-# vocabulary (docs/tables-plan.md). column#0 is the For container (the
-# root is a row, the reorder scene's rule). expect_columns reads the
-# header bar AS THE TABLE PATH PRESENTED IT — titles in visual order,
-# the indicator as ^N (asc) or vN (desc); HEADERS RENDER AT EVERY
-# WIDTH (ratified 2026-08-21: the compact degrade died — nothing but
-# an Apple-idiom analogy ever forced it, and it cost the phones their
-# headers and this scene its phone legs). expect_rows reads per-row
-# cell labels in the toolkit's child order, rows joined with `|`,
-# cells with `,` — the two-level expect_order, because a
-# creation-order registry cannot see the moves a sort makes.
-# expect_column_edges is the GEOMETRY claim every backend makes
-# uniformly, both halves: header cell i and every row's cell i share
-# a leading edge with exactly N such edges, AND the table spans its
-# assigned track — a column's content is its width FLOOR, leftover
-# distributes, the table fills its viewport (decision 6; mac's native
-# columns add user resize on top, which is the one affordance the
-# synthesized tiers lack). A header click is a REQUEST: the platform sorts nothing;
-# the guest reorders by key and re-declares the indicator, so every
-# expectation below is the guest's policy (same column flips, a new
-# column starts ascending) coming back through the toolkit.
+# docs/tables-plan.md. column#0 is the For container (the root is a row,
+# the reorder scene's rule). A header click is a REQUEST — the platform
+# sorts nothing — so the orders below are the GUEST's policy coming back
+# through the toolkit: the same column flips, a new column starts
+# ascending.
 expect_columns column#0 "Name|Size"
 expect_column_edges column#0 2
-# A table is a viewport: its rows may leave slack, but they may not
-# extend beyond the track the grown For received.
+# A table is a viewport: rows may leave slack, never exceed the track
+# the grown For received (decision 6).
 expect_fills column#0
 expect_rows column#0 "banana,30|apple,10|cherry,20"
 header_click column#0 0

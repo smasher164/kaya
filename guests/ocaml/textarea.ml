@@ -1,5 +1,5 @@
-(* The textarea conformance scene, OCaml port. See
-   guests/rust/textarea.rs and tools/scenes/textarea.steps. *)
+(* The textarea scene, OCaml port — guests/rust/textarea.rs,
+   tools/scenes/textarea.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -17,7 +17,7 @@ let () =
        window ~title:"textarea" ();
 
        (* The editor realizes here because the clear button's handler needs
-          its handle; [w editor] slots it into the child list. *)
+          its handle. *)
        let editor =
          textarea ~on_change:(fun text -> write lines (Str (count text))) ()
        in

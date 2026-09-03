@@ -3,8 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The grid conformance scene from the JVM. See
- * guests/rust/grid.rs and tools/scenes/grid.steps.
+ * The grid scene from the JVM — guests/rust/grid.rs, tools/scenes/grid.steps.
  */
 public final class GridScene {
     public static void app() {

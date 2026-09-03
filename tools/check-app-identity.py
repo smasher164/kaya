@@ -8,62 +8,36 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # ONE DECLARATION, TWO READERS, AND NOTHING BETWEEN THEM THAT CAN DRIFT
-# (docs/app-identity-plan.md ruling 4). The identity is a NAME and a
-# PICTURE FILE in guests/assets/identity.toml; the BUILD reads it
-# before any program runs, and the RUNNING APP sends the same file's
-# BYTES over the wire. Five routes reading five different files is how
-# the promise gets broken quietly, with every test still passing
-# because each reader is internally consistent.
+# (docs/app-identity-plan.md ruling 4; CLAUDE.md's gate list). The byte
+# comparison itself lives in each packaging step, on the path nobody can
+# avoid; this gate is the STATIC half, and it reaches platforms whose
+# packaging step does not exist yet.
 #
-# WHERE THE WALL SITS: the byte comparison itself lives in each
-# packaging step, on the path nobody can avoid. This gate is the STATIC
-# half — it holds the DECLARATION and every hand-written copy of it
-# level, including on platforms whose packaging step does not exist
-# yet.
-#
-# THE CLAUSES:
-#
+# THE CONTRACT.
 #   C1  the manifest declares a non-empty name and an icon file that
-#       exists and is not empty. Everything below reads those two
-#       values out of it; neither is ever written down in this gate.
-#
-#   C2  THE PIXELS ARE THE EXPECTATION. tools/scenes/*.steps are shared
-#       verbatim and compared byte-for-byte, so `expect_app_icon
-#       "E01B24/33D17A/1C71D8/F6D32D"` is a frozen claim about the
-#       CONTENT of the declared icon. Decoding it here means swapping
-#       the asset fails HERE rather than on five lanes at once.
-#
-#   C3  THE DECLARATION IS WRITTEN DOWN ONCE. None of the runtime
-#       readers parses TOML, so a site may name it in THREE ways and no
-#       fourth: READ THE MANIFEST; SPELL THE DECLARED PATH (backslashes
-#       and a drive-letter mirror allowed, since deploy-win stages the
-#       tree to C:\kaya); or OPEN IT AS AN ASSET, which this gate
-#       DERIVES from the manifest rather than typing. NO COMMENT IN
-#       THIS FILE MAY SPELL AN ASSET NAME IN THE MARK'S FAMILY: the
-#       checker reads this file too, and it will refuse it.
-#
-#       They may spell it, they may not DISAGREE with it: naming
-#       KAYA_ICON_FILE while naming none of the three is a third
-#       source of truth wearing the override's name, and opening some
-#       OTHER file out of the mark's asset family is a second mark —
-#       silent at runtime, because an asset name nothing answers to
-#       leaves each platform's own icon in place.
-#
-#   C4  THE NAME IS WRITTEN DOWN ONCE, same rule one field over: every
-#       identity guest declares it and `expect_title window#1` reads it
-#       back off the platform.
-#
-#   C5  ONE PICTURE. Any app-icon resource anywhere in the tree must be
-#       BYTE-IDENTICAL to the declared icon or be in EXCLUDED with a
-#       reason.
-#
-#   C6  A PACKAGING CONSUMER READS THE MANIFEST rather than hard-coding
-#       the path. The .cmd launchers are exempt and C3 covers them
-#       instead: a batch file cannot read TOML.
-#
-# THE SELF-TEST runs the real checker over a shadow root of symlinks
-# with one file doctored and requires the red (docs/traps.md: the
-# wayland seat guard passed vacuously twice against a fixture).
+#       exists and is not empty; neither value is written down here.
+#   C2  THE PIXELS ARE THE EXPECTATION: `expect_app_icon` freezes the
+#       CONTENT of the declared icon, decoded here so that swapping the
+#       asset fails HERE rather than on five lanes at once.
+#   C3  THE DECLARATION IS WRITTEN DOWN ONCE. No runtime reader parses
+#       TOML, so a site may name it in THREE ways and no fourth: READ
+#       THE MANIFEST; SPELL THE DECLARED PATH (backslashes and a
+#       drive-letter mirror allowed, since deploy-win stages the tree to
+#       C:\kaya); or OPEN IT AS AN ASSET, which this gate DERIVES rather
+#       than types. Naming KAYA_ICON_FILE while naming none of the three
+#       is a third source of truth wearing the override's name, and
+#       opening some OTHER file out of the mark's family is a second
+#       mark — silent at runtime, since an asset name nothing answers to
+#       leaves each platform's own icon in place. NO COMMENT IN THIS
+#       FILE MAY SPELL AN ASSET NAME IN THE MARK'S FAMILY: the checker
+#       reads this file too, and it will refuse it.
+#   C4  THE NAME IS WRITTEN DOWN ONCE, same rule one field over.
+#   C5  ONE PICTURE: any app-icon resource in the tree is BYTE-IDENTICAL
+#       to the declared icon or in EXCLUDED with a reason.
+#   C6  A PACKAGING CONSUMER READS THE MANIFEST. The .cmd launchers are
+#       exempt and C3 covers them: a batch file cannot read TOML.
+# The self-test runs the real checker over a shadow root of symlinks
+# (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
 import os
 import re
@@ -75,14 +49,12 @@ g = Gate("check-app-identity")
 
 MANIFEST = "guests/assets/identity.toml"
 
-# Directory names that hold BUILD OUTPUT rather than tree, pruned by
-# name while walking (the unpruned walk visits 752,511 paths, 750,000
-# of them cargo's).
-#
-# `build` is here for a second reason: reading a build directory would
-# make the verdict depend on whatever the last build — or the last
-# WATCHED NEGATIVE — left lying around, and a gate a negative test can
-# turn red afterwards is a gate whose red means nothing.
+# Directory names holding BUILD OUTPUT rather than tree, pruned while
+# walking (the unpruned walk visits 752,511 paths, 750,000 of them
+# cargo's). `build` is pruned for a second reason: reading a build
+# directory would make the verdict depend on what the last build — or
+# the last WATCHED NEGATIVE — left lying around, and a gate a negative
+# test can turn red afterwards is a gate whose red means nothing.
 PRUNE = {".git", ".gradle", ".build", "build", "target", "_build",
          "obj", "bin", "node_modules", "__pycache__", "DerivedData"}
 
@@ -340,13 +312,11 @@ def check(root):
             prose = (rel.endswith(".md")
                      or rel.startswith("tools/scenes/"))
             # C3, THE ASSET FORM'S OWN HALF, asked BEFORE the
-            # is-this-a-namer question below: a file opening the WRONG
-            # file out of the mark's family names none of the three
-            # accepted forms and would fall out of this loop
-            # unlooked-at. A mistyped asset name compiles in all eight
-            # languages and leaves whatever icon the platform had.
-            # (NO COMMENT HERE MAY QUOTE SUCH A NAME — the arm would
-            # read it and refuse this file.)
+            # is-this-a-namer question: a file opening the WRONG file
+            # out of the mark's family names none of the three accepted
+            # forms and would fall out of this loop unlooked-at, and a
+            # mistyped asset name compiles in all eight languages.
+            # (NO COMMENT HERE MAY QUOTE SUCH A NAME.)
             if not prose and icon_family:
                 for other in sorted(
                         n for n in asset_names
@@ -550,15 +520,12 @@ def doctor_pixel(label, shadow_root, rel, x, y):
                  f"rule fires)")
 
 
-# The declared icon's ASSET name (the manifest's `icon` with the asset
-# root's prefix removed), a regex matching it, and a NEIGHBOUR of it:
-# same family, not the declared file.
-#
-# THE SELF-TEST DERIVES ITS DATA, because THIS SCRIPT IS IN THE TREE
-# THE CHECKER READS: an asset call spelled out here, naming any file in
-# the mark's family other than the declared one, makes the gate refuse
-# itself. The rule reaches PROSE because prose is text, so no comment
-# in this file may spell one either.
+# The declared icon's ASSET name (the manifest's `icon` minus the asset
+# root's prefix), a regex matching it, and a NEIGHBOUR of it: same
+# family, not the declared file. DERIVED, because THIS SCRIPT IS IN THE
+# TREE THE CHECKER READS — an asset call naming any file in the mark's
+# family but the declared one makes the gate refuse itself, and the rule
+# reaches prose, so no comment here may spell one either.
 def declared(which):
     man = ROOT / MANIFEST
     icon = tomllib.loads(man.read_text(encoding="utf-8"))["icon"] \
@@ -585,8 +552,8 @@ if out:
     raise SystemExit(1)
 
 # N1 — THE DRIFT ITSELF: repaint a quadrant of the declared mark and
-# watch the byte-frozen scene expectation stop being true of it. This
-# is the failure that would otherwise surface as five red lanes.
+# watch the byte-frozen scene expectation stop being true of it — the
+# failure that would otherwise surface as five red lanes.
 s = fresh("repainted")
 mark_rel = tomllib.loads((ROOT / MANIFEST).read_text(
     encoding="utf-8"))["icon"].replace("\\", "/")
@@ -640,12 +607,12 @@ g.negative("a scene that stopped reading the name back",
            lambda p=s: check(p), want="never reads the declared name")
 
 # N7 — the vacuity half: no scene asserts the icon at all. A gate that
-# stopped finding its site must be loud rather than clean. THREE
-# SITES, all replaced — the old subn replaced every one.
+# stopped finding its site must be loud rather than clean. Both verb
+# sites replaced (anchored: a comment naming the verb is not a site).
 s = fresh("noobservation")
 doctor_shadow("the no-observation perturbation", s,
-              "tools/scenes/identity.steps", r"expect_app_icon",
-              "expect_app_haiku", want=3)
+              "tools/scenes/identity.steps", r"(?m)^expect_app_icon",
+              "expect_app_haiku", want=2)
 g.negative("a tree where no scene reads the icon",
            lambda p=s: check(p), want="would agree with anything")
 

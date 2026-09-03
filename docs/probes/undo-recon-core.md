@@ -7,9 +7,9 @@ Reconnaissance only; nothing was changed or run. Every claim carries
 
 ## 0. The one-paragraph answer
 
-A committed transaction at rest is `Vec<TxOp>` (`crates/kaya/src/protocol.rs:1256`)
+A committed transaction at rest is `Vec<TxOp>` (`crates/kaya/src/protocol.rs:1209`)
 — a *forward* delta with no before-image anywhere in it. The core
-(`crates/kaya/src/scene.rs:215`) holds current state for **signals**
+(`crates/kaya/src/scene.rs:201`) holds current state for **signals**
 (`scene.rs:216`) and for **collection entries** (`scene.rs:271`,
 `CollInstance` at `scene.rs:143`), and for **structure** (widget kinds, nav
 stacks, section sets, menu trees). It holds **no value at all** for a widget
@@ -29,7 +29,7 @@ the const-prop path is the place it is not true today.
 
 ### 1a. Built (guest side, Rust binding as the reference)
 
-- `AppCtx::begin` mints a `Tx` — `crates/kaya/src/app.rs:576-585`. Fields:
+- `AppCtx::begin` mints a `Tx` — `crates/kaya/src/app.rs:529-537`. Fields:
   `ops: Vec<TxOp>`, `journal`, `pending_derived`, `parents`, `committed`
   (`app.rs:799-816`).
 - `AppCtx::apply(body)` is the closure-scoped form: begin, run, commit
@@ -53,12 +53,12 @@ the const-prop path is the place it is not true today.
   The comment is load-bearing for undo: "The model edits stand: they are
   exactly what was sent" (`app.rs:2088-2089`).
 - The C floor's equivalent is `kaya_submit(records, len)` —
-  `crates/kaya/src/capi.rs:935-950`. It decodes the byte buffer into a
+  `crates/kaya/src/capi.rs:908-923`. It decodes the byte buffer into a
   `Transaction` (`wire::decode_transaction_with_blobs`), resolving blob
   handles against the pending registration table, which **drains at this
   boundary whether referenced or not** (`capi.rs:787-792`, `capi.rs:941-946`),
   then sends on the same channel and rings the doorbell.
-- Decoding lives in `crates/kaya/src/wire.rs:507` (`decode_transaction`) and
+- Decoding lives in `crates/kaya/src/wire.rs:497` (`decode_transaction`) and
   `wire.rs:518` (`decode_transaction_with_blobs`).
 
 ### 1c. Applied (core side)
@@ -225,7 +225,7 @@ Ranked by how hard each is to fix.
    recorded, so nothing replays on rebuild". The core does **not** know what
    is focused — the *backends* do, independently: `gtk.rs:2170-2179`
    (`focused_widget_id`), `winui/mod.rs:3453-3456` (`focused_editable_id`),
-   `swift/KayaSwiftUI.swift:5747` (`kayaScene.focusedId`),
+   `swift/KayaSwiftUI.swift:5155` (`kayaScene.focusedId`),
    `KayaCompose.kt:1962`. So restoring focus across an undo is a *new*
    core↔backend read that does not exist today.
 
@@ -355,7 +355,7 @@ a real Python defect for months.
 
 ### 4b. The ambient/handle split
 
-`tools/check-tx-liveness.py:10-30` states the rule and the split verbatim:
+`tools/check-tx-liveness.py:10-10` states the rule and the split verbatim:
 
 - **HANDLE bindings** hand the guest a transaction object, so a stale one can be
   recognised and refused. **Rust at compile time** (`Tx` is `!Send`/`!Sync`,
@@ -409,9 +409,9 @@ mutation, taken by `model_set` (`app.rs:851`), `model_set_field`
 (`app.rs:881`), `model_remove` (`app.rs:925`), `purge_children` (`app.rs:951`).
 
 **The other bindings' journals**, all with the same comment:
-`bindings/go/app.go:157`, `bindings/java/dev/kaya/KayaApp.java:1521`,
-`bindings/swift/KayaApp.swift:1268`, `bindings/csharp/KayaApp.cs:750`,
-`bindings/python/kaya/__init__.py:130` (`_journal`), with `_journal_once`
+`bindings/go/app.go:150`, `bindings/java/dev/kaya/KayaApp.java:1386`,
+`bindings/swift/KayaApp.swift:1167`, `bindings/csharp/KayaApp.cs:699`,
+`bindings/python/kaya/__init__.py:97` (`_journal`), with `_journal_once`
 at `:142-151` and per-object restores at `:188`, `:283`, `:307`, `:578`,
 `:604`, `:900`; run-or-clear at `:2219-2244`; dispatch at `:2443-2462` and
 `:2510+`.

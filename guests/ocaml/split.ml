@@ -1,15 +1,5 @@
-(* The split conformance scene, OCaml port — adaptive panes: [~panes]
-   rides the window, [push_entry ~title ~on_popped] plus [mount_in]
-   presents the detail.
-
-   THE GUEST ASKS FOR THE PRESENTATION ONCE and then does nothing adaptive
-   again: the platform re-decides as the size class changes, and there is
-   no prop for WHICH entries present.
-
-   TWO scripts drive this ONE app: [split] resizes and names the
-   presentation on each side, [listdetail] asserts the bare invariant at
-   whatever width its host gives. See guests/rust/split.rs,
-   tools/scenes/split.steps and tools/scenes/listdetail.steps. *)
+(* The split scene, OCaml port — guests/rust/split.rs,
+   tools/scenes/split.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -33,9 +23,8 @@ let () =
      let root =
        column
          [
-           (* Authored ids so the REAL-TREE read can address these: an index
-              read passes whether or not anything reached the screen, which is
-              what let a non-rendering split arm look green. *)
+           (* Authored ids: an index read passes whether or not anything
+              reached the screen. *)
            label ~a11y_id:"list" ~bind:s (* label#0 *);
            button ~text:"open detail" ~on_click:on_detail;
          ]

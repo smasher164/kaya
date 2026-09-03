@@ -15,10 +15,10 @@ numbers for that file are the working-tree ones, not HEAD's.
 ### 1.1 The one wire object underneath all eight
 
 There is exactly one transaction type on the protocol: `pub type Transaction =
-Vec<TxOp>` (crates/kaya/src/protocol.rs:1256), "applied atomically, in
+Vec<TxOp>` (crates/kaya/src/protocol.rs:1209), "applied atomically, in
 submission order, last write wins per signal within the batch"
-(crates/kaya/src/protocol.rs:1254-1255). `TxOp` is the closed op vocabulary
-(crates/kaya/src/protocol.rs:1115-1252): signal writes, widget creation, props,
+(crates/kaya/src/protocol.rs:1207-1208). `TxOp` is the closed op vocabulary
+(crates/kaya/src/protocol.rs:1082-1205): signal writes, widget creation, props,
 windows, alerts, file dialogs, clipboard, navigation, sections, menus,
 collection deltas, template scopes, and one-shot widget commands.
 
@@ -60,30 +60,30 @@ compute before-images; the wire simply does not carry them today.
 | Language | Tier | Opened by | Handle | Committed by |
 |---|---|---|---|---|
 | Rust | handle | `AppCtx::apply` app.rs:569, `AppCtx::begin` app.rs:576 | `Tx<'a>` app.rs:799 | `Tx::commit` app.rs:2090 |
-| Go | handle | `(*App).Build` bindings/go/app.go:418 | `*Tx` app.go:359 | `Submit(tx.records...)` app.go:449 |
-| Java | handle | `KayaApp.build` bindings/java/dev/kaya/KayaApp.java:2787 and :2799 | `Tx` KayaApp.java:1479 | `tx.submitIfAny()` KayaApp.java:2818 (body KayaApp.java:1552) |
-| C# | handle | `KayaApp.Build` bindings/csharp/KayaApp.cs:399 | `Tx` KayaApp.cs:707 | `tx.SubmitIfAny()` KayaApp.cs:417 (body KayaApp.cs:767) |
-| Swift | handle | `KayaApp.build` bindings/swift/KayaApp.swift:753 | `KayaAppTx` (init KayaApp.swift:1278) | `tx.submitIfAny()` KayaApp.swift:757 (body KayaApp.swift:1283) |
-| Python | ambient | `app.build()` `bindings/python/kaya/__init__.py:2357`, `app.window()` `:2340` | module global `_tx` `__init__.py:93` | `_TxScope.__exit__` `__init__.py:2189` |
-| OCaml | ambient | `Kaya_app.build` bindings/ocaml/kaya_app.ml:369 | global `ambient_tx : tx option ref` kaya_app.ml:184; record type `tx` kaya_app.ml:167-175 | `Kaya_runtime.submit` kaya_app.ml:383 |
-| Haskell | ambient | `buildTx` bindings/haskell/KayaApp.hs:2262 (`submitTx` = the handle-less alias, KayaApp.hs:2318) | the `Build` state monad / `BuildState` KayaApp.hs:2268 | `kayaSubmit [records]` KayaApp.hs:2290 |
-| C floor | neither | — | caller-owned buffers | — (tools/check-tx-liveness.py:21) |
+| Go | handle | `(*App).Build` bindings/go/app.go:409 | `*Tx` app.go:359 | `Submit(tx.records...)` app.go:449 |
+| Java | handle | `KayaApp.build` bindings/java/dev/kaya/KayaApp.java:2562 and :2799 | `Tx` KayaApp.java:1479 | `tx.submitIfAny()` KayaApp.java:2818 (body KayaApp.java:1552) |
+| C# | handle | `KayaApp.Build` bindings/csharp/KayaApp.cs:359 | `Tx` KayaApp.cs:707 | `tx.SubmitIfAny()` KayaApp.cs:417 (body KayaApp.cs:767) |
+| Swift | handle | `KayaApp.build` bindings/swift/KayaApp.swift:701 | `KayaAppTx` (init KayaApp.swift:1278) | `tx.submitIfAny()` KayaApp.swift:757 (body KayaApp.swift:1283) |
+| Python | ambient | `app.build()` `bindings/python/kaya/__init__.py:2076`, `app.window()` `:2340` | module global `_tx` `__init__.py:93` | `_TxScope.__exit__` `__init__.py:2189` |
+| OCaml | ambient | `Kaya_app.build` bindings/ocaml/kaya_app.ml:327 | global `ambient_tx : tx option ref` kaya_app.ml:184; record type `tx` kaya_app.ml:167-175 | `Kaya_runtime.submit` kaya_app.ml:383 |
+| Haskell | ambient | `buildTx` bindings/haskell/KayaApp.hs:2051 (`submitTx` = the handle-less alias, KayaApp.hs:2318) | the `Build` state monad / `BuildState` KayaApp.hs:2268 | `kayaSubmit [records]` KayaApp.hs:2290 |
+| C floor | neither | — | caller-owned buffers | — (tools/check-tx-liveness.py:10) |
 
-The split is stated verbatim by the gate, tools/check-tx-liveness.py:10-30
+The split is stated verbatim by the gate, tools/check-tx-liveness.py:10-10
 (python since the 2026-08-31 conversion; the .sh is its exec shim):
 
 - HANDLE (Rust, Go, Java, C#, Swift) — "hand the guest a transaction object, so
   a stale one can be recognised and refused" (check-tx-liveness.py:36-37). Rust
   refuses at COMPILE time (`Tx` is `!Send`, pinned by a `compile_fail` doctest
-  at crates/kaya/src/app.rs:781-798); the other four check a `closed` flag at
+  at crates/kaya/src/app.rs:713-730); the other four check a `closed` flag at
   ONE chokepoint (check-tx-liveness.py:38-39).
 - AMBIENT (Python, OCaml, Haskell) — "keep the open transaction in a global, so
   there is no handle to invalidate and nothing to make stale ... therefore
   check the THREAD instead, at the entry to a build"
   (check-tx-liveness.py:41-45). The three guards: `_require_app_thread`
-  `bindings/python/kaya/__init__.py:100`, `require_app_thread`
-  bindings/ocaml/kaya_app.ml:201, `requireAppThread`
-  bindings/haskell/KayaApp.hs:2243.
+  `bindings/python/kaya/__init__.py:70`, `require_app_thread`
+  bindings/ocaml/kaya_app.ml:179, `requireAppThread`
+  bindings/haskell/KayaApp.hs:2034.
 
 The chokepoints, named, because an undo-group surface has to route through the
 same places:
@@ -159,7 +159,7 @@ Four candidates, ascending in invasiveness:
    in its own transaction — Rust "Run everything posted, each in its own
    transaction" app.rs:530-541; Go "dispatch runs one handler inside its own
    Build" app.go:453-455; OCaml `let dispatch app` kaya_app.ml:419; Python's
-   `_dispatch` is the subject of tools/check-ambient-tx.py:10-26 (the
+   `_dispatch` is the subject of tools/check-ambient-tx.py:10-18 (the
    gate's body is python since the 2026-08-27 conversion ruling; the .sh
    is its exec shim). So "one
    gesture = one transaction = one undo step" costs no new binding surface at
@@ -275,9 +275,9 @@ distinct from `app.build()` so the indentation lint keeps working.
 
 `tools/scenes/*.steps` are line-oriented scripts, LF-only, shared byte-for-byte
 across every platform (CLAUDE.md invariant 6). They are parsed by
-`harness::parse` (crates/kaya/src/harness.rs:785) into `Step`
-(crates/kaya/src/harness.rs:190-431) and executed against a `Stage`
-implementation (crates/kaya/src/harness.rs:499) supplied per backend. **47
+`harness::parse` (crates/kaya/src/harness.rs:584) into `Step`
+(crates/kaya/src/harness.rs:143-312) and executed against a `Stage`
+implementation (crates/kaya/src/harness.rs:373) supplied per backend. **47
 verbs** exist today, extracted the same way check-verbs does it
 (crates/kaya/src/harness.rs `parse`'s match arms):
 
@@ -325,8 +325,8 @@ resolved wherever the item surfaced" (harness.rs:339-347, Stage method
 harness.rs:711). `shortcut` drives the platform's key-equivalent dispatch table
 (harness.rs:407-412, Stage method harness.rs:778). The clipboard scene already
 uses exactly this shape for the platform-owned roles:
-`menu_activate "Edit>Paste"` at tools/scenes/clipboard.steps:100 and :109, and
-`shortcut "primary+s"` at tools/scenes/menus.steps:49.
+`menu_activate "Edit>Paste"` at tools/scenes/clipboard.steps:73 and :109, and
+`shortcut "primary+s"` at tools/scenes/menus.steps:41.
 
 So `menu_activate "Edit>Undo"` **parses and runs today** — but what it means
 depends entirely on how the item is declared, and the two options are not close
@@ -337,7 +337,7 @@ to each other:
    Nothing in kaya does the undoing. This needs zero protocol work and proves
    nothing about a core-owned undo stack.
 2. **A `role` item.** `MENU_ROLES` is `["settings", "cut", "copy", "paste"]`
-   (crates/kaya/src/scene.rs:522) — **there is no `undo` or `redo` role today**.
+   (crates/kaya/src/scene.rs:499) — **there is no `undo` or `redo` role today**.
    The three clipboard roles are exactly the precedent an undo role would
    follow: "they hand the item's BEHAVIOUR to the platform. Such an item lowers
    to the host's own command, acts on the FOCUSED widget, emits no occurrence
@@ -364,7 +364,7 @@ only through its visible consequences (`expect label#0 "..."`, `expect_order`,
 
 - **Whether the undo command is LIVE.** `expect_menu "Edit>Undo" disabled` /
   `enabled` already works (harness.rs:353-358, and the enablement axis is
-  exercised at tools/scenes/menus.steps:6-7 and :26-27) — so if undo's
+  exercised at tools/scenes/menus.steps:5-6 and :26-27) — so if undo's
   enablement is core-computed like the clipboard roles', that assertion is
   free and is the single most valuable one: it proves core knows the stack is
   empty.
@@ -386,16 +386,16 @@ harness.rs:379-382).
 
 Adding any verb touches **five** places, and check-verbs enforces three of them:
 
-1. `Step` variant + `parse` arm, crates/kaya/src/harness.rs:190 / :785.
-2. `Stage` trait method, crates/kaya/src/harness.rs:499 — "No default: a
+1. `Step` variant + `parse` arm, crates/kaya/src/harness.rs:143 / :785.
+2. `Stage` trait method, crates/kaya/src/harness.rs:373 — "No default: a
    backend that forgets it must fail to compile" is the repeated house rule
    (harness.rs:508-510, :520-525, :709-711). That is the compile-time half.
 3. GTK + WinUI implementations (they run harness.rs directly).
 4. **swift/KayaSwiftUI.swift** — string-matched, not compile-checked.
 5. **android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt** — same.
 
-tools/check-verbs.py:868-880 extracts every verb from `parse()` and demands the
-literal string in BOTH interpreter files. tools/check-verbs.py:1098-1134 demands
+tools/check-verbs.py:788-800 extracts every verb from `parse()` and demands the
+literal string in BOTH interpreter files. tools/check-verbs.py:1008-1037 demands
 every `expect_*` arm actually append to `observed` — "an expect that records
 nothing passes without verifying anything", the defect measured on the Compose
 `expect_ax` arm 2026-07-25 (check-verbs.py:1098-1134). And any new scene
@@ -478,7 +478,7 @@ gaps are doctrinal rather than accidental.**
 
 ### 3.1 What core holds
 
-`Scene` (crates/kaya/src/scene.rs:215-288) holds everything DECLARED:
+`Scene` (crates/kaya/src/scene.rs:201-265) holds everything DECLARED:
 
 - `signals: HashMap<SignalId, Value>` (scene.rs:216) and the four binding maps
   (widget scene.rs:218, window :219, entry :234, section :247, menu :265,
@@ -505,51 +505,51 @@ each USER change as an occurrence" (DESIGN.md:379-382). And: "Widget-owned
 state never grows a read: an entry's text arrives as change occurrences the app
 folds into its own model (the uncontrolled widget stays the authority; the app
 keeps its draft), so nothing eventual ever sits on a read path"
-(DESIGN.md:547-551). Every binding repeats it — bindings/swift/KayaApp.swift:778-780
+(DESIGN.md:547-551). Every binding repeats it — bindings/swift/KayaApp.swift:725-727
 ("the widget owns its text … there is no read-back, by doctrine"),
-bindings/go/app.go:2406-2407, bindings/python/kaya/__init__.py:1989.
+bindings/go/app.go:2257-2258, bindings/python/kaya/__init__.py:1764.
 
 So `Prop::Text` in core is **what the app SET**, never what the user typed. The
-backends carry the live value: `KayaNode.text` (swift/KayaSwiftUI.swift:154),
+backends carry the live value: `KayaNode.text` (swift/KayaSwiftUI.swift:149),
 `.checked` (:167), `.value` (:168). The clipboard scene depends on this
 distinction — `expect entry#1 "pasted by hand"` at
-tools/scenes/clipboard.steps:110 reads the WIDGET, and the whole point of
+tools/scenes/clipboard.steps:82 reads the WIDGET, and the whole point of
 clipboard.steps:104-110 is that the platform inserted text core never saw.
 
 **If the app folds every change into a collection, core's copy is complete. If
 it does not, core is behind, legally.** The `menus` scene states the licence
 outright: "The Rust depth guest deliberately does not write their bound signals
-back: the native control owns user state" (tools/scenes/menus.steps:12-13), and
+back: the native control owns user state" (tools/scenes/menus.steps:7-7), and
 three lines later demands "The stateful controls must survive from the
 backend's user-state mirror" (menus.steps:23-24). The Compose interpreter names
 that mirror in so many words: "This model is also the backend's user-state
 mirror: a user toggle/radio pick lands in checked/value here (and emits), the
 guest deliberately may not echo it back, and an unrelated prop write must not
-clobber it" (android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:368-375; the
+clobber it" (android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:324-331; the
 SwiftUI twin is `KayaMenuItemModel.checked`/`.value`,
-swift/KayaSwiftUI.swift:308-310).
+swift/KayaSwiftUI.swift:237-239).
 
 **Focus.** No field in `Scene` — `grep -n focus crates/kaya/src/scene.rs`
 returns only the `CommandKind::Focus` check (scene.rs:381) and a comment. The
-backends own it: `focused_widget_id()` in crates/kaya/src/gtk.rs:2123 (read at
+backends own it: `focused_widget_id()` in crates/kaya/src/gtk.rs:2016 (read at
 :2173, :2181, :2243 — that is where the clipboard roles' enablement is
-computed), `@FocusState` in swift/KayaSwiftUI.swift:7215 and :7256,
+computed), `@FocusState` in swift/KayaSwiftUI.swift:6533 and :7256,
 `kayaFocusedSemanticsNode` in KayaCompose.kt:2076-2090. `expect_focused` reads
 the toolkit, per-window, never a model copy (harness.rs:511-514, :221-224).
 
 **Scroll offset.** Not in core. `filled_scrolls` (scene.rs:280) records only
 that a viewport already holds its one child. The backends hold the live
 position: `kayaScrollProxies: [UInt64: ScrollViewProxy]` in
-swift/KayaSwiftUI.swift:453-455 is how `scroll_end` drives the real API. DESIGN
+swift/KayaSwiftUI.swift:374-376 is how `scroll_end` drives the real API. DESIGN
 lists scroll offset as a "present-state slot … Keep-latest" in the channel
 taxonomy (DESIGN.md:2469-2474) — a channel that is **designed and not built**:
 "Two are BUILT (`CommandKind`): `focus()` and `clear()`. `scrollTo()` is
 designed and deferred" (DESIGN.md:2484-2486), and `CommandKind` in
-crates/kaya/src/scene.rs:378-391 confirms it — exactly two variants.
+crates/kaya/src/scene.rs:357-369 confirms it — exactly two variants.
 
 **Window geometry after a user resize.** `SetWindowProp` carries `width`/
 `height` as an ADVISORY request (protocol.rs:1125, and Python's docstring at
-`bindings/python/kaya/__init__.py:2342-2343` says "request content size in DIP
+`bindings/python/kaya/__init__.py:2071-2071` says "request content size in DIP
 (advisory)"). The `resize_window` verb drives "the window's REAL resize — the
 path a user's drag takes, not a model write" (harness.rs:413-419), and
 `expect_window_size` (harness.rs:280) reads it back from the platform. Nothing
@@ -558,7 +558,7 @@ folds a user resize into `Scene`.
 **Selection inside a text control.** kaya has no selection API at all, stated
 as the REASON the clipboard roles had to be commands: "kaya has no selection
 API: only the widget knows what is selected, so 'copy the selection' cannot be
-assembled by an app out of the data layer" (crates/kaya/src/scene.rs:514-517;
+assembled by an app out of the data layer" (crates/kaya/src/scene.rs:491-494;
 same at KayaCompose.kt:4592-4594).
 
 ### 3.3 What that means for the two features

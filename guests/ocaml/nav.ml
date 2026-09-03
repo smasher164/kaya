@@ -1,11 +1,4 @@
-(* The nav conformance scene, OCaml port — the serial navigation grammar:
-   [push_entry ~title ~intercept_back] plus [mount_in] presents each
-   screen, [on_entry_popped] hears the user's native pop, and
-   [on_back_requested] answers the intercept_back veto with [pop_entry].
-   THE COVERED ROOT IS RETAINED (status keeps taking writes while
-   covered), and a programmatic [pop_entry] does NOT echo entry_popped,
-   so the settings round's final status stays "back requested". See
-   guests/rust/nav.rs and tools/scenes/nav.steps. *)
+(* The nav scene, OCaml port — guests/rust/nav.rs, tools/scenes/nav.steps. *)
 
 open Kaya_wire
 open Kaya_app

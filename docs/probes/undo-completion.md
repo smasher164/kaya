@@ -45,7 +45,7 @@ native tier — a dropped episode would be unreachable in BOTH directions).
   regeneration.
 - Every backend asks the CORE for the route before acting:
   `kayaRedoRoute()` → `KayaHost.api.redo_route(...)` →
-  `.core` → `kayaCoreRedo` (swift/KayaSwiftUI.swift:6771, :6832-6838,
+  `.core` → `kayaCoreRedo` (swift/KayaSwiftUI.swift:6125, :6832-6838,
   :7001), Compose's `kayaRedoRoute` (KayaCompose.kt:4140+), GTK
   (gtk.rs:2605+), WinUI (winui/mod.rs:3877). A route that changes from
   `Nothing` to `Core` therefore changes behaviour on all five arms with

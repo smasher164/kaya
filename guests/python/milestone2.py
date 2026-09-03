@@ -1,12 +1,6 @@
-"""The milestone-2 scene from Python, on the tier-1 surface: ambient
-transactions, container auto-parenting, co-located click handlers,
-element proxies, handles with methods, and derived signals — the extras
-banner's When binds `steps.eq(1)`, recomputed by the binding at write
-time and batched into the same transaction. The counter itself is a
-guest variable: signals are a render pipe, written and never read back.
+"""The milestone-2 scene, on the tier-1 surface.
 
-Build the library first (cargo build), then:
-    KAYA_SELFTEST=1 python3 crates/kaya/examples/milestone2.py
+    KAYA_SELFTEST=1 python3 guests/python/milestone2.py
 """
 
 import sys
@@ -50,9 +44,7 @@ with app.window():
     with kaya.column():
         kaya.button("step", on_click=on_step)
         kaya.label(bind=status)
-        # `steps == 1` is steps.eq(1), a derived Bool signal. `if steps:`
-        # RAISES, pointing at kaya.when: the branch must be traced, not
-        # taken.
+        # `if steps:` RAISES: the branch must be traced, not taken.
         with kaya.when(steps == 1):
             kaya.label("extras on")
         for group in groups:

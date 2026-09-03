@@ -1,9 +1,7 @@
 // The C# arm of the generator family. Reads guest sources for [KayaGen]
 // declarations and writes <Type>Kaya.cs beside them; the DECLARATION'S
-// SHAPE decides what comes out — an abstract record is a sum (derived
-// records, in declaration order, are the constructors), a plain record
-// is a record. Generated files are checked in; tools/gen-guests.py
-// regenerates and diffs.
+// SHAPE decides what comes out. Generated files are checked in;
+// tools/gen-guests.py regenerates and diffs.
 //
 //     dotnet run --project tools/kaya-csgen -- <guest source dir>
 

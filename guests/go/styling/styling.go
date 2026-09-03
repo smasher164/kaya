@@ -1,10 +1,5 @@
-// The styling conformance scene from Go (docs/styling-plan.md slice 1):
-// the brand accent, the role tier and the window inset together,
-// because they are one design. One hex is the whole accent call and the
-// core derives fills and foregrounds from it, which a platform may let
-// its user override (D2); Role says what a widget MEANS and changes
-// nothing about what pressing it does; Inset(0) is the full bleed (D3).
-// See guests/rust/styling.rs and tools/scenes/styling.steps.
+// The styling conformance scene (tools/scenes/styling.steps): brand
+// accent, role tier, window inset.
 package styling
 
 import (
@@ -24,8 +19,7 @@ func App() *kaya.App {
 		status = tx.Signal("ready")
 
 		tx.Mount(tx.Column(func() {
-			// expect_ax resolves a target through its AUTHORED id into
-			// the real tree.
+			// expect_ax resolves a target through its AUTHORED id.
 			tx.Heading(heading).A11yID("title") // label#0
 			tx.Label(status)                                         // label#1
 			tx.Button("Delete", func(tx *kaya.Tx) {                  // button#0
@@ -34,9 +28,7 @@ func App() *kaya.App {
 			tx.Button("Save", func(tx *kaya.Tx) { // button#1
 				tx.Write(status, "saved")
 			}).Role(kaya.RoleProminent).A11yID("save")
-			// Declared so every backend's caption arm runs, like the
-			// two button roles: no universal AX observable, so the
-			// walls are the arms' refusals plus this label's text.
+			// Declared so every backend's caption arm runs: no AX observable.
 			tx.CaptionText("captioned") // label#2
 		}))
 	})

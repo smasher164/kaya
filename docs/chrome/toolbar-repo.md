@@ -121,7 +121,7 @@ derived from catalog preorder.
 
 | backend | reads `primary`? | site |
 |---|---|---|
-| SwiftUI / **iOS** | YES | `kayaPromotedActions` → `KayaMenuToolbar`, `ToolbarItemGroup(placement: .primaryAction)`, swift/KayaSwiftUI.swift:9951, 11078-11124 |
+| SwiftUI / **iOS** | YES | `kayaPromotedActions` → `KayaMenuToolbar`, `ToolbarItemGroup(placement: .primaryAction)`, swift/KayaSwiftUI.swift:8994, 11078-11124 |
 | SwiftUI / **macOS** | **NO** | `kayaPromotedActions` (KayaSwiftUI.swift:9951) has exactly two callers: its own body and KayaMenuToolbar:11086, which is inside `#if !os(macOS)`. `KayaMenuChrome` on macOS is literally `content` (10844-10849) |
 | Compose / Android | YES | `KayaMenuTopBar` actions slot, KayaCompose.kt:8766-8812 |
 | GTK | **NO** | gtk.rs:2056-2059 — the field carries `#[allow(dead_code)]` and the comment *"The phone-promotion hint, mirrored for the record: INERT on desktop by design (DESIGN.md, Menus), so nothing here reads it."* |
@@ -144,7 +144,7 @@ three distinct stances in the tree and they are NOT interchangeable:
    (`expect_split` / `expect_sections_presentation` /
    `expect_menu_presentation` all take a BARE form asserting an
    INVARIANT rather than a literal, because "the exact literal differs
-   per lane" — tools/scenes/menus.steps:88-96).
+   per lane" — tools/scenes/menus.steps:75-80).
 2. **INERT BY PHYSICS** (`veto_close` on mobile, `dirty` on the phones):
    "Inert on mobile by physics: no chrome close, and back is not close"
    — spec.rs:229-230; "the phones show nothing at all because they have
@@ -182,7 +182,7 @@ to `Text(item.label)` (11091-11096), and `kayaCatalogElement` builds
 `UIAction(title:)` with no image at all (11005). Compose, by contrast,
 checks `item.symbol != 0` FIRST (KayaCompose.kt:8783-8790).
 
-And `expect_menu_symbol "File>Save" "done"` (tools/scenes/menus.steps:14)
+And `expect_menu_symbol "File>Save" "done"` (tools/scenes/menus.steps:10)
 PASSES on iOS, because the iOS branch of `kayaMenuSymbolRead` reads the
 MODEL — the value the apply arm stored — and merely checks the SF name
 resolves on the OS (KayaSwiftUI.swift:10131-10143). Its own doc comment
@@ -200,7 +200,7 @@ accessibility name (which is what macOS/GTK/WinUI already do for
 
 ## 3. The iOS promoted-bar arm — what an app-declared list would replace
 
-**[REPO]** swift/KayaSwiftUI.swift:11072-11124
+**[REPO]** swift/KayaSwiftUI.swift:9999-10052
 
 ```swift
 struct KayaMenuToolbar: ViewModifier {          // inside #if !os(macOS)
@@ -485,7 +485,7 @@ The menus scene PROVES the live half and would prove it for a toolbar
 too: `click button#2` appends a fourth bar root, renames `File` to
 `Document`, appends `Publish` under the retained parent, **and moves the
 primary hint from Share to Publish**, then asserts the promoted set
-followed (tools/scenes/menus.steps:71-86). That step already exercises
+followed (tools/scenes/menus.steps:60-73). That step already exercises
 promotion recomputation on every lane. C2 inherits a working test.
 
 ### 7.3 Undo refuses it, mechanically
@@ -527,7 +527,7 @@ capacity *k* differs per platform (2 on SwiftUI, its own on Compose). So
 `expect_toolbar N` cannot ride a shared scene with a literal N unless
 C2 fixes the capacity question — the same problem
 `expect_menu_presentation` solved by admitting a BARE form that asserts
-an INVARIANT rather than a literal (tools/scenes/menus.steps:88-96,
+an INVARIANT rather than a literal (tools/scenes/menus.steps:75-80,
 harness.rs:1964-1974). **[INFER]** `expect_toolbar` wants that same bare
 form: "the promoted set FITS this window's chrome", not a count.
 
@@ -674,13 +674,13 @@ checked against the same pins:
 
 | layer | pin | source |
 |---|---|---|
-| GTK | `gtk4 = "0.11.4"`, features `["v4_10"]` | crates/kaya/Cargo.toml:151 |
+| GTK | `gtk4 = "0.11.4"`, features `["v4_10"]` | crates/kaya/Cargo.toml:87 |
 | libadwaita | `adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }` — the comment notes the validation image carries libadwaita **1.7.6**, so *"anything above 1.7 would compile here and fail"* | Cargo.toml:165-175 |
 | linux image | `debian@sha256:fac46bff…` (trixie, pinned by digest), `libgtk-4-dev`, `libadwaita-1-dev`, `adwaita-icon-theme`, `librsvg2-common` | tools/linux/Dockerfile:23,27,34,121 |
 | pango | `0.22.8`, features `["v1_56"]` | Cargo.toml:164 |
-| WinUI / WASDK | Base 2.0.4, Foundation 2.1.0, InteractiveExperiences 2.0.15, **WinUI 2.2.1**, Runtime 2.2.0 | tools/fetch-winappsdk.sh:89-98 |
+| WinUI / WASDK | Base 2.0.4, Foundation 2.1.0, InteractiveExperiences 2.0.15, **WinUI 2.2.1**, Runtime 2.2.0 | tools/fetch-winappsdk.sh:86-95 |
 | windows-rs | `windows` / `windows-core` **0.62**; `windows-numerics`/`collections`/`future` 0.3 | Cargo.toml:34-124 |
-| Compose | `compose-bom:2024.10.01`, `material3` from the BOM (**M3 1.7.5**, per the comment at :73), `material3.adaptive:1.0.0` + `adaptive-layout:1.0.0` | android/kaya/build.gradle.kts:53,54,65,66,73 |
+| Compose | `compose-bom:2024.10.01`, `material3` from the BOM (**M3 1.7.5**, per the comment at :73), `material3.adaptive:1.0.0` + `adaptive-layout:1.0.0` | android/kaya/build.gradle.kts:49,54,65,66,73 |
 | Android | `compileSdk = 35`, AGP 8.7.3, Kotlin 2.0.21 (+ compose plugin 2.0.21) | android/kaya/build.gradle.kts:9, android/build.gradle.kts:2-5 |
 | Apple | host macOS **26.5.2** (build 25F84); the flake carries `aarch64-apple-ios` / `aarch64-apple-ios-sim` rust targets and no pinned Xcode — the SDK is the host's | `sw_vers`; flake.nix:52-53 |
 

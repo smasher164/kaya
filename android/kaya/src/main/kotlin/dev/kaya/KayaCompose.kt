@@ -64,19 +64,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 // THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6), one
-// import per concept.
-//
-// THEY MUST BE IMPORTED, never written out at the callsite: each is an
-// EXTENSION PROPERTY on `Icons.Filled` declared in its own package, and
-// Kotlin cannot spell an extension property fully qualified. So the
-// import list IS the mapping table's other half, and a name that does
-// not exist fails the COMPILER rather than drawing nothing at runtime.
-//
-// back/forward COME FROM `automirrored`. The pre-1.6
-// `Icons.Filled.ArrowBack`/`ArrowForward` still compile (only
-// @Deprecated), so an arm importing those builds clean, runs clean, and
-// points the wrong way in a right-to-left layout, which nothing in this
-// tree looks at.
+// import per concept. IMPORTED, never written out at the callsite: each
+// is an extension property Kotlin cannot spell fully qualified, so a
+// name that does not exist fails the COMPILER. back/forward come from
+// `automirrored`; the pre-1.6 spellings still compile and point the
+// wrong way in a right-to-left layout.
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -126,13 +118,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-// Material 3 adaptive: Android's OWN list-detail container.
-// calculatePaneScaffoldDirective lives in `.layout`, not in `.adaptive`
-// beside currentWindowAdaptiveInfo, whose Large/XL opt-in is what
-// carries a third partition at 1200dp — docs/multicolumn-plan.md; the
-// 1.2.0 pin exists for it (at 1.0.0 three panes were unreachable at
-// every width, and 1.2.0 spells the opt-in as a parameter rather than
-// the V2 name the release notes trailed).
+// Material 3 adaptive: Android's OWN list-detail container
+// (docs/multicolumn-plan.md). calculatePaneScaffoldDirective lives in
+// `.layout`, not in `.adaptive` beside currentWindowAdaptiveInfo, whose
+// Large/XL opt-in carries the third partition at 1200dp.
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.AdaptStrategy
@@ -214,23 +203,18 @@ import kotlin.concurrent.thread
 import kotlinx.coroutines.launch
 
 /**
- * KayaCompose: the Kotlin half of the Compose backend, the Android
- * sibling of KayaSwiftUI.swift — an interpreter of resolved apply-op
- * records.
- *
- * The pump blocks in nextCommands on its own thread and HOPS TO THE UI
- * THREAD to apply. Signals, collections and templates never reach this
- * layer; the core resolves them before the records leave
- * kaya_next_commands. A click tag is opaque bytes this layer stores and
- * emits verbatim — identity stays a core concern.
+ * KayaCompose: the Kotlin half of the Compose backend, an interpreter of
+ * resolved apply-op records (KayaSwiftUI.swift is its sibling). The pump
+ * blocks in nextCommands on its own thread and HOPS TO THE UI THREAD to
+ * apply; signals, collections and templates never reach this layer, and
+ * a click tag is opaque bytes stored and emitted verbatim.
  */
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /**
      * TABLE (docs/tables-plan.md): the declared header bar, stored by
-     * the apply pump; the synthesized-header lowering that DRAWS it is
-     * the Compose breadth slice. tableSorted is a column index or the
-     * wire's u32 no-column sentinel; sortTag is what a header click
-     * hands to kaya_emit_sort_requested verbatim.
+     * the apply pump. tableSorted is a column index or the wire's u32
+     * no-column sentinel; sortTag is what a header click hands to
+     * kaya_emit_sort_requested verbatim.
      */
     var tableColumns: List<String> = emptyList()
     var tableSorted: Int = -1
@@ -241,45 +225,34 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * What the TABLE PATH actually presented — written by the render,
      * never a model echo (the SwiftUI twin's rule), so expect_columns
      * proves the header rendered rather than that the wire arrived.
-     * Headers render at EVERY width (ratified 2026-08-21,
-     * docs/tables-plan.md), so there is no size-class prefix.
+     * Headers render at EVERY width (docs/tables-plan.md), so there is
+     * no size-class prefix.
      */
     var tablePresented by mutableStateOf("")
 
     /**
      * Cell leading edges in dp, window space, keyed by declaration
      * generation and "<rowId>/<col>" ("h/<col>" for kaya's own header
-     * cells) — written by the render's position readers, clustered by
-     * expect_column_edges. The generation keeps a re-declaration from
-     * reading the preceding layout's bounds.
-     * Concurrent because the harness thread reads while the UI thread
-     * writes.
+     * cells); the generation keeps a re-declaration from reading the
+     * preceding layout's bounds. Concurrent because the harness thread
+     * reads while the UI thread writes.
      */
     val cellEdgeX = java.util.concurrent.ConcurrentHashMap<String, Float>()
     val cellEdgeRightX = java.util.concurrent.ConcurrentHashMap<String, Float>()
     /**
-     * COMPOSE STATE, not a plain field, because the table's own measure
-     * READS it: a bump must force the re-measure that republishes the
-     * geometry the bump cleared. Measured 2026-08-28 on the portfolio's
-     * android leg — a day tick re-declares the header, which clears the
-     * geometry, and same-width cell text leaves this table's box
-     * untouched, so neither the measure nor the position reader ran
-     * again and every later expect_column_edges answered "no live table
-     * viewport geometry" (docs/traps.md). SwiftUI's generation-keyed
-     * reporter is the same rule (tools/check-table-tier.py).
+     * COMPOSE STATE, not a plain field: the table's own measure READS
+     * it, so a bump forces the re-measure that republishes the geometry
+     * it cleared. Otherwise every later expect_column_edges answers "no
+     * live table viewport geometry" (measured 2026-08-28,
+     * docs/traps.md; tools/check-table-tier.py holds SwiftUI's twin).
      */
     var tableGeometryGeneration by mutableLongStateOf(0L)
 
     /**
-     * The table's assigned horizontal track, laid-out viewport, and raw
-     * content span, in dp (-1 before layout; track -1 when unbounded).
-     *
-     * [tableDrawnW] is COERCED into the incoming constraints and so can
-     * never exceed [tableTrackW]; [tableContentW] is the same measure
-     * before that coerce, and is therefore the only field in which a
-     * resolved-column overflow is visible at all. kayaTableHorizontalIssue
-     * separates the two causes; expect_column_edges reads both.
-     * Volatile: written at layout, read by the harness thread.
+     * The table's assigned track, laid-out viewport and raw content
+     * span, in dp (-1 before layout). [tableDrawnW] is COERCED into the
+     * constraints, so only [tableContentW] shows a resolved-column
+     * overflow. Volatile: written at layout, read by the harness thread.
      */
     @Volatile var tableTrackW = -1f
     @Volatile var tableDrawnW = -1f
@@ -292,20 +265,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     @Volatile var tableContentH = -1f
 
     /**
-     * THE COLUMNS' AXIS (docs/tables-plan.md, ruled 2026-08-29): a table
-     * whose columns need more than its track SCROLLS to them — header
-     * locked to the body — rather than compressing or clipping.
-     *
-     * [tableScrollX] is the offset the header cells and the row cells are
-     * BOTH placed at, [tableReachX] the furthest it may go; device
-     * pixels, both. Reach is EXACTLY zero when the columns fit, because
-     * the leftover distribution spends the track to the pixel, so
-     * expect_overflow needs no slack over it. [tableDensity] is the
-     * divisor the three widths above were taken with — the only way a
-     * reader holding this node can put these two in that dp.
-     *
-     * Snapshot state on the offset because the table's PLACEMENT reads
-     * it: a scroll re-places and never re-measures.
+     * THE COLUMNS' AXIS (docs/tables-plan.md): the offset both header
+     * and row cells are placed at, the furthest it may go, and their
+     * divisor, in device pixels; reach is EXACTLY zero when the columns
+     * fit. Snapshot state on the offset because the table's PLACEMENT
+     * reads it — a scroll re-places and never re-measures.
      */
     var tableScrollX by mutableFloatStateOf(0f)
     @Volatile var tableReachX = 0f
@@ -328,27 +292,19 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     }
 
     /**
-     * KAYA'S MODEL MIRROR of the widget's text — what the app was last
-     * told, and what a label renders.
-     *
-     * For an entry or a textarea the field reads from [textState], not
-     * from this. The two are written together by [kayaWriteText] and
-     * reconciled by KayaTextField's observer, and THE DIFFERENCE
-     * BETWEEN THEM is what tells a user edit apart from the echo of
-     * kaya's own write (docs/undo-plan.md §1.4).
+     * KAYA'S MODEL MIRROR of the widget's text; an entry or textarea
+     * reads from [textState] instead. The two are written together by
+     * [kayaWriteText], and THE DIFFERENCE BETWEEN THEM tells a user edit
+     * from the echo of kaya's own write (docs/undo-plan.md §1.4).
      */
     var text by mutableStateOf("")
 
     /**
      * THE TEXT WIDGET'S OWN STATE (entry/textarea only). The legacy
      * `TextField(value:, onValueChange:)` path is DISQUALIFIED
-     * (docs/undo-plan.md §1.4): `CoreTextField` remembers an INTERNAL
-     * `UndoManager` with no `canUndo` and no `undo()`, so neither D7
-     * nor D6's native tier is expressible on it.
-     *
-     * `by lazy` because only two of the fourteen kinds have text to
-     * edit. NOT thread-safe by choice: every touch is on the UI thread
-     * (apply hops there, the harness goes through `onUi`).
+     * (docs/undo-plan.md §1.4): its internal `UndoManager` has no
+     * `canUndo` and no `undo()`. `by lazy`, not thread-safe by choice —
+     * every touch is on the UI thread.
      */
     val textState by lazy(LazyThreadSafetyMode.NONE) {
         androidx.compose.foundation.text.input.TextFieldState("")
@@ -424,26 +380,19 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var axis by mutableStateOf<Long?>(null)
     /**
      * THE DECLARED SET OF DECORATED RANGES (textarea only), and the text
-     * it was declared against.
-     *
-     * The PAIR is what makes D2's clear-on-edit structural: the draw
-     * scope paints the set only while the field still holds
-     * [highlightsFor], so a keystroke, a programmatic write or a native
-     * undo drops it at paint time. A message from the core could not do
-     * this job — the hazard is a text change arriving AFTER the thing
-     * declared over it, and a compare made on the pass that paints
-     * cannot arrive late. PAINTED OFFSETS WERE VALIDATED AGAINST THE
-     * TEXT THEY ARE PAINTED ON.
+     * it was declared against. The PAIR is what makes D2's clear-on-edit
+     * structural: the draw scope paints the set only while the field
+     * still holds [highlightsFor], and a compare made on the pass that
+     * paints cannot arrive late where a message from the core could.
      */
     var highlights by mutableStateOf<List<KayaRange>>(emptyList())
     var highlightsFor by mutableStateOf<String?>(null)
     /**
-     * The REVEAL one-shot: the range to scroll into view, plus a
-     * sequence number rather than a consumed optional. A scroll needs
-     * the field's own TextLayoutResult, which exists only after a
-     * layout pass. Keyed on [revealSeq] so a recomposition for any
-     * other reason re-runs nothing while a second reveal of the SAME
-     * range still runs.
+     * The REVEAL one-shot: the range to scroll into view plus a sequence
+     * number, because a scroll needs the field's own TextLayoutResult
+     * and that exists only after a layout pass. Keyed on [revealSeq], so
+     * an unrelated recomposition re-runs nothing while a second reveal
+     * of the SAME range still runs.
      */
     var revealRequest by mutableStateOf<KayaRange?>(null)
     var revealSeq by mutableStateOf(0)
@@ -468,50 +417,27 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
 
 /**
  * WHAT THE DRAW SCOPE ACTUALLY PAINTED, by node id, in UTF-16 code
- * units — written inside the draw lambda beside the `drawPath` calls,
- * which is the only place the answer is true.
- *
- * NOT the declared set ([KayaNode.highlights]): a verb reading that
- * would agree with the apply arm by construction and pass with the
- * whole paint deleted. Written after the staleness compare, from the
- * ranges `getPathForRange` was handed, so a dropped set and a stale set
- * both show up here as they show up on screen.
- *
- * Android has no accessibility channel carrying a background span, so
- * this is the honest in-process read; the harness pairs it with the
- * FIELD'S OWN text for the covered half.
+ * units — written inside the draw lambda, the only place the answer is
+ * true. NOT the declared set ([KayaNode.highlights]), which a verb would
+ * agree with by construction and pass with the paint deleted.
  */
 val kayaPaintedRanges = HashMap<Long, List<KayaRange>>()
 
 /**
- * The field's own text layout, by node id — the `onTextLayout` provider
- * `BasicTextField(state=)` hands out. KEPT AS A LAMBDA rather than a
- * result so reading it stays in the LAYOUT/DRAW phase and never
- * invalidates composition (range-probe-android.md §1c measured the
- * naive spelling recomposing the field 200 times in 200 frames).
- *
- * A plain map and not snapshot state for the same reason: it is written
- * during layout, and a snapshot write there would invalidate the pass
- * that wrote it.
+ * The field's own text layout, by node id. KEPT AS A LAMBDA rather than
+ * a result so reading it stays in the LAYOUT/DRAW phase and never
+ * invalidates composition (range-probe-android.md §1c measured the naive
+ * spelling recomposing the field 200 times in 200 frames). A plain map
+ * and not snapshot state for the same reason.
  */
 val kayaTextLayouts = HashMap<Long, () -> androidx.compose.ui.text.TextLayoutResult?>()
 
 /**
- * Where each textarea's viewport sits IN THE WINDOW — the rectangle the
- * paint witness photographs.
- *
- * WINDOW coordinates, which is what `boundsInWindow()` answers and which
- * is NOT what `PixelCopy` takes: its srcRect is in the window's SURFACE
- * space, and the two agree only while nothing has panned the window.
- * Measured 2026-08-10 with the soft keyboard up,
- * `decorView.getLocationInWindow()` was (0, -199) and a witness that
- * handed these numbers straight to `PixelCopy` photographed 199px below
- * the field. The conversion lives in `kayaPhotograph`, which is the one
- * place that crosses between the two spaces.
- *
- * Measured from the laid-out node rather than computed from anything
- * kaya knows, in the same discipline the layout observations already
- * keep (`kayaCrossRects` and friends).
+ * Where each textarea's viewport sits IN THE WINDOW, which is NOT
+ * `PixelCopy`'s SURFACE space: the two agree only while nothing has
+ * panned the window (measured 2026-08-10 with the keyboard up,
+ * `getLocationInWindow()` (0, -199) and the witness photographing 199px
+ * low). `kayaPhotograph` is the one place that crosses.
  */
 val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
 
@@ -531,10 +457,9 @@ val kayaCanvasBoxes = HashMap<Long, android.graphics.Rect>()
 private val kayaHarnessDrivesFrames = System.getenv("KAYA_SELFTEST") != null
 
 /**
- * The selection background each textarea is painted UNDER, ARGB, by
- * node id — the paint witness composites what it expects to
- * photograph, and the platform's wash sits on top of kaya's
- * decoration. RESOLVED BY THE COMPOSITION rather than assumed: the
+ * The selection background each textarea is painted UNDER, ARGB, by node
+ * id: the platform's wash sits on top of kaya's decoration and the
+ * witness composites what it expects. RESOLVED BY THE COMPOSITION — the
  * colour differs between an app that wraps a MaterialTheme and one that
  * does not.
  */
@@ -542,11 +467,9 @@ val kayaSelectionWash = HashMap<Long, Int>()
 
 /**
  * How many apply batches this interpreter has finished — the signal an
- * ACTION verb waits on (see KayaCompose.kayaAwaitAnswer).
- *
- * `@Volatile` because it is WRITTEN ON THE UI THREAD AND READ ON THE
- * HARNESS THREAD; an unpublished counter makes the wait either instant
- * or forever.
+ * ACTION verb waits on (KayaCompose.kayaAwaitAnswer). `@Volatile`
+ * because it is written on the UI thread and read on the harness one;
+ * an unpublished counter makes the wait either instant or forever.
  */
 @Volatile
 var kayaBatches = 0
@@ -594,17 +517,11 @@ val kayaCrossRects = HashMap<Long, Pair<Double, Double>>()
 val kayaBaselineOffsets = HashMap<Long, Double>()
 
 /**
- * The main-axis extent each flex child DREW at, by node id — what
- * `expect_fills` compares against that child's track on a widget
- * target.
- *
- * THE TRACK'S SIBLING, AND DELIBERATELY NOT THE SAME NUMBER.
- * [kayaMainExtents] is the weighted cell the grow arithmetic decided;
- * this is the box the control took inside it. A widget that draws at a
- * hard size in a correct cell splits its container exactly right and
- * renders wrong — measured on two backends at once when a textarea
- * with grow(1) stayed 96 units tall — and the gap between these two
- * maps is the only place that shows.
+ * The main-axis extent each flex child DREW at — what `expect_fills`
+ * compares against that child's track. DELIBERATELY NOT
+ * [kayaMainExtents], the weighted cell: a widget drawing at a hard size
+ * in a correct cell renders wrong (measured, a grow(1) textarea stuck
+ * at 96 units tall).
  */
 val kayaDrawnExtents = HashMap<Long, Double>()
 
@@ -636,27 +553,21 @@ var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 // backend that refuses in its own words.
 
 /**
- * TEXT RANGES, in the unit this backend counts.
- *
- * `start`/`stop` are UTF-16 CODE UNITS — the offsets the core converted
- * to before lowering (docs/ranges-units.md §7), and the unit a
- * Kotlin `CharSequence` indexes. NOTHING ON THE LOWERING PATH
- * CONVERTS. The one place this file converts is the READING direction,
- * where a harness verb answers in the protocol's own unit so one frozen
- * scene compares byte-for-byte on five lanes.
+ * TEXT RANGES. `start`/`stop` are UTF-16 CODE UNITS — what the core
+ * converted to before lowering (docs/ranges-units.md §7) and what a
+ * Kotlin `CharSequence` indexes. NOTHING ON THE LOWERING PATH CONVERTS;
+ * the one conversion is the READING direction, where a verb answers in
+ * the protocol's own unit.
  */
 data class KayaRange(val start: Int, val stop: Int)
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     // The title materializes on TWO surfaces — the Activity task label
-    // and the composed [KayaMenuTopBar]'s title slot — and expect_title
-    // asserts both. Width/height record the advisory size request only;
-    // the system owns surface geometry on Android.
-    //
-    // A COMPOSITION STATE AND NOT A PLAIN FIELD: the bar's title slot
-    // reads it, so a plain field composes once and never again
-    // (docs/deferred.md).
+    // and the top bar's title slot — and expect_title asserts both.
+    // Width/height are advisory only. A COMPOSITION STATE AND NOT A
+    // PLAIN FIELD: the bar's title slot reads it, so a plain field
+    // composes once and never again (docs/deferred.md).
     var windowTitle by mutableStateOf("")
     var windowWidth: Double? = null
     var windowHeight: Double? = null
@@ -671,34 +582,20 @@ object KayaSceneModel {
     var windowInset by mutableStateOf(16.0)
 
     /**
-     * THE REQUESTED BRAND ACCENT, packed 0xRRGGBB, or null for "the app
-     * asked for nothing" (apply 32; docs/styling-plan.md D1/D2).
-     *
-     * A composition STATE, because the theme reads it: the brand
-     * arrives in an apply batch, AFTER the first composition on any
-     * scene that mounts before it, and a plain field would leave the
-     * scheme at Material's baseline until something unrelated
-     * recomposed. SET ONCE, BEFORE THE FIRST MOUNT — the root refuses a
-     * second write.
+     * THE REQUESTED BRAND ACCENT, packed 0xRRGGBB, or null (apply 32;
+     * docs/styling-plan.md D1/D2). A composition STATE because the theme
+     * reads it and the brand arrives AFTER the first composition, where
+     * a plain field would leave Material's baseline standing. SET ONCE,
+     * BEFORE THE FIRST MOUNT — the root refuses a second write.
      */
     var brandSeed by mutableStateOf<Int?>(null)
 
     /**
      * THE DECLARED IDENTITY AS IT ARRIVED ON THE WIRE (apply 34;
-     * docs/app-identity-plan.md) — the name, and the icon's bytes, or
-     * null for "the guest declared none".
-     *
-     * KEPT, WHERE THE TYPEFACE'S REQUEST DELIBERATELY IS NOT (the note
-     * below). `expect_app_icon` reports the PACKAGE's icon and uses
-     * these two only as a REQUIREMENT: the launcher icon is compiled
-     * into the APK whether or not a guest declared anything, so a read
-     * of the package alone would pass on a run that declared nothing.
-     * The read refuses unless the declaration arrived AND its bytes
-     * sample the same four colours as the packaged resource.
-     *
-     * NOT A COMPOSITION STATE: nothing composes them. The launcher icon
-     * belongs to the installed package and no route from here reaches
-     * it.
+     * docs/app-identity-plan.md), or null. `expect_app_icon` reports the
+     * PACKAGE's icon and uses these only as a REQUIREMENT, since the
+     * launcher icon is in the APK whether a guest declared one or not.
+     * Not composition state: nothing composes them.
      */
     var appIdentityName: String? = null
     var appIdentityIcon: ByteArray? = null
@@ -710,30 +607,18 @@ object KayaSceneModel {
     // mistaken for a resolution.
 
     /**
-     * THE BRAND TYPEFACE AS RESOLVED — the `FontFamily` the theme hands
-     * to both of its writes, or null for "no typeface is in force".
-     *
-     * A FontFamily OBJECT and not a name, and the probe is what settled
-     * that (docs/styling/typeface-compose.md §6.2): Android has NO app-font
-     * registry, so the plan's "register the blob, then let the name
-     * machinery take over" cannot hold here — after the bytes are loaded
-     * and rendering, `Typeface.create("Noto Serif", …)` still returns
-     * Roboto, both through the platform and through Compose. So the two
-     * wire forms converge one layer lower than on Apple: at the
-     * FontFamily the theme holds.
-     *
-     * Composition STATE, brandSeed's reason exactly.
+     * THE BRAND TYPEFACE AS RESOLVED, or null. A FontFamily OBJECT and
+     * not a name: Android has NO app-font registry, and after the bytes
+     * load `Typeface.create("Noto Serif", …)` still returns Roboto
+     * (docs/styling/typeface-compose.md §6.2). Composition STATE.
      */
     var typefaceFamily by mutableStateOf<FontFamily?>(null)
     /// A counter bumped whenever what the system clipboard OFFERS may
-    /// have moved. It carries no information; READING IT SUBSCRIBES a
-    /// composition to clipboard changes.
-    ///
-    /// The clipboard is not snapshot state and
-    /// OnPrimaryClipChangedListener cannot stand in for one — dispatch
-    /// is itself focus-gated, with no catch-up callback on regaining
-    /// focus (docs/clipboard-plan.md §7). So enablement is RE-DERIVED
-    /// rather than pushed.
+    /// have moved: it carries no information, and READING IT SUBSCRIBES
+    /// a composition to clipboard changes. The clipboard is not snapshot
+    /// state and OnPrimaryClipChangedListener is itself focus-gated with
+    /// no catch-up callback (docs/clipboard-plan.md §7), so enablement is
+    /// RE-DERIVED rather than pushed.
     var clipboardGeneration by mutableStateOf(0)
     // The live modal alert (one per process): identity + spec for the
     // M3 dialog and the runner's reads; null = none. The fields
@@ -791,14 +676,10 @@ object KayaSceneModel {
     @OptIn(ExperimentalMaterial3AdaptiveApi::class)
     var paneValue: ThreePaneScaffoldValue? = null
     /// Does this surface hold UNSAVED WORK (wprop 7;
-    /// docs/dirty-plan.md).
-    ///
-    /// PLAIN STATE, AND THAT IS THE WHOLE LOWERING HERE (D4): Android
-    /// has no window chrome to put an unsaved-work mark in, so nothing
-    /// reads this field to draw with and no composition depends on it.
-    /// `expect_dirty` still reads it, and the read is not vacuous — the
-    /// value arrives over the wire, so a backend that dropped the prop
-    /// fails. The title is NEVER rewritten (D1).
+    /// docs/dirty-plan.md). PLAIN STATE, AND THAT IS THE WHOLE LOWERING
+    /// (D4): Android has no window chrome to mark, so nothing draws from
+    /// it. `expect_dirty` still reads it, so a backend that dropped the
+    /// prop fails. The title is NEVER rewritten (D1).
     var windowDirty = false
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
@@ -814,15 +695,11 @@ object KayaSceneModel {
     // closing — dismissal or a leaf firing — clears it.
     var openContextWidget by mutableStateOf<Long?>(null)
     /**
-     * THE OVERFLOW ⋮'s presentation state, and the id of the submenu it
-     * is drilled into (0 = at its roots).
-     *
-     * HOISTED OUT OF THE COMPOSABLE so a harness read can MATERIALIZE a
-     * row: an overflow row does not exist until the menu is presented,
-     * because Compose composes a DropdownMenu's content only while it
-     * is open. In a `remember` local, the only read available from
-     * outside composition was of the model — the read that agrees with
-     * itself. THE TAP ROUTE AND THE READ ROUTE DRIVE ONE STATE.
+     * THE OVERFLOW ⋮'s presentation state, and the submenu it is drilled
+     * into (0 = at its roots). HOISTED OUT OF THE COMPOSABLE so a
+     * harness read can MATERIALIZE a row — Compose composes a
+     * DropdownMenu's content only while it is open. THE TAP ROUTE AND
+     * THE READ ROUTE DRIVE ONE STATE.
      */
     var menuOverflowOpen by mutableStateOf(false)
     var menuOverflowDrilled by mutableStateOf(0L)
@@ -831,13 +708,10 @@ object KayaSceneModel {
     var menuOverflowPresentedForRead = false
     /**
      * THE COMPOSE ROOTS OF THE OPEN MENU POPUPS — UI thread only,
-     * registered by the popup's own content and dropped when it leaves.
-     *
-     * A Compose `Popup` (a DropdownMenu is one) is a SEPARATE WINDOW:
-     * its view goes straight to the WindowManager, not under
-     * `activity.window.decorView`, so [kayaComposeRoot]'s walk cannot
-     * see one row of an open menu. `LocalView.current` INSIDE the
-     * popup's content is that window's AndroidComposeView.
+     * registered by the popup's own content. A Compose `Popup` (a
+     * DropdownMenu is one) is a SEPARATE WINDOW under the WindowManager,
+     * not under `decorView`, so [kayaComposeRoot]'s walk cannot see one
+     * row of an open menu.
      */
     val menuPopupViews = ArrayList<android.view.View>()
     // Per-kind registries in creation order (stamped copies included):
@@ -926,14 +800,10 @@ class KayaMenuItem(val id: Long, val kind: Int) {
     // show it, overflow rows stay textual (native menu dress).
     var iconBitmap by mutableStateOf<ImageBitmap?>(null)
     /**
-     * The SEMANTIC ICON's wire value, 0 = none (docs/styling-plan.md
-     * D6). Unlike [iconBitmap] this reaches EVERY affordance the item
-     * materializes as — the promoted bar button, the overflow row, a
-     * drilled row, a context row, a radio option and a group header.
-     *
-     * WHEN AN ITEM CARRIES BOTH, THE SYMBOL WINS, so that this backend
-     * and macOS (which never draws a blob in a menu) show the same
-     * thing for the same declaration.
+     * The SEMANTIC ICON's wire value, 0 = none (docs/styling-plan.md D6).
+     * Unlike [iconBitmap] it reaches EVERY affordance the item
+     * materializes as. WHEN AN ITEM CARRIES BOTH, THE SYMBOL WINS, so
+     * this backend and macOS show the same thing for one declaration.
      */
     var symbol by mutableStateOf(0L)
     // Single-parent (the root validates); set at append. Bar-level
@@ -955,13 +825,10 @@ class KayaContextAttachment {
 }
 
 /**
- * One representation as this side holds it, before it crosses to the
- * core. FLATTENED at the boundary rather than marshalled as a struct.
- *
- * Which field carries what: text and html ride `text`, an image rides
- * `bytes`, a CUSTOM format's id rides `text` with its payload in
- * `bytes`, and files ride `locators` (the documents' own `content://`
- * URIs) beside `names` of the same length.
+ * One representation as this side holds it, FLATTENED at the boundary.
+ * Text and html ride `text`, an image `bytes`, a CUSTOM format's id
+ * `text` with its payload in `bytes`, and files `locators` (the
+ * documents' own `content://` URIs) beside `names` of equal length.
  */
 internal class KayaClipValue(
     val clip: Int,
@@ -1000,11 +867,9 @@ val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
 /**
  * THE VERB TRACE, this interpreter's copy of crates/kaya/src/vtrace.rs:
  * every attempt of every step, in a ring, written ONLY WHEN THE RUN
- * FAILS to the file `KAYA_VERB_TRACE` names (unset or empty: no
- * instrument, no recording). A RELATIVE name resolves under the app's
- * own files directory, the one place a runner can read back with
- * `run-as`. Three line shapes and the failure-only rule, held level with
- * the Rust ring and the SwiftUI one by tools/check-verbs.py.
+ * FAILS to the file `KAYA_VERB_TRACE` names. A RELATIVE name resolves
+ * under the app's files directory, the one place `run-as` can read.
+ * tools/check-verbs.py holds the three rings level.
  */
 object KayaVTrace {
     const val CAP = 2048
@@ -1138,12 +1003,10 @@ object KayaCompose {
 
     /**
      * The app's declared identity (docs/app-identity-plan.md). THE
-     * CONSTANT IS HERE AND THE LOWERING IS NOT: on Android the launcher
-     * icon belongs to the installed package, and the running app's one
-     * route to a picture (TaskDescription's bitmap, deprecated at API
-     * 28, whose replacement takes a drawable resource id stock
-     * Launcher3 ignores) is refused by the plan's I6. This record's
-     * Android reader is the APK build, and the arm below skips it.
+     * CONSTANT IS HERE AND THE LOWERING IS NOT: the launcher icon
+     * belongs to the installed package, and the running app's one route
+     * to a picture is refused by the plan's I6. This record's Android
+     * reader is the APK build, and the arm below skips it.
      */
     private const val APPLY_SET_APP_IDENTITY = 34
     private const val APPLY_SET_COLUMN_HEADERS = 35
@@ -1173,12 +1036,9 @@ object KayaCompose {
     /**
      * A1's clear (docs/undo-plan.md §3): a core undo group committed, so
      * the FOCUSED editable's native text-undo history goes with it.
-     *
-     * TARGETLESS ON THE WIRE BY DESIGN — the record names a window and
-     * nothing else, because the core does not know what holds focus and
-     * this backend does. Every episode therefore begins with an EMPTY
-     * native stack, so the native stack can never reach past the
-     * current episode's start.
+     * TARGETLESS ON THE WIRE — the core does not know what holds focus
+     * and this backend does — so every episode begins with an EMPTY
+     * native stack and can never reach past its own start.
      */
     private const val APPLY_CLEAR_UNDO = 27
 
@@ -1256,18 +1116,11 @@ object KayaCompose {
     const val MENU_PROMOTED_CAPACITY = 2
 
     /**
-     * THE CHROME'S OWN TAGS — what makes `expect_toolbar` a read of the
-     * real bar rather than of the window. The tag scopes the search to
-     * the composed `TopAppBar`, so BEING IN THE CHROME is the thing
-     * measured; without it a promoted button that had fallen into the
-     * page below would still be "found".
-     *
-     * [TOOLBAR_MORE_TAG] is the ⋮ anchor. material3 1.3.1 has no
-     * overflow of its own (`AppBarRow`/`AppBarOverflowIndicator` are
-     * 1.4.0-alpha and absent from the pinned aar), so this interpreter
-     * synthesizes the anchor and the menu under it
-     * ([KayaOverflowMenu]). Anchored IN the bar, which is why this
-     * backend reports the home as `overflow` and not `more`.
+     * THE CHROME'S OWN TAGS: they scope `expect_toolbar` to the composed
+     * `TopAppBar`, so a promoted button fallen into the page is not
+     * "found". [TOOLBAR_MORE_TAG] is the ⋮ anchor, synthesized because
+     * material3 1.3.1 has none — anchored IN the bar, which is why this
+     * backend reports `overflow` and not `more`.
      */
     const val TOOLBAR_TAG = "kaya:toolbar"
     const val TOOLBAR_MORE_TAG = "kaya:toolbar-more"
@@ -1363,20 +1216,11 @@ object KayaCompose {
     const val SYMBOL_HOME = 20L
 
     /**
-     * THE MATERIAL COLUMN: (wire value, semantic name, the glyph this
-     * platform draws for it). The KayaSwiftUI sibling is
-     * `kayaSymbolTable`, spelled with SF names.
-     *
-     * NO VERSION FLOOR TO CHECK HERE, unlike the SF column: these are
-     * Kotlin ImageVector builders COMPILED INTO THE APK, not platform
-     * assets resolved by name at runtime, so a name that does not exist
-     * is a compile error (see the import block) and one that does draws
-     * on every API level. The auto-mirrored trap is the one that
-     * remains, and the import block holds it.
-     *
-     * The semantic name is the second column because it is what a
-     * TalkBack user hears and what expect_menu_symbol reads back off
-     * the composed row.
+     * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
+     * `kayaSymbolTable` is the SwiftUI sibling. No version floor to
+     * check, unlike the SF column — a missing ImageVector is a compile
+     * error. The semantic name is what TalkBack speaks and what
+     * expect_menu_symbol reads off the composed row.
      */
     val SYMBOLS: List<Triple<Long, String, ImageVector>> = listOf(
         Triple(SYMBOL_ADD, "add", Icons.Default.Add),
@@ -1452,12 +1296,9 @@ object KayaCompose {
 
     /**
      * THE CANVAS WIRE VOCABULARY THIS BACKEND DOES NOT READ: the core
-     * rasterizes and a backend blits (docs/canvas-plan.md §1.1), so no op,
-     * paint, rule, align or baseline is interpreted here — only the
-     * SET_DRAWING record that carries the finished pixels. The copies
-     * exist so a drifted number fails a gate rather than a lane, and
-     * naming them once here is what keeps check-detekt's unused-private
-     * family off them. The KayaSwiftUI sibling is `kayaCanvasVocabulary`.
+     * rasterizes and a backend blits (docs/canvas-plan.md §1.1). The
+     * copies exist so a drifted number fails a gate rather than a lane,
+     * and naming them once here is what keeps check-detekt off them.
      */
     val CANVAS_VOCABULARY: List<Long> = listOf(
         APPLY_SET_DRAWING.toLong(),
@@ -1475,18 +1316,10 @@ object KayaCompose {
     private const val VALUE_BLOB = 5
 
     /**
-     * The clip representation masks (wire.rs's CLIP_*). BIT POSITIONS,
-     * not an ordinal: a copy carries several at once and a widget
-     * accepts several. Their descending order — custom, files, image,
-     * html, text — is the CANONICAL one, which is richness order and
-     * therefore preference order.
-     *
-     * A PRIVATE MIRROR. check-verbs' general constant sweep matches the
-     * APPLY_/KIND_/PROP_/… prefixes and stops, so this family is pinned
-     * by that gate's own clip_mirrors clause instead, name and value
-     * together, against crates/kaya/src/wire.rs. A drift here is
-     * SILENT: `present and CLIP_IMAGE` against a copy that spells image
-     * 8 reads the FILES slot as a picture.
+     * The clip masks (wire.rs's CLIP_*): BIT POSITIONS in the CANONICAL
+     * descending order — custom, files, image, html, text — which is
+     * richness and so preference order. A private mirror, pinned by
+     * check-verbs' clip_mirrors clause because a drift is SILENT.
      */
     internal const val CLIP_TEXT = 1
     internal const val CLIP_HTML = 2
@@ -1505,14 +1338,11 @@ object KayaCompose {
     private var mountedActivity: ComponentActivity? = null
 
     /**
-     * THE BUILD-ONCE LATCH (docs/deferred.md's mount entry, ruled
-     * 2026-08-27). Android relaunches an activity for any configuration
-     * change it does not declare — night mode, rotation, locale, font
-     * scale, density — and a back-out-and-reopen recreates it under a
-     * living process whatever the manifest says. So `onCreate` runs
-     * again in ONE process, and everything that is per-PROCESS (the
-     * pump, the guest, the harness thread) is taken once here while
-     * everything that is per-WINDOW is re-applied.
+     * THE BUILD-ONCE LATCH (docs/deferred.md's mount entry). Android
+     * relaunches an activity for any configuration change it does not
+     * declare, so `onCreate` runs again in ONE process: everything
+     * per-PROCESS (the pump, the guest, the harness thread) is taken
+     * once here while everything per-WINDOW is re-applied.
      */
     private var mounted = false
 
@@ -1532,30 +1362,11 @@ object KayaCompose {
     internal var appearanceOverride: String? = null
 
     /**
-     * `KAYA_APPEARANCE=light|dark`, the harness's per-process appearance.
-     *
-     * UNSET INSTALLS NOTHING — the platform default, byte for byte
-     * (tools/check-appearance.py's inert clause). A value that is neither
-     * word dies here rather than being ignored, which would run the whole
-     * leg under the host's palette and freeze a wrong string.
-     *
-     * NOT `UiModeManager.setApplicationNightMode`, AND THE REASON IS
-     * MEASURED, not preferred. That call is the framework's app-level
-     * night mode and it was this knob's first mechanism; it changes the
-     * app's resource configuration, which makes Android RELAUNCH the
-     * activity, and the relaunch runs `onCreate` TWICE IN ONE PROCESS.
-     * The second mount no longer dies — [mount] is re-entrant since
-     * 2026-08-27 (docs/deferred.md's mount entry) — but a knob whose
-     * mechanism relaunches the window would still tear down and rebuild
-     * every leg's surface to say one word about it.
-     *
-     * SO BOTH HALVES ARE MOVED DIRECTLY, WITHOUT A RELAUNCH, and both are
-     * required: `isSystemInDarkTheme()` alone would leave the MANIFEST
-     * theme's window background light, which is the measured half-dark app
-     * D1 exists to have fixed (values/themes.xml). The window background
-     * is not hardcoded — it is resolved out of the SAME
-     * `Theme.Kaya.NoActionBar` the `-night` file declares, read under a
-     * night-forced configuration, so it is whatever that theme says.
+     * `KAYA_APPEARANCE=light|dark` (CLAUDE.md's check-appearance
+     * paragraph). UNSET INSTALLS NOTHING; a value that is neither word
+     * dies here. BOTH HALVES MOVE DIRECTLY, WITHOUT A RELAUNCH, and both
+     * are required — `isSystemInDarkTheme()` alone leaves the MANIFEST
+     * theme's background light, the half-dark app D1 fixed.
      */
     private fun applyAppearanceOverride(activity: ComponentActivity) {
         val want = System.getenv("KAYA_APPEARANCE") ?: return
@@ -1580,12 +1391,10 @@ object KayaCompose {
     }
 
     /**
-     * The window the override's background write last landed on. The
-     * composition half is a process global and a fresh composition picks
-     * it up for free, but this half is per-WINDOW and a re-created one
-     * carries the manifest theme's background again — so `kayaRecreate`
-     * reads this back, which is the only witness there is (no scene can
-     * see a window background, tools/check-appearance.py holds the rest).
+     * The window the override's background write last landed on: that
+     * half is per-WINDOW, and a re-created window carries the manifest
+     * theme's background again. `kayaRecreate` reads this back, the only
+     * witness there is (tools/check-appearance.py holds the rest).
      */
     private var appearanceAppliedTo: ComponentActivity? = null
 
@@ -1593,15 +1402,11 @@ object KayaCompose {
         if (want == "dark") Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
 
     /**
-     * Mount the interpreter into `activity`. Call from onCreate when
-     * [Kaya.attach] returns [Kaya.PRESENT_GUEST].
-     *
-     * RE-ENTRANT ACROSS A RELAUNCH, and the split is what `mounted`
-     * decides: a later onCreate RE-ATTACHES ONLY — swap the activity,
-     * re-apply the appearance to the new window, re-observe its
-     * lifecycle, re-materialize the title, `setContent`. The core is not
-     * resynced: KayaSceneModel is process-global and a fresh composition
-     * re-projects the whole of it by construction.
+     * Mount the interpreter into `activity`, from onCreate when
+     * [Kaya.attach] returns [Kaya.PRESENT_GUEST]. RE-ENTRANT ACROSS A
+     * RELAUNCH, and `mounted` decides the split: a later onCreate
+     * RE-ATTACHES ONLY. The core is not resynced — KayaSceneModel is
+     * process-global and a fresh composition re-projects all of it.
      */
     fun mount(activity: ComponentActivity) {
         val first = !mounted
@@ -1612,13 +1417,11 @@ object KayaCompose {
         // manifest theme's again (tools/check-appearance.py).
         applyAppearanceOverride(activity)
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
-        // (KayaHarnessAccessibility.dismiss): a dialog activity on top
-        // means this one is PAUSED, and it is resumed again only once
-        // the dialog is done and its result already delivered —
-        // onActivityResult precedes onResume by OS contract. Read from
-        // the lifecycle in this process rather than from the
-        // accessibility window list, which lags in both directions
-        // (docs/deferred.md's WATCH entry on the dialog family).
+        // (KayaHarnessAccessibility.dismiss): a dialog on top means this
+        // activity is PAUSED, and onActivityResult precedes onResume by
+        // OS contract. Read in-process rather than from the
+        // accessibility window list, which lags both ways
+        // (docs/deferred.md's dialog-family WATCH).
         activity.lifecycle.addObserver(
             LifecycleEventObserver { source, event ->
                 when (event) {
@@ -1761,15 +1564,8 @@ object KayaCompose {
                     KayaPresent.blobData(handle)?.let { blobs[handle] = it }
                 }
             }
-            // COPY CARRIES BLOBS TOO — the image and every custom
-            // format's bytes — and WITHOUT THIS ARM THE MISS IS SILENT:
-            // the handles resolve to null on the UI thread and the copy
-            // ships text and html only.
-            //
-            // Walked GENERICALLY off the header's slot count. Absolute
-            // reads, so the record cursor above is untouched.
-            // SET_DRAWING's pixels are a blob too, and a blob handle
-            // dies with the batch: without this the raster arrives as no
+            // SET_DRAWING's pixels are a blob, and a blob handle dies
+            // with the batch: without this the raster arrives as no
             // bytes at all, with no error on any side. Body is
             // { u64 id; u32 width; u32 height; Value scale; Value
             // pixels }, so the blob's value header sits one 16-byte f64
@@ -1782,6 +1578,11 @@ object KayaCompose {
                     KayaPresent.blobData(handle)?.let { blobs[handle] = it }
                 }
             }
+            // COPY CARRIES BLOBS TOO — the image and every custom
+            // format's bytes — and WITHOUT THIS ARM THE MISS IS SILENT:
+            // the handles resolve to null on the UI thread and the copy
+            // ships text and html only. Walked GENERICALLY off the
+            // header's slot count, with absolute reads.
             if (kind == APPLY_COPY) {
                 val body = start + 8
                 val slots = b.getInt(body + 16)
@@ -1846,15 +1647,12 @@ object KayaCompose {
     private fun apply(batch: ByteArray, blobs: Map<Long, ByteArray>) {
         val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
         // THE BATCH'S DESTROYED IDS, AND THE PARENTS THAT HELD THEM —
-        // detached once at the end rather than one by one.
-        //
-        // MEASURED 2026-08-25, and it is why windowing needed it: a
-        // SnapshotStateList removal copies the whole list, so N removals
-        // from one parent are O(N^2) with an allocation per element. The
-        // first band report on a 2,000-row table tears down ~1,950 rows
-        // (5,850 widgets) in ONE batch, and per-widget removal wedged the
-        // UI thread past the harness's 60s step ceiling — intermittently,
-        // from about 2,000 rows up. One pass per parent instead.
+        // detached once at the end rather than one by one. MEASURED
+        // 2026-08-25: a SnapshotStateList removal copies the whole list,
+        // so N removals from one parent are O(N^2) with an allocation
+        // per element, and per-widget removal of a 2,000-row table's
+        // first band (~1,950 rows, 5,850 widgets, ONE batch) wedged the
+        // UI thread past the harness's 60s step ceiling.
         val doomed = HashSet<Long>()
         val bereaved = HashSet<Long>()
         while (b.remaining() >= 8) {
@@ -2033,14 +1831,12 @@ object KayaCompose {
                 }
                 APPLY_HIGHLIGHT_RANGES -> {
                     // { u64 widget_id; u32 count; u32 reserved } then a
-                    // Values block of 2*count I64s, read IN PAIRS —
-                    // start then end — already in UTF-16 code units.
-                    //
-                    // RECORDED WITH THE TEXT IT WAS DECLARED AGAINST,
-                    // which is the whole of D2's clear-on-edit: any
-                    // text write earlier in this same batch has already
-                    // landed on the field, because kayaWriteText writes
-                    // the TextFieldState synchronously.
+                    // Values block of 2*count I64s, read IN PAIRS, in
+                    // UTF-16 code units. RECORDED WITH THE TEXT IT WAS
+                    // DECLARED AGAINST (D2's clear-on-edit): an earlier
+                    // text write in this batch has already landed,
+                    // because kayaWriteText writes the state
+                    // synchronously.
                     val hid = b.long
                     val hcount = b.int
                     b.int // reserved
@@ -2063,13 +1859,10 @@ object KayaCompose {
                 }
                 APPLY_SELECT_RANGE -> {
                     // { u64 widget_id; u64 start; u64 stop }, UTF-16.
-                    //
                     // PERFORMED WHERE IT IS DECODED, unlike the reveal
-                    // below: a selection needs no layout, and any text
-                    // write of the same transaction has already landed.
-                    // THAT ORDER IS REQUIRED — kaya's own write places
-                    // the cursor at the end and would otherwise undo the
-                    // selection it was asked for.
+                    // below: a selection needs no layout. THAT ORDER IS
+                    // REQUIRED — kaya's own write places the cursor at
+                    // the end and would undo the selection.
                     val sid = b.long
                     val sstart = b.long.toInt()
                     val sstop = b.long.toInt()
@@ -2308,16 +2101,12 @@ object KayaCompose {
                         MPROP_VALUE -> item.value = readF64(b)
                         MPROP_PRIMARY -> item.primary = readBool(b)
                         MPROP_SHORTCUT -> item.shortcut = readString(b)
-                        // A standard-command role. Android has no
-                        // application menu to relocate into, so the item
-                        // stays where the app declared it — but the role
+                        // A standard-command role. Nothing relocates —
+                        // Android has no application menu — but the role
                         // CHANGES BEHAVIOR: activation performs
-                        // cut/copy/paste on the focused widget
-                        // (kayaPerformClipboardRole), and enablement
-                        // becomes the intersection of what the clipboard
-                        // offers and what the focused widget accepts
-                        // (kayaRoleEnabled). Snapshot state, so a role
-                        // arriving after the bar was built recomposes.
+                        // cut/copy/paste on the focused widget, and
+                        // enablement intersects what the clipboard offers
+                        // with what that widget accepts. Snapshot state.
                         MPROP_ROLE -> item.role = readString(b)
                         MPROP_ICON -> {
                             // A null decode is the placeholder class,
@@ -2437,11 +2226,9 @@ object KayaCompose {
                 APPLY_SET_BRAND ->
                     // ELEVEN packed sRGB words in the wire's fixed
                     // order: seed, light's five, dark's five. THIS
-                    // BACKEND READS THE FIRST AND NOTHING ELSE, by
-                    // design (docs/styling-plan.md D1): Material's
-                    // colour system is "one seed hex, one deterministic
-                    // role scheme", so kaya hands Material the seed and
-                    // defers. The other ten words are skipped by the
+                    // BACKEND READS THE FIRST AND NOTHING ELSE
+                    // (docs/styling-plan.md D1) — Material derives the
+                    // rest from a seed. The other ten are skipped by the
                     // record cursor at the bottom of this loop.
                     KayaSceneModel.brandSeed = b.int
                 APPLY_SET_APP_IDENTITY -> {
@@ -2459,21 +2246,11 @@ object KayaCompose {
                             null
                         }
                     // NOTHING IS DRAWN FROM HERE, BY RULING
-                    // (docs/app-identity-plan.md I6). The launcher icon
-                    // belongs to the INSTALLED PACKAGE, produced from
-                    // this same declared asset by
-                    // android/build.gradle.kts, and a running app has no
-                    // route to it: TaskDescription's Bitmap path is
-                    // deprecated at API 28 and its replacement takes a
-                    // drawable resource id stock Launcher3 ignores
-                    // (`// TODO: Load icon resource (b/143363444)`). A
-                    // real blob channel exists from API 37.
-                    //
-                    // SO WHY DECODE AT ALL: for the READ.
-                    // `expect_app_icon` reports the package's icon, and
-                    // the package carries the mark whether or not a
-                    // guest declared one — so without these two fields
-                    // the read would pass on a run that declared nothing.
+                    // (docs/app-identity-plan.md I6). DECODED FOR THE
+                    // READ: the package carries the mark whether or not
+                    // a guest declared one, so without these two fields
+                    // `expect_app_icon` would pass on a run that
+                    // declared nothing.
                     KayaSceneModel.appIdentityName = name
                     KayaSceneModel.appIdentityIcon = icon
                 }
@@ -2581,31 +2358,11 @@ object KayaCompose {
     }
 
     /**
-     * AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT. `click` emits an
-     * occurrence and the guest answers on its own thread, so without
-     * this the next step runs against the scene as it was BEFORE the
-     * click — invisible while the following `expect` retries, until the
-     * assertion is one that was ALREADY TRUE.
-     *
-     * Measured 2026-08-06: the ranges scene's last step asserts that a
-     * select_range arriving mid-composition did NOT move the caret
-     * (D4). The caret is already there when the click is sent, so with
-     * the refusal DELETED the leg still passed — the read landed before
-     * the app's answer did.
-     *
-     * BOUNDED AND SILENT. Some actions legitimately produce no batch at
-     * all, so a timeout here is not a verdict.
-     *
-     * AND THE SILENT BOUND IS A CLOCK, NOT AN ITERATION COUNT. 60 sleeps
-     * of 5ms is 300ms on an idle emulator and however long the scheduler
-     * says on a loaded one: MEASURED 2026-08-21 under load, this wait —
-     * which every action pays after a handler that answers NOTHING —
-     * ran to 2400ms, and it is the larger half of the gap that used to
-     * decide stall-compose (docs/traps.md). A second of wall clock is
-     * far past the 300ms the sleeps cost on an idle device, so nothing
-     * changes there and the ANSWERING path keeps its iteration budget
-     * whole; what changes is that no amount of load makes this wait
-     * unbounded.
+     * AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT — watched
+     * 2026-08-06: deleted, a step asserting select_range did NOT move
+     * the caret still passed, because the read landed first. BOUNDED AND
+     * SILENT (some actions produce no batch), and the bound is a CLOCK:
+     * 60 sleeps of 5ms ran to 2400ms under load (docs/traps.md).
      */
     private fun kayaAwaitAnswer(seen: Int) {
         var last = seen
@@ -2701,12 +2458,11 @@ object KayaCompose {
     }
 
     /**
-     * The interaction harness's Kotlin interpreter: the same
-     * line-oriented grammar the Rust backends embed from tools/scenes,
-     * with targets as kind#index and `;` accepted as a newline stand-in
-     * — THE INTENT-EXTRA TRANSPORT CANNOT CARRY NEWLINES. Results go to
-     * logcat; halt rather than exit so no teardown hook races the
-     * render threads.
+     * The harness's Kotlin interpreter: the grammar the Rust backends
+     * embed from tools/scenes, targets as kind#index, and `;` accepted
+     * as a newline stand-in — THE INTENT-EXTRA TRANSPORT CANNOT CARRY
+     * NEWLINES. Results go to logcat; halt rather than exit, so no
+     * teardown hook races the render threads.
      */
     private fun startSelftest(activity: ComponentActivity) {
         val script = System.getenv("KAYA_SELFTEST_SCRIPT")
@@ -2720,19 +2476,11 @@ object KayaCompose {
     }
 
     /**
-     * THE ACTIVITY THE HARNESS IS TALKING TO RIGHT NOW — a getter and
-     * not a captured value, which is the whole of what makes `runScript`
-     * survive a relaunch. A recreation swaps `mountedActivity` under a
-     * script that is still running; a captured one would keep hopping
-     * into a destroyed window's view tree, and every read after the
-     * relaunch would answer about a surface nobody can see
-     * (docs/deferred.md's mount entry).
-     *
-     * `runScript` and the reads it drives name this and never a
-     * parameter, so a verb added later gets the current one for free.
-     * Every OTHER caller keeps its own `mountedActivity ?: <refusal>`,
-     * because those run off the harness thread and the gap between a
-     * destroy and the next mount is theirs to answer for.
+     * THE ACTIVITY THE HARNESS IS TALKING TO RIGHT NOW — a getter, not a
+     * captured value, which is what makes `runScript` survive a
+     * relaunch (docs/deferred.md's mount entry). Every OTHER caller
+     * keeps its own `mountedActivity ?: <refusal>`: those run off the
+     * harness thread, where the destroy-to-mount gap is theirs.
      */
     private val activity: ComponentActivity
         get() = mountedActivity
@@ -2751,49 +2499,19 @@ object KayaCompose {
     }
 
     /**
-     * THE REAL-KEYSTROKE TYPING VERB (harness.rs `Stage::type_text`,
-     * whose six numbered points this implements), on Android.
-     *
-     * POINT 1 — THE PLATFORM'S OWN INPUT PATH. An app may not INJECT
-     * events (`INJECT_EVENTS` is a signature permission) but it may
-     * DISPATCH one into its own window, and measured, that reaches the
-     * focused field's key handler and drives the field's real undo
-     * stack: `dispatchKeyEvent(KEYCODE_Z + META_CTRL_ON)` undid typed
-     * text on both text paths (probe §4/H). Keycodes and meta state
-     * come from the platform's own `KeyCharacterMap`, so a capital
-     * letter arrives as shift-down, key-down, key-up, shift-up.
-     *
-     * POINT 2 — WHATEVER HOLDS FOCUS RECEIVES IT: the events go into
-     * the Activity's dispatch and the platform resolves the
-     * destination, which is the routing question D6 asks.
-     *
-     * POINT 3 — IT APPENDS, and on this platform WITHOUT a caret move,
-     * measured: typing `tea`, focusing away, focusing back and typing
-     * `s` gives `teas`, and so does typing after a programmatic
-     * `setTextAndPlaceCursorAtEnd`. AN EXPLICIT CARET MOVE WOULD BE
-     * WRONG HERE — the only way to place the cursor from app code is
-     * `TextFieldState.edit {}`, which commits and therefore CLEARS the
-     * undo history the verb exists to build.
-     *
-     * POINT 4 — IT BLOCKS UNTIL THE TEXT HAS LANDED, past the widget
-     * AND past this backend's own observation. Actions are not retried,
-     * so a following `menu_activate "Edit>Undo"` has no POLL_DEADLINE
-     * cover and a race there reads as a broken undo.
-     *
-     * POINT 6 — PRINTABLE ASCII ONLY; a character this keyboard layout
-     * cannot generate is a loud step failure.
+     * THE REAL-KEYSTROKE TYPING VERB — harness.rs `Stage::type_text`'s
+     * six points. An app may not INJECT events but may DISPATCH into its
+     * own window, which drives the field's real undo stack (probe §4/H);
+     * it APPENDS with NO caret move, since `edit {}` commits and CLEARS
+     * that history; it blocks past this backend's own observation.
      */
     private fun kayaTypeAtFocus(activity: ComponentActivity, text: String): String? {
         if (text.isEmpty()) return "type wants some text to type"
-        // CONTRACT POINT 3: TYPING APPENDS. Keys arriving at a
-        // non-empty selection REPLACE what is there, and one script is
-        // compared byte-for-byte across all five lanes.
-        //
-        // BEFORE THE KEYS AND NOT BETWEEN THEM: a selection change
-        // mid-run breaks the field's own edit coalescing, which is the
-        // granularity the delegated undo tier is made of.
-        //
-        // SKIPPED WHEN THE CARET IS ALREADY THERE, or an unconditional
+        // CONTRACT POINT 3: TYPING APPENDS, so the caret is collapsed
+        // to the end BEFORE the keys and not between them — a selection
+        // change mid-run breaks the field's own edit coalescing, which
+        // is the granularity the delegated undo tier is made of.
+        // Skipped when the caret is already there, or an unconditional
         // edit spends a state commit per `type` to change nothing.
         onUi(activity) {
             kayaFocusedTextNode()?.let { node ->
@@ -2814,19 +2532,13 @@ object KayaCompose {
         for (c in text) {
             val events = map.getEvents(charArrayOf(c))
                 ?: return "type: this keyboard layout cannot generate ${c.code} ($c)"
-            // A KEY NOTHING CONSUMED WAS NOT TYPED, so it is sent again.
-            //
-            // Measured 2026-08-06, two runs in six: the FIRST key-down
-            // of a leg came back `handled=false` and the field's text
-            // did not move — focus had been requested and the model
-            // reported it, but the field was not yet taking keys.
-            //
-            // The signal is the FIELD'S OWN LENGTH rather than
-            // dispatchKeyEvent's return: "somebody consumed this" and
-            // "the text I am typing into changed" are different claims.
-            // Every character this verb may send is printable ASCII and
-            // the caret was collapsed above, so each grows the text by
-            // exactly one and "nothing moved" is never correct.
+            // A KEY NOTHING CONSUMED WAS NOT TYPED, so it is sent again
+            // (measured 2026-08-06, two runs in six: a leg's FIRST
+            // key-down came back handled=false with the model already
+            // reporting focus). The signal is the FIELD'S OWN LENGTH and
+            // not dispatchKeyEvent's return — every character here is
+            // printable ASCII onto a collapsed caret, so each grows the
+            // text by exactly one.
             var tries = 0
             while (true) {
                 val was = onUi(activity) { kayaFocusedTextNode()?.textState?.text?.length }
@@ -2881,24 +2593,11 @@ object KayaCompose {
     }
 
     /**
-     * Point 4's wait: the typing has landed when this backend's MODEL has
-     * caught up with the WIDGET, because that is one turn past the
-     * emission — the observer in KayaTextField assigns `node.text` and
-     * emits in the same step, so an agreeing pair means the app has heard
-     * every keystroke.
-     *
-     * AND THEN HELD STILL. "Model equals widget" is true the instant the
-     * collector catches up with the FIRST keystroke, so a two-character
-     * `type` can return with one character delivered and one in flight
-     * — measured on this backend 2026-08-06, one run in three.
-     *
-     * MOVED THEN STABLE, the shape both Swift arms use: wait for the
-     * text to change at all, then for two consecutive samples that
-     * agree. A LONGER SINGLE WAIT CANNOT REPLACE THE STABILITY WINDOW,
-     * because what is being waited for is an ABSENCE of further changes.
-     *
-     * A TIMEOUT IS NOT A VERDICT: nothing focused is legitimate under
-     * point 2, and a following assertion reports the mismatch.
+     * Point 4's wait: the typing has landed when the MODEL has caught up
+     * with the WIDGET, and then HELD STILL — the first is true the
+     * instant the collector catches the FIRST keystroke, so a
+     * two-character `type` could return with one in flight (measured
+     * 2026-08-06, one run in three). A timeout is not a verdict.
      */
     private fun kayaSettleTypedText(activity: ComponentActivity, before: String?) {
         var last: String? = null
@@ -2965,14 +2664,11 @@ object KayaCompose {
     }
 
     /**
-     * A TABLE TARGET READS ITS COLUMNS' AXIS (docs/tables-plan.md, ruled
-     * 2026-08-29): a table's rows already answer expect_window and
-     * scroll_to_row, so the target's KIND decides which axis
-     * expect_overflow, scroll_end and expect_at_end are about, and none
-     * of the three needs an axis word. Null when the spec names no
-     * table.
-     *
-     * Every number is read on the UI thread, where the layout wrote it.
+     * A TABLE TARGET READS ITS COLUMNS' AXIS (docs/tables-plan.md): the
+     * target's KIND decides which axis expect_overflow, scroll_end and
+     * expect_at_end are about, so none of the three needs an axis word.
+     * Null when the spec names no table; every number is read on the UI
+     * thread, where the layout wrote it.
      */
     private fun columnsAxis(activity: ComponentActivity, spec: String): KayaColumnsAxis? =
         onUi(activity) {
@@ -3090,16 +2786,13 @@ object KayaCompose {
         return last
     }
 
-    /// THE PRESENTATION INSTRUMENTS, the dialog family's named next move
-    /// (docs/deferred.md's WATCH entry). Two of that family's faces are
-    /// told apart by nothing else: a dialog that presented LATE, and one
+    /// THE PRESENTATION INSTRUMENTS (docs/deferred.md's dialog-family
+    /// WATCH): nothing else tells a dialog that presented LATE from one
     /// that presented on time and could not be READ — matrix6's picker
-    /// was Displayed in 1.06s and answered null reads for the next 7.4s.
-    ///
-    /// One line each way, at most once per presentation, permanent like
-    /// KAYA_PICK_RESULT: KAYA_DIALOG_SEEN the first time an a11y read
-    /// sees the dialog this process launched, KAYA_DIALOG_UNSEEN when a
-    /// reader's budget runs out without one.
+    /// was Displayed in 1.06s and answered null reads for 7.4s after.
+    /// One line each way, at most once per presentation: KAYA_DIALOG_SEEN
+    /// on the first a11y read that sees it, KAYA_DIALOG_UNSEEN on a
+    /// reader's budget running out.
     private class KayaDialogPresentation(val dialog: Long, val kind: String) {
         val atMs: Long = android.os.SystemClock.elapsedRealtime()
 
@@ -3234,14 +2927,12 @@ object KayaCompose {
         val svc = KayaHarnessAccessibility.live
             ?: return "no harness accessibility service — the runner did not enable it"
         if (name == "cancel") return svc.dismiss()
-        // ROUNDS, NOT ONE SHOT (2026-08-20, caught by the full-buffer
-        // capture): under a loaded matrix the picker can be UP with its
-        // list still unreadable — DocumentsUI's own log showed its
-        // provider cache lock contended — and the one-shot choose()
-        // missed, instantly, into a failure string nobody prints until
-        // scene end. Six rounds re-walking the tree is simdrive's
-        // choose shape, and the picker being GONE stays the only proof
-        // a click landed.
+        // ROUNDS, NOT ONE SHOT (2026-08-20): under a loaded matrix the
+        // picker can be UP with its list still unreadable — DocumentsUI's
+        // own log showed its provider cache lock contended — and a
+        // one-shot choose() misses instantly into a failure string
+        // nobody prints until scene end. The picker being GONE stays the
+        // only proof a click landed.
         var clicked = false
         var last: String? = null
         for (round in 0 until 6) {
@@ -3271,15 +2962,10 @@ object KayaCompose {
 
     /**
      * Present the platform's REAL picker and answer exactly once.
-     *
-     * ACTION_OPEN_DOCUMENT, which hands off to DocumentsUI. The answer
-     * is `content://` URIs and NOT paths: the document may not be a
-     * file on this device, so the core wraps each URI in a source that
-     * opens it through the ContentResolver.
-     *
-     * A single tap answers either way (measured): with ALLOW_MULTIPLE
-     * set, one chosen file still comes back through `data.data` with an
-     * empty clipData.
+     * ACTION_OPEN_DOCUMENT answers `content://` URIs and NOT paths: the
+     * document may not be a file on this device. A single tap answers
+     * either way (measured): with ALLOW_MULTIPLE set, one chosen file
+     * still comes back through `data.data` with an empty clipData.
      */
     private fun kayaPresentFileDialog(
         dialog: Long,
@@ -3382,16 +3068,12 @@ object KayaCompose {
         )
     }
 
-    /// The DISPLAY NAME, not the last URI segment: the segment is the
-    /// provider's document id, which is a path fragment on the
-    /// ExternalStorage provider and an opaque key on others.
-    ///
-    /// A SAVED DOCUMENT NEEDS THIS MORE THAN A PICKED ONE DOES. SAF
-    /// appends an extension matching the request's mime type when it
-    /// creates the file, and it renames on collision — `picked.txt`
-    /// becomes `picked (1).txt` with no prompt (measured). So the name
-    /// the user typed and the name the document HAS are routinely
-    /// different, and only the provider knows which is which.
+    /// The DISPLAY NAME, not the last URI segment, which is the
+    /// provider's document id — a path fragment on ExternalStorage and
+    /// an opaque key elsewhere. A SAVED DOCUMENT NEEDS THIS MOST: SAF
+    /// appends an extension for the mime type and renames on collision,
+    /// `picked.txt` becoming `picked (1).txt` with no prompt (measured),
+    /// so only the provider knows the name the document HAS.
     private fun displayName(activity: ComponentActivity, uri: Uri): String {
         var name = ""
         try {
@@ -3406,23 +3088,11 @@ object KayaCompose {
     }
 
     /**
-     * Present the platform's REAL save dialog and answer exactly once.
-     *
-     * `ACTION_CREATE_DOCUMENT` — the picker's own hand-off to
-     * DocumentsUI with the mode flipped, sharing its registry, result
-     * path and one-live-dialog slot.
-     *
-     * IT ANSWERS WITH A DOCUMENT THAT ALREADY EXISTS, which is where
-     * this platform and the desktops disagree and where
-     * docs/save-plan.md D1 says the core absorbs it: DocumentsUI
-     * creates the file when SAVE is pressed, so the first `wt` open
-     * reports size 0 and the guest's write lands (measured,
-     * docs/probes/save-probe-android.md).
-     *
-     * THE NAME IS A SUGGESTION AND THE PLATFORM MAY NOT KEEP IT — SAF
-     * appends an extension for the mime type and renames on collision
-     * rather than prompting, which is why the frozen scene asserts the
-     * BYTES a handle reads back and never a file's name.
+     * Present the platform's REAL save dialog and answer exactly once,
+     * through `ACTION_CREATE_DOCUMENT`. IT ANSWERS WITH A DOCUMENT THAT
+     * ALREADY EXISTS, which docs/save-plan.md D1 absorbs in the core,
+     * and THE NAME IS A SUGGESTION the platform may not keep — so the
+     * frozen scene asserts BYTES and never a file's name.
      */
     private fun kayaPresentSaveDialog(
         dialog: Long,
@@ -3512,12 +3182,10 @@ object KayaCompose {
 
     /// The ExternalStorage provider's document uri for a directory under
     /// the primary volume, which is what EXTRA_INITIAL_URI wants — a
-    /// filesystem path in that extra is ignored.
-    ///
-    /// AIMED SOMEWHERE THE PLATFORM HIDES, the extra is accepted and the
-    /// picker SILENTLY opens on Recent instead (measured, with
-    /// `Android/data/...`). Nothing reports it; expect_file_dialog
-    /// reading the breadcrumb back is what catches it.
+    /// filesystem path there is ignored. AIMED SOMEWHERE THE PLATFORM
+    /// HIDES, the extra is accepted and the picker SILENTLY opens on
+    /// Recent (measured with `Android/data/...`); only
+    /// expect_file_dialog's breadcrumb read catches it.
     private fun initialUri(dir: String): Uri {
         val root = Environment.getExternalStorageDirectory().path.trimEnd('/')
         val rel = dir.removePrefix("$root/")
@@ -3539,15 +3207,9 @@ object KayaCompose {
      */
     internal fun pickerContext(): ComponentActivity? = mountedActivity
 
-    // -----------------------------------------------------------------
-    // Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §7 for
-    // what this platform was measured to charge).
-    //
-    // MATERIALIZE INSIDE THE READ, ALWAYS. The read grant is revoked
-    // the moment the clip changes, so a stashed URI answers
-    // SecurityException later. Nothing here holds one past the call
-    // that opened it.
-    // -----------------------------------------------------------------
+    // Clipboard (docs/clipboard-plan.md §7). MATERIALIZE INSIDE THE
+    // READ, ALWAYS: the read grant is revoked the moment the clip
+    // changes, so a stashed URI answers SecurityException later.
 
     /**
      * SystemUI's overlay-suppression extra. Honoured on an emulator (or
@@ -3577,18 +3239,11 @@ object KayaCompose {
     private const val CLIP_TIMEOUT_MS = 5_000L
 
     /**
-     * Put one clip on the system clipboard.
-     *
-     * ONE ClipData, its ClipDescription listing every offered mime in
-     * the canonical order — custom ids, text/uri-list, image/png,
-     * text/html, text/plain, descending richness. BUILT BY HAND:
-     * `newHtmlText` advertises text/html and never text/plain, and
-     * `addItem(item)` does not touch the type list at all.
-     *
-     * ITEM 0 CARRIES TEXT AND HTML INLINE — most foreign readers look
-     * at item 0 alone, `coerceToText` answers the EMPTY STRING for a
-     * content:// item (contradicting its own javadoc), and SystemUI
-     * previews item 0.
+     * Put one clip on the system clipboard: ONE ClipData listing every
+     * offered mime in descending richness, BUILT BY HAND because
+     * `newHtmlText` never advertises text/plain. ITEM 0 CARRIES TEXT AND
+     * HTML INLINE — foreign readers look there alone, `coerceToText`
+     * answers "" for a content:// item, and SystemUI previews item 0.
      */
     private fun kayaCopyToClipboard(
         text: String?,
@@ -3668,12 +3323,9 @@ object KayaCompose {
 
     /**
      * Choose the RICHEST representation the clipboard offers that the
-     * accept list takes, materialize exactly that one, and answer —
-     * null for no intersection, the universal no. Shared by the
-     * privileged read and by the declared-paste delivery.
-     *
-     * Descending clip value — custom (in accept-list order), files,
-     * image, html, text. MAIN THREAD, like every other apply arm.
+     * accept list takes, materialize that one, and answer — null for no
+     * intersection. Shared by the privileged read and the declared-paste
+     * delivery; descending clip value, MAIN THREAD like every apply arm.
      */
     private fun kayaMaterializeClipboard(accepting: String): KayaClipValue? {
         val activity = mountedActivity ?: return null
@@ -3802,18 +3454,11 @@ object KayaCompose {
         }
 
     /**
-     * Whether a clipboard role's command can act right now; a non-role
-     * item answers true and pays nothing.
-     *
-     * THE SAME RULE AS THE MAC AND GTK ARMS: paste is the INTERSECTION
-     * of what the clipboard offers and what the focused widget accepts,
-     * and a widget that declared NOTHING still pastes on the text offer
-     * alone. Cut and copy need a focused editable.
-     *
-     * NOT A BUILD-TIME FACT: both halves move long after the bar was
-     * built. Every affordance reads kayaMenuEffectivelyEnabled, which
-     * ends here, so rows, shortcuts, expect_menu and the activation
-     * gate see one answer.
+     * Whether a clipboard role's command can act right now. THE SAME
+     * RULE AS THE MAC AND GTK ARMS: paste is the INTERSECTION of the
+     * clipboard's offer and the focused widget's accept list, and one
+     * that declared NOTHING still pastes on the text offer. NOT A
+     * BUILD-TIME FACT — both halves move after the bar was built.
      */
     internal fun kayaRoleEnabled(role: String): Boolean {
         when (role) {
@@ -3849,13 +3494,11 @@ object KayaCompose {
     }
 
     /**
-     * Perform a clipboard role on the focused widget. Answers whether
-     * it WAS one, so a plain action falls through to its own dispatch.
-     *
-     * THE PASTE SPLIT (DESIGN.md): a widget that DECLARED what it
-     * accepts takes the content itself through the paste hook, while
-     * one that declared nothing gets the platform's own insertion and
-     * its ordinary change handler.
+     * Perform a clipboard role on the focused widget; answers whether it
+     * WAS one, so a plain action falls through. THE PASTE SPLIT
+     * (DESIGN.md): a widget that DECLARED what it accepts takes the
+     * content through the paste hook, one that declared nothing gets the
+     * platform's own insertion.
      */
     internal fun kayaPerformClipboardRole(role: String): Boolean {
         when (role) {
@@ -3867,20 +3510,13 @@ object KayaCompose {
                 val id = KayaSceneModel.focusedId ?: return true
                 val node = KayaSceneModel.nodes[id] ?: return true
                 if (node.accepts.isEmpty()) {
-                    // THE PLATFORM'S OWN INSERTION, spelled the way
-                    // COMMAND_CLEAR is: no responder chain here, and the
-                    // MODEL owns the field's text. APPENDED, because
-                    // kaya has no selection API and the end of the field
-                    // is where Compose leaves the caret after a
-                    // programmatic write.
-                    //
-                    // AND IT COSTS THE FIELD'S TYPING HISTORY
-                    // (docs/undo-plan.md §1.4 names this site): on
-                    // TextFieldState there is measurably no public way
-                    // to make an app write undoable, so the insertion
-                    // clears the stack like any other write. That costs
-                    // GRANULARITY, not history — the episode was banked
-                    // before the clear.
+                    // THE PLATFORM'S OWN INSERTION: no responder chain
+                    // here, and the MODEL owns the field's text.
+                    // APPENDED, because kaya has no selection API. IT
+                    // COSTS THE FIELD'S TYPING HISTORY — on
+                    // TextFieldState no public API makes an app write
+                    // undoable (docs/undo-plan.md §1.4 names this site),
+                    // so this costs granularity, not history.
                     val pasted = kayaClipboardPlainText() ?: return true
                     kayaWriteText(node, kayaLf(node.text + pasted))
                     KayaPresent.emitTextChanged(
@@ -3900,18 +3536,11 @@ object KayaCompose {
     }
 
     /**
-     * Perform an undo/redo role on the focused surface. Answers whether
-     * it WAS one, so a plain action falls through to its own dispatch.
-     * A SEPARATE FUNCTION from [kayaPerformClipboardRole];
-     * tools/check-roles.py takes the UNION of the `kayaPerform*Role`
-     * functions as its perform anchor.
-     *
-     * ROUTING IS KAYA'S HERE, all of it (docs/undo-plan.md §1). Android
-     * leaves no choice: measured, a focused text field CONSUMES Ctrl+Z
-     * whether or not it has anything to undo, and the Activity's
-     * shortcut route never sees it. On a phone there is no hardware
-     * keyboard and the text toolbar carries no Undo, so THIS menu item
-     * is the only undo affordance the platform has.
+     * Perform an undo/redo role on the focused surface. A SEPARATE
+     * FUNCTION from [kayaPerformClipboardRole]: tools/check-roles.py
+     * anchors on the UNION of the `kayaPerform*Role` functions. ROUTING
+     * IS KAYA'S HERE (docs/undo-plan.md §1) — a focused field CONSUMES
+     * Ctrl+Z whether or not it has anything to undo.
      */
     internal fun kayaPerformUndoRole(role: String): Boolean {
         when (role) {
@@ -3945,25 +3574,11 @@ object KayaCompose {
     }
 
     /**
-     * Cut and Copy, acting on the FOCUSED FIELD'S SELECTION through the
-     * one selection-level hook this interpreter's fields have.
-     *
-     * kaya holds no caret and no selection, so nothing on this side
-     * names a range to cut. Compose publishes
-     * SemanticsActions.CutText/CopyText on the field's own node, present
-     * ONLY while a selection exists, and invoking one runs
-     * BasicTextField's own cut/copy — the same action the text toolbar
-     * and TalkBack invoke. A field with no selection publishes neither
-     * and the role does nothing.
-     *
-     * `edit {}` was measured (range-probe-android.md §2) to leave
-     * `canUndo` true when it changes only the SELECTION, so D7's clear
-     * is keyed on the text moving and not on `edit {}` being called —
-     * which is what let `select_range` be lowered on that call.
-     *
-     * MAIN THREAD ONLY — Compose owns its semantics tree from the
-     * thread that lays out, and reading it from the harness thread is a
-     * hard crash rather than a wrong answer (see kayaAx).
+     * Cut and Copy on the FOCUSED FIELD'S SELECTION, through
+     * SemanticsActions.CutText/CopyText — present ONLY while a selection
+     * exists. `edit {}` leaves `canUndo` true when it changes only the
+     * SELECTION (range-probe-android.md §2), which is why D7's clear is
+     * keyed on the text moving. MAIN THREAD ONLY.
      */
     private fun kayaEditFocusedText(role: String) {
         val activity = mountedActivity ?: return
@@ -3977,13 +3592,10 @@ object KayaCompose {
     }
 
     /**
-     * THE TEXT-RANGE READS, all three, off the platform.
-     *
-     * The a11y id is how a leg finds a control in the semantics tree, so
-     * a textarea with no `a11y_id` cannot be asserted about — the same
-     * requirement every other backend's range reads make.
-     *
-     * MAIN THREAD ONLY (kayaAx's own note).
+     * THE TEXT-RANGE READS, all three, off the platform. The a11y id is
+     * how a leg finds a control in the semantics tree, so a textarea
+     * with no `a11y_id` cannot be asserted about. MAIN THREAD ONLY
+     * (kayaAx's own note).
      */
     private fun kayaSelectionRead(activity: ComponentActivity, spec: String): String {
         val node = kayaTextTarget(spec) ?: return "<no such target>"
@@ -4001,67 +3613,11 @@ object KayaCompose {
     }
 
     /**
-     * THE HIGHLIGHT READ, AND ITS PAINT WITNESS.
-     *
-     * The record alone is not enough and this arm proved it rather than
-     * assuming it: deleting the `drawPath` call and leaving everything
-     * else — the apply arm, the staleness compare, the record — left the
-     * leg GREEN with nothing decorated on screen (flip proof 1, watched
-     * failing to fail on 2026-08-06). That is the same silent shape the
-     * android probe measured from the other side: pushing an
-     * `AnnotatedString` into the state compiles clean, stores a plain
-     * String and paints zero pixels. A read that cannot tell those apart
-     * is a gate satisfiable without exercising the real thing.
-     *
-     * So every range whose box is ON SCREEN is photographed:
-     * `PixelCopy` reads the field's own viewport out of the window —
-     * in process, no adb, no screenshot tool, API 24 against kaya's
-     * floor of 26 — and the range's rectangle must actually contain the
-     * decoration. A range scrolled out of the viewport cannot be
-     * witnessed by anything on screen and is reported on the record
-     * alone; the scene keeps that from being a loophole, because at
-     * every `expect_highlights` with a non-empty set at least one match
-     * is inside the viewport.
-     *
-     * THE PREDICATE IS COMPUTED FROM THE COLOURS IN PLAY, not guessed at
-     * and not hard-coded. It used to be "much more red and green than
-     * blue", which is what the decoration alone blends to (#F4E689: the
-     * highlight over this field's #E6E0E9 container, and exactly what
-     * 0x8CFFEB3B over that background computes to). That predicate is
-     * BLIND TO THE ONE RANGE EVERY FIND BAR HAS — the current match,
-     * which is highlighted AND selected. The platform paints its
-     * selection wash on top of this layer, so the pixel is the highlight
-     * seen THROUGH the wash, measured 2026-08-10 on the editor scene as
-     * #ACC0B4 (r-b = -8, g-b = 12: both clauses fail) — and the leg
-     * accused the lowering of painting nothing.
-     *
-     * So the witness composites what it expects instead: the field's own
-     * undecorated background is SAMPLED from the photograph, the
-     * decoration is that background under KAYA_HIGHLIGHT_COLOR, and the
-     * washed form is the decoration under the platform's own selection
-     * background (read from the composition, not assumed — this app wraps
-     * no MaterialTheme, so foundation's default 0xFF4286F4 at 0.4 is what
-     * actually paints). Both computed values reproduced the measured
-     * pixels to within one level. A pixel matching either is the
-     * decoration; nothing else the field paints is within reach of them —
-     * the wash over the BARE container computes to #A4BCED, 57 levels of
-     * blue away from #ACC0B4, so "selected but not highlighted" is still
-     * refused, which is the whole point of photographing at all.
-     *
-     * AND THE PHOTOGRAPH IS AIMED IN THE RIGHT SPACE. `PixelCopy` takes
-     * its srcRect in the window's SURFACE space; `boundsInWindow()`
-     * answers in WINDOW space; those are the same numbers only while
-     * nothing has panned the window. Measured on the same leg with the
-     * soft keyboard up, `decorView.getLocationInWindow()` was (0, -199)
-     * and the witness photographed 199px below the field — a flat block
-     * of the app's background, which it then reported as "the lowering
-     * painted nothing". A read that cannot see the thing must say so
-     * (`offwindow@`) and never accuse the paint.
-     *
-     * NOT ON THE UI THREAD: `PixelCopy` answers on a main-thread
-     * callback, so waiting for it there would deadlock. The semantics
-     * and geometry are gathered in one UI hop, the photograph is taken
-     * from the harness thread, and the spelling is assembled after.
+     * THE HIGHLIGHT READ, AND ITS PAINT WITNESS: every on-screen range is
+     * photographed and must contain the decoration, since the record
+     * alone stayed GREEN with `drawPath` deleted (docs/traps.md: "The
+     * Compose highlight witness composites what it expects, and aims in
+     * surface space"). NOT ON THE UI THREAD — `PixelCopy` deadlocks.
      */
     private fun kayaHighlightRead(activity: ComponentActivity, spec: String): String {
         val gathered = onUi(activity) { kayaGatherHighlights(activity, spec) }
@@ -4182,15 +3738,11 @@ object KayaCompose {
         val deco = kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), base)
         val washed = kayaOver(read.wash, deco)
         // AND WHAT THE FIELD PAINTS WITH NO DECORATION AT ALL, both
-        // ways, because a colour the witness cannot TELL APART from that
-        // is a colour it must not accept. This is the clause the flip
-        // proof paid for: with the highlight's alpha set to zero the
-        // decoration composites to the background exactly, every
-        // background pixel matched the expectation, and the leg passed
-        // with nothing on screen — the same false green this whole
-        // witness exists to refuse (watched failing to fail 2026-08-10,
-        // and again 2026-08-06 for the deleted drawPath). An invisible
-        // decoration is an undecorated range, and it is reported as one.
+        // ways: a colour the witness cannot TELL APART from that is one
+        // it must not accept. Watched — with the highlight's alpha at
+        // zero the decoration composites to the background exactly and
+        // the leg passed with nothing on screen. An invisible decoration
+        // is an undecorated range and is reported as one.
         val bare = kayaOver(read.wash, base)
         val decoShows = !kayaSameColour(deco, base)
         val washedShows = !kayaSameColour(washed, bare)
@@ -4285,14 +3837,11 @@ object KayaCompose {
         return true
     }
 
-    /** The field's viewport, out of the window's own surface.
-     *
-     * THE SRCRECT IS IN SURFACE SPACE and the caller's rectangle is in
-     * window space; they differ by `decorView`'s location in the window,
-     * which the gather hop read. Clipped to the surface as well, because
-     * `PixelCopy` is given a rectangle it can actually copy — a panned
-     * window puts part of the field outside it, and the pixels that are
-     * left are still worth photographing. */
+    /** The field's viewport, out of the window's own surface. THE
+     * SRCRECT IS IN SURFACE SPACE where the caller's rectangle is in
+     * window space, differing by `decorView`'s location; clipped to the
+     * surface too, since a panned window puts part of the field outside
+     * it and the rest is still worth photographing. */
     private fun kayaPhotograph(
         activity: ComponentActivity,
         box: android.graphics.Rect,
@@ -4370,23 +3919,11 @@ object KayaCompose {
     }
 
     /**
-     * Start an input-method composition in the target, leaving `text`
-     * MARKED — displayed, uncommitted, invisible to the app.
-     *
-     * THE PLATFORM'S OWN ENTRY POINT AND NOT A TEXT WRITE. No adb
-     * command can open a composing region (`input text` injects key
-     * events and never calls `setComposingText` — measured, §5), but
-     * the harness runs INSIDE the app, so it takes the connection the
-     * input method holds:
-     * `AndroidComposeView.onCreateInputConnection` hands out the
-     * current text-input session's connection, WHICH ONLY EXISTS WHILE
-     * A FIELD IS FOCUSED.
-     *
-     * The caret goes to the end first, explicitly, so `compose` inserts
-     * at the end of the current text on every lane.
-     *
-     * BLOCKS UNTIL THE COMPOSITION IS LIVE, like `type`: a composition
-     * still in flight reads as a backend that honoured the selection.
+     * Start an input-method composition, leaving `text` MARKED —
+     * uncommitted and invisible to the app. No adb command can open a
+     * composing region (measured, §5), so the harness takes the
+     * connection `onCreateInputConnection` hands out, WHICH ONLY EXISTS
+     * WHILE A FIELD IS FOCUSED. Blocks until the composition is live.
      */
     private fun kayaComposeMarkedText(
         activity: ComponentActivity,
@@ -4422,32 +3959,20 @@ object KayaCompose {
         target(spec, "canvas", KayaSceneModel.canvases)
 
     /**
-     * `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
-     * docs/canvas-plan.md §7.2). THIS backend reports the core's own
-     * bytes — PixelCopy crosses no colour space — while a macOS window's
+     * `expect_ink` compares WITHIN ±1 PER CHANNEL (docs/canvas-plan.md
+     * §7.2): this backend reports the core's own bytes while a macOS
      * backing store carries the DISPLAY's profile and reads D2E3F7 back
-     * as D2E2F7, so no single frozen string can exact-match both
-     * (measured, docs/traps.md). `expect_drawing_hash` keeps the
-     * byte-exact assertion.
-     *
-     * harness.rs and KayaSwiftUI.swift carry their own copies of this
-     * number; tools/check-verbs.py holds the three equal and pinned at
-     * the ruled 1.
+     * as D2E2F7 (docs/traps.md). harness.rs and KayaSwiftUI.swift carry
+     * their own copies; tools/check-verbs.py pins all three at 1.
      */
     private const val INK_TOLERANCE = 1
 
     /**
      * The half of a PER-MODE expectation that names [mode], out of
-     * `"light FFFFFF/D2E3F7 dark 16181C/2B3B4F"` — alternating mode word
-     * and colour run, in one byte-shared string (docs/canvas-plan.md
-     * §7.2).
-     *
-     * ONE SPELLING CARRYING BOTH MODES is what keeps a frozen ink
-     * expectation from depending on the host's appearance setting. A mode
-     * the string does not name is null, which never matches.
-     *
-     * harness.rs's `ink_for_mode` and KayaSwiftUI.swift's
-     * `kayaInkForMode` are the other two copies.
+     * `"light FFFFFF/D2E3F7 dark 16181C/2B3B4F"` (docs/canvas-plan.md
+     * §7.2): ONE SPELLING CARRYING BOTH MODES keeps a frozen expectation
+     * off the host's appearance setting. Copies in harness.rs's
+     * `ink_for_mode` and KayaSwiftUI.swift's `kayaInkForMode`.
      */
     private fun kayaInkForMode(want: String, mode: String): String? {
         val words = want.split(" ").filter { it.isNotEmpty() }
@@ -4491,23 +4016,10 @@ object KayaCompose {
 
     /**
      * THE BLIT, sampled off the WINDOW'S OWN RENDERED PIXELS at the
-     * declared probe points — `x,y` pairs in hundredths of the canvas's
-     * box — as `RRGGBB/RRGGBB/...` (docs/canvas-plan.md §7.2). The mac's
-     * `cacheDisplay` move in this platform's spelling, and the only
-     * canvas read that fails when the buffer never reached the
-     * ImageBitmap.
-     *
-     * THE APPEARANCE RIDES THE ANSWER (§6): the display raster uses the
-     * platform's mode and kaya's palette has two of them, so a bare
-     * colour string would be a frozen expectation quietly depending on
-     * the device's night setting. The bit is the one KayaRoot reported.
-     *
-     * NOT ON THE UI THREAD, for `kayaHighlightRead`'s measured reason:
-     * `PixelCopy` answers on a main-thread callback, so waiting for it
-     * there would deadlock. The geometry is gathered in one UI hop and
-     * the photograph is taken from the harness thread.
-     *
-     * Every angle-bracketed answer says what it MEASURED (invariant 3).
+     * probe points (docs/canvas-plan.md §7.2) — the only canvas read
+     * that fails when the buffer never reached the ImageBitmap. THE
+     * APPEARANCE RIDES THE ANSWER (§6). Not on the UI thread, for
+     * `kayaHighlightRead`'s reason.
      */
     private fun kayaCanvasInk(
         activity: ComponentActivity,
@@ -4592,15 +4104,11 @@ object KayaCompose {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
         val root = view as RootForTest
         // THE TREE IS BROUGHT UP TO DATE FIRST: Compose publishes
-        // semantics on the pass that lays out, so a read taken between
-        // an apply and the next frame answers with the state BEFORE the
-        // apply — invisible while an assertion waits for a value to
-        // CHANGE, fatal when the assertion was already true. Measured
-        // 2026-08-06: with D4's refusal deleted the selection really did
-        // move, `TextFieldState` said so immediately, and this tree
-        // still reported the old caret for ~400ms.
-        // `measureAndLayoutForTest` is the same call Compose's own test
-        // framework makes before it reads.
+        // semantics on the pass that lays out, so a read between an
+        // apply and the next frame answers with the state BEFORE it —
+        // fatal when the assertion was already true. Measured
+        // 2026-08-06: the tree reported the old caret for ~400ms after
+        // `TextFieldState` had moved.
         root.measureAndLayoutForTest()
         return kayaAxFind(root.semanticsOwner.rootSemanticsNode, tag)
     }
@@ -4644,23 +4152,10 @@ object KayaCompose {
 
     /**
      * Put content on the clipboard FROM OUTSIDE THIS APP, through the
-     * helper APK — a separate package, uid and process using the
-     * ordinary ClipboardManager API (tools/android/cliphelper).
-     *
-     * FOREIGN ON PURPOSE: a check where kaya reads what kaya wrote
-     * parses its own malformed lowering happily. Android has no `cmd
-     * clipboard` and no host-side path carrying more than text
-     * (docs/clipboard-plan.md §7), so the outside process must be a
-     * real app.
-     *
-     * The seed never moves focus — background WRITES are unrestricted
-     * (`case OP_WRITE_CLIPBOARD: allowed = true`, unchanged across API
-     * 10..15) — so a plain BroadcastReceiver is enough.
-     *
-     * AND IT WAITS UNTIL THE CONTENT IS REALLY THERE, twice: the
-     * ordered broadcast's result, then a poll of THIS process's own
-     * view of the offer. A verb that returns before its own work is
-     * visible makes every step after it race.
+     * helper APK (tools/android/cliphelper). FOREIGN ON PURPOSE: kaya
+     * reading what kaya wrote parses its own malformed lowering happily
+     * (docs/clipboard-plan.md §7). IT WAITS UNTIL THE CONTENT IS REALLY
+     * THERE, twice, or every step after it races.
      */
     private fun kayaClipboardSeed(kind: String, argument: String) {
         val arg = kayaExpandPath(argument)
@@ -4734,12 +4229,10 @@ object KayaCompose {
 
     /**
      * Read the clipboard back FROM OUTSIDE this app, in one
-     * representation. Empty when it holds nothing of that kind.
-     *
-     * THE HELPER READS WITHOUT TOUCHING THE GUEST'S FOCUS: it owns the
-     * selected input method for the lane run, and ClipboardService
-     * admits the default IME's reads before it checks focus
-     * (docs/clipboard-plan.md §7).
+     * representation; empty when it holds nothing of that kind. THE
+     * HELPER READS WITHOUT TOUCHING THE GUEST'S FOCUS: it owns the
+     * selected input method, and ClipboardService admits the default
+     * IME's reads before it checks focus (docs/clipboard-plan.md §7).
      */
     private fun kayaClipboardRead(kind: String): String {
         val extras = android.os.Bundle()
@@ -4762,20 +4255,11 @@ object KayaCompose {
     }
 
     /**
-     * One ordered broadcast to the helper, and its answer.
-     *
-     * An ordered broadcast's result data is a synchronous, host-free
-     * channel: no adb round trip, no logcat scraping.
-     *
-     * AN EXPLICIT COMPONENT, ALWAYS. An implicit broadcast has not
-     * reached a manifest receiver since API 26, and the stopped-package
-     * exclusion applies to implicit broadcasts only — so naming the
-     * class reaches a helper that has never been launched (measured),
-     * and no warm-up launch is needed.
-     *
-     * RUNS OFF THE MAIN THREAD: this blocks on another process while
-     * the result receiver is dispatched on main, so waiting inside an
-     * onUi hop deadlocks on the thread the answer needs.
+     * One ordered broadcast to the helper, and its answer. AN EXPLICIT
+     * COMPONENT, ALWAYS: an implicit broadcast has not reached a
+     * manifest receiver since API 26, and naming the class reaches a
+     * helper never launched (measured). RUNS OFF THE MAIN THREAD, where
+     * the result receiver is dispatched.
      */
     private fun kayaHelperCall(
         action: String,
@@ -4839,26 +4323,11 @@ object KayaCompose {
     }
 
     /**
-     * Normalize what Compose classified this node as into the harness's
-     * closed role set. THE PLATFORM CLASSIFIED THE CONTROL, so anything
-     * kaya has no name for reports `unknown` rather than being guessed
-     * at.
-     *
-     * TWO SOURCES, in the order Compose itself trusts them: `Role`,
-     * Compose's own classification; then `className` for the controls
-     * Compose classifies WITHOUT one (a slider and a progress bar are
-     * the same ProgressBarRangeInfo semantics, told apart by SeekBar vs
-     * ProgressBar). Deriving those from raw semantics would be kaya
-     * reclassifying.
-     *
-     * Android has no group class: a node with no Role and no class of
-     * its own comes out as the generic `android.view.View`. A generic
-     * node WITH children is a group; a generic LEAF stays `unknown`.
-     *
-     * A THIRD SOURCE ahead of both: `heading` is a PROPERTY, read from
-     * the published AccessibilityNodeInfo rather than from the
-     * semantics config this interpreter wrote — the config only says
-     * what was asked for (the read-backs-lie rule).
+     * Compose's classification, normalized into the harness's closed
+     * role set; anything unnamed reports `unknown`. Sources in order:
+     * `heading` off the published node info (never the config, which
+     * says only what was ASKED for), `Role`, then `className`. A generic
+     * view with children is a group; a generic LEAF is `unknown`.
      */
     private fun kayaAxRole(
         role: Role?,
@@ -4899,18 +4368,11 @@ object KayaCompose {
     }
 
     /**
-     * The name a service would speak for this node: the authored
-     * description first, then whatever the control derived from its own
-     * content — the same precedence every other backend reads.
-     *
-     * The first two properties are LISTS after merging, joined with a
-     * space because a service reads them as one utterance.
-     *
-     * THE THIRD SOURCE IS THE FIELD'S OWN VALUE (macOS falls through to
-     * kAXValueAttribute, GTK to AT-SPI Text, WinUI to ValuePattern). A
-     * Compose TextField's edited content lives in EditableText and NOT
-     * in Text — `Text` carries the label/placeholder, which this
-     * lowering passes neither.
+     * The name a service would speak: the authored description first,
+     * then what the control derived from its own content — every
+     * backend's precedence. The first two properties are LISTS after
+     * merging, joined with a space. THE THIRD SOURCE IS THE FIELD'S OWN
+     * VALUE, which on Compose is EditableText and NOT Text.
      */
     private fun kayaAxName(node: SemanticsNode): String {
         val described = node.config.getOrNull(SemanticsProperties.ContentDescription)
@@ -4931,21 +4393,11 @@ object KayaCompose {
     }
 
     /**
-     * Read the MERGED semantics tree — the post-merge truth an
-     * assistive client consumes.
-     *
-     * Compose does not hand a service a finished tree: it sends the
-     * UNMERGED nodes plus `mergeDescendants` instructions and the
-     * SERVICE merges, so `createAccessibilityNodeInfo(id)` returns a
-     * pre-merge node no client ever sees as such — a Button comes back
-     * as a nameless generic view with children, its `Role` on a node
-     * the service would have folded into its parent.
-     * `SemanticsOwner.rootSemanticsNode` is merging-enabled, so walking
-     * it IS the merged view.
-     *
-     * Identity is the merged `TestTag`, where `a11y_id` lands. The node
-     * info is consulted for ONE thing — the class name of the controls
-     * Compose classifies without a Role (see [kayaAxRole]).
+     * Read the MERGED semantics tree — the post-merge truth a client
+     * consumes. Compose sends UNMERGED nodes plus `mergeDescendants` and
+     * the SERVICE merges, so `createAccessibilityNodeInfo(id)` returns a
+     * pre-merge node no client sees as such. Identity is the merged
+     * `TestTag`; the node info serves [kayaAxRole]'s class name alone.
      */
     private fun kayaAxFind(node: SemanticsNode, tag: String, depth: Int = 0): SemanticsNode? {
         if (depth > 64) return null
@@ -5009,13 +4461,10 @@ object KayaCompose {
             else -> kayaAxRole(role, null, node.children.size, false)
         }
         // A TEXT NODE THAT CARRIES A CONTENT DESCRIPTION HAS NO CLASS:
-        // the provider's AccessibilityNodeInfo names android.widget.TextView
-        // for a plain Text and nothing at all once a contentDescription
-        // rides it, so a label whose spoken name is authored read
-        // `unknown/<name>` (measured 2026-09-02, the a11y scene's
-        // label@spoken on three legs). The node's own Text semantics is
-        // the platform fact the class stood for; read it when the class
-        // is silent.
+        // the provider names android.widget.TextView for a plain Text and
+        // nothing at all once a contentDescription rides it, so an
+        // authored label read `unknown/<name>` (measured 2026-09-02).
+        // The node's own Text semantics is what the class stood for.
         val className = info?.className
             ?: if (cfg.getOrNull(SemanticsProperties.Text) != null) "android.widget.TextView" else null
         return KayaAxRead(
@@ -5027,23 +4476,11 @@ object KayaCompose {
     }
 
     /**
-     * One ax read, with the PROVIDER'S SILENCE carried out-of-band. The
-     * semantics tree is in-process and always answers; the provider
-     * serves AccessibilityNodeInfo from its own view of that tree, and
-     * the two can DISAGREE: three straight 2026-08-12 matrix runs had
-     * clipboard-jvm's pasted field findable by tag while
-     * createAccessibilityNodeInfo returned null past the step's whole
-     * 5s deadline — under five-lane host contention only, solo green
-     * every time. WHY the provider lags that far is deliberately not
-     * claimed here (the on-device probe DISPROVED the obvious story:
-     * with accessibility disabled outright, regular node infos are
-     * still served — and the root node's id never is, which is also
-     * why no readiness probe of the root can stand in for the real
-     * read). What is measured is the disagreement itself, so it is
-     * carried as its own state instead of being conflated with a
-     * classification: a read with [infoServed] false measured NO
-     * classification, and reporting it as `unknown/…` sends the reader
-     * after a lowering that was never consulted.
+     * One ax read, with the PROVIDER'S SILENCE carried out-of-band: the
+     * semantics tree always answers where createAccessibilityNodeInfo
+     * can return null past a step's whole 5s deadline under contention
+     * (measured 2026-08-12; WHY is deliberately not claimed).
+     * [infoServed] false measured NO classification.
      */
     private data class KayaAxRead(
         val spec: String,
@@ -5054,11 +4491,10 @@ object KayaCompose {
 
     /**
      * Whether the platform publishes this node as a HEADING. The
-     * framework getter arrived in API 28 and kaya's floor is 26, so
-     * below it the answer is the honest one for the pre-28 platform:
-     * there was no heading bit on an AccessibilityNodeInfo to publish,
-     * and Compose stashes it in an extras bundle no service of that era
-     * reads.
+     * framework getter arrived in API 28 against kaya's floor of 26, and
+     * below it the honest answer is false: there was no heading bit to
+     * publish, and Compose stashes it in an extras bundle no service of
+     * that era reads.
      */
     private fun kayaAxHeading(info: android.view.accessibility.AccessibilityNodeInfo?): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info?.isHeading == true
@@ -5077,26 +4513,11 @@ object KayaCompose {
     }
 
     /**
-     * THE expect_menu_symbol READ (docs/styling-plan.md D6): the
-     * semantic name the item's REAL row carries, off the merged
-     * semantics tree — the post-merge node a service focuses and speaks.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]).
-     *
-     * WHY THIS AND NOT THE MODEL: answering from `KayaMenuItem.symbol`
-     * would make the verb agree with itself and pass with nothing
-     * drawn. What is read is the content description on the row's
-     * merged node, which got there from the [Icon] the lowering drew.
-     *
-     * WHY THE ROW HAS TO BE PRESENTED FIRST: Compose composes a
-     * DropdownMenu's content ONLY while it is open, so an overflow row
-     * nobody is looking at does not exist in any tree. The read drives
-     * the same presentation state the ⋮ tap drives
-     * ([kayaPresentMenuRow]) and reads what got composed.
-     *
-     * TOTAL: every failure is a short sentence and a retryable
-     * non-match, never an exception. The step wrapper re-runs it every
-     * 20ms, which also absorbs the frame the presentation needs.
+     * THE expect_menu_symbol READ (docs/styling-plan.md D6): the content
+     * description on the row's MERGED node, not `KayaMenuItem.symbol`,
+     * which would agree with itself. THE ROW MUST BE PRESENTED FIRST —
+     * Compose composes a DropdownMenu's content only while it is open —
+     * so this drives the same state the ⋮ tap does. MAIN THREAD ONLY.
      */
     private fun kayaMenuSymbolRead(activity: ComponentActivity, path: String): String {
         val item = kayaResolveMenuPath(path)?.first ?: return "no such item"
@@ -5171,12 +4592,10 @@ object KayaCompose {
 
     /**
      * The tagged node for a materialized menu affordance, across every
-     * window this host can be showing one in: the activity's own tree
-     * (the bar), then each open menu popup.
-     *
-     * MERGED trees only — [kayaAxFind]'s rule. The row's description
-     * and its tag land on the same merged node because the row merges
-     * its descendants.
+     * window this host can show one in: the activity's tree, then each
+     * open menu popup. MERGED trees only ([kayaAxFind]'s rule) — the
+     * row's description and its tag land on one node because the row
+     * merges its descendants.
      */
     private fun kayaMenuRowNode(activity: ComponentActivity, tag: String): SemanticsNode? {
         kayaComposeRoot(activity.window.decorView)?.let { view ->
@@ -5193,12 +4612,10 @@ object KayaCompose {
 
     /**
      * Why no row was found — every input this reader weighed, because
-     * "not composed" has three quite different causes here and the
-     * sentence a reader chases has to tell them apart: the menu was
-     * never presented, it was presented but the row is one drill deeper
-     * than this arm jumped, or the lowering stopped tagging its rows.
-     * Printed only after the step's whole deadline, by which time the
-     * frame excuse is gone.
+     * "not composed" has three causes it must tell apart: never
+     * presented, presented but one drill deeper than this arm jumped, or
+     * the lowering stopped tagging its rows. Printed only after the
+     * step's whole deadline, when the frame excuse is gone.
      */
     private fun kayaMenuRowMissing(item: KayaMenuItem): String =
         "no composed row carries " + kayaMenuTag(item.id) +
@@ -5211,14 +4628,10 @@ object KayaCompose {
             "while its menu is presented"
 
     /**
-     * The invariant the BARE expect_toolbar step asserts, over this
-     * backend's `<promoted found in the real chrome>/<promoted in the
-     * catalog>/<items the chrome holds>/<remainder's home>` reading.
-     * MIRRORED FROM harness.rs's `toolbar_chrome_fits` SENTENCE FOR
-     * SENTENCE — keep the words identical. null means it fits; the
-     * failure NAMES THE MEASURED NUMBERS, which the pass observation
-     * cannot, since k is the platform's own and the scene is compared
-     * byte-for-byte on every lane.
+     * The invariant the BARE expect_toolbar step asserts. MIRRORED FROM
+     * harness.rs's `toolbar_chrome_fits` SENTENCE FOR SENTENCE — keep
+     * the words identical. Null means it fits; the failure NAMES THE
+     * MEASURED NUMBERS, which the byte-compared pass observation cannot.
      */
     private fun kayaToolbarChromeFits(spelling: String): String? {
         val homes = listOf("menubar", "more", "overflow", "none")
@@ -5244,15 +4657,11 @@ object KayaCompose {
     }
 
     /**
-     * The composed `TopAppBar` — THE CHROME, and only it.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]).
-     *
-     * Deliberately NOT [kayaMenuRowNode]'s search, which also walks
-     * every open menu popup: a promoted button that had fallen into the
+     * The composed `TopAppBar` — THE CHROME, and only it. MAIN THREAD
+     * ONLY. Deliberately NOT [kayaMenuRowNode]'s search, which also
+     * walks every open menu popup: a promoted button fallen into the
      * overflow would be "found" by the wider walk, and WHERE the button
-     * is is the whole question. The bar is in the activity's own
-     * window; a `DropdownMenu` is a separate one.
+     * is is the whole question.
      */
     private fun kayaToolbarNode(activity: ComponentActivity): SemanticsNode? {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
@@ -5260,16 +4669,11 @@ object KayaCompose {
     }
 
     /**
-     * THE TITLE THE CHROME REALLY DREW, off the merged semantics node —
-     * or null when this window composed no title node at all.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]).
-     *
-     * THE CALLER MUST PAIR IT WITH [kayaWindowHasChrome]: null means
-     * both "this window has no bar and never should have" and "the bar
-     * is gone", and only the MODEL's catalog condition tells them
-     * apart. A read answering "no bar, so nothing to check" from a
-     * failed lookup goes vacuous the first time the chrome breaks.
+     * THE TITLE THE CHROME REALLY DREW, off the merged semantics node,
+     * or null when this window composed no title node. MAIN THREAD ONLY.
+     * THE CALLER MUST PAIR IT WITH [kayaWindowHasChrome]: null means both
+     * "no bar and never should have" and "the bar is gone", and only the
+     * MODEL's catalog condition tells those apart.
      */
     private fun kayaChromeTitle(activity: ComponentActivity): String? {
         val bar = kayaToolbarNode(activity) ?: return null
@@ -5287,17 +4691,11 @@ object KayaCompose {
     private fun kayaWindowHasChrome(): Boolean = KayaSceneModel.menubar.isNotEmpty()
 
     /**
-     * What the chrome HOLDS: every affordance under the bar, in tree
-     * order, one node per thing a service can focus.
-     *
-     * An affordance is a node carrying `SemanticsActions.OnClick` — the
-     * bar's title is a `Text` and never appears. In a MERGED tree a
-     * node that merges its descendants has no children, so a button
-     * contributes exactly one entry and the icon inside it cannot be
-     * double-counted.
-     *
-     * THE COUNT INCLUDES THE ⋮ ANCHOR, which really is one of the bar's
-     * press targets. A bar that lost its promoted buttons still holds 1.
+     * What the chrome HOLDS: every node under the bar carrying
+     * `SemanticsActions.OnClick`, in tree order. In a MERGED tree a node
+     * that merges its descendants has no children, so a button
+     * contributes exactly one entry. THE COUNT INCLUDES THE ⋮ ANCHOR, so
+     * a bar that lost its promoted buttons still holds 1.
      */
     private fun kayaToolbarAffordances(node: SemanticsNode, depth: Int = 0): List<SemanticsNode> {
         if (depth > 64) return emptyList()
@@ -5313,18 +4711,11 @@ object KayaCompose {
     }
 
     /**
-     * EVERY SECTION SWITCHER ROW THE BAR REALLY COMPOSED, in tree order,
-     * each reduced to the two things the verb asks about — and each read
-     * off the MERGED node a TalkBack user focuses.
-     *
-     * BOTH HALVES COME FROM THE RENDER: the TITLE is
-     * [NavigationBarItem]'s composed label slot, the SYMBOL the
-     * `ContentDescription` [KayaSymbolIcon]'s [Icon] put there. NEITHER
-     * IS [KayaSection]'s field beside them — answering from those makes
-     * the verb agree with itself.
-     *
-     * The tag is on EVERY row, symbol or not: "the row is there and
-     * drew no icon" and "no row is there" are different measurements.
+     * EVERY SECTION SWITCHER ROW THE BAR REALLY COMPOSED, in tree order.
+     * BOTH HALVES COME FROM THE RENDER — the label slot and the icon's
+     * `ContentDescription`, never [KayaSection]'s own fields. The tag is
+     * on EVERY row: "drew no icon" and "no row is there" are different
+     * measurements.
      */
     private fun kayaSectionRows(activity: ComponentActivity): List<SemanticsNode> {
         val view = kayaComposeRoot(activity.window.decorView) ?: return emptyList()
@@ -5350,36 +4741,11 @@ object KayaCompose {
     }
 
     /**
-     * One property off a section row's SUBTREE, not off its own node —
-     * and this is a MEASURED shape, not defensive coding.
-     *
-     * WHAT WAS MEASURED (emulator, 2026-08-17). The row's MERGED node —
-     * the one a TalkBack user focuses, and the tree every other read in
-     * this file uses — carries the label and nothing of the icon:
-     *
-     *     keys Role|OnClick|Focused|RequestFocus|Selected|TestTag|Text|…
-     *
-     * no `ContentDescription` at all, for a bar that was drawing icons
-     * (the model held `Feed=20/home`, `Archive=17/star`, both resolving
-     * to real ImageVectors). In the UNMERGED tree the icon is right
-     * there under the tagged row:
-     *
-     *     [kaya:section#7 cd=null txt=null role=Tab]
-     *       [null cd=null txt=Feed role=null]
-     *       [null cd=null txt=null role=null]
-     *         [null cd=home txt=null role=Image]
-     *
-     * So Material3's NavigationBarItem does not carry its icon slot's
-     * description up into the selectable's merged node — which is a
-     * reasonable thing for it to do (a tab that announced "home, Feed"
-     * says the same thing twice) and it means the merged tree simply
-     * does not contain this observation.
-     *
-     * The answer is therefore the first one the row's UNMERGED subtree
-     * publishes. That is still entirely the render — the semantics node
-     * [KayaSymbolIcon]'s [Icon] created — and still not
-     * [KayaSection.symbol] beside it, which is the field a wrong decode
-     * fills with garbage while every lane stays green.
+     * One property off a section row's SUBTREE, a MEASURED shape:
+     * NavigationBarItem does not carry its icon slot's description into
+     * the merged node, so a bar drawing icons has NO ContentDescription
+     * where a TalkBack user focuses (2026-08-17). The answer is the
+     * first the UNMERGED subtree publishes — the render, not the model.
      */
     private fun kayaSectionProp(
         node: SemanticsNode,
@@ -5406,15 +4772,10 @@ object KayaCompose {
 
     /**
      * THE expect_section_symbol READ: the semantic name the REAL
-     * switcher row titled [title] draws.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]) — [kayaAxFind]'s
-     * rule; Compose owns its semantics tree from the thread that lays
-     * out.
-     *
-     * TOTAL, like [kayaToolbarItemRead]: every failure is a short
-     * measured sentence and a retryable non-match. No presentation step
-     * is needed — a bottom bar is composed as long as the sections are.
+     * switcher row titled [title] draws. MAIN THREAD ONLY, and TOTAL
+     * like [kayaToolbarItemRead] — every failure is a short measured
+     * sentence and a retryable non-match. No presentation step: a bottom
+     * bar is composed as long as the sections are.
      */
     private fun kayaSectionSymbolRead(activity: ComponentActivity, title: String): String {
         val rows = kayaSectionRows(activity)
@@ -5432,12 +4793,10 @@ object KayaCompose {
         if (described.isEmpty()) {
             // The row composed and nothing in its subtree publishes a
             // content description. It deliberately does NOT say whether
-            // the app asked for a symbol — this reader cannot tell "none
-            // declared" from "declared and never lowered", and a
-            // diagnostic may only print what it measured (invariant 3).
-            // The subtree's size rides the sentence, because "the row
-            // composed empty" and "the row composed and the icon slot
-            // drew nothing" are different bugs.
+            // the app asked for a symbol: this reader cannot tell "none
+            // declared" from "declared and never lowered" (invariant 3).
+            // The subtree's size rides the sentence, because a row that
+            // composed EMPTY is a different bug.
             return "no icon on the section row (it has ${hit.children.size} child nodes)"
         }
         if (!isSymbolName(described)) {
@@ -5464,22 +4823,11 @@ object KayaCompose {
     }
 
     /**
-     * THE expect_toolbar READ on this backend: `<promoted found in the
-     * real chrome>/<promoted in the catalog>/<items the chrome
-     * holds>/<remainder's home>`.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]).
-     *
-     * The first number walks the COMPOSED bar's affordances in tree
-     * order and advances through the promoted list as their tags match,
-     * so a bar holding the right set in the WRONG SEQUENCE does not
-     * count. The second is the promotion list itself. TWO DIFFERENT
-     * SIDES on purpose — an answer computed once and reported twice
-     * agrees with itself. Delete the `actions` slot's body and this
-     * reads `0/2/1/…`.
-     *
-     * The remainder's home is MEASURED too — the ⋮ anchor's tag, found
-     * in the bar or not — rather than named from the model.
+     * THE expect_toolbar READ: `<promoted in the chrome>/<promoted in
+     * the catalog>/<items held>/<remainder's home>`, MAIN THREAD ONLY.
+     * The first number walks the COMPOSED bar in tree order, so a right
+     * set in the WRONG SEQUENCE does not count. TWO DIFFERENT SIDES on
+     * purpose — one answer reported twice agrees with itself.
      */
     private fun kayaToolbarChromeRead(activity: ComponentActivity): String {
         val promoted = kayaPromotedActions()
@@ -5507,35 +4855,11 @@ object KayaCompose {
     }
 
     /**
-     * THE expect_toolbar_item READ on this backend: one aspect of the
-     * real bar button, off the MERGED semantics tree — the post-merge
-     * node a TalkBack user focuses, which is the same surface
-     * [kayaMenuSymbolRead] and [kayaAxRead] consult.
-     *
-     * MAIN THREAD ONLY (callers go through [onUi]).
-     *
-     * WHAT IS READ, and from where:
-     * - PRESENCE: the node tagged `kaya:menu#<id>` inside the bar's own
-     *   subtree. NOT the promotion list, which is what is being checked.
-     * - THE SYMBOL: the content description on that node, which got
-     *   there from the [Icon] [KayaSymbolIcon] drew.
-     * - ENABLEMENT: `SemanticsProperties.Disabled` on that node, which
-     *   `IconButton(enabled = …)` publishes through
-     *   `Modifier.clickable` — one tree-hop from what a service is
-     *   told, so a lowering keeping its own enablement copy fails here
-     *   while `expect_menu`, which reads the catalog, still passes.
-     *
-     * THE ONE LIMIT: the ADDRESS is resolved through the catalog, not
-     * read off the button. An icon-only bar button publishes the
-     * SYMBOL's name as its accessible name and never the item's label,
-     * so there is no rendered "Save" to match — and adding the label to
-     * that description is a measured trap: [kayaMenuSymbolRead] rejects
-     * anything outside the twenty symbol names, so `expect_menu_symbol`
-     * on a promoted item would go red
-     * (docs/chrome/toolbar-android.md §6).
-     *
-     * TOTAL: every failure is a short sentence naming what was
-     * measured, and a retryable non-match rather than an exception.
+     * THE expect_toolbar_item READ, off the MERGED tree: PRESENCE from
+     * the node tagged `kaya:menu#<id>` in the bar's subtree (never the
+     * promotion list, which is what is checked), the SYMBOL from its
+     * content description, ENABLEMENT from `Disabled`. The ADDRESS comes
+     * through the catalog (docs/chrome/toolbar-android.md §6).
      */
     private fun kayaToolbarItemRead(
         activity: ComponentActivity,
@@ -5621,18 +4945,11 @@ object KayaCompose {
     }
 
     /**
-     * Cut one script LINE into statements at `;` — the newline stand-in
-     * for transports that cannot carry a newline, which on this platform
-     * is the intent extra every leg arrives in.
-     *
-     * QUOTE-AWARE, because an expected string is whatever the app puts
-     * on screen and kaya's own asset miss sentence carries a semicolon.
-     * Same rule as `split_statements` in crates/kaya/src/harness.rs and
-     * `kayaSplitStatements` in swift/KayaSwiftUI.swift; the three are
-     * held equal by tools/scenes/assets.steps.
-     *
-     * A `"` toggles, so a statement must have BALANCED QUOTES;
-     * tools/check-steps.py refuses one that does not.
+     * Cut one script LINE into statements at `;`, the newline stand-in
+     * for the intent extra every leg arrives in. QUOTE-AWARE, because
+     * kaya's asset miss sentence carries a semicolon; harness.rs's
+     * `split_statements` and KayaSwiftUI's `kayaSplitStatements` are the
+     * other two. BALANCED QUOTES required (tools/check-steps.py).
      */
     private fun kayaSplitStatements(line: String): List<String> {
         val out = ArrayList<String>()
@@ -5657,35 +4974,20 @@ object KayaCompose {
     private const val RETRY_PERIOD_NS = RETRY_PERIOD_MS * 1_000_000
 
     /**
-     * A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH, not on a
-     * frame — the reason SAVE_PANEL_TRIES already spends 5s on the save
-     * panel's own reader. DocumentsUI is another process, and the FIRST
-     * dialog a scene opens pays its COLD start while every later one is
-     * warm, so the one step that must absorb a cross-process launch was
-     * the one given the frame-sized 5s deadline.
-     *
-     * Measured on the android lane 2026-08-30 (docs/traps.md), save-jvm
-     * under the full matrix: OPEN_DOCUMENT Displayed +4s603ms cold and
-     * a11y-readable at 6983ms — 511ms past the budget — while the two
-     * CREATE_DOCUMENT panels after it were Displayed in 160ms and 74ms
-     * and passed. So the leg was red over a picker that worked, and the
-     * verb that fails is whichever one happens to be first in the file.
-     *
-     * Shaped like expect_ax's own extension below rather than a bigger
-     * number for every step: it is spent only while a dialog arm is
-     * actually missing its dialog, and it stays far under STEP_CEILING.
+     * A DIALOG THAT IS NOT UP YET IS WAITING ON AN APP LAUNCH, not a
+     * frame: the FIRST dialog a scene opens pays DocumentsUI's COLD
+     * start (measured 2026-08-30, docs/traps.md — a11y-readable at
+     * 6983ms against a 5s budget, warm panels after it at 160ms and
+     * 74ms). Spent only while a dialog arm is missing its dialog.
      */
     private const val DIALOG_LAUNCH_BUDGET_NS = 20_000_000_000L
 
     /**
-     * THE CEILING ON ONE STEP, HOP INCLUDED — harness.rs's
-     * STEP_CEILING, the same number in all three harnesses
-     * (tools/check-harness-ceiling.py). The retry deadline above is read only
-     * AFTER a step returns and every step blocks in `onUi`'s
-     * `done.await()`, so a saturated UI thread answers nothing and the
-     * leg prints no verdict at all until the runner kills it. Measured
-     * on four platforms 2026-08-24
-     * (docs/measurements/choke-*-2026-08-24.txt).
+     * THE CEILING ON ONE STEP, HOP INCLUDED — one number in all three
+     * harnesses (tools/check-harness-ceiling.py). The retry deadline
+     * above is read only AFTER a step returns and every step blocks in
+     * `onUi`, so a saturated UI thread prints no verdict at all
+     * (measured 2026-08-24, docs/measurements/choke-*-2026-08-24.txt).
      */
     private const val STEP_CEILING_MS = 60_000L
 
@@ -5701,18 +5003,10 @@ object KayaCompose {
 
     /**
      * ANDROID'S ONE EXTRA HARNESS KNOB: `KAYA_RECREATE_AFTER=<n>` drives
-     * a REAL Activity recreation after the n-th statement, and the rest
-     * of the scene then runs against the re-attached surface.
-     *
-     * NOT A `.steps` VERB, deliberately — recreation exists on no other
-     * platform and a shared verb would need four stubs (docs/deferred.md's
-     * mount entry, "the recreation PROOF is android-only"). The lane wires
-     * it as an intent extra beside KAYA_SELFTEST_SCRIPT.
-     *
-     * The statement it fired after is LOGGED WITH ITS TEXT, and
-     * tools/android/run-emulator.py greps for that exact sentence: a
-     * scene edit that shifts the count then fails naming both sides
-     * instead of silently recreating somewhere harmless.
+     * a REAL Activity recreation after the n-th statement. Not a
+     * `.steps` verb — recreation exists on no other platform
+     * (docs/deferred.md's mount entry). The statement is LOGGED WITH ITS
+     * TEXT, which run-emulator.py greps for.
      */
     private fun recreateAfter(): Int =
         System.getenv("KAYA_RECREATE_AFTER")?.toIntOrNull()?.takeIf { it > 0 } ?: 0
@@ -5763,18 +5057,11 @@ object KayaCompose {
     }
 
     /**
-     * THE SECOND-MOUNT WITNESS, and the reason it counts THREADS. A
-     * re-attach that started a second pump or a second script runner is
-     * invisible to every assertion a scene can make: two pumps drain the
-     * one core and apply the same batches, and two runners publish the
-     * same green verdict of which the lane reads the first (measured
-     * 2026-08-27 — the unfixed tree printed two `KAYA_HARNESS: epoch`
-     * lines and the leg would still have read OK). So the process's own
-     * thread table is the witness.
-     *
-     * BOUNDED-SETTLE, not a snapshot: a thread on its way out is not the
-     * defect, and the re-attach does not wait for anything to finish
-     * leaving. A twin still there when the settle runs out is.
+     * THE SECOND-MOUNT WITNESS, counting THREADS: a re-attach that
+     * started a second pump or runner is invisible to every assertion a
+     * scene can make, since two runners publish the same green verdict
+     * (measured 2026-08-27). BOUNDED-SETTLE — a thread on its way out is
+     * not the defect; a twin still there at the end is.
      */
     private fun kayaSecondMountThreads(): String? {
         val singletons = listOf("kaya-compose-pump", "kaya-selftest", "kaya-app")
@@ -5804,11 +5091,9 @@ object KayaCompose {
     /**
      * The sentence a wedged step ends its run with — harness.rs's
      * `wedge_verdict` and KayaSwiftUI.swift's `kayaWedgeVerdict` are the
-     * same text. It prints only what it measured (which step, how long
-     * ago, that nothing came back) and says out loud what it cannot
-     * tell apart. The steps that already failed are not repeated here:
-     * each was printed the moment it became final, which is what leaves
-     * them in the log when a run ends before its verdict.
+     * same text. It prints only what it measured and says out loud what
+     * it cannot tell apart. Steps that already failed are not repeated:
+     * each was printed the moment it became final.
      */
     private fun wedgeVerdict(step: String, waitedMs: Long): String =
         "KAYA_SELFTEST: FAILED (no verdict — the harness entered step $step " +
@@ -5822,12 +5107,9 @@ object KayaCompose {
 
     /**
      * The thread that makes those two ceilings real. NOT the harness
-     * thread: the whole failure class is the harness thread stuck
-     * inside a call that never returns, so the only thread that can
-     * report it is one that never enters a step.
-     *
-     * `halt`, never `exit`: shutdown hooks run on a thread pool this
-     * process can no longer schedule reliably, and the Activity's own
+     * thread: the failure class IS the harness thread stuck in a call
+     * that never returns. `halt`, never `exit` — shutdown hooks run on a
+     * pool this process can no longer schedule, and the Activity's
      * teardown wants the UI thread that is not answering.
      */
     private class StepWatchdog(private val ceilingMs: Long) {
@@ -5920,12 +5202,10 @@ object KayaCompose {
                 KayaVTrace.step(statements, line)
                 // The observation contract (harness.rs is the norm):
                 // every expect is a BOUNDED RETRY — each verb case
-                // appends exactly one failure on a miss, so the
-                // wrapper retracts it and re-runs the case until it
-                // passes or the deadline lands the last failure
-                // text. Actions never re-run; the FIRST expect
-                // doubles as the scene-ready wait (scripts open
-                // with one).
+                // appends exactly one failure on a miss, the wrapper
+                // retracts it and re-runs until it passes or the
+                // deadline lands the last text. Actions never re-run;
+                // the FIRST expect doubles as the scene-ready wait.
                 val stepStart = System.nanoTime()
                 var stepDeadline = stepStart + 5_000_000_000L
                 var retryStep = true
@@ -6159,13 +5439,11 @@ object KayaCompose {
                     "expect" -> {
                         val want = quoted(parts.drop(2))
                         // The target kind picks the observation —
-                        // harness.rs's routing.
-                        //
-                        // THE TEXT KINDS READ THE WIDGET, not the model
-                        // mirror: `TextFieldState` IS what the field
-                        // renders from, and a model read could not see
-                        // a native undo that moved the widget and not
-                        // yet the mirror.
+                        // harness.rs's routing. THE TEXT KINDS READ THE
+                        // WIDGET, not the model mirror: `TextFieldState`
+                        // IS what the field renders from, and a model
+                        // read could not see a native undo that moved
+                        // the widget and not yet the mirror.
                         val got = onUi(activity) {
                             if (parts[1].startsWith("textarea"))
                                 target(parts[1], "textarea", KayaSceneModel.textareas)?.let {
@@ -6286,12 +5564,9 @@ object KayaCompose {
                     }
                     "expect_column_edges" -> {
                         // The uniform GEOMETRY claim, both halves: the
-                        // cells' leading edges (recorded in dp, window
-                        // space, by the render's position readers —
-                        // kaya's own header cells included, since this
-                        // backend composes the header) form exactly N
-                        // clusters within two units, AND the table
-                        // spans its assigned track — the regression a
+                        // cells' leading edges form exactly N clusters
+                        // within two units, AND the table spans its
+                        // assigned track — the regression a
                         // content-hugging layout slips past every
                         // model-side observable.
                         val want = parts.getOrNull(2)?.toIntOrNull() ?: -1
@@ -6401,15 +5676,13 @@ object KayaCompose {
                                         "${read.viewportRight.toInt()}dp)"
                                 )
                             else -> {
-                                // The ink in the CONTENT's own space,
-                                // which is the frame the sentences below
-                                // name: the live offset is added back, so
-                                // a table read after a scroll is measured
+                                // The ink in the CONTENT's own space:
+                                // the live offset is added back, so a
+                                // table read after a scroll is measured
                                 // where its columns were laid out rather
                                 // than convicted of the displacement the
-                                // reader asked for (ruled 2026-08-29).
-                                // At rest the offset is 0 and this is the
-                                // table's own space, as before.
+                                // reader asked for. At rest the offset
+                                // is 0.
                                 val complaint = kayaTableHorizontalComplaint(
                                     read.drawn,
                                     read.content,
@@ -6450,16 +5723,13 @@ object KayaCompose {
                         if (off != null) failures.add("header_click: $off")
                     }
                     "expect_window" -> {
-                        // THE FIRST VISIBLE ROW AND THE DECLARED
-                        // TOTAL (docs/virtualization-plan.md §5; the
-                        // realized count left the verb 2026-08-25 — a
-                        // band width is a viewport metric). The
-                        // WINDOWED tier here is the declared table, and
-                        // it is asked for the row a reader can see, off
-                        // the edges it laid out. A For no tier of this
-                        // backend windows realizes the whole collection
-                        // and its first row is visible at rest, which
-                        // is what "0 n" says — true, not a stub.
+                        // THE FIRST VISIBLE ROW AND THE DECLARED TOTAL
+                        // (docs/virtualization-plan.md §5). The WINDOWED
+                        // tier is the declared table, asked for the row
+                        // a reader can see off the edges it laid out. An
+                        // unwindowed For realizes the whole collection
+                        // and its first row is visible at rest, which is
+                        // what "0 n" says — true, not a stub.
                         val want = parts.drop(2).joinToString(" ")
                         val got = onUi(activity) {
                             target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
@@ -6482,13 +5752,11 @@ object KayaCompose {
                     }
                     "scroll_to_row" -> {
                         // The core maps the KEY to an index in the
-                        // collection's current order and the tier
-                        // scrolls that row to the viewport's TOP. An
-                        // action, silent like click: the expect_window
-                        // after it is the observable. Addresses the ROW,
-                        // so an unrealized row scrolls exactly like a
-                        // realized one — the band moves first and the
-                        // park is honoured by the correction cycle.
+                        // current order and the tier scrolls that row to
+                        // the viewport's TOP. An action, silent like
+                        // click. Addresses the ROW, so an unrealized row
+                        // scrolls exactly like a realized one — the band
+                        // moves first, the park follows the correction.
                         val rawKey = parts.drop(2).joinToString(" ")
                         val key = if (rawKey.startsWith("\"")) quoted(parts.drop(2)) else rawKey
                         val off = onUi(activity) {
@@ -6551,13 +5819,11 @@ object KayaCompose {
                     }
                     "expect_dirty" -> {
                         // THE UNSAVED-WORK MARK (docs/dirty-plan.md D5).
-                        // Every other backend reads its CHROME; HERE
-                        // THE MODEL IS THE HONEST ANSWER and that is
-                        // the stated carve-out (D4), because this
-                        // platform has no chrome to publish the mark
-                        // in. Not vacuous: the value came over the wire
-                        // through the apply arm, so a dropped prop
-                        // fails here.
+                        // Every other backend reads its CHROME; HERE THE
+                        // MODEL IS THE HONEST ANSWER, the stated
+                        // carve-out (D4), since this platform has no
+                        // chrome to publish it in. Not vacuous — the
+                        // value came over the wire.
                         val target = parts.getOrNull(1) ?: ""
                         val explicit = target.startsWith("window#")
                         val wid =
@@ -6644,16 +5910,12 @@ object KayaCompose {
                         // and is useless.
                         val state = kayaFileDialogState()
                         if (state == null) {
-                            // THE CENSUS ONLY ON THE LAST LOOKS. This arm
-                            // re-runs until the deadline and the wrapper
-                            // RETRACTS every earlier failure, so an
-                            // UNSEEN logged on the first look would be
-                            // about a dialog still coming up and a census
-                            // built on it would be an IPC per window
-                            // nobody ever reads. The margin is the
-                            // wrapper's own retry period, so the look
-                            // whose sentence is PRINTED always carries
-                            // one.
+                            // THE CENSUS ONLY ON THE LAST LOOKS: this
+                            // arm re-runs until the deadline and the
+                            // wrapper RETRACTS every earlier failure, so
+                            // an UNSEEN on the first look would be about
+                            // a dialog still coming up. The margin is the
+                            // wrapper's own retry period.
                             stepDeadline = maxOf(
                                 stepDeadline,
                                 stepStart + DIALOG_LAUNCH_BUDGET_NS,
@@ -6682,14 +5944,12 @@ object KayaCompose {
                         }
                     }
                     "expect_save_dialog" -> {
-                        // The REAL save panel, read out of DocumentsUI's
-                        // own tree: the directory it is showing AND the
-                        // name in its name field. The name half is the
-                        // one that catches a backend which ignored the
-                        // name it was told — that saves under the
-                        // SUGGESTED name, where every byte assertion
-                        // downstream still passes and points at the
-                        // wrong file.
+                        // The REAL save panel, out of DocumentsUI's own
+                        // tree: its directory AND the name in its name
+                        // field. The name half catches a backend that
+                        // ignored the name it was told, which saves under
+                        // the SUGGESTED one while every byte assertion
+                        // downstream passes on the wrong file.
                         val wantSaveDir = kayaExpandPath(parts.getOrNull(1) ?: "")
                         val wantSaveName = parts.getOrNull(2) ?: ""
                         if (wantSaveDir.contains("$")) {
@@ -6934,23 +6194,10 @@ object KayaCompose {
                     }
                     "back" -> {
                         // Drive the SAME path the system back dispatch
-                        // runs (the BackHandler's body), so
-                        // interception and the post-fact reconcile fire
-                        // as a real gesture would. Silent, like click.
-                        //
-                        // AND ONLY WHERE IT WOULD RUN. With both panes
-                        // on screen the BackHandler is DISABLED and the
-                        // gesture goes to the system, so calling
-                        // kayaUserBack regardless pops a detail that
-                        // covers nothing and blanks the trailing pane.
-                        //
-                        // Keyed on the SCAFFOLD ARRANGEMENT and not on
-                        // the handler's `enabled` expression: `enabled`
-                        // is computed during composition, this verb
-                        // posts straight to the UI thread, and a read
-                        // taken between a push and its recomposition
-                        // would refuse a pop it owed. Same truth value,
-                        // and its stale value is the harmless one.
+                        // runs — AND ONLY WHERE IT WOULD RUN, since with
+                        // both panes on screen the BackHandler is
+                        // DISABLED. Keyed on the SCAFFOLD ARRANGEMENT,
+                        // not the handler's composition-time `enabled`.
                         onUi(activity) {
                             if (KayaSceneModel.splitPresentation != "split") kayaUserBack()
                         }
@@ -7050,19 +6297,12 @@ object KayaCompose {
                                     "${axis.reach.toInt()} column px)")
                         }
                     }
-                    // THE THREE TEXT-RANGE READS, each going to the
-                    // platform for the half it can: SELECTION and the
-                    // field's own TEXT out of the merged semantics
-                    // tree, VIEWPORT geometry out of the field's
-                    // TextLayoutResult and ScrollState.
-                    //
-                    // HIGHLIGHT IS THE ONE WITH NO PLATFORM CHANNEL —
-                    // Android publishes no accessibility property
-                    // carrying a background span
-                    // (range-probe-android.md §4) — so it reads what
-                    // the DRAW SCOPE painted and never the declaration,
-                    // which would agree with the apply arm by
-                    // construction and pass with the paint deleted.
+                    // THE THREE TEXT-RANGE READS go to the platform for
+                    // the half it can. HIGHLIGHT IS THE ONE WITH NO
+                    // PLATFORM CHANNEL — Android publishes no
+                    // accessibility property carrying a background span
+                    // (range-probe-android.md §4) — so it reads what the
+                    // DRAW SCOPE painted, never the declaration.
                     "expect_highlights", "expect_selection" -> {
                         val want = quoted(parts.drop(2))
                         val got =
@@ -7076,14 +6316,11 @@ object KayaCompose {
                     }
                     "expect_revealed" -> {
                         // CONTAINMENT, never the viewport itself: how
-                        // much context a scroll leaves around a range is
-                        // native behaviour and differs per lane, while
-                        // "is my range on screen" is the same question
-                        // everywhere. The `offscreen` spelling is what
-                        // keeps this from being vacuous — a scene
-                        // asserts it BEFORE the reveal, so a document
-                        // short enough to be entirely visible fails
-                        // rather than passes.
+                        // much context a scroll leaves is native
+                        // behaviour, while "is my range on screen" is the
+                        // same question everywhere. The `offscreen`
+                        // spelling keeps this from being vacuous — a
+                        // scene asserts it BEFORE the reveal.
                         val want = parts[3]
                         val got = onUi(activity) {
                             kayaRevealedRead(activity, parts[1], parts[2])
@@ -7093,36 +6330,21 @@ object KayaCompose {
                     }
                     "compose" -> {
                         // The state a user is in mid-word with an IME,
-                        // which no other verb can reach: `type` is
-                        // printable ASCII by contract, precisely because
-                        // a composed character is an input-method
-                        // question and not a verb argument. This goes
-                        // through the field's own InputConnection —
-                        // `setComposingText`, the call an IME makes — so
-                        // the text is DISPLAYED, UNCOMMITTED and
-                        // invisible to the app, which is exactly the
-                        // state select_range must refuse to run over.
+                        // which no other verb reaches: `type` is
+                        // printable ASCII by contract. This goes through
+                        // the field's own InputConnection, so the text is
+                        // DISPLAYED, UNCOMMITTED and invisible to the
+                        // app — the state select_range must refuse.
                         kayaComposeMarkedText(activity, parts[1], quoted(parts.drop(2)))
                             ?.let { failures.add("compose: $it") }
                     }
                     "expect_title" -> {
                         // BOTH REAL MATERIALIZATIONS, never the model's
-                        // copy. A title lands on TWO surfaces here: the
-                        // Activity task label (recents, the switcher,
-                        // the platform ActionBar) and the composed
-                        // TopAppBar. Reading only one lets the other
-                        // drift — the android film of the editor caught
-                        // "notes" in the ActionBar over "untitled" in
-                        // the bar while all five title assertions
-                        // passed (docs/deferred.md).
-                        //
-                        // BOTH-AGREE rather than the bar alone: the
-                        // task label is the name this app answers to in
-                        // the switcher. The bar half is asserted IF AND
-                        // ONLY IF this window declares a catalog, which
-                        // is the exact condition KayaRoot composes the
-                        // bar on — measured from the model, never from
-                        // a failed node lookup (see kayaChromeTitle).
+                        // copy: a title lands on the task label AND the
+                        // composed TopAppBar, and reading one lets the
+                        // other drift (the android film caught "notes"
+                        // over "untitled" with all five title assertions
+                        // passing, docs/deferred.md).
                         val target = parts.getOrNull(1) ?: ""
                         val explicit = target.startsWith("window#")
                         val wid = if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1 else 0L
@@ -7172,19 +6394,12 @@ object KayaCompose {
                         }
                     }
                     "expect_typeface" -> {
-                        // THE RESOLVED FAMILY, off the real text nodes:
-                        // the font the SHAPER picked, named by its own
-                        // file's OpenType name table. NEVER THE REQUEST
-                        // — on this backend the two reads that look
-                        // right both echo it
-                        // (docs/styling/typeface-compose.md §2.1), and an
-                        // echo reports a perfect swap for a family the
-                        // device does not have.
-                        //
-                        // The family is a QUOTED string in the grammar
-                        // and the observation is byte-compared against
-                        // harness.rs, so the quotes come off here and
-                        // stay off in both sentences.
+                        // THE RESOLVED FAMILY, off the real text nodes,
+                        // named by the font's own OpenType name table.
+                        // NEVER THE REQUEST — the two reads that look
+                        // right both echo it, and an echo reports a
+                        // perfect swap for a family the device does not
+                        // have (docs/styling/typeface-compose.md §2.1).
                         val want = quoted(parts.drop(1))
                         val got = onUi(activity) { kayaResolvedTypeface() }
                         if (got == want) {
@@ -7209,12 +6424,10 @@ object KayaCompose {
                     }
                     // THE CANONICAL RASTER, asked of the CORE
                     // (docs/canvas-plan.md §7.1): every backend answers
-                    // the same way, because the point is that five
-                    // platforms' libkaya drew the same picture. The
-                    // probe carries the hash AND the two legible facts;
-                    // the hash verb compares the first and prints the
-                    // rest, since a hash on its own tells the next
-                    // reader nothing.
+                    // the same way, since the point is that five
+                    // platforms' libkaya drew one picture. The hash verb
+                    // compares the hash and prints the legible facts
+                    // beside it, which a hash alone cannot give.
                     "expect_drawing_hash", "expect_drawing" -> {
                         val want = quoted(parts.drop(2))
                         val probe = onUi(activity) {
@@ -7239,18 +6452,12 @@ object KayaCompose {
                         }
                     }
                     // WHICH SIZE THE RASTER IS (docs/canvas-plan.md
-                    // §3.2.1), asked of the CORE like the probe: the two
-                    // numbers being compared were produced on opposite
-                    // sides of the boundary — the TRACK is what this
-                    // backend measured and reported, the VIEWBOX is what
-                    // the guest declared.
-                    //
-                    // The only canvas read a size policy can move: the
-                    // hash and the ink bounds come from the CANONICAL
-                    // raster, which is taken at the viewbox by
-                    // definition, so a canvas that stretched a
-                    // viewbox-sized buffer into its track answers both of
-                    // them identically.
+                    // §3.2.1), asked of the CORE: the TRACK is what this
+                    // backend measured, the VIEWBOX what the guest
+                    // declared. The only canvas read a size policy can
+                    // move — the hash and ink bounds come from the
+                    // CANONICAL raster, taken at the viewbox, so a
+                    // stretched buffer answers those identically.
                     "expect_raster" -> {
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
@@ -7276,13 +6483,11 @@ object KayaCompose {
                         observed.add("frame $frames")
                     }
                     // THE BLIT, sampled off the window's own rendered
-                    // pixels (§7.2) — the one canvas read that fails
-                    // when the buffer never reached the platform's image
-                    // object, and the reason the hash is not the whole
-                    // story.
-                    // `"<x,y> ... = light <RRGGBB>/... dark <RRGGBB>/..."`
-                    // — both modes named, so the expectation does not
-                    // depend on the host's appearance (kayaInkForMode).
+                    // pixels (§7.2) — the one canvas read that fails when
+                    // the buffer never reached the platform's image
+                    // object. Both modes are named in the expectation, so
+                    // it does not depend on the host's appearance
+                    // (kayaInkForMode).
                     "expect_ink" -> {
                         val spec = quoted(parts.drop(2))
                         val halves = spec.split(" = ")
@@ -7324,11 +6529,10 @@ object KayaCompose {
                     "expect_inset" -> {
                         // The window content inset, MEASURED: the halved
                         // gap between the padding container's outer
-                        // extent and the offer inside it, in DP.
-                        // RELATIVE deliberately — absolute offers
-                        // cannot be byte-frozen across platforms
-                        // (docs/styling-plan.md D3). TWO FORMS:
-                        // `expect_inset N` reads the WINDOW's pair,
+                        // extent and the offer inside it, in DP, RELATIVE
+                        // because absolute offers cannot be byte-frozen
+                        // across platforms (docs/styling-plan.md D3).
+                        // `expect_inset N` is the WINDOW's pair,
                         // `expect_inset <target> N` a CONTAINER's own.
                         if (parts.size >= 3) {
                             val spec = parts[1]
@@ -7510,12 +6714,9 @@ object KayaCompose {
                                         // STRETCH FIRST, and alone: spanning
                                         // geometry is DEGENERATE — a child at
                                         // (0, inner) satisfies start, center
-                                        // and end too, so a stretched
-                                        // container can never classify by
-                                        // elimination. The positional modes
+                                        // and end too. The positional modes
                                         // classify only a container with a
-                                        // non-spanning child
-                                        // (tools/scenes/align.steps).
+                                        // non-spanning child.
                                         "stretch"
                                     } else {
                                         // Multi-match is ambiguity, and
@@ -7595,22 +6796,12 @@ object KayaCompose {
                     }
                     "expect_fills" -> {
                         // ONE VERB, TWO SUBJECTS (harness.rs
-                        // Step::ExpectFills).
-                        //
-                        // A CONTAINER's children span its content box —
-                        // the leftover-consumption half of the grow
-                        // contract, which shares (total-invariant) and
-                        // root_fills (root-level only) cannot see.
-                        //
-                        // A WIDGET spans the cell its weight earned:
-                        // kayaMainExtents is the CELL, so a control
-                        // drawing three lines tall inside a correct cell
-                        // splits the column right and renders small. An
-                        // overflow is not a leftover, so that test is
-                        // one-sided.
-                        //
-                        // The pass observation matches harness.rs
-                        // byte-for-byte in both cases.
+                        // Step::ExpectFills). A CONTAINER's children span
+                        // its content box — the leftover-consumption half
+                        // of the grow contract. A WIDGET spans the cell
+                        // its weight earned, so a control drawing small
+                        // inside a correct cell is caught; an overflow is
+                        // not a leftover, so that test is one-sided.
                         val isContainer = parts[1].startsWith("row") ||
                             parts[1].startsWith("column")
                         val slack = onUi(activity) {
@@ -7641,14 +6832,11 @@ object KayaCompose {
                                 val tracks = container.children
                                     .map { kayaMainExtents[it.id] }
                                 // THE BREADTH CLAUSE'S TWO NUMBERS. The
-                                // parent is looked up among the containers of
-                                // the OTHER kind, so a row in a row finds
-                                // nothing and the clause is skipped — only a
-                                // CROSSING container owes its parent's whole
-                                // breadth. The cross rect stays nullable
-                                // because an unrecorded one is not a zero:
-                                // reading it as one would claim "spans 0px"
-                                // about a container nobody measured.
+                                // parent is looked up among containers of the
+                                // OTHER kind, so a row in a row is skipped —
+                                // only a CROSSING container owes its parent's
+                                // breadth. The cross rect stays nullable: an
+                                // unrecorded one is not a zero.
                                 val crossParent =
                                     (if (isRow) KayaSceneModel.columns
                                     else KayaSceneModel.rows)
@@ -7663,24 +6851,17 @@ object KayaCompose {
                                     // its own box must span the track its
                                     // weight earned before its children can
                                     // span anything (docs/deferred.md's
-                                    // nested-container GAP,
-                                    // tools/scenes/align.steps). One-sided
-                                    // like the widget clause, and skipped
-                                    // where no track was recorded — the root,
-                                    // or a non-flex parent.
+                                    // nested-container GAP). One-sided, and
+                                    // skipped where no track was recorded.
                                     ownTrack > 0.0 && ownDrawn < ownTrack - 2.0 ->
                                         "draws ${Math.round(ownDrawn)}px of its own " +
                                             "${Math.round(ownTrack)}px track"
                                     // THE BREADTH CLAUSE (2026-08-22): a
-                                    // CROSSING container — a row in a column,
-                                    // a column in a row — spans its parent's
+                                    // CROSSING container spans its parent's
                                     // inner breadth under EVERY align mode.
-                                    // Its cross rect in the parent is already
-                                    // recorded for the classifier; skipped
-                                    // honestly when the parent is not a
-                                    // recorded container of the other kind
-                                    // (the root), or when either number is
-                                    // missing.
+                                    // Skipped honestly when the parent is not
+                                    // a recorded container of the other kind,
+                                    // or when either number is missing.
                                     parentInner > 0.0 && ownCross != null &&
                                         ownCross < parentInner - 2.0 ->
                                         "spans ${Math.round(ownCross)}px of its parent's " +
@@ -7752,35 +6933,22 @@ object KayaCompose {
                                             onUi(activity) { kayaAxDump(activity) }
                                     )
                                     // THE PROVIDER'S SILENCE IS ITS OWN
-                                    // VERDICT, ahead of the comparison: a
-                                    // read that got no AccessibilityNodeInfo
-                                    // measured no classification, so it must
-                                    // not print as one (see [KayaAxRead]).
-                                    // It also earns a longer leash, once per
-                                    // step: the disagreement outlived the
-                                    // whole 5s deadline in three straight
-                                    // matrix runs and resolved on its own in
-                                    // every solo run, so the retry is what
-                                    // absorbs it — and only the extended
-                                    // deadline turns this sentence into a
-                                    // failure, naming the state that was
-                                    // actually seen.
+                                    // VERDICT, ahead of the comparison: no
+                                    // AccessibilityNodeInfo measured no
+                                    // classification ([KayaAxRead]). It earns
+                                    // a longer leash once per step — the
+                                    // disagreement outlived the 5s deadline in
+                                    // three matrix runs, solo-green in every.
                                     !got.infoServed &&
                                         System.nanoTime() >= stepStart + 20_000_000_000L &&
                                         got.fallback == want -> {
                                         // THE LEASH EXPIRED WITH THE PROVIDER
-                                        // STILL SILENT, and the SEMANTICS
-                                        // TREE — the provider's own source —
-                                        // answers what the step asks. The
-                                        // observation stays byte-identical
-                                        // (invariant 6); the evidence
-                                        // downgrade is printed HERE, the
-                                        // channel the phone cuts already use
-                                        // for what a verdict cannot carry.
-                                        // Ruled by the maintainer 2026-08-16
-                                        // after the silence outlived the
-                                        // leash in two straight matrices,
-                                        // solo-green every time.
+                                        // STILL SILENT, and the SEMANTICS TREE
+                                        // — its own source — answers what the
+                                        // step asks. The observation stays
+                                        // byte-identical (invariant 6); the
+                                        // evidence downgrade is logged here
+                                        // (ruled 2026-08-16).
                                         Log.i(
                                             "kaya",
                                             "KAYA_HARNESS: ax ${parts[1]} served from " +
@@ -8149,16 +7317,12 @@ object KayaCompose {
                 )
                 val fault = KayaPresent.fault()?.toString(Charsets.UTF_8)
                 if (fault != null) {
-                    // THE CORE FAULTED: a guard caught an app misuse, or a
-                    // transaction died inside Scene::apply. Nothing after
-                    // this is applied, so the retry below is dead time and
-                    // every following step would fail at its own deadline
-                    // for a reason three removes from this one.
-                    //
-                    // The in-flight attempt is RETRACTED: it had not reached
-                    // its deadline, so it was never final, and a non-final
-                    // read printed next to the cause is what sends the next
-                    // reader after the wrong thing.
+                    // THE CORE FAULTED: nothing after this is applied, so
+                    // the retry below is dead time and every following step
+                    // would fail for a reason three removes from this one.
+                    // The in-flight attempt is RETRACTED — it never reached
+                    // its deadline, and a non-final read printed beside the
+                    // cause sends the next reader after the wrong thing.
                     while (failures.size > failuresBefore) failures.removeAt(failures.size - 1)
                     failures.add(fault)
                     Log.e("kaya", "KAYA_HARNESS: step-failed $fault")
@@ -8172,14 +7336,12 @@ object KayaCompose {
                     Thread.sleep(RETRY_PERIOD_MS)
                     retryStep = true
                 } else if (failures.size > failuresBefore) {
-                    // THE EVIDENCE MUST OUTLIVE THE PROCESS. `failures` is
-                    // named only by the verdict at the bottom, and an abort
-                    // before it — a core refusal, a panic in a later handler —
-                    // takes the whole list with it, leaving a crash with no
-                    // reason. So a failure is printed the moment it is FINAL:
-                    // an expect past its deadline, or any action, which never
-                    // retries. Spelled and placed as in harness.rs and
-                    // KayaSwiftUI.swift; check-verbs.py holds the three level.
+                    // THE EVIDENCE MUST OUTLIVE THE PROCESS: an abort before
+                    // the verdict takes `failures` with it and leaves a crash
+                    // with no reason. So a failure is printed the moment it is
+                    // FINAL — an expect past its deadline, or any action.
+                    // check-verbs.py holds this level with harness.rs and
+                    // KayaSwiftUI.swift.
                     for (i in failuresBefore until failures.size) {
                         Log.i("kaya", "KAYA_HARNESS: step-failed ${failures[i]}")
                     }
@@ -8265,39 +7427,19 @@ object KayaCompose {
 }
 
 /** The interpreter's render: the node tree as Compose declarations. */
-// The exposed-dropdown family (the select's dressed floor) is still
-// behind M3's experimental gate.
+// The exposed-dropdown family is still behind M3's experimental gate.
 /**
- * Guest-visible text uses LF on every platform (strings are compared
- * byte-for-byte across languages). NORMALIZE AT EVERY WRITE into the
- * model — user edits, the wire's property write, set_text, and the
- * platform-insertion half of the paste split — so reads need none.
- *
- * NOT on the DELIVERED half of the paste split: content handed to the
- * app's own paste hook crosses as a REPRESENTATION, and the mac and
- * GTK arms hand it over unnormalized too.
+ * Guest-visible text uses LF on every platform. NORMALIZE AT EVERY WRITE
+ * into the model, so reads need none — but NOT on the DELIVERED half of
+ * the paste split, where content crosses as a REPRESENTATION.
  */
-// THIS BACKEND STUBS NOTHING TODAY, so it carries no depthStub: an
-// unused private function fails tools/check-detekt.py. The next depth
-// slice writes it back in as a CALL, never a sentence —
-// tools/check-stubs.py reads the call, and its silence is bought by an
-// OPEN entry in docs/deferred.md (tools/lib/stub-ledger.py):
-//
-//     private fun depthStub(scene: String): Nothing =
-//         error("kaya: the $scene scene is not yet materialized on android")
 
 /**
- * THE BLIT'S BYTES (docs/canvas-plan.md §8): the core's premultiplied
- * RGBA8 as an ImageBitmap.
- *
- * `Bitmap.Config.ARGB_8888` IS RGBA IN MEMORY ORDER on Android — the
- * platform's own kN32 layout, R at byte 0 — and it is premultiplied by
- * default, so this arm swizzles nothing. `expect_ink` is what fails if
- * that ever stops being true.
- *
- * null for a zero-sized or short buffer, which is the declared-and-empty
- * case; the render keeps the node present either way
- * (tools/check-empty-child.py).
+ * THE BLIT'S BYTES (docs/canvas-plan.md §8). `Bitmap.Config.ARGB_8888`
+ * IS RGBA IN MEMORY ORDER on Android and premultiplied by default, so
+ * this arm swizzles nothing and `expect_ink` fails if that stops being
+ * true. Null for a short buffer — the render keeps the node present
+ * either way (tools/check-empty-child.py).
  */
 private fun kayaDrawingBitmap(bytes: ByteArray?, width: Int, height: Int): ImageBitmap? {
     if (bytes == null || width <= 0 || height <= 0) return null
@@ -8311,37 +7453,20 @@ private fun kayaDrawingBitmap(bytes: ByteArray?, width: Int, height: Int): Image
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 
-// ---- The native text-undo tier ------------------------------------
+// ---- The native text-undo tier (docs/undo-plan.md D1) ---------------
 //
-// TWO TIERS, ONE SURFACE (docs/undo-plan.md D1).
-//
-// §3a WAS ANSWERED BY MEASUREMENT HERE and the answer is the OPPOSITE of
-// the mac arm's: on Compose a native undo DOES emit the ordinary
-// text_changed, structurally rather than luckily —
-// `TextFieldState.text` IS snapshot state, `undoState.undo()` writes it,
-// and this backend emits from a snapshot observer, so there is no
-// separate commit path for an undo to bypass. Measured on
-// emulator-5558, foundation 1.7.5:
-//
-//     type "abc"                -> tfsObserved=4 canUndo=true
-//     undoState.undo()          -> tfsObserved=5 text=""   canUndo=false
-//     undoState.redo()          -> tfsObserved=6 text="abc"
-//     hardware Ctrl+Z           -> tfsObserved=5 text=""
-//     programmatic write "PROG" -> tfsObserved=4 text="PROG" canUndo=false
-//
-// So this arm does NOT write the node's text itself the way the mac one
-// must. It rides the ordinary channel and brackets it ledger-quiet, which
-// is precisely what Q2's flag was built for.
+// A NATIVE UNDO DOES EMIT THE ORDINARY text_changed HERE, the opposite
+// of the mac arm and structural: `undoState.undo()` writes the same
+// snapshot state this backend's observer emits from (measured,
+// emulator-5558, foundation 1.7.5). So this arm rides the ordinary
+// channel and brackets it ledger-quiet.
 
 /**
  * EVERY TOUCH OF `undoState`, in one place, so the file's experimental
- * opt-in stays a single annotation at the smallest scope covering it.
- *
+ * opt-in stays one annotation at the smallest scope covering it:
  * `undoState` and its five members are the ONLY
  * `@ExperimentalFoundationApi` surface this file uses at foundation
- * 1.7.5; `TextFieldState`, `edit {}`, `setTextAndPlaceCursorAtEnd`,
- * `BasicTextField(state=)`, `TextFieldLineLimits` and `decorator` are
- * all STABLE there.
+ * 1.7.5.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private object KayaUndoState {
@@ -8353,24 +7478,11 @@ private object KayaUndoState {
 }
 
 /**
- * KAYA WRITES A TEXT WIDGET: the model and the widget together, and D7 +
- * A3 with them.
- *
- * D7 is FREE here: `setTextAndPlaceCursorAtEnd` calls `commitEdit`,
- * which calls `TextUndoManager.clearHistory()`. The explicit
- * `clearHistory()` beside it is a measured no-op kept as the RULE'S
- * SPELLING, so a reader finds a call rather than an inference.
- *
- * A3 IS THE GUARD. Measured: even a no-op rewrite of identical text
- * clears the history (B6), so an app mirroring a field's text into a
- * signal and writing it back would lose the typing history on EVERY
- * KEYSTROKE. THE GUARD SITS IN FRONT OF THE WRITE, not the clear,
- * because here the write IS the clear.
- *
- * The model is assigned either way and assigned FIRST: KayaTextField's
- * observer reports what makes the two DIFFER, so a model lagging the
- * widget by one collector turn emits kaya's own write back to the app
- * as if the user had typed it.
+ * KAYA WRITES A TEXT WIDGET: the model and the widget together, D7 and
+ * A3 with them. D7 is FREE, and the explicit `clearHistory()` beside it
+ * is the RULE'S SPELLING. A3 IS THE GUARD IN FRONT OF THE WRITE, since
+ * even a no-op rewrite clears the history (B6). The model is assigned
+ * FIRST, or a lagging mirror emits kaya's write back as a user edit.
  */
 internal fun kayaWriteText(node: KayaNode, next: String) {
     node.text = next
@@ -8386,17 +7498,11 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
 
 // ---- Text ranges: the ONE place this file converts an offset ---------
 //
-// THE LOWERING PATH DOES NO ARITHMETIC: offsets arrive from the core
-// already in UTF-16 code units (docs/ranges-units.md §7).
-//
-// THE READING DIRECTION IS DIFFERENT AND DELIBERATE: a harness verb
-// compares one frozen string on five lanes, so a read must answer in the
-// PROTOCOL's unit — UTF-8 byte offsets.
-//
-// BOTH CONVERSIONS REFUSE A SPLIT CHARACTER RATHER THAN ROUNDING:
-// `String.substring` across a surrogate pair hands back a LONE
-// SURROGATE, and encoding that to UTF-8 yields a single `?` (0x3F) with
-// no error anywhere (docs/ranges-units.md §4, measured on the JVM).
+// THE LOWERING PATH DOES NO ARITHMETIC (offsets arrive in UTF-16 code
+// units) while a READ answers in the PROTOCOL's UTF-8 byte offsets
+// (docs/ranges-units.md §7). BOTH CONVERSIONS REFUSE A SPLIT CHARACTER:
+// `substring` across a surrogate pair hands back a LONE SURROGATE, which
+// encodes to a single `?` with no error anywhere (§4).
 
 /** A UTF-16 code-unit offset as a UTF-8 byte offset into the same text,
  * or -1 when the offset splits a character — which can only mean the
@@ -8423,13 +7529,10 @@ internal fun kayaUtf16Offset(text: String, byte: Int): Int {
 
 /**
  * A set of platform ranges in the harness's spelling:
- * `<start>:<end>=<covered text>` per range, `|`-joined, ascending.
- *
- * THE COVERED TEXT IS NOT DECORATION. Offsets alone let a wrong
- * lowering report its own wrong numbers back unharmed; the covered half
- * has NO ARITHMETIC in it — the platform slices its own string with the
- * range it is actually holding — so a backend forwarding byte offsets
- * as UTF-16 shows up as the wrong CHARACTERS.
+ * `<start>:<end>=<covered text>` per range, `|`-joined, ascending. THE
+ * COVERED TEXT IS NOT DECORATION: offsets alone let a wrong lowering
+ * report its own numbers back unharmed, while the covered half has NO
+ * ARITHMETIC in it and shows up as the wrong CHARACTERS.
  */
 internal fun kayaRangeSpelling(
     text: String,
@@ -8461,24 +7564,10 @@ internal fun kayaRangeSpelling(
 
 /**
  * SELECT one range — and REFUSE while an input method is composing (D4).
- *
- * THE REFUSAL ASKS THE PLATFORM, not the harness: `TextFieldState`
- * publishes the composing region, a state on no kaya channel, so
- * neither the app nor the core can see the race. Measured on this
- * backend (range-probe-android.md §5): a `state.edit {}` selection
- * while a composing region is live DESTROYS it — a half-typed word is
- * committed and its underline vanishes, an in-progress kana conversion
- * is force-committed.
- *
- * A NO-OP UNDER A NAMED REASON AND NOT A PANIC: the app that wants the
- * selection waits for the composition to end, which `text_changed`
- * announces anyway.
- *
- * ROUTE A (`edit { selection = }`) rather than the semantics
- * `SetSelection` action: the semantics route PRESERVES a composing
- * region, so it would move the selection mid-composition and the
- * refusal would still be owed. A SELECTION-ONLY `edit {}` leaves the
- * field's undo history intact (measured, §2).
+ * THE REFUSAL ASKS THE PLATFORM: an `edit {}` selection over a live
+ * composing region DESTROYS it (range-probe-android.md §5). A no-op
+ * under a named reason. Route A rather than the semantics
+ * `SetSelection`, which preserves the region and would still owe it.
  */
 internal fun kayaSelectRange(node: KayaNode, range: KayaRange) {
     val length = node.textState.text.length
@@ -8499,18 +7588,11 @@ internal fun kayaSelectRange(node: KayaNode, range: KayaRange) {
 }
 
 /**
- * REVEAL one range: scroll the textarea's own viewport until the range's
- * box is inside it.
- *
- * THE GEOMETRY IS THE PLATFORM'S — `TextLayoutResult.getBoundingBox`
- * over the layout `BasicTextField` handed out, plus the field's own
- * `ScrollState` — so nothing here models where text is. It scrolls
- * MINIMALLY: the range lands at the viewport EDGE, not centred, which
- * is why the observable kaya fixes is CONTAINMENT and never the
- * viewport itself.
- *
- * A PURE EFFECT: it touches no selection and no composition (measured,
- * §5), so reveal has no refusal arm.
+ * REVEAL one range: scroll the textarea's viewport until the range's box
+ * is inside it. THE GEOMETRY IS THE PLATFORM'S, so nothing here models
+ * where text is; it scrolls MINIMALLY, landing the range at the EDGE,
+ * which is why the observable kaya fixes is CONTAINMENT. A PURE EFFECT
+ * touching no selection and no composition (measured, §5).
  */
 internal suspend fun kayaRevealRange(node: KayaNode, range: KayaRange) {
     val layout = kayaTextLayouts[node.id]?.invoke() ?: return
@@ -8530,18 +7612,10 @@ internal suspend fun kayaRevealRange(node: KayaNode, range: KayaRange) {
 
 /**
  * THE VIEWPORT'S HEIGHT, in the one spelling this field publishes:
- * content height minus how far it can scroll.
- *
- * `ScrollState.viewportSize` IS NOT IT and reads 0 here — measured
- * 2026-08-06 on this backend: `TextFieldCoreModifier` sets `maxValue`
- * (548 for a 644px layout in a 96px box) and never touches
- * `viewportSize`, which only `Modifier.verticalScroll`'s own measure
- * policy writes. A read that trusted that field would call every range
- * `<no viewport>` forever, which is how this was found.
- *
- * Both numbers are the platform's: content - scrollable = what fits.
- * When the content fits entirely, maxValue is 0 and this is the content
- * height, so containment is true for every range.
+ * content height minus how far it can scroll. `ScrollState.viewportSize`
+ * IS NOT IT and reads 0 — `TextFieldCoreModifier` sets `maxValue` (548
+ * for a 644px layout in a 96px box) and never touches it (measured
+ * 2026-08-06).
  */
 internal fun kayaViewportHeight(
     layout: androidx.compose.ui.text.TextLayoutResult,
@@ -8565,15 +7639,10 @@ internal fun kayaRangeBox(node: KayaNode, range: KayaRange): Pair<Int, Int>? {
 
 /**
  * A1 (docs/undo-plan.md §3): a core undo group committed, so the focused
- * editable's native history goes with it.
- *
- * THE ONE SITE THAT NEEDS AN EXPLICIT `clearHistory()` — every other
- * clear here is a write and clears by construction, while this one must
- * clear WITHOUT touching the text. `undoState.clearHistory()` is
- * measured to empty BOTH stacks and leave the content alone.
- *
- * Every episode then begins with an empty native stack, so the native
- * stack can never reach past the current episode's start.
+ * editable's native history goes with it. THE ONE SITE THAT NEEDS AN
+ * EXPLICIT `clearHistory()`, since every other clear here is a write —
+ * this one must clear WITHOUT touching the text. Every episode then
+ * begins with an empty native stack.
  */
 internal fun kayaClearUndoForGroup() {
     kayaFocusedTextNode()?.let { KayaUndoState.clearHistory(it) }
@@ -8618,15 +7687,11 @@ enum class KayaUndoRoute {
 }
 
 /**
- * The ledger-quiet bracket around a native undo this backend ROUTED (§3,
- * and the "report it once" rule): node id -> the text the walk left in
- * the widget, recorded when the sample was taken.
- *
- * A BRACKET AND NOT A FLAG-WITH-A-TIMER: the two reports of one native
- * undo are NOT adjacent in time — the sample is taken the instant
- * `undo()` returns and the snapshot observer delivers the same text one
- * frame LATER, so a boolean set and cleared around the call would be
- * gone. Matching on the text the sample saw self-clears. UI thread only.
+ * The ledger-quiet bracket around a native undo this backend ROUTED
+ * (§3): node id -> the text the walk left in the widget. A BRACKET AND
+ * NOT A FLAG-WITH-A-TIMER, because the two reports are NOT adjacent in
+ * time — the observer delivers the same text a frame later, so a boolean
+ * around the call would be gone. UI thread only.
  */
 private val kayaNativeUndoEcho = HashMap<Long, String>()
 
@@ -8640,17 +7705,10 @@ internal fun kayaTakeNativeUndoEcho(id: Long, text: String): Boolean {
 
 /**
  * THE NATIVE TIER, performed: hand the walk to the field's own stack and
- * report it to the ledger ONCE.
- *
- * THE SAMPLE IS TAKEN IMMEDIATELY AFTER THE WALK, FROM THE WIDGET and
- * not the model — the model is exactly one collector turn stale here,
- * and the three facts `note_native_undo` needs are true only at that
- * instant.
- *
- * THE THIRD FACT IS `canUndo` IN BOTH DIRECTIONS, as the mac arm sends
- * it: it is the core's test for a platform that coalesced ACROSS the
- * episode's start, so a redo reporting `canRedo` would answer false at
- * the end of a forward walk and send the core backwards.
+ * report it ONCE, sampling FROM THE WIDGET immediately after — the model
+ * is one collector turn stale. THE THIRD FACT IS `canUndo` IN BOTH
+ * DIRECTIONS, where `canRedo` would answer false at the end of a forward
+ * walk and send the core backwards.
  */
 internal fun kayaNativeUndo(redo: Boolean) {
     val node = kayaFocusedTextNode() ?: return
@@ -8663,21 +7721,15 @@ internal fun kayaNativeUndo(redo: Boolean) {
 // ---- The seam to the core's ledger --------------------------------
 //
 // This host's spelling of KayaHostApi's undo rows, declared in
-// KayaPresent.kt and registered by `register_present_natives` in
-// crates/kaya/src/android.rs. tools/check-jni.py pins both directions.
-//
-// THE WINDOW IS 0 EVERYWHERE HERE: Android is one Activity and one
-// surface.
+// KayaPresent.kt and registered by `register_present_natives`
+// (crates/kaya/src/android.rs); tools/check-jni.py pins both directions.
+// THE WINDOW IS 0 EVERYWHERE HERE — Android is one Activity.
 
 /**
- * Where an undo would go RIGHT NOW.
- *
- * ASKED ONCE AND USED TWICE — enablement and activation are the same
- * question (D6), and NOTHING is what a disabled Edit>Undo means.
- *
- * THE ANSWER IS THE CORE'S. The backend contributes only the pair it
- * alone can see — what is focused, and whether that field's own stack
- * has anything — and the ledger decides against them.
+ * Where an undo would go RIGHT NOW. ASKED ONCE AND USED TWICE —
+ * enablement and activation are the same question (D6). THE ANSWER IS
+ * THE CORE'S: the backend contributes only what it alone can see, what
+ * is focused and whether that field's stack has anything.
  */
 internal fun kayaUndoRoute(): KayaUndoRoute =
     kayaRouteCode(
@@ -8705,17 +7757,11 @@ internal fun kayaRouteCode(code: Int): KayaUndoRoute =
     }
 
 /**
- * THE ONE REPORT OF A ROUTED NATIVE UNDO (§3). The core walks its
- * frontier episode from three facts; all the endings are its to decide.
- *
- * ONE REPORT AND NOT TWO, on a backend where BOTH channels fire. §3a
- * demands each arm measure whether a native undo reaches kaya's model,
- * and this one answered YES where the mac arm answered no
- * (docs/probes/undo-fan-compose.md §1 Q-a, re-measured on the shipped
- * source at §3 point 6): `undoState.undo()` writes the same snapshot
- * state the field's collector observes, so the ordinary `text_changed`
- * arrives a frame later on its own. That emission is bracketed
- * LEDGER-QUIET ([kayaNativeUndoEcho]) and this call is the report.
+ * THE ONE REPORT OF A ROUTED NATIVE UNDO (§3), on a backend where BOTH
+ * channels fire: `undoState.undo()` writes the same snapshot state the
+ * field's collector observes, so the ordinary `text_changed` arrives a
+ * frame later on its own (docs/probes/undo-fan-compose.md §1 Q-a). That
+ * emission is bracketed LEDGER-QUIET and this call is the report.
  */
 internal fun kayaNoteNativeUndo(node: KayaNode, text: String, canUndo: Boolean) {
     KayaPresent.noteNativeUndo(0, node.id, text, canUndo)
@@ -8723,11 +7769,9 @@ internal fun kayaNoteNativeUndo(node: KayaNode, text: String, canUndo: Boolean) 
 
 /**
  * The CORE tier: routing cases 2 and 3 (§3), where the core applies the
- * inverse itself.
- *
- * NOTHING COMES BACK. The inverse produces ordinary apply records that
- * reach this interpreter through the pump, so this layer keeps no copy
- * of the ledger to disagree with.
+ * inverse itself. NOTHING COMES BACK — the inverse produces ordinary
+ * apply records that arrive through the pump, so this layer keeps no
+ * copy of the ledger to disagree with.
  */
 internal fun kayaCoreUndo() {
     KayaPresent.undo(0)
@@ -8740,12 +7784,10 @@ internal fun kayaCoreRedo() {
 }
 
 /**
- * ONE TABLE'S COLUMNS' AXIS as the three scroll verbs read it: the track
- * and the resolved columns in dp, the granted scroll and the offset it
- * stands at in device pixels (KayaNode.tableReachX's units).
- *
- * [measured] is the one guard the three share — a table whose layout has
- * not run records no track, and "fits" would then be a claim about a
+ * ONE TABLE'S COLUMNS' AXIS as the three scroll verbs read it: track and
+ * resolved columns in dp, granted scroll and current offset in device
+ * pixels. [measured] is the guard the three share — a table whose layout
+ * has not run records no track, and "fits" would then be a claim about a
  * measurement nobody took.
  */
 private data class KayaColumnsAxis(
@@ -8758,21 +7800,11 @@ private data class KayaColumnsAxis(
 }
 
 /**
- * ONE CAUSE PER SENTENCE for expect_column_edges' horizontal half — the
- * gtk.rs / winui `TableHorizontalIssue` in this backend's spelling. A
- * disjunction here would print one sentence for several causes and the
- * numbers in it would read compliant on a red leg (invariant 3).
- *
- * THE ORDER IS gtk.rs's: track, then the LEADING edge, then the trailing
- * one — a table displaced at its start also ends in the wrong place, so
- * conviction on the end would name the symptom.
- *
- * GTK's `ContentUnderfill` is the one cause missing here, and it is the
- * INSTRUMENT that is missing rather than the clause: this tier measures
- * every cell with a bare `Constraints()` and records `left + size.width`,
- * so a cell's box is its INK and not its column. A 20dp "42" in a 200dp
- * column ends 180dp short of the viewport on a correctly drawn table
- * (docs/deferred.md, the leading-edge UNDERFILL entry).
+ * ONE CAUSE PER SENTENCE for expect_column_edges' horizontal half
+ * (invariant 3). THE ORDER IS gtk.rs's — track, LEADING edge, trailing —
+ * since a table displaced at its start also ends wrong. GTK's
+ * `ContentUnderfill` is missing because the INSTRUMENT is: a cell's box
+ * here is its INK (docs/deferred.md's leading-edge UNDERFILL entry).
  */
 private enum class KayaTableHorizontalIssue {
     TrackUnderfill,
@@ -8783,23 +7815,11 @@ private enum class KayaTableHorizontalIssue {
 }
 
 /**
- * [drawn] is the table's laid-out width, [content] the resolved columns
- * BEFORE the coerce that clamps them to the track, [track] what the
- * parent offered, [viewport] the table's own width, [left]/[right] the
- * cell ink in the table's own space, [reach] how far this surface's
- * columns' axis can be scrolled.
- *
- * [content] is why the overflow cause is separable at all: KayaTableSurface
- * coerces totalW into the incoming constraints, so [drawn] can never
- * exceed [track] and the resolved-column overflow is invisible in it.
- *
- * COLUMNS PAST THE TRACK ARE NORMAL (docs/tables-plan.md, ruled
- * 2026-08-29): a table that does not fit scrolls to the rest of itself.
- * So the defect is columns the reader CANNOT REACH, which is why [reach]
- * is a separate measurement — the surface's own granted scroll — and not
- * `content - track`, which would make the clause agree with itself. It
- * carries the ink's clause too: the cells legitimately run [reach] past
- * the viewport and not one dp further.
+ * [drawn] the laid-out width, [content] the columns BEFORE the coerce,
+ * [track] the parent's offer, [viewport] the table's width, [left]/
+ * [right] the cell ink, [reach] the granted scroll. COLUMNS PAST THE
+ * TRACK ARE NORMAL, so the defect is columns the reader CANNOT REACH —
+ * hence [reach] measured, not computed as `content - track`.
  */
 private fun kayaTableHorizontalIssue(
     drawn: Float,
@@ -8846,16 +7866,11 @@ private fun kayaTableHorizontalComplaint(
 }
 
 /**
- * THE TRUTH TABLE, ON THE UNAVOIDABLE PATH: expect_column_edges runs
- * this before it reads any geometry, so a backend whose sentences have
- * stopped discriminating reddens the leg it was about to lie to rather
- * than being believed. pickerBackGateSelftest's shape, one file over —
- * a sentence and not a throw, because runScript's thread has no catch
- * and a dead thread is a lane that hangs instead of losing.
- *
- * Null when every claim holds. Each sentence is read off six PAIRWISE
- * DISTINCT numbers, so an arm printing the wrong one of the six is a
- * failure and not a coincidence.
+ * THE TRUTH TABLE, ON THE UNAVOIDABLE PATH: expect_column_edges runs it
+ * before reading any geometry, so a backend whose sentences stopped
+ * discriminating reddens the leg rather than being believed. A sentence
+ * and not a throw (runScript's thread has no catch); each is read off
+ * six PAIRWISE DISTINCT numbers, so a wrong arm is not a coincidence.
  */
 private fun kayaTableHorizontalSelftest(): String? {
     // A table that CANNOT scroll its columns is the default here, which
@@ -8967,14 +7982,10 @@ private fun kayaTableHorizontalSelftest(): String? {
             (issue(200f, 200f, 232f, 232f, 16f, 216f) ==
                 KayaTableHorizontalIssue.TrackUnderfill),
         // The shape the WinUI half was MEASURED failing on: 310dp of
-        // columns in a 300dp track whose ink runs 5..295, so the
+        // columns in a 300dp track whose ink runs 5..295, where the
         // pre-split sentence printed "cells span 290dp inside a 300dp
-        // viewport" — two numbers asserting the opposite of the
-        // failure. THIS backend's ink and its resolved columns move
-        // together today (the last cell's right edge IS the unclamped
-        // span), so the split's worth here is that the sentence names
-        // the ROOT rather than its symptom; the input is held anyway,
-        // because the two backends answer one rule.
+        // viewport" — two numbers asserting the opposite of the failure.
+        // Held here too, because the two backends answer one rule.
         "an unreachable table names its columns, not a compliant-looking span" to
             (say(300f, 310f, 300f, 300f, 5f, 295f) ==
                 "columns resolve to 310dp in a 300dp track that scrolls 0dp"),
@@ -8997,32 +8008,18 @@ private const val KAYA_WINDOW_VISIBLE_PX = 1.0
 internal val kayaTableWindows = HashMap<Long, KayaTableWindow>()
 
 /**
- * ONE TABLE'S WINDOW: the report loop, the numbers the spacers are cut
- * from, and the anchor (docs/virtualization-plan.md §2.4, §3).
- *
- * The loop is the mac tier's contract in this tier's spelling — the
- * visible range to `windowMoved` on every scroll, resize and first
- * layout; the realized rows' laid-out extents to `rowsMeasured` after
- * layout, EXACT and only where they disagree with what the core already
- * holds, which is also what stops the report -> stamp -> layout cycle
- * repeating. Nothing here estimates a row height or a position: this
- * tier reports what it laid out and asks the core for everything else.
- *
- * THE REPORT NEVER RUNS INSIDE MEASURE OR PLACEMENT. It writes snapshot
- * state and drives a scroll, and a snapshot write from inside the layout
- * phase invalidates the pass that made it. One coalesced main-looper hop
- * per turn instead, however many callbacks asked for it — the SwiftUI
- * driver's scheduleReport, one platform over, where the same write from
- * inside -[NSView layout] was fatal.
+ * ONE TABLE'S WINDOW: the report loop, the spacers' numbers, the anchor
+ * (docs/virtualization-plan.md §2.4, §3). Nothing here estimates a row
+ * height, and reports go out only where this tier disagrees with the
+ * core, which stops the report -> stamp -> layout cycle. THE REPORT
+ * NEVER RUNS INSIDE MEASURE OR PLACEMENT.
  */
 internal class KayaTableWindow(private val node: KayaNode) {
     /**
      * THE SPACERS' NUMBERS, and the only place the composition learns
-     * them: where the band's first row sits, how tall the whole
-     * collection is, and which rows the band holds. Published HERE, by
-     * the report loop, so no layout pass ever calls across the ABI and a
-     * correction that moved only the arithmetic still re-cuts the
-     * spacers.
+     * them. Published HERE by the report loop, so no layout pass calls
+     * across the ABI and a correction that moved only the arithmetic
+     * still re-cuts the spacers.
      */
     var bandStart by mutableStateOf(0)
         private set
@@ -9101,15 +8098,11 @@ internal class KayaTableWindow(private val node: KayaNode) {
     }
 
     /**
-     * The rows this viewport actually shows, as COLLECTION indices.
-     *
-     * Read off the edges THIS TIER LAID OUT, which is what a report is
-     * (`NSTableView.rows(in:)`, one platform over). The fallback under it
-     * is for a viewport that left the band entirely — a fling, or a
-     * resize — where there is nothing laid out to read: the CORE's own
-     * extents answer instead, multiplication on the exact path and a walk
-     * from the band's edge on the corrected one, and the report that
-     * follows brings the band back under the viewport.
+     * The rows this viewport actually shows, as COLLECTION indices, read
+     * off the edges THIS TIER LAID OUT. The fallback under it is for a
+     * viewport that left the band entirely — a fling or a resize, where
+     * nothing laid out can be read — and the CORE's own extents answer
+     * instead until the next report brings the band back.
      */
     private fun visibleRange(scroll: Int): Pair<Int, Int> {
         val tops = rowTops
@@ -9149,23 +8142,11 @@ internal class KayaTableWindow(private val node: KayaNode) {
     }
 
     /**
-     * Once per layout and once per scroll: re-park the anchor, hand the
-     * core the visible range, hand it the extents this tier laid out, and
-     * publish the geometry the spacers are cut from.
-     *
-     * THE RANGE LEADS AND THE HEIGHTS FOLLOW (§3.4): the entering rows
-     * have to start stamping before there is anything to measure.
-     */
-    /**
      * A TABLE JUST LAID OUT SHOWS ITS FIRST COLUMN: either half of the
-     * columns' box moving resets the offset, and a recomposition that
-     * moved neither keeps the scroll the reader made. Without the reset
-     * `expect_at_end` passes before anything has scrolled — measured on
-     * the mac tier (docs/deferred.md).
-     *
-     * ON THE MAIN-LOOPER HOP AND NEVER FROM MEASURE, [report]'s own rule:
-     * the offset is snapshot state the layout reads, and a write from
-     * inside the layout phase invalidates the pass that made it.
+     * columns' box moving resets the offset, while a recomposition that
+     * moved neither keeps the reader's scroll. Without it `expect_at_end`
+     * passes before anything scrolled (docs/deferred.md). ON THE
+     * MAIN-LOOPER HOP AND NEVER FROM MEASURE, [report]'s own rule.
      */
     private fun settleColumns() {
         if (hContentPx != lastHContent || hTrackPx != lastHTrack) {
@@ -9262,38 +8243,12 @@ internal class KayaTableWindow(private val node: KayaNode) {
 }
 
 /**
- * The declared table's surface (docs/tables-plan.md): the synthesized
- * header — Material dropped its data-table component, so this is the
- * tier-3 lowering DESIGN.md files — over CONTENT-SIZED columns: one
- * measure pass finds each column's widest cell, and header and cells
- * share those widths so alignment holds by measurement (the claim
- * expect_column_edges reads back). Headers render at EVERY width
- * (ratified 2026-08-21: nothing but an Apple-idiom analogy forced the
- * compact degrade, and it cost the phones their headers). A header tap
- * hands the core-minted sort tag back verbatim with the column index —
- * a REQUEST; the indicator moves only when the guest re-declares.
- *
- * AND IT IS THE WINDOWED TIER (docs/virtualization-plan.md §4): top
- * spacer, the realized band's real widgets, bottom spacer, inside the
- * scroll container a grown table already meant by "fill and scroll"
- * (tools/scenes/table.steps). BOTH SPACERS ARE CUT FROM THE CORE'S
- * ARITHMETIC — `offset` is the band's top, `extent` the whole
- * collection's height — so the scrollbar is about N rows while about
- * three viewports of them carry widgets. LazyColumn stays rejected (§7):
- * one observable mechanism, and the core owns the band.
- */
-/**
- * THE SEGMENTED GROUPED CONTAINER (docs/deferred.md's table-card entry;
- * ruled 2026-08-25 after the Material research). Corners BY POSITION, and
- * every number is androidx's own rather than a guess: a group's OUTER pair
- * is `ListTokens.ContainerShape` = CornerLarge = 16 dp, the boundary
- * between two segments keeps `ListItemShapes.shape` =
- * ItemContainerExpressiveShape = CornerExtraSmall = 4 dp, and
- * `ListItemDefaults.SegmentedGap` = 2 dp parts them.
- *
- * PLAIN MODIFIERS, NOT SegmentedListItem: compose-bom 2024.10.01 pins
- * material3 1.3.1 and that API arrived in 1.5.0-alpha23
- * (android/kaya/build.gradle.kts, tools/check-pins.py).
+ * The declared table's surface (docs/tables-plan.md): a synthesized
+ * header over CONTENT-SIZED columns sharing widths found in one measure
+ * pass, which expect_column_edges reads back. Headers render at EVERY
+ * width, a header tap is a REQUEST, and this is THE WINDOWED TIER
+ * (docs/virtualization-plan.md §4, §7). The segmented grouped container
+ * below takes androidx's own corner numbers (docs/deferred.md).
  */
 private val KAYA_TABLE_SEGMENT_OUTER = 16.dp
 private val KAYA_TABLE_SEGMENT_INNER = 4.dp
@@ -9451,35 +8406,13 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 window.viewportPx = it.size.height
                 window.schedule()
             }
-            // THE COLUMNS' AXIS (docs/tables-plan.md, ruled 2026-08-29),
-            // and NOT Modifier.horizontalScroll: that proposes an
-            // infinite width, and the leftover distribution below would
-            // lose the very track it spends (docs/probes/
-            // table-overflow-2026.md §4.2). `scrollable` is the gesture
-            // ALONE — the Layout keeps its real constraints and places
-            // the columns at the offset itself — and it is orthogonal to
-            // the vertical scroll under it, which is the one nesting
-            // Compose allows (a same-direction nest throws at measure).
-            // The clip is this backend's own: verticalScroll's clip
-            // INFLATES the cross axis (androidx's MaxSupportedElevation,
-            // so a child's shadow survives), so a scrolled-out column
-            // draws outside the table's box without this.
-            // TRACE (KAYA_LAYOUT_TRACE): what this scrollable is measured
-            // with. Compose refuses an infinite maximum height here and
-            // kills the app, and the stack is all framework frames — the
-            // constraint itself is the only thing that names the caller.
-            // A VIEWPORT ASKED FOR NO BOUND TAKES THE SCREEN (2026-08-29).
-            // Compose refuses to measure a scrollable with an infinite
-            // maximum along its own axis — "Vertically scrollable
-            // component was measured with an infinity maximum height
-            // constraints, which is disallowed" — and it is a HARD THROW
-            // that killed the app on every visit to the portfolio's
-            // Transactions screen. The infinity arrives from an ancestor's
-            // intrinsic pass, which no descendant can prevent, so the
-            // clamp belongs here where the rule is: a window onto larger
-            // content must have a size, and absent one the screen is the
-            // honest answer. Bounded asks pass through untouched, so this
-            // changes nothing about a normally-measured table.
+            // THE COLUMNS' AXIS (docs/tables-plan.md), NOT
+            // Modifier.horizontalScroll, which proposes an infinite width
+            // the leftover distribution would lose its track to
+            // (docs/probes/table-overflow-2026.md §4.2). The clip is this
+            // backend's own, since verticalScroll's INFLATES the cross
+            // axis. A VIEWPORT ASKED FOR NO BOUND TAKES THE SCREEN, since
+            // Compose HARD THROWS on an infinite maximum along its axis.
             .layout { measurable, constraints ->
                 val bounded =
                     if (constraints.hasBoundedHeight) constraints
@@ -9551,29 +8484,20 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         }
         // A REPRESENTABLE CONSTRAINT OR NOTHING: Compose packs width and
         // height into one long, so a giant height beside a tiny width is
-        // an IllegalArgumentException, not a big box. A zero-width track
-        // (the phone-width portfolio dashboard, first mounted by the
-        // packaging milestone's pyhost APK) made the windowed spacers
-        // tower past the packing and this measure THREW during first
-        // composition. fitPrioritizingWidth returns the same values
-        // whenever they were representable and clamps only past the
-        // packing's edge — where nothing is visible anyway.
+        // an IllegalArgumentException. A zero-width track made the
+        // windowed spacers tower past the packing and this measure THREW
+        // during first composition. fitPrioritizingWidth clamps only past
+        // the packing's edge, where nothing is visible anyway.
         fun kayaFixedRepresentable(w: Int, h: Int) =
             Constraints.fitPrioritizingWidth(w, w, h.coerceAtLeast(0), h.coerceAtLeast(0))
         val totalW = (acc + 2 * padX).coerceIn(constraints.minWidth, constraints.maxWidth)
         val innerW = (totalW - 2 * padX).coerceAtLeast(0)
-        // THE CARD'S OWN SPAN COMES OFF THE TRACK (gtk.rs's `css_inset_span`
-        // and swift's `kayaTableContentTrack` in this backend's spelling):
-        // the segments span the outer box and the cells the interior, so
-        // every number here is the interior's — a raw track convicts every
-        // carded table of a 32dp underfill it does not have.
-        // THE REPUBLISH SUBSCRIPTION. Reading the generation inside
-        // measure subscribes this layout to it, so the clear at
-        // APPLY_SET_COLUMNS re-runs this block and the three widths
-        // below are written again even when nothing about the box moved
-        // (KayaNode.tableGeometryGeneration carries the measurement).
-        // The stamp is what lets a reader tell a republished geometry
-        // from the cleared one.
+        // THE CARD'S OWN SPAN COMES OFF THE TRACK: the segments span the
+        // outer box and the cells the interior, so a raw track convicts
+        // every carded table of a 32dp underfill. THE REPUBLISH
+        // SUBSCRIPTION: reading the generation inside measure subscribes
+        // this layout to it, so APPLY_SET_COLUMNS' clear re-runs the
+        // block even when the box did not move.
         val geometryAt = node.tableGeometryGeneration
         node.tableTrackW =
             if (constraints.hasBoundedWidth) (constraints.maxWidth - 2 * padX) / density else -1f
@@ -9649,13 +8573,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.schedule()
         layout(totalW, totalH) {
             // THE HEADER IS LOCKED TO THE BODY because ONE offset moves
-            // both — the whole mechanism is that the two `colX` reads
-            // below are the same array (the ruling).
-            //
-            // THE CARD STAYS WITH THE VIEWPORT. The segments are what
-            // bounds the table for the reader; sliding them off would
-            // run the rows over bare ground while the boundary the card
-            // draws sat somewhere the reader cannot see.
+            // both — the two `colX` reads below are the same array. THE
+            // CARD STAYS WITH THE VIEWPORT: sliding the segments off
+            // would run the rows over bare ground while the boundary sat
+            // somewhere the reader cannot see.
             val colX = IntArray(cols) { colLeft[it] - Math.round(node.tableScrollX) }
             headerSeg.place(0, foldedBlock)
             bodySeg.place(0, bodyTop)
@@ -9678,18 +8599,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
 
 /**
  * THE TWO SPACERS, from the CORE'S ARITHMETIC AND NOTHING ELSE
- * (docs/virtualization-plan.md §4). [offset] is where the band's first
- * row sits and [extent] the whole collection's height — both out of
- * kaya_window_geometry, which is the only estimator (§2). [band] is what
- * this layout measured for the rows it actually holds, and [tail] the
- * trailing gap the last row of the collection does not draw.
- *
- * ITS OWN FUNCTION BECAUSE NO SCENE CAN SEE IT: with both spacers zeroed
- * the windowed scene stays green (measured 2026-08-25 — expect_window
- * reads the row at the viewport's top, and a tier whose rows are laid
- * out at the wrong y is internally consistent about which one that is).
- * tools/check-verbs.py holds the call site instead, with that
- * perturbation as its self-test.
+ * (docs/virtualization-plan.md §4). ITS OWN FUNCTION BECAUSE NO SCENE
+ * CAN SEE IT — with both spacers zeroed the windowed scene stays green
+ * (measured 2026-08-25), so tools/check-verbs.py holds the call site
+ * with that perturbation as its self-test.
  */
 internal fun kayaWindowSpacers(offset: Double, extent: Double, band: Int, tail: Int):
     Pair<Int, Int> {
@@ -9785,31 +8698,10 @@ fun KayaRender(
 
 /**
  * A HUGGING CONTAINER PINS ITSELF TO ITS CONTENT before the breadth
- * ruling's fill resolves against it — the one place Compose needs a
- * sentence the other three backends get for free.
- *
- * `fillMaxWidth()`/`fillMaxHeight()` take the CONSTRAINT a parent handed
- * down, never the size the parent ended up. GTK's Fill fills the box's
- * ALLOCATION, XAML's Stretch fills an Auto row, and SwiftUI's KayaFlex
- * probes each child `.unspecified` first: all three mean "as tall as my
- * parent ENDED UP", and Compose means "as tall as my parent MAY be".
- * They agree only where the parent's cross axis is already pinned — by
- * the window, by a weight on the parent's main axis, or by the
- * grandparent's stretch.
- *
- * Where it is NOT pinned, the raw fill takes everything the grandparent
- * had left: align.steps' row#1 would have claimed the rest of the window
- * and expect_fills column@fitcol would have read ~138px of ~900px, and
- * portfolio's unpinned accounts sidebar would have widened to the window
- * and left the grow=1 detail column no leftover at all. IntrinsicSize is
- * Compose's own answer (the same recipe as its full-height divider), and
- * it reproduces the width a wrap container already had — MAX on width,
- * because MIN there is the longest-word width; MIN on height, because
- * that IS the wrapped height.
- *
- * Returns an empty modifier for every node that is not a hugging
- * container with a crossing child, which is all but one container in
- * today's scenes.
+ * ruling's fill resolves against it: `fillMaxWidth()` takes the
+ * CONSTRAINT a parent handed down where GTK, XAML and SwiftUI mean "as
+ * tall as my parent ENDED UP", so under an unpinned parent it claims the
+ * window. IntrinsicSize is Compose's own answer.
  */
 private fun kayaHugCross(
     node: KayaNode,
@@ -9838,26 +8730,17 @@ private fun KayaRenderCore(
     node: KayaNode,
     isRoot: Boolean = false,
     /**
-     * The MAIN AXIS of the flex container this node is a child of —
-     * true inside a column, false inside a row — and null wherever grow
-     * has no meaning: a grid cell, a scroll's content, the mounted root.
-     *
-     * A control whose natural size is a fixed box — or a nested
-     * CONTAINER, which hugs whatever it is offered — needs this to
-     * honour grow: a grower's extent is the cell its weight earned on
-     * THIS axis, and it can only fill the right dimension if it knows
-     * which one that is. Filling both would take the cross axis
-     * too, which is align's business — GTK gives a grown textarea its
-     * natural 240 across a start-aligned column, and this backend must
-     * not disagree.
+     * The MAIN AXIS of the flex container this node is a child of — true
+     * inside a column, false inside a row, null where grow has no
+     * meaning. A grower fills only that axis; filling both would take the
+     * cross axis, which is align's business.
      */
     flexVertical: Boolean? = null,
     /**
      * Whether that container aligns its children `stretch` — the CROSS
-     * axis's half of the same question [flexVertical] answers for the
-     * main one. A control whose natural size is a fixed box needs it,
-     * and so does a NESTED CONTAINER: both hug a box they were handed
-     * unless told (the 2026-08-22 ruling; docs/deferred.md's
+     * axis's half of what [flexVertical] answers for the main one. A
+     * fixed-size control needs it, and so does a NESTED CONTAINER: both
+     * hug a box they were handed unless told (docs/deferred.md's
      * nested-container GAP).
      */
     flexStretch: Boolean = false,
@@ -9874,23 +8757,12 @@ private fun KayaRenderCore(
     // 25/75 held over a content-wide strip while every other backend
     // spanned the window.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
-    // AND EVERY NODE ADOPTS THE BOX IT WAS HANDED (the 2026-08-22
-    // rulings; docs/deferred.md, tools/scenes/align.steps and
-    // grow.steps): a grower spans its track on the parent's MAIN axis,
-    // `stretch` spans the parent's cross axis, and with neither it still
-    // hugs. The CELL carries both already (the column and row arms
-    // below); this is the CONTENT inside it, which Compose otherwise
-    // lets hug a cell it was handed — and it rides every kind, LEAF AND
-    // CONTAINER ALIKE, because the ruling's leaf half is the same
-    // sentence one tier down (a grown label drew 23 of its 109pt track
-    // on the backend that had only been told about containers).
-    // A cell-level fill would satisfy expect_fills without the control
-    // moving, which is the false green kayaDrawnExtents exists to catch.
-    //
-    // AND A CROSSING CONTAINER MAXIMIZES ITS OWN MAIN AXIS under EVERY
-    // align mode: a row in a column, a column in a row. Its own main
-    // axis IS the parent's cross axis, so it joins the stretch arm
-    // rather than adding a third write.
+    // AND EVERY NODE ADOPTS THE BOX IT WAS HANDED (docs/deferred.md,
+    // tools/scenes/align.steps): a grower spans its track on the parent's
+    // MAIN axis, `stretch` the cross axis, and with neither it hugs. This
+    // is the CONTENT inside the cell, LEAF AND CONTAINER ALIKE — a grown
+    // label drew 23 of its 109pt track on the backend told only about
+    // containers. A CROSSING CONTAINER joins the stretch arm.
     var boxFill = rootFill
     if (flexVertical != null) {
         val crossing =
@@ -9913,34 +8785,12 @@ private fun KayaRenderCore(
         }
     }
     val hugCross = kayaHugCross(node, isRoot, flexVertical, flexStretch)
-    // THE UNIVERSAL ACCESSIBILITY PROPS, folded into the base modifier
-    // every kind already threads.
-    //
-    // contentDescription is the semantics property a service speaks, so
-    // a11y_label reaches assistive tech directly.
-    //
-    // a11y_id is a plain testTag. Android has no accessibility-identifier
-    // concept the way accessibilityIdentifier (AppKit) and AutomationId
-    // (WinUI) are genuine platform properties; the testTag is the
-    // identity slot in the semantics tree, and it is what Compose's own
-    // test framework matches on. The detour worth naming is
-    // testTagsAsResourceId, which additionally copies the tag into the
-    // node's resource-id: it is experimental, and it exists for
-    // out-of-process clients like UIAutomator, which can only match on
-    // properties that survive into AccessibilityNodeInfo. The read here
-    // is in-process against the merged semantics tree, so it would cost
-    // an experimental opt-in to buy nothing.
-    //
-    // Empty stays unset: Compose derives a control's description from
-    // its own content, and writing "" would silence it.
-    //
-    // The two halves are separately named because ONE kind cannot take
-    // the name this way: Image publishes Role.Image only when the name
-    // rides its own contentDescription PARAMETER (measured 2026-07-25 —
-    // an image named through the modifier read `unknown/Logo`, since
-    // `contentDescription = null` is Compose's spelling of "decorative,
-    // hide me"). That arm takes a11yTag and hands the name to Image
-    // itself; everything else takes both through `a11y`.
+    // THE UNIVERSAL ACCESSIBILITY PROPS. a11y_id is a plain testTag,
+    // Android having no accessibility-identifier property. EMPTY STAYS
+    // UNSET, or the control's own derived description is silenced. The
+    // two halves are separately named because Image publishes Role.Image
+    // only when the name rides its own contentDescription PARAMETER
+    // (measured 2026-07-25: through the modifier it read `unknown/Logo`).
     val a11yTag = if (node.a11yId.isNotEmpty()) Modifier.testTag(node.a11yId) else Modifier
     val a11yName =
         if (node.a11yLabel.isNotEmpty()) {
@@ -9948,19 +8798,13 @@ private fun KayaRenderCore(
         } else {
             Modifier
         }
-    // THE HINT rides the CLICK ACTION'S LABEL, which is Android's
-    // author-supplied hint: TalkBack speaks it as "double tap to
-    // <label>". Measured 2026-07-25 on a Material3 Button — layering a
-    // label-only semantics node relabels the action and KEEPS it
-    // (clickLabel=ours, clickAction=true, role and name untouched),
-    // because the OnClick key's merge policy takes the parent's label
-    // and the child's action. `action = null` is what says "I am only
-    // naming what the control already does".
-    //
-    // Nothing else on Android carries a hint: there is no hint
-    // SemanticsProperty, and AccessibilityNodeInfo.hintText is the
-    // editable-field placeholder, not a description. That is why the
-    // root scopes this prop to activation kinds.
+    // THE HINT rides the CLICK ACTION'S LABEL, Android's author-supplied
+    // hint: layering a label-only semantics node relabels the action and
+    // KEEPS it, because the OnClick key's merge policy takes the parent's
+    // label and the child's action (measured 2026-07-25). `action = null`
+    // says "I am only naming what the control already does". Nothing else
+    // on Android carries a hint, which is why the root scopes this prop
+    // to activation kinds.
     val a11yHint =
         if (node.a11yHint.isNotEmpty()) {
             Modifier.semantics { onClick(label = node.a11yHint, action = null) }
@@ -10253,15 +9097,11 @@ private fun KayaRenderCore(
         }
         KayaCompose.KIND_BUTTON ->
             // THE ROLE TIER, in M3's own emphasis ladder
-            // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, with
-            // filled reserved for `prominent` — a roleless button that
-            // was already filled would leave `prominent` nowhere to go,
-            // and the other three backends sit the same way.
-            //
-            // DESTRUCTIVE takes the error-role CONTAINER, a pair fixed
-            // by Material rather than derived from the brand, so red
-            // keeps meaning destructive in a red-branded app. Never
-            // `Color.Red`: the role, so the platform judges the shade.
+            // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, filled
+            // reserved for `prominent`, or a roleless button would leave
+            // `prominent` nowhere to go. DESTRUCTIVE takes the error-role
+            // CONTAINER, fixed by Material rather than derived from the
+            // brand, so red keeps meaning destructive in a red-branded app.
             when (node.role) {
                 KayaCompose.ROLE_PROMINENT ->
                     Button(
@@ -10343,24 +9183,12 @@ private fun KayaRenderCore(
                 )
             }
         KayaCompose.KIND_CHECKBOX ->
-            // Uncontrolled toward the app, the entry's shape: the node
-            // mirrors the box's state (Compose needs it), and every
-            // flip is emitted with the box's identity tag. The caption
-            // rides beside the box, the labeled-checkbox idiom.
-            //
-            // The TOGGLE LIVES ON THE ROW, not on the box, and the box
-            // takes onCheckedChange = null — Material's own labeled
-            // checkbox recipe, and here it is what makes the control ONE
-            // thing to an assistive client. A box with its own
-            // onCheckedChange is independently screen-reader-focusable,
-            // and Compose's merging deliberately STOPS at such a node
-            // (an independently focusable descendant is not absorbed):
-            // measured 2026-07-25, the caption row then read
-            // `group/Details` with a separate unnamed checkbox inside
-            // it, instead of the single `checkbox/Details` every other
-            // backend publishes. Moving the toggle up also makes the
-            // whole row the hit target, which is what the caption
-            // beside a box means everywhere else.
+            // Uncontrolled toward the app, the entry's shape. The TOGGLE
+            // LIVES ON THE ROW and the box takes onCheckedChange = null:
+            // a box with its own handler is independently focusable and
+            // Compose's merging STOPS there, so the row read
+            // `group/Details` with a separate unnamed checkbox instead of
+            // one `checkbox/Details` (measured 2026-07-25).
             Row(
                 modifier = boxFill.then(a11y)
                     .toggleable(
@@ -10392,36 +9220,13 @@ private fun KayaRenderCore(
                 valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
             )
         KayaCompose.KIND_IMAGE -> {
-            // Fixed to the decoded bitmap's intrinsic size (Image
-            // defaults to it), matching the harness's size observation.
-            //
-            // The one kind whose NAME does not ride the shared modifier:
-            // Image's own contentDescription parameter is what declares
-            // Role.Image, and null there is Compose's spelling of "this
-            // is decoration, hide it from assistive tech" — which is the
-            // right default for an unnamed image and the wrong answer
-            // for a named one.
-            //
-            // A FAILED DECODE IS PRESENT AND EMPTY, NOT ABSENT. The
-            // placeholder is a 0x0 Box that still occupies the node's
-            // slot — what GTK and WinUI have by construction (a
-            // GtkPicture with its paintable cleared, an Image with no
-            // Source), and what a declarative backend has to say out
-            // loud. This used to be a bare `?.let`, which emits NOTHING
-            // when the bitmap is null, and everything above that counts
-            // children POSITIONALLY then read the wrong child: the grid
-            // arm's `placeables[i]` is paired with `node.children[i]`, so
-            // one undecodable image shifted every later cell up a slot
-            // and recorded every later cell's origin against its
-            // neighbour. The SwiftUI twin of this line went further and
-            // trapped outright (docs/deferred.md).
-            //
-            // The placeholder takes no fill — a decode that produced
-            // nothing has no box to render at its track, and a 0x0 slot
-            // is a smaller lie than a track-wide blank. Its two lines are
-            // also verbatim: tools/check-empty-child.py perturbs them for
-            // its watched negative and reads an unchanged copy as a
-            // BROKEN self-test.
+            // Fixed to the decoded bitmap's intrinsic size. The one kind
+            // whose NAME does not ride the shared modifier: Image's own
+            // contentDescription declares Role.Image, null there meaning
+            // "decoration". A FAILED DECODE IS PRESENT AND EMPTY, NOT
+            // ABSENT — emit nothing and everything counting children
+            // POSITIONALLY reads the wrong one (tools/check-empty-child.py
+            // perturbs these two lines verbatim).
             val bitmap = node.imageBitmap
             if (bitmap != null) {
                 Image(
@@ -10441,65 +9246,13 @@ private fun KayaRenderCore(
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
         KayaCompose.KIND_CANVAS -> {
-            // THE BLIT (docs/canvas-plan.md §8): the core rasterized, and
-            // this arm puts the bytes on screen. No draw op is
-            // interpreted here and no drawing API is owned here.
-            //
-            // THE INTRINSIC SIZE IS ALREADY THE VIEWBOX. The scale this
-            // backend reports IS the composition's density (§5), so the
-            // raster is viewbox-times-density pixels and Image's default
-            // sizing — the painter's pixel size — lands on the viewbox
-            // in dp with no arithmetic here.
-            //
-            // STRICTLY 1:1, NEVER STRETCHED (§3.2.1, ruling 2): the
-            // image is measured UNBOUNDED so it takes exactly those
-            // pixels, and a track bigger than the buffer leaves MARGIN
-            // rather than a rescale. Whether the buffer is the viewbox's
-            // size or the track's is the CORE's decision and the whole
-            // content of the size policy — this arm may not have an
-            // opinion about it.
-            //
-            // THE TRACK IS THIS LAYOUT'S OWN SIZE, never the image's:
-            // `boxFill` puts the grow fill HERE, so the constrained size
-            // is the cell a grower earned, while the image inside is
-            // always the buffer. Reading the image would make the track
-            // and the raster agree by construction and leave the policy
-            // inert (KayaSwiftUI.swift's `.background` trap, one toolkit
-            // over).
-            //
-            // A GROWER TAKES THE WHOLE OFFERED BOX, BOTH AXES, which is
-            // KayaSwiftUI.swift's `.frame(maxWidth:.infinity,
-            // maxHeight:.infinity)` in this toolkit's spelling, and it is
-            // the half that cannot be derived from the buffer: a `redraw`
-            // or `tick` canvas HAS no buffer until the core asks, and the
-            // core only asks once a track is reported. Sized from the
-            // child, such a canvas is 0 wide, the report is degenerate,
-            // the ask never goes out and it stays empty for the process's
-            // life (docs/traps.md, "A `redraw` canvas sized from its own
-            // buffer NEVER STARTS"). An UNGROWN canvas keeps its natural
-            // size, which is content-is-the-floor and the track it truly
-            // has.
-            //
-            // AND AN UNGROWN ONE IS CLAMPED INTO its constraints, never
-            // merely floored by them: letting a `fixed` canvas's
-            // oversized buffer push this layout out would report the
-            // VIEWBOX as the track, and scene.rs's canvas_raster_shape
-            // answers "track" for that — the one word it cannot then
-            // tell from a re-raster.
-            //
-            // ONE READER, BOTH JOBS: `expect_ink` samples the box this
-            // records and the core rasters for the size this reports.
-            //
-            // THE TAG RIDES THE IMAGE, not this Layout: `Image` publishes
-            // Role.Image only when the name rides its own
-            // contentDescription PARAMETER (the measured finding at
-            // `a11yTag`'s declaration), so a tag on the wrapper answers
-            // `expect_ax` with `group/` and one child (docs/traps.md, the
-            // same entry).
-            //
-            // A DRAWING NOT YET DECLARED IS PRESENT AND EMPTY, NOT
-            // ABSENT — the image arm's rule verbatim, for its reason
-            // (tools/check-empty-child.py).
+            // THE BLIT (docs/canvas-plan.md §8), interpreting no draw op.
+            // STRICTLY 1:1, NEVER STRETCHED (§3.2.1 ruling 2), and THE
+            // TRACK IS THIS LAYOUT'S OWN SIZE — reading the image would
+            // make track and raster agree by construction. A GROWER TAKES
+            // THE WHOLE OFFERED BOX (docs/traps.md, "A `redraw` canvas
+            // sized from its own buffer NEVER STARTS"); an UNGROWN one is
+            // CLAMPED. THE TAG RIDES THE IMAGE, not this Layout.
             val drawing = node.drawing
             val canvasDensity = LocalDensity.current.density.toDouble()
             Layout(
@@ -10550,21 +9303,12 @@ private fun KayaRenderCore(
                 }
             }
             // THE PLATFORM'S FRAME DRIVE, outside the harness
-            // (docs/canvas-plan.md §15.4). `withFrameNanos` is Compose's
-            // own Choreographer schedule and hands back the frame's
-            // timestamp, which is what the tick has to carry: a clock
-            // read inside the callback re-imports exactly the jitter the
-            // frame time was fixed to remove.
-            //
-            // NOT UNDER THE HARNESS, and that is the determinism half of
-            // the ruling: a scene's frame count is what the `frame` verb
-            // advanced, so a second clock running beside it would make
-            // every animation leg a question about the machine's load.
-            //
-            // ONE PER CANVAS, because this backend is not told which
-            // canvases tick — the size policy is the core's. `kaya_frame`
-            // is monotone in the timestamp, so the second and later
-            // canvases in a frame cost a comparison and nothing else.
+            // (docs/canvas-plan.md §15.4). `withFrameNanos` hands back the
+            // frame's timestamp, which is what the tick must carry — a
+            // clock read inside the callback re-imports the jitter the
+            // frame time removes. NOT UNDER THE HARNESS, or a second
+            // clock would make every animation leg a question about load.
+            // ONE PER CANVAS, since this backend is not told which tick.
             if (!kayaHarnessDrivesFrames) {
                 LaunchedEffect(node.id) {
                     while (true) {
@@ -10578,37 +9322,11 @@ private fun KayaRenderCore(
 
 /**
  * THE ENTRY AND THE TEXTAREA, on `BasicTextField(state:)` with M3
- * dressing (docs/undo-plan.md §1.4).
- *
- * WHY NOT `TextField(value:, onValueChange:)` any more: that path's undo
- * stack is an INTERNAL `UndoManager` the app cannot see, clear or ask,
- * Ctrl+Z drives it, and kaya's writes enter it — see [KayaNode.textState]
- * for the measured worst case. This shape is the only one on which D7
- * (an app write invalidates the field's edit history) and D6's native
- * tier (`undoState.canUndo` / `undo()`) can be expressed at all.
- *
- * AND IT NEEDS NO PIN BUMP, which was the open question §1.4 closed:
- * material3 1.3.1 has no `TextField(state:)` overload (compile-proven —
- * "None of the following candidates is applicable"), but
- * `BasicTextField(state=)` + `TextFieldDefaults.DecorationBox` compiles
- * and renders as a proper M3 filled field at kaya's own BOM. The cost is
- * two opt-ins, each proven required by removing it.
- *
- * THE ECHO GUARD IS THE ONE NEW FAILURE CLASS, and it is why the
- * observation is a comparison rather than a flag. `TextFieldState` has no
- * `onValueChange`; the observation is `snapshotFlow { state.text }`, and
- * MEASURED that channel fires for kaya's OWN writes too (the legacy
- * path's `onValueChange` never did). Under the echo doctrine a
- * programmatic write must not emit, so [kayaWriteText] moves the model
- * and the widget together and this collector reports only what makes them
- * DIFFER — which is exactly the set of edits kaya did not perform. A
- * boolean set around the write would have to survive an unknown number of
- * frames; the comparison is exact and self-clearing.
+ * dressing (docs/undo-plan.md §1.4) — NOT `TextField(value:,
+ * onValueChange:)`, whose undo stack no app can see. THE ECHO GUARD:
+ * `snapshotFlow { state.text }` fires for kaya's OWN writes too, so this
+ * collector reports only what makes model and widget DIFFER.
  */
-// The M3 dressing is the file's SECOND and last experimental opt-in, and
-// it is proven required rather than assumed: removing it fails the
-// compile with "This material API is experimental" at the DecorationBox
-// call, one error, at material3 1.3.1.
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun KayaTextField(
@@ -10617,10 +9335,9 @@ fun KayaTextField(
     /**
      * [KayaRenderCore]'s `boxFill` — the grow/stretch/crossing fill every
      * kind rides. THE LINE LIMITS BELOW ARE A FLOOR AND A CEILING IN
-     * LINES, which is what bounds an unweighted field; a grower's size is
-     * the cell its weight earned, and a field that ignored that cell
-     * rendered three lines tall inside a cell expect_shares read as
-     * exactly right.
+     * LINES, which bounds an unweighted field; a grower's size is the
+     * cell its weight earned, and a field ignoring that cell rendered
+     * three lines tall inside one expect_shares read as exactly right.
      */
     fill: Modifier,
     singleLine: Boolean,
@@ -10649,19 +9366,13 @@ fun KayaTextField(
     }
     BasicTextField(
         state = node.textState,
-        // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, which
-        // is what every other backend's already is — macOS an NSTextView
-        // in its scroll view at 240x96, GTK a GtkTextView inside the
-        // GtkScrolledWindow the textarea foundation gave it at the same
-        // size, WinUI a RichEditBox. Compose's was the one that GREW:
-        // `MultiLine(minHeightInLines = 3)` leaves the maximum at
-        // Int.MAX_VALUE, so a 40-line document rendered 2496px tall
-        // (measured, range-probe-android.md §0.2) with nothing able to
-        // scroll it — and reveal is then not a hard feature, it is an
-        // UNRUNNABLE one: `expect_revealed offscreen` would be true
-        // forever. Bounding it here uses the field's OWN scroll rather
-        // than a verticalScroll wrapper, which would also cost the
-        // field's keep-the-caret-visible behaviour while typing.
+        // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, as
+        // every other backend's already is. `MultiLine(minHeightInLines)`
+        // leaves the maximum at Int.MAX_VALUE, so a 40-line document
+        // rendered 2496px tall with nothing able to scroll it (measured,
+        // range-probe-android.md §0.2) and `expect_revealed offscreen`
+        // would be true forever. Bounded through the field's OWN scroll,
+        // which a verticalScroll wrapper would cost.
         lineLimits =
             if (singleLine) TextFieldLineLimits.SingleLine
             else TextFieldLineLimits.MultiLine(
@@ -10724,37 +9435,11 @@ fun KayaTextField(
 }
 
 /**
- * THE DECORATED RANGES, painted behind the text from the platform's own
- * layout — the whole highlight lowering, and the reason it is a DRAW and
- * not a styled string.
- *
- * THERE IS NO STYLING HOOK ON THIS FIELD, compile-proven at kaya's pins
- * (range-probe-android.md §1a): `BasicTextField(state=)` has no
- * `visualTransformation` — that parameter exists only on the
- * `value:`/`TextFieldValue:` overloads the undo milestone deliberately
- * left — `OutputTransformation` can only EDIT text
- * (`TextFieldBuffer` has no style API at all), and the
- * `TextHighlightType` the state does carry is one range, Kotlin-internal,
- * and means stylus preview. THE TRAP IS THE FOURTH ROUTE: an
- * `AnnotatedString` IS a `CharSequence`, so `state.edit { replace(0,
- * length, annotated) }` COMPILES CLEAN, and the state stores it as a
- * plain String and paints NOTHING — measured, zero highlight pixels. A
- * backend that "supported" highlight that way would pass every compile
- * gate in this repo and decorate nothing on screen.
- *
- * So the ranges are drawn, and drawn onto `getPathForRange`, which
- * handles a wrapped range and bidi where a hand-rolled per-line rect
- * does not — the probe's own rect helper got a range crossing a line
- * break subtly wrong while the path matched the pixels to within one.
- *
- * PHASE DISCIPLINE IS THE RULE THIS PLACE EXISTS TO KEEP. Everything the
- * paint depends on is read INSIDE the draw lambda: the declared set, the
- * text it was declared against, the live text and the scroll offset. A
- * read hoisted into the composable body recomposes the field on every
- * re-declaration (measured: 200 recompositions in 200 frames, against
- * zero here), and at 40 lines it would still fit inside a frame — so it
- * would never fail a lane and would only ever show up on somebody's real
- * document.
+ * THE DECORATED RANGES, painted behind the text: there is NO STYLING
+ * HOOK on this field, and the trap is that `state.edit { replace(0,
+ * length, annotated) }` COMPILES CLEAN and paints NOTHING
+ * (range-probe-android.md §1a). PHASE DISCIPLINE IS THE RULE HERE — a
+ * hoisted read recomposes the field 200 times in 200 frames.
  */
 @Composable
 private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
@@ -10781,15 +9466,10 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
             .drawBehind {
             // D2's CLEAR-ON-EDIT, made structural: the set is painted
             // ONLY while the field still holds the text it was declared
-            // against, so a keystroke, a programmatic write or a native
-            // undo drops it HERE, at paint time. A compare made on the
-            // pass that paints cannot arrive late, which a message from
-            // the core could.
-            //
-            // Stale offsets on this backend are a WRONG highlight
-            // rather than a crash — measured (§1c): after prepending
-            // three characters the old offsets kept painting at the old
-            // glyph positions until re-declared.
+            // against, so a compare made on the pass that paints cannot
+            // arrive late where a message from the core could. Stale
+            // offsets here are a WRONG highlight rather than a crash
+            // (measured, §1c).
             val live = node.textState.text.toString()
             val paint =
                 if (node.highlightsFor == live) node.highlights else emptyList()
@@ -10832,38 +9512,19 @@ private const val KAYA_TEXTAREA_LINES = 6
 private val KAYA_HIGHLIGHT_COLOR = androidx.compose.ui.graphics.Color(0x8CFFEB3B)
 
 /**
- * TONE, the number Material's whole colour system is built on: HCT's T
- * is CIE L*, so a tone is perceptual lightness and a TONE DIFFERENCE IS
- * A CONTRAST GUARANTEE — that is the property every rule below leans on.
- *
- * Read through Compose's own colour-space machinery (`ColorSpaces.CieLab`
- * is D50, and the connector Bradford-adapts sRGB's D65 into it), so the
- * number here is the number material3 itself works in.
+ * TONE, the number Material's colour system is built on: HCT's T is CIE
+ * L*, so a TONE DIFFERENCE IS A CONTRAST GUARANTEE — the property every
+ * rule below leans on. Read through Compose's own colour-space
+ * machinery, so this is the number material3 itself works in.
  */
 private fun Color.kayaTone(): Float = convert(ColorSpaces.CieLab).red
 
 /**
- * The seed's palette AT A TONE — the one piece of colour maths this
- * backend does, and it is Material's own: material3 computes the tones
- * the platform does not publish exactly this way (`setLuminance` in
- * DynamicTonalPalette.android.kt — convert to CIELab, keep the a and b
- * axes, set L), and this is that function with one thing added.
- *
- * THE THING ADDED IS THE GAMUT LOOP, and without it the derivation is
- * wrong in the direction that matters. A saturated seed at tone 90 has
- * no sRGB representative: the conversion CLIPS, and a clipped colour
- * lands at some other lightness — measured, Adwaita blue #3584E4 at tone
- * 90 comes back at L* 78 unclipped-naive, which quietly destroys the
- * contrast the tone was chosen for. HCT solves this by keeping the tone
- * and giving up chroma (that IS its "closest in-gamut colour at this
- * tone"), so this bisects the seed's chroma for the most colourful
- * candidate whose REALIZED tone is the one asked for, within half a
- * tone. Aim, measure, correct — the same shape as the core's own
- * danger-band clamp (crates/kaya/src/brand.rs), for the same reason:
- * a number nobody measured back is a number nobody has.
- *
- * Degenerate seeds fall out right: white and black have no chroma to
- * keep, so every tone of them is the grey at that tone.
+ * The seed's palette AT A TONE: Material's own `setLuminance` plus THE
+ * GAMUT LOOP, without which a saturated seed at tone 90 has no sRGB
+ * representative and CLIPS to another lightness (measured, Adwaita blue
+ * #3584E4 at tone 90 comes back at L* 78). So this bisects the seed's
+ * chroma for the most colourful candidate at the tone asked for.
  */
 private fun kayaToneOf(seed: Color, tone: Float): Color {
     val lab = seed.convert(ColorSpaces.CieLab)
@@ -10924,27 +9585,11 @@ private fun kayaContrastAt(
 }
 
 /**
- * A ROLE'S TONE: the nominal one if it already meets the contrast its
- * curve asks for against its own background, else the one
- * `DynamicColor.foregroundTone` would pick — walked a tone at a time
- * rather than solved analytically (the two agree to within a tone, and a
- * walk cannot return an out-of-range answer).
- *
- * BOTH DIRECTIONS ARE WEIGHED, and that is not a refinement: walking one
- * way is wrong in exactly the case the contrast slider creates, measured
- * on emulator-5554 before this rule had the second half. At high
- * contrast the container tone is pulled down to ~45 to clear the page,
- * and a rule that only walked "away from the background" then took
- * onPrimaryContainer DOWN to black — 3.9:1 — when white above it was
- * 5.4:1. So: a background below tone 60 wants a LIGHT foreground and one
- * at or above it wants a dark one (Material's
- * `tonePrefersLightForeground`), and the other side wins anyway when the
- * preferred one cannot reach the ratio and it can.
- *
- * Either candidate CLAMPS at 0 or 100 rather than failing, which is
- * Material's `lighterUnsafe`/`darkerUnsafe`: its own light `onPrimary` is
- * tone 100 against a tone-40 primary — 6.1:1 where the curve asks 7 —
- * because there is nothing lighter than white.
+ * A ROLE'S TONE: the nominal one if it meets its curve's contrast, else
+ * what `DynamicColor.foregroundTone` picks, walked a tone at a time.
+ * BOTH DIRECTIONS ARE WEIGHED, measured: at high contrast a rule walking
+ * only away from the background took onPrimaryContainer down to black
+ * (3.9:1) where white above it was 5.4:1. Either candidate CLAMPS.
  */
 private fun kayaRoleTone(nominal: Float, background: Float, desired: Float): Float {
     if (kayaRatioOfTones(nominal, background) >= desired) return nominal
@@ -10976,50 +9621,22 @@ private fun kayaRoleTone(nominal: Float, background: Float, desired: Float): Flo
 }
 
 /**
- * The colour schemes this backend composes under — Material's baseline
- * until an app requests a brand, and the SEED'S OWN SCHEME once it does.
- *
- * WHY THIS BACKEND DERIVES AT ALL, when the rule everywhere else is that
- * the core derives and backends apply values (docs/styling-plan.md D1):
- * Material's colour system IS a derivation from one seed hex, published
- * and deterministic, and kaya defers to a platform's own model wherever
- * one exists rather than fighting it. So the wire's ten derived words are
- * for the backends whose platforms have no such model, and this one takes
- * the seed.
- *
- * WHAT IS DERIVED, AND WHAT DELIBERATELY IS NOT. ALL FIVE of Material's
- * seed palettes follow the brand (the M3 ruling, docs/deferred.md "THE
- * FULL M3 SCHEME", 2026-08-31): the PRIMARY family through kayaToneOf's
- * CIELab bisection exactly as before the ruling, and the
- * secondary/tertiary/neutral/neutralVariant families through HCT
- * (CorePalette.of — the port's chroma constants are Material's own:
- * secondary 16, tertiary hue+60 at 24, neutrals 4 and 8), each role at
- * the tone color_spec_2021.ts assigns it, on-roles and outlines through
- * the same contrast machinery the primary family uses. The ERROR palette
- * alone stays Material's baseline, and that is not "not yet":
- * SchemeTonalSpot hands it a fixed palette rather than deriving one,
- * because red means destructive whatever an app's brand is. kaya's
- * destructive role reads those roles, and they must not follow the seed.
- * KayaColorSchemesTest is the wall on all of that — the four families
- * moving with the seed, the error family refusing to — watched red
- * against the pre-ruling code.
- *
- * Not a composable and not remembered: a scheme is a value. The caller
- * keys it on (seed, appearance, contrast) — the three inputs it has.
+ * The colour schemes this backend composes under. THIS BACKEND DERIVES,
+ * against the rule elsewhere, because Material's colour system IS a
+ * published derivation from one seed (docs/styling-plan.md D1). ALL FIVE
+ * palettes follow the brand except ERROR (docs/deferred.md "THE FULL M3
+ * SCHEME"; KayaColorSchemesTest is the wall).
  */
 internal object KayaColorSchemes {
     val light: ColorScheme = lightColorScheme()
     val dark: ColorScheme = darkColorScheme()
 
     /**
-     * @param seed the requested brand accent, packed 0xRRGGBB, or null
-     *   for "the app asked for nothing" — which is Material's baseline,
-     *   NOT the wallpaper palette: opting into dynamic colour is a
-     *   ratified non-goal for v1 (docs/styling-plan.md D2).
+     * @param seed the brand accent, packed 0xRRGGBB, or null for
+     *   Material's baseline — NOT the wallpaper palette (D2).
      * @param dark the appearance to build for.
-     * @param contrast the system contrast level, -1..1, 0 = default —
-     *   Material's own scale, and the input a STATIC scheme silently
-     *   ignores (MDC #3524). Every role's tone below moves with it.
+     * @param contrast the system level, -1..1, which a STATIC scheme
+     *   silently ignores (MDC #3524).
      */
     fun of(seed: Int?, dark: Boolean, contrast: Float): ColorScheme {
         val base = if (dark) this.dark else this.light
@@ -11231,38 +9848,12 @@ internal object KayaColorSchemes {
 }
 
 // --- THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b) --------------
-//
-// Measured before written (docs/styling/typeface-compose.md, on the lane's
-// own API 35 image), and three of those findings decide the shape of
-// everything below.
-//
-// ONE WRITE IS NOT ENOUGH — this backend needs TWO, and the measurement
-// is what says so. `MaterialTheme`'s `typography` argument brands
-// Material's OWN components; kaya's labels and text fields never read
-// it, because KayaTheme deliberately holds `LocalTextStyle` at its
-// PRE-theme value (see its note) and that local is what
-// `KIND_LABEL -> Text(…)` and `textStyle = LocalTextStyle.current…`
-// read. Measured with `typography` alone: the Button moved to Noto Serif
-// while the plain label stayed on ROBOTO at exactly its unbranded width
-// — a half-branded window that still looks branded, which is the state a
-// coarse observation calls applied.
-//
-// THE READS THAT LOOK RIGHT ARE ECHOES OF THE REQUEST.
-// `layoutInput.style.fontFamily` is the request by construction, and
-// `Typeface.getSystemFontFamilyName()` — which has the right type and
-// reads like a resolved-face read — returns the KEY the Typeface was
-// created with: `georgia` for a font that shaped as Noto Serif,
-// `courier new` for one that shaped as Cutive Mono, and null for a face
-// loaded from bytes. The honest read is the shaped glyph run's own font
-// FILE, named out of that file's OpenType `name` table; nothing in that
-// chain can carry the requested string.
-//
-// THE FALLBACK IS TOTAL AND SILENT. A family this device does not have
-// renders as Roboto, pixel-identical to declaring no brand at all (three
-// screenshots sharing one md5), and `FontFamily.Resolver.preload` — the
-// API that documents itself as throwing for a font that cannot load —
-// returned ok for every nonsense name. The sentinel probe below is what
-// actually detects it.
+// Three measured findings shape it (docs/styling/typeface-compose.md).
+// ONE WRITE IS NOT ENOUGH: `typography` brands Material's OWN components
+// while kaya's labels read `LocalTextStyle`. THE READS THAT LOOK RIGHT
+// ARE ECHOES OF THE REQUEST, so the honest read is the shaped glyph
+// run's own font FILE. THE FALLBACK IS TOTAL AND SILENT — a missing
+// family renders as Roboto and `preload` accepted every nonsense name.
 
 /**
  * The string the resolved-face reads shape. Latin, because every UI face
@@ -11273,24 +9864,11 @@ internal object KayaColorSchemes {
 private const val KAYA_TYPEFACE_PROBE = "Handgloves"
 
 /**
- * TWO SENTINELS, which is what makes the apply-time miss detector
- * device-independent.
- *
- * The mechanism (docs/styling/typeface-compose.md §3.2): Compose's
- * `DeviceFontFamilyName` loader returns null for a family the device
- * does not have, and the FontFamily then falls through to the next font
- * in its list — so landing on a sentinel IS the miss. ONE sentinel would
- * need a name-vs-face comparison to spot the landing, and would
- * misreport the app that asks for the sentinel's own family; two need
- * neither. Resolve the requested name with A appended, and again with B
- * appended: if the name loads, both shape in the SAME face; if it does
- * not, one shapes as A and the other as B.
- *
- * They are two of the four AOSP-baseline generic names, the only font
- * vocabulary Android guarantees on an arbitrary device — and the
- * detector still refuses a verdict rather than assuming it, by checking
- * HERE that A and B are different faces (a device resolving both to one
- * face would otherwise make every family look present).
+ * TWO SENTINELS, which makes the apply-time miss detector
+ * device-independent (docs/styling/typeface-compose.md §3.2): a
+ * FontFamily falls through when a name does not load, so landing on a
+ * sentinel IS the miss. One face means it loaded, two means it did not —
+ * and the detector checks HERE that A and B differ.
  */
 private const val KAYA_TYPEFACE_SENTINEL_A = "cursive"
 private const val KAYA_TYPEFACE_SENTINEL_B = "monospace"
@@ -11307,18 +9885,11 @@ internal class KayaFace(val family: String, val file: String, val axes: String) 
 }
 
 /**
- * The FAMILY NAME out of a font file's OpenType `name` table.
- *
- * This is the link in the read that cannot echo: the buffer is the file
- * the shaper picked, and the name comes out of that file's own bytes.
- * nameID 16 (typographic family) when the font has one, else nameID 1
- * (font family) — 16 is what groups a family whose weights carry their
- * own nameID 1 ("Roboto Condensed Light"). Windows and Unicode records
- * are UTF-16BE; the Macintosh record is a byte encoding whose ASCII
- * range is all a family name uses in practice.
- *
- * Null when the buffer is not a font this parser can walk, which is a
- * real answer and reads as a mismatch rather than as a pass.
+ * The FAMILY NAME out of a font file's OpenType `name` table — the link
+ * in the read that cannot echo. nameID 16 when the font has one, else
+ * nameID 1, since 16 groups a family whose weights carry their own.
+ * Windows and Unicode records are UTF-16BE, the Macintosh one a byte
+ * encoding. Null reads as a mismatch rather than a pass.
  */
 private fun kayaFontFamilyName(buffer: java.nio.ByteBuffer, ttcIndex: Int): String? {
     val b = buffer.duplicate().order(ByteOrder.BIG_ENDIAN)
@@ -11370,13 +9941,10 @@ private fun kayaFontFamilyName(buffer: java.nio.ByteBuffer, ttcIndex: Int): Stri
 }
 
 /**
- * THE HONEST READ, one face: shape [KAYA_TYPEFACE_PROBE] with a resolved
- * `Typeface` and ask the resulting glyph run which FONT it came from
- * (docs/styling/typeface-compose.md §2.2).
- *
- * `TextRunShaper` is API 31. Below that the platform offers no supported
- * way to ask which font a run used, and the honest answer is null —
- * which the callers turn into a sentence naming the API level, never
+ * THE HONEST READ, one face: shape [KAYA_TYPEFACE_PROBE] and ask the
+ * glyph run which FONT it came from (docs/styling/typeface-compose.md
+ * §2.2). `TextRunShaper` is API 31, and below it the honest answer is
+ * null — which callers turn into a sentence naming the API level, never
  * into a family name nobody measured.
  */
 private fun kayaShapedFace(typeface: android.graphics.Typeface): KayaFace? {
@@ -11412,30 +9980,19 @@ private fun kayaResolveFace(resolver: FontFamily.Resolver, family: FontFamily): 
 
 /**
  * What the presence detector below can answer. TWO ways of not knowing,
- * kept apart on purpose: a diagnostic may only print what it measured,
- * and a single "cannot tell" would make the arm name one cause for a
- * state produced by the other. (Caught by the negative that forced this
- * branch to print: it blamed the API level for a device whose sentinels
- * had collided.)
+ * kept apart because a diagnostic may only print what it measured and a
+ * single "cannot tell" would name one cause for the other's state
+ * (caught by the negative that made this branch print: it blamed the API
+ * level for a device whose sentinels had collided).
  */
 private enum class KayaPresence { PRESENT, ABSENT, NO_SHAPED_READ, SENTINELS_ALIKE }
 
 /**
- * DOES THIS DEVICE HAVE THIS FAMILY? — asked at the moment the lowering
- * applies it, which is the wall invariant 3 asks for: not one more thing
- * to remember to assert in a scene, but a fact the code establishes on
- * the path nobody can avoid.
- *
- * The two not-knowing answers are real answers rather than a shrug: this
- * device cannot be asked at all (below API 31 there is no shaped-run
- * read), or the detector's own precondition does not hold here (the two
- * sentinels resolve to one face, so every family would look present). A
- * detector that guessed in either case would be printing a verdict it
- * never measured.
- *
- * NOT `preload`, which returned ok for every nonsense family, and NOT
- * `getSystemFontFamilyName()`, which is a string comparison against the
- * request (docs/styling/typeface-compose.md §3.2).
+ * DOES THIS DEVICE HAVE THIS FAMILY? — asked where the lowering applies
+ * it, on the path nobody can avoid. The two not-knowing answers are
+ * real: below API 31 there is no shaped-run read, or the sentinels
+ * resolved alike. NOT `preload`, which returned ok for every nonsense
+ * family, and NOT `getSystemFontFamilyName()`, an echo of the request.
  */
 private fun kayaDeviceFamilyPresent(
     context: android.content.Context,
@@ -11457,17 +10014,11 @@ private fun kayaDeviceFamilyPresent(
 }
 
 /**
- * The BYTES form: the blob to an app-private file, and a `FontFamily`
- * over that file. Null when the bytes are not a font.
- *
- * WHY THE CHECK IS `Typeface.Builder`, MEASURED: a corrupt blob makes
- * Compose's own `Font(File)` THROW `IllegalStateException` at RESOLVE —
- * that is, inside composition, taking the app down — while
- * `Typeface.Builder(file).build()` returns null for the same bytes
- * (docs/styling/typeface-compose.md §6.3). So the platform's non-throwing
- * check runs first and Compose never sees a file it would die on. The
- * two request forms then fail the same way: a bad name and bad bytes
- * both fall back, neither is fatal.
+ * The BYTES form: the blob to an app-private file and a `FontFamily`
+ * over it, null when the bytes are not a font. WHY THE CHECK IS
+ * `Typeface.Builder`, MEASURED: a corrupt blob makes Compose's own
+ * `Font(File)` THROW at RESOLVE, inside composition, where
+ * `Typeface.Builder(file).build()` returns null (§6.3).
  */
 private fun kayaFontFromBytes(context: android.content.Context, bytes: ByteArray): FontFamily? {
     return try {
@@ -11490,18 +10041,9 @@ private fun kayaFontFromBytes(context: android.content.Context, bytes: ByteArray
 
 /**
  * The brand typeface, RESOLVED and applied (apply 33). Both wire forms
- * land here, and on this backend they converge on the `FontFamily`
- * OBJECT rather than on a name: Android has no app-font registry at all,
- * so the plan's "register the bytes, then let the name machinery take
- * over" cannot hold here — after a blob is loaded and rendering,
- * `Typeface.create(itsFamilyName, …)` still answers Roboto
- * (docs/styling/typeface-compose.md §6.2). One resolution, one observation,
- * one fallback; just one layer lower than on Apple.
- *
- * PRECEDENCE IS THE APPLE ARM'S, to the word: the bytes, then this
- * platform's row, then the default family. Bytes that are not a font
- * fall through to the name, exactly as a registration that failed does
- * there.
+ * converge on the `FontFamily` OBJECT rather than a name: Android has no
+ * app-font registry (docs/styling/typeface-compose.md §6.2). PRECEDENCE
+ * IS THE APPLE ARM'S — the bytes, this platform's row, the default.
  */
 internal fun kayaApplyTypeface(
     context: android.content.Context?,
@@ -11563,27 +10105,10 @@ internal fun kayaApplyTypeface(
 
 /**
  * WHERE THE READ TAKES ITS SAMPLES: one real laid-out text per ROUTE
- * into the theme, keyed by the site that produced it.
- *
- * A ROUTE and not a widget, because the two writes are what can come
- * apart: `label` and the text fields read `LocalTextStyle`, while
- * `heading` and `button` read the typography ramp (Material's own
- * components provide their rung internally). A read that sampled one
- * side would call a half-applied lowering applied — the measured failure
- * mode the two writes exist for.
- *
- * Written during LAYOUT, so a plain map like [kayaTextLayouts] and not
- * snapshot state: a snapshot write in the layout pass invalidates the
- * pass that wrote it.
- *
- * A sample can OUTLIVE the node that made it — nothing removes an entry
- * when a label leaves the tree — and that is safe here for a reason
- * worth stating rather than assuming: the key is a ROUTE, not a widget,
- * and the brand typeface is set ONCE before the first mount, so every
- * sample a route ever produces in this process carries that route's one
- * answer. The residual case (a sample taken before the brand applied,
- * from a node since removed) can only ever manufacture a DISAGREEMENT,
- * which fails loudly — never a false agreement, which would pass.
+ * into the theme, since the two writes are what come apart — `label`
+ * reads `LocalTextStyle` where `heading` reads the ramp. Written during
+ * LAYOUT, so a plain map and not snapshot state. A sample outliving its
+ * node can only manufacture a DISAGREEMENT, which fails loudly.
  */
 val kayaTypefaceSites = HashMap<String, androidx.compose.ui.text.TextLayoutResult>()
 
@@ -11596,20 +10121,10 @@ private var kayaTypefaceSaid: String? = null
 
 /**
  * THE HONEST READ, for `expect_typeface`: the family the TEXT SYSTEM
- * ended up with, off the real text on screen.
- *
- * NEVER THE MODEL AND NEVER THE REQUEST. Each sample is a
- * `TextLayoutResult` a real layout pass produced, and BOTH halves of the
- * resolution come out of it — the style that layout used, and the
- * `fontFamilyResolver` that layout used — so the answer is about the
- * render rather than about `KayaSceneModel`. From there the face is
- * shaped and named out of the font file's own name table.
- *
- * THE SITES MUST AGREE, for [kayaTypefaceSites]' reason: reporting the
- * first one found would hide a lowering that reached the typography ramp
- * and not the ambient style, which on this backend is one missing line
- * rather than an exotic failure. A disagreement is reported AS a
- * disagreement, naming each site — a string no scene can assert.
+ * ended up with — NEVER THE MODEL AND NEVER THE REQUEST. Both halves of
+ * the resolution come out of a `TextLayoutResult` a real layout pass
+ * produced. THE SITES MUST AGREE, or a lowering that reached the ramp
+ * and not the ambient style would hide; a disagreement is reported AS one.
  */
 internal fun kayaResolvedTypeface(): String {
     val samples = LinkedHashMap<String, androidx.compose.ui.text.TextLayoutResult>()
@@ -11663,47 +10178,27 @@ internal fun kayaResolvedTypeface(): String {
 
 /**
  * THE HONEST READ, for `expect_app_icon`: the four quadrant centres of
- * the picture the LAUNCHER draws for this app, and a requirement that
- * the guest's declaration agrees with it.
+ * the picture the LAUNCHER draws, plus a requirement that the guest's
+ * declaration agrees. The picture comes from PackageManager
+ * (docs/app-identity-plan.md ruling 3), never from kaya's model; THE
+ * DECLARATION IS ALSO REQUIRED, since the packaged icon is there
+ * whatever a guest declared. A sentence is wrapped in `<…>` and the
+ * samples never are, which is how a failure rides back through a String.
  *
- * WHERE THE PICTURE COMES FROM. On Android the launcher icon is part of
- * the installed package (docs/app-identity-plan.md ruling 3), so this
- * asks the system's PackageManager to resolve the MAIN/LAUNCHER activity
- * of this package and to load its icon — the same resolution the launcher
- * itself performs, out of the APK's own resources, through a system
- * service. Nothing here reads kaya's model, which on this backend holds
- * no picture at all: the apply arm draws nothing, by ruling.
+ * THE SENTENCES, and what each one MEASURED (invariant 3):
  *
- * AND WHY IT ALSO REQUIRES THE DECLARATION. The packaged icon is in the
- * APK whether or not a guest declared anything, so a read of the package
- * alone would PASS ON A RUN THAT DECLARED NOTHING — an observation that
- * cannot fail for the reason it exists. Both halves must be present and
- * they must sample the same four colours, which is ruling 4's
- * byte-equality invariant re-proved on the device rather than in a gate.
- *
- * THE SENTENCES, and what each one MEASURED (invariant 3: a read may
- * print only what it measured, and must tell its causes apart):
- *
- *   no declaration    `KayaSceneModel.appIdentityName` is null — no
- *                     set_app_identity record was decoded in this
- *                     process. Distinct from every sentence below.
- *   no icon declared  the record arrived and its mask carried no blob,
- *                     so the name is known and the picture is not.
+ *   no declaration    no set_app_identity record was decoded in this
+ *                     process.
+ *   no icon declared  the record arrived with no blob in its mask.
  *   undecodable       BitmapFactory refused the declared bytes; the byte
  *                     count is printed because it is what was refused.
  *   no launcher       queryIntentActivities found no MAIN/LAUNCHER
  *                     activity for this package at all.
- *   no packaged icon  ResolveInfo.getIconResource() is 0 — the package
- *                     declares android:icon on neither the activity nor
- *                     the application, so the system hands back its own
- *                     default, which loadIcon() would return with no
- *                     complaint. Measured, never inferred from pixels.
- *   disagreement      both sides sampled, and their samples differ; both
- *                     are printed, because which one is wrong is exactly
- *                     what the reader has to decide.
- *
- * A sentence is wrapped in `<…>` and the samples never are, which is what
- * lets the two helpers below hand a failure back through a String.
+ *   no packaged icon  getIconResource() is 0, so the system would hand
+ *                     back its own default with no complaint. Measured,
+ *                     never inferred from pixels.
+ *   disagreement      both sides sampled and differ; both are printed,
+ *                     since which is wrong is the reader's decision.
  */
 internal fun kayaAppIconSamples(activity: ComponentActivity): String {
     val name = KayaSceneModel.appIdentityName
@@ -11762,14 +10257,10 @@ private fun kayaDrawableSamples(icon: Drawable, what: String): String {
 
 /**
  * `RRGGBB/RRGGBB/RRGGBB/RRGGBB` — top-left, top-right, bottom-left,
- * bottom-right, the reading order every backend's read uses.
- *
- * CENTRES AND NOT CORNERS, the WinUI read's rule and for its reason: any
- * rescale between the declared 64x64 PNG and the size a platform
- * rasterizes an icon at blurs the quadrant BOUNDARIES, and a corner
- * sample sits on one. Android does rescale — a mipmap with no density
- * qualifier is treated as mdpi and the emulator's 320dpi doubles it — so
- * this is load-bearing here and not a copied convention.
+ * bottom-right, every backend's reading order. CENTRES AND NOT CORNERS:
+ * any rescale between the declared 64x64 PNG and the size a platform
+ * rasterizes at blurs the quadrant BOUNDARIES, and Android does rescale
+ * (an unqualified mipmap is mdpi, and the emulator's 320dpi doubles it).
  */
 private fun kayaBitmapSamples(bitmap: Bitmap, what: String): String {
     val w = bitmap.width
@@ -11786,14 +10277,11 @@ private fun kayaBitmapSamples(bitmap: Bitmap, what: String): String {
 }
 
 /**
- * Material's ramp with the FAMILY swapped and nothing else touched.
- *
- * `copy` moves one field, so `fontSize`, `lineHeight`, `fontWeight` and
- * `letterSpacing` stay exactly what Material set — the whole of "the
- * family swaps, the ramp never does" (DESIGN.md), checked rather than
- * asserted: all fifteen rungs read byte-identical across the
- * unbranded, `serif` and `cursive` legs, and the rendered line boxes
- * with them (docs/styling/typeface-compose.md §1.3).
+ * Material's ramp with the FAMILY swapped and nothing else touched, so
+ * `fontSize`, `lineHeight`, `fontWeight` and `letterSpacing` stay what
+ * Material set — "the family swaps, the ramp never does" (DESIGN.md),
+ * checked: all fifteen rungs read byte-identical across the unbranded,
+ * `serif` and `cursive` legs (docs/styling/typeface-compose.md §1.3).
  */
 private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
     displayLarge = displayLarge.copy(fontFamily = f),
@@ -11814,71 +10302,11 @@ private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
 )
 
 /**
- * THE THEME ROOT — the one place this backend's appearance is decided.
- *
- * There was none until now, and the reason it was survivable is also the
- * reason it had to change: an unthemed composition still renders, because
- * every Material component falls back to `LocalColorScheme`'s default,
- * which IS `lightColorScheme()` (read off material3 1.3.1's bytecode, not
- * assumed). So the pixels were fine and there was simply NOTHING TO WRITE
- * TO — no scheme in kaya's hands, so nowhere for a brand accent to land
- * and nowhere for a contrast level to be read into. Android could not
- * take one line of the styling pass before this existed
- * (docs/styling-plan.md §3 step 3).
- *
- * ITS THREE INPUTS, all of them read from the platform or the app and
- * none of them assumed: the brand SEED (apply 32, or null), the
- * APPEARANCE (the system's, no longer pinned — see below), and the
- * CONTRAST level (Android 14's slider; a static scheme ignores it
- * silently, MDC #3524, which is the read-backs-lie rule with a Material
- * spelling). The typeface (D6, slice 2) is MaterialTheme's `typography`
- * argument, and the note on the text style below is the thing to read
- * before touching it.
- *
- * THE APPEARANCE UNPINS HERE, and it took three changes rather than one.
- * The foundation measured why: with the scheme following the system, the
- * window stayed #FAFAFA in BOTH appearances while the primary role moved
- * #6750A4 -> #D0BCFF — dark-scheme controls on a light page, because the
- * window background came from the platform theme each app declares in its
- * manifest, where no Compose theme reaches. So all three moved together:
- * the manifests now name kaya's own DayNight theme
- * (android/kaya/src/main/res/values{,-night}/themes.xml), this wrapper
- * paints `colorScheme.background` and takes the matching content colour
- * (a black label on a dark page is the other half of that same bug), and
- * the appearance follows `isSystemInDarkTheme()`. The AVDs still boot
- * `notnight`, but the dark arm no longer costs a whole lane re-run with
- * every device's setting flipped: `KAYA_APPEARANCE=dark` moves THIS
- * PROCESS (KayaCompose.applyAppearanceOverride) and the canvas scene runs
- * a dark leg beside the light one on every lane.
- *
- * MaterialTheme ALSO PROVIDES A TEXT STYLE, and that one is not a
- * fallback anybody was already getting: it ends in
- * `ProvideTextStyle(typography.bodyLarge)`. Without a theme
- * `LocalTextStyle` is material3's `DefaultTextStyle`, whose font size
- * is UNSPECIFIED and lays out at the text layer's own default;
- * bodyLarge is 16sp on a 24sp line. Every label
- * (`KIND_LABEL -> Text(node.text, …)`) and every text field
- * (`textStyle = LocalTextStyle.current.copy(…)`) in this interpreter
- * reads that local, so accepting it would resize all of them. That is
- * a change to the type SCALE, which is precisely what DESIGN.md says a
- * brand typeface may never make. The ambient style is therefore held at
- * whatever it was outside this theme; moving it is the typeface slice's
- * ratified decision, made in this one line. The heading role reaches
- * into `typography` for ITS tier and nothing else does — a tier picked
- * per widget is not a scale changed under everything.
- */
-/**
  * The composition half of `KAYA_APPEARANCE` (KayaCompose.mount holds the
- * window-background half and the reasoning for both).
- *
- * `isSystemInDarkTheme()` reads `LocalConfiguration`'s night bits and
- * NOTHING ELSE, so providing a configuration with those bits forced moves
- * every reading in one place — the theme's `dark`, and the appearance the
- * presentation report sends. Unset provides nothing and the composition is
- * the platform's own, which is what keeps an ordinary leg byte-identical.
- *
- * The rest of the configuration is COPIED, not synthesized: screenWidthDp
- * is right beside these bits and the size class reads it.
+ * other half and the reasoning). `isSystemInDarkTheme()` reads
+ * `LocalConfiguration`'s night bits and NOTHING ELSE, so forcing those
+ * bits moves every reading at once; unset provides nothing. The rest of
+ * the configuration is COPIED, since the size class reads screenWidthDp.
  */
 @Composable
 internal fun KayaAppearance(content: @Composable () -> Unit) {
@@ -11897,6 +10325,13 @@ internal fun KayaAppearance(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalConfiguration provides forced, content = content)
 }
 
+/**
+ * THE THEME ROOT, where this backend's appearance is decided, from three
+ * inputs none of which are assumed: the brand SEED, the APPEARANCE and
+ * the CONTRAST level (MDC #3524). MaterialTheme ALSO PROVIDES A TEXT
+ * STYLE at 16sp where `LocalTextStyle` outside a theme is UNSPECIFIED,
+ * so accepting it would change the type SCALE (DESIGN.md).
+ */
 @Composable
 internal fun KayaTheme(content: @Composable () -> Unit) {
     // Read BEFORE the theme, which is what makes them the pre-theme
@@ -11918,18 +10353,12 @@ internal fun KayaTheme(content: @Composable () -> Unit) {
         if (family == null) baseTypography else baseTypography.kayaWithFamily(family)
     }
     MaterialTheme(colorScheme = scheme, typography = typography) {
-        // AND THE SECOND WRITE, which is the one a reader would not
-        // predict and the probe measured: kaya's own labels and text
-        // fields read this local and NOT the ramp, so a lowering that
-        // set `typography` alone would brand Material's components and
-        // leave every kaya label on the platform face — half branded,
-        // and still branded-looking enough to pass a coarse look.
-        //
-        // FAMILY ONLY. The size stays Unspecified, which is this local's
-        // whole reason for being held at its pre-theme value: a brand
-        // typeface substitutes the family and never the scale
-        // (DESIGN.md), so the note above survives the typeface slice
-        // rather than being spent by it.
+        // AND THE SECOND WRITE, which the probe measured: kaya's own
+        // labels and fields read this local and NOT the ramp, so setting
+        // `typography` alone brands Material's components and leaves
+        // every kaya label on the platform face. FAMILY ONLY — the size
+        // stays Unspecified, since a brand typeface substitutes the
+        // family and never the scale (DESIGN.md).
         CompositionLocalProvider(
             LocalTextStyle provides
                 if (family == null) ambientTextStyle
@@ -11951,18 +10380,10 @@ internal fun KayaTheme(content: @Composable () -> Unit) {
 
 /**
  * THE SYSTEM CONTRAST LEVEL, -1..1 with 0 the default — Android 14's
- * accessibility slider (Settings -> Accessibility -> Colour and motion),
- * on Material's own scale, which is why it can be handed to the
- * derivation unconverted.
- *
- * LIVE, not sampled once: the slider is not a Configuration field, so a
- * composition that read it at startup would keep the old scheme for the
- * life of the process — the silent no-op of MDC #3524 rebuilt one layer
- * up. `addContrastChangeListener` is the platform's own answer and this
- * is the whole of it.
- *
- * Below API 34 there is no slider and no listener, and the honest answer
- * is Material's default rather than a guess: 0.
+ * accessibility slider, on Material's own scale. LIVE, not sampled once:
+ * the slider is not a Configuration field, so a composition reading it
+ * at startup would keep the old scheme for the process's life. Below API
+ * 34 there is no slider and the honest answer is 0.
  */
 @Composable
 private fun kayaSystemContrast(): Float {
@@ -11990,15 +10411,11 @@ fun KayaRoot() {
     // tracks).
     kayaDensity = LocalDensity.current.density.toDouble()
     // THE WINDOW'S SCALE AND APPEARANCE, reported to the core, which
-    // re-rasters every canvas at them (docs/canvas-plan.md §5, §6). Only
-    // these two numbers cross: no platform colour reaches a drawing.
-    //
-    // COMPOSITION IS THE CHANNEL. Both values are composition locals, so
-    // a display move or a night-mode flip re-runs this for free — which
-    // is Android's own spelling of the get-told-then-re-render mechanism
-    // every platform documents. The density IS the scale kaya reports,
-    // which is what makes the canvas arm's intrinsic sizing land on the
-    // viewbox with no arithmetic.
+    // re-rasters every canvas at them (docs/canvas-plan.md §5, §6); no
+    // platform colour reaches a drawing. COMPOSITION IS THE CHANNEL, so
+    // a display move or a night-mode flip re-runs this for free. The
+    // density IS the scale kaya reports, which lands the canvas arm's
+    // intrinsic sizing on the viewbox with no arithmetic.
     val presentationScale = LocalDensity.current.density.toDouble()
     val presentationDark = isSystemInDarkTheme()
     LaunchedEffect(presentationScale, presentationDark) {
@@ -12026,16 +10443,12 @@ fun KayaRoot() {
     LaunchedEffect(metricsWidth, metricsHeight) {
         KayaPresent.windowMetrics(0, metricsWidth, metricsHeight)
     }
-    // THE SOFT KEYBOARD IS AN INSET THIS SURFACE CONSUMES. Without it
-    // the system PANS the whole window up for a focused field low in
-    // it: measured 2026-08-10 on the editor scene with the find bar
-    // focused, `decorView.getLocationInWindow()` = (0, -199), putting
-    // the menu bar and the document's first line ABOVE the window —
-    // NEVER DRAWN, absent from the app's own surface, while kaya's
-    // model, the semantics tree and the field's viewport all still read
-    // correctly, so only a PIXEL read notices. Consuming the inset
-    // resizes the content instead, the platform's own guidance from API
-    // 30 up.
+    // THE SOFT KEYBOARD IS AN INSET THIS SURFACE CONSUMES: without it
+    // the system PANS the whole window up for a focused field low in it
+    // (measured 2026-08-10, `getLocationInWindow()` = (0, -199)), putting
+    // the menu bar and first line ABOVE the window — never drawn, while
+    // the model, the semantics tree and the field's viewport all still
+    // read correctly, so only a PIXEL read notices.
     Box(modifier = Modifier.fillMaxSize().imePadding()) {
         if (KayaSceneModel.menubar.isEmpty()) {
             // No catalog: the surface keeps its exact pre-menus shape (no
@@ -12105,20 +10518,12 @@ internal fun kayaPaneDirective(): PaneScaffoldDirective =
     calculatePaneScaffoldDirective(
         currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true))
 
-/** The pane arrangement [ListDetailPaneScaffold] lays out from: which
- * roles are expanded and which are hidden.
- *
+/** The pane arrangement [ListDetailPaneScaffold] lays out from.
  * SUPPLIED, NOT OWNED, which is why adaptive-navigation is deliberately
- * not a dependency: its navigator would hold a destination history, and
+ * not a dependency: its navigator would hold a destination history and
  * kaya's core owns the stack (DESIGN.md, Navigation). The wrapper is
- * told the ONE fact it needs — is a detail open — and nothing else, so
- * the guest's pop and the widget's pop cannot become two truths.
- *
- * Everything past that fact is Material's: the directive is Material's
- * reading of the window, the adapt strategies are the list-detail
- * defaults, and which panes survive is `calculateThreePaneScaffoldValue`'s
- * call. That is what makes reading this back an observation rather than
- * an echo. */
+ * told the ONE fact it needs. Everything past that is Material's, which
+ * is what makes reading it back an observation rather than an echo. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaScaffoldValue(directive: PaneScaffoldDirective): ThreePaneScaffoldValue =
     calculateThreePaneScaffoldValue(
@@ -12141,15 +10546,12 @@ internal fun kayaScaffoldValue(directive: PaneScaffoldDirective): ThreePaneScaff
         kayaPaneHistory(),
     )
 
-/** THE HISTORY IS THE STACK (docs/multicolumn-plan.md D1/D3). The pane
- * set follows the destination history, newest first, then Detail, List,
- * Extra — so fed the stack's own order this walk IS "the shallowest
- * pane sheds first", and at one partition the newest destination alone
- * survives, which is the phone collapse. A synthesized single item was
- * exactly right for two roles and silently wrong for three: with a
- * history that can never name Extra, the pane the user navigated to is
- * the one Material hides. Still no navigator dependency — these are
- * plain values, and kaya's core owns the stack. */
+/** THE HISTORY IS THE STACK (docs/multicolumn-plan.md D1/D3): fed the
+ * stack's own order, newest first, this walk IS "the shallowest pane
+ * sheds first", and at one partition the newest destination alone
+ * survives. A synthesized single item is right for two roles and
+ * silently wrong for three — with a history that can never name Extra,
+ * Material hides the pane the user navigated to. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaPaneHistory(): List<ThreePaneScaffoldDestinationItem<Nothing>> =
     buildList {
@@ -12204,16 +10606,10 @@ internal fun kayaPanePositions(): String {
 }
 
 /** Whether this window is presenting its entry stack as list-detail
- * right now, meaning both panes are on screen.
- *
- * ONE source, read by the arm that renders and by the back rule that
- * depends on it. Two copies of this condition drift, and the drift is
- * invisible: the arm would show two panes while back still popped, or
- * the reverse, and each half would look correct on its own.
- *
- * Compose's own `canNavigateBack` is false in exactly this state —
- * back reveals what the top entry covers, and here it covers nothing —
- * and disabling the BackHandler is how that rule is spelled here. */
+ * right now. ONE source, read by the arm that renders AND by the back
+ * rule: two copies of this condition drift invisibly, one pane count
+ * against the other's pop, each half looking correct alone. Compose's
+ * own `canNavigateBack` is false in exactly this state. */
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 internal fun kayaSplitArm(value: ThreePaneScaffoldValue): Boolean =
     // BRIDGE (docs/multicolumn-plan.md): ceiling >= 2 takes the
@@ -12261,37 +10657,20 @@ private fun KayaSurface() {
         } else {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
         // ADAPTIVE LIST-DETAIL (DESIGN.md): Android's OWN container,
-        // ListDetailPaneScaffold, entered on the app's declaration
-        // alone. WHETHER it shows one pane or two is the scaffold's
-        // call, not a branch here — that is what "each platform decides
-        // where one pane becomes two" means, and it is why the arm is
-        // no longer gated on a width kaya picked.
-        //
-        // It also buys what the hand-built Row could not: the platform's
-        // own pane proportions and spacing, and the collapse/expand
-        // ANIMATION between them. The 25%-clamped-to-180..280dp leading
-        // width this arm used to compute is gone with it — that number
-        // was libadwaita's default, borrowed because nothing here knew
-        // Material's.
-        //
-        // No `topEntry != null` requirement: an empty stack on a regular
-        // window shows the leading pane and an EMPTY trailing one, the
-        // same rule GTK and mac follow. Requiring an entry here reported
-        // `stacked` where they report `split` for one scene, which is a
-        // semantics divergence rather than a backend's call.
+        // entered on the app's declaration alone, and WHETHER it shows
+        // one pane or two is the scaffold's call. No `topEntry != null`
+        // requirement — an empty stack on a regular window shows the
+        // leading pane and an EMPTY trailing one, as GTK and mac do.
         if (KayaSceneModel.panes >= 2) {
             val directive = kayaPaneDirective()
             val scaffoldValue = kayaScaffoldValue(directive)
             // THE SCAFFOLD'S OWN ARRANGEMENT, not a value the arm
-            // stamped about itself. The old spelling wrote "split"
-            // inside the branch that had just tested for it, so the
-            // observation restated the condition and agreed with the
-            // lowering by construction; this reports how many panes
-            // Material resolved, for BOTH outcomes, from the one value
-            // the scaffold below is laid out from. GTK reads
-            // is_collapsed and Windows reads TwoPaneView's Mode for
-            // exactly this reason. expect_panes reads the same stashed
-            // value role by role.
+            // stamped about itself: writing "split" inside the branch
+            // that tested for it would restate the condition and agree
+            // with the lowering by construction. This reports how many
+            // panes Material resolved, for BOTH outcomes, from the value
+            // the scaffold is laid out from — GTK reads is_collapsed and
+            // Windows TwoPaneView's Mode for the same reason.
             KayaSceneModel.paneValue = scaffoldValue
             KayaSceneModel.splitPresentation =
                 when (kayaExpandedPanes(scaffoldValue)) {
@@ -12363,40 +10742,24 @@ private fun KayaSurface() {
 
 /**
  * THE TEST TAG EVERY MATERIALIZED MENU AFFORDANCE CARRIES, keyed by the
- * item's own id.
- *
- * It is what makes the symbol read an OBSERVATION: the tag says "this
- * row is the row for item N", the merged semantics node it lands on is
- * the node a TalkBack user focuses, and the content description on that
- * node got there from the [Icon] the lowering drew — not from the field
- * the apply arm decoded. An item with no row composed has no node with
- * this tag, and the read reports that as its own state rather than
- * guessing.
- *
- * On EVERY affordance, symbol or not, deliberately: "the row exists and
- * carries no icon" and "no row exists" are different measurements, and a
- * tag only on the icon-bearing rows would collapse them into one.
+ * item's id — what makes the symbol read an OBSERVATION, the tagged
+ * node's content description having come from the [Icon] the lowering
+ * drew. On EVERY affordance, symbol or not: "the row carries no icon"
+ * and "no row exists" are different measurements.
  */
 fun kayaMenuTag(id: Long): String = "kaya:menu#$id"
 
 /** THE TAG EVERY MATERIALIZED SECTION ROW CARRIES, keyed by the
- * section's own id — [kayaMenuTag] one construct over, for the same
- * reason: it is what makes the symbol read an OBSERVATION. The tag says
- * "this node is a section row", the merged node it lands on is the node
- * a TalkBack user focuses, and the content description on that node got
- * there from the [Icon] [KayaSymbolIcon] drew — not from the field the
- * apply arm decoded, which is the field a wrong decode fills with
+ * section's id — [kayaMenuTag] one construct over and for its reason:
+ * the content description on the tagged merged node got there from the
+ * [Icon] the lowering drew, not from the field a wrong decode fills with
  * garbage while every lane stays green. */
 fun kayaSectionTag(id: Long): String = "${KayaCompose.SECTION_TAG_PREFIX}$id"
 
-/** The SEMANTIC ICON, drawn once, in one place — the kayaApplySymbol
- * precedent from the macOS arm, so every kind gets identical treatment
- * and an unset symbol is simply no icon.
- *
- * `contentDescription` IS the semantic name. That is the whole
- * observation channel on this backend, and it is also just correct
- * accessibility: an icon that means something has to say what it means,
- * and "done" is what the item's checkmark glyph means. */
+/** The SEMANTIC ICON, drawn once in one place, so every kind gets
+ * identical treatment and an unset symbol is simply no icon.
+ * `contentDescription` IS the semantic name: the whole observation
+ * channel on this backend, and correct accessibility besides. */
 @Composable
 fun KayaSymbolIcon(symbol: Long) {
     val icon = KayaCompose.symbolIcon(symbol) ?: return
@@ -12410,18 +10773,11 @@ fun kayaSymbolSlot(symbol: Long): (@Composable () -> Unit)? =
     if (symbol == 0L) null else { -> KayaSymbolIcon(symbol) }
 
 /**
- * Hands the harness a handle on the WINDOW this menu is composed in.
- *
- * A Compose `Popup` — and every DropdownMenu is one — is its own window,
- * added straight to the WindowManager, so nothing under
- * `activity.window.decorView` leads to it and the a11y reads that start
- * there see an open menu as an empty screen. Inside the popup's content
- * `LocalView.current` IS that window's AndroidComposeView, which makes
- * this two lines instead of a hunt through WindowManagerGlobal.
- *
- * Called at the TOP of each menu's content, so the registration outlives
- * every row below it, and dropped on dispose so a closed menu leaves no
- * stale root for a later read to walk.
+ * Hands the harness a handle on the WINDOW this menu is composed in. A
+ * Compose `Popup` is its own window under the WindowManager, so nothing
+ * under `decorView` leads to it and a11y reads starting there see an
+ * open menu as an empty screen. Called at the TOP of each menu's
+ * content, and dropped on dispose so a closed menu leaves no stale root.
  */
 @Composable
 private fun KayaMenuPopupRoot() {
@@ -12435,10 +10791,9 @@ private fun KayaMenuPopupRoot() {
 /**
  * The window catalog's phone materialization (DESIGN.md, Menus): an M3
  * TopAppBar whose actions slot carries the promoted primaries — the
- * SEMANTIC ICON when the item names one, then the icon blob, then text
- * — and the overflow ⋮ holding the ENTIRE catalog. Every affordance
- * here routes through [kayaActivateMenuItem]: chrome emits, one
- * dispatch path.
+ * SEMANTIC ICON, then the icon blob, then text — and the overflow ⋮
+ * holding the ENTIRE catalog. Every affordance routes through
+ * [kayaActivateMenuItem]: one dispatch path.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -12593,13 +10948,10 @@ private fun KayaOverflowMenu() {
 
 /**
  * One run of menu rows — the shared materialization for the overflow
- * catalog, a drilled submenu, and a context menu. `noun` is the
- * anchor's key path (empty off the window catalog); every leaf routes
- * through [kayaActivateMenuItem] and closes the menu (a leaf command
- * fires exactly one occurrence and the menu closes). `promoted` is the
- * promoted-primary id set: promotion moves an action OUT of overflow,
- * so those ids render no row here (empty off the window catalog —
- * context items are never promoted).
+ * catalog, a drilled submenu and a context menu. `noun` is the anchor's
+ * key path, empty off the window catalog; every leaf routes through
+ * [kayaActivateMenuItem] and closes the menu. `promoted` ids render no
+ * row here, promotion having moved them OUT of overflow.
  */
 @Composable
 fun KayaMenuRows(
@@ -12673,18 +11025,12 @@ fun KayaMenuRows(
     }
 }
 
-/** A radio group's options as RadioButton rows (inline wherever the
- * group appears — bar level or nested; the platform's checkmark
- * idiom). A pick routes through [kayaActivateMenuItem], which emits on
- * the GROUP with the option's index — the Choice contract.
- *
- * THE ONE ROW WHOSE SEMANTIC ICON IS TRAILING, not leading: the
- * leading slot holds the selection mark, which is the row's whole
- * point, and moving that to make room for an icon would break the
- * checkmark idiom this arm exists to keep. Nothing else changes — the
- * icon is the same [Icon] with the same content description on the
- * same merged node, so the read does not know or care which slot it
- * came out of. */
+/** A radio group's options as RadioButton rows, inline wherever the
+ * group appears. A pick routes through [kayaActivateMenuItem], which
+ * emits on the GROUP with the option's index — the Choice contract.
+ * THE ONE ROW WHOSE SEMANTIC ICON IS TRAILING, since the leading slot
+ * holds the selection mark; the icon is the same [Icon] on the same
+ * merged node, so the read cannot tell which slot it came from. */
 @Composable
 fun KayaRadioRows(group: KayaMenuItem, noun: ByteArray, onClose: () -> Unit) {
     group.children.forEachIndexed { i, option ->
@@ -12709,11 +11055,10 @@ fun KayaRadioRows(group: KayaMenuItem, noun: ByteArray, onClose: () -> Unit) {
 
 /**
  * The promoted primaries: the first k primary actions in CATALOG
- * PREORDER — top-level grouping nodes in menubar-append order, then
- * each node's children in append order, depth-first; creation time is
- * irrelevant. k = [KayaCompose.MENU_PROMOTED_CAPACITY], this
- * platform's own idiom. Call from composition: the observable reads
- * make every catalog mutation recompute the set.
+ * PREORDER — grouping nodes in menubar-append order, then each node's
+ * children depth-first, creation time being irrelevant. k is
+ * [KayaCompose.MENU_PROMOTED_CAPACITY]. Call from composition, where the
+ * observable reads recompute the set on every catalog mutation.
  */
 fun kayaPromotedActions(): List<KayaMenuItem> {
     val promoted = ArrayList<KayaMenuItem>()
@@ -12726,17 +11071,11 @@ fun kayaPromotedActions(): List<KayaMenuItem> {
 }
 
 /** Effective enablement: an item is reachable only while it AND every
- * ancestor grouping node is enabled — the inherited-disabled read
- * expect_menu asserts, and what lifts when the ancestor re-enables —
- * AND, for a standard command, only while its role can act.
- *
- * The role factor is not a build-time fact: it is the intersection of
- * what the clipboard offers and what the focused widget accepts, and
- * both move long after the bar was built (docs/clipboard-plan.md §3).
- * It goes here because every affordance on this host already reads this
- * one helper — bar actions, overflow rows, drill-ins, context rows,
- * shortcuts, expect_menu, and the activation gate — so one clause
- * reaches all of them and none of them can disagree. */
+ * ancestor grouping node is enabled, and, for a standard command, only
+ * while its role can act. The role factor is not a build-time fact — it
+ * is the intersection of what the clipboard offers and what the focused
+ * widget accepts (docs/clipboard-plan.md §3) — and it goes HERE because
+ * every affordance on this host already reads this one helper. */
 fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
     var cur: KayaMenuItem? = item
     while (cur != null) {
@@ -12747,12 +11086,11 @@ fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
 }
 
 /**
- * THE activation route — every affordance lands here: a rendered row
- * (bar action, overflow, drill-in, context), the harness's
- * menu_activate, and a shortcut. Chrome emits (the user route);
- * programmatic prop writes never come here. The model mirrors the
- * user state exactly as the checkbox/slider nodes do, and the noun
- * rides every emission verbatim.
+ * THE activation route — every affordance lands here: a rendered row,
+ * the harness's menu_activate, and a shortcut. Chrome emits (the user
+ * route) and programmatic prop writes never come here; the model mirrors
+ * the user state as the checkbox nodes do, and the noun rides every
+ * emission verbatim.
  */
 fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
     // A disabled item's row is inert and its chord fires nothing —
@@ -12761,16 +11099,11 @@ fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
     when (item.kind) {
         KayaCompose.MENU_KIND_ACTION -> {
             // A ROLE ITEM IS THE PLATFORM'S COMMAND, not the app's
-            // action: it acts on the focused widget and emits nothing of
-            // its own, because there is nothing for the app to decide.
-            // kaya has no selection API, which is exactly why these had
-            // to be commands. Enablement was re-derived one line above,
-            // live — that is this host's "refresh before a harness
-            // activation", satisfied by construction.
-            // An undo is asked FIRST and separately: it is not a
-            // clipboard command, and the two perform paths are disjoint
-            // by role so the order is documentation rather than
-            // precedence.
+            // action: it acts on the focused widget and emits nothing,
+            // there being nothing for the app to decide. Enablement was
+            // re-derived one line above, live. An undo is asked FIRST and
+            // separately, the two perform paths being disjoint by role,
+            // so the order is documentation rather than precedence.
             if (KayaCompose.kayaPerformUndoRole(item.role)) return
             if (KayaCompose.kayaPerformClipboardRole(item.role)) return
             KayaPresent.emitMenuActivated(item.id, noun)
@@ -12795,12 +11128,10 @@ fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
 
 /**
  * The shortcut dispatch table IS the window catalog: window-anchored
- * actions matched on their canonical spelling (the root already
- * rejected shortcuts anywhere else, and context items never carry
- * one). Both the hardware-key route and the harness's shortcut verb
- * land here, and the hit activates through [kayaActivateMenuItem] —
- * the SAME menu_activated the row emits. Returns false when no
- * catalog action owns the chord.
+ * actions matched on their canonical spelling. Both the hardware-key
+ * route and the harness's verb land here and activate through
+ * [kayaActivateMenuItem] — the SAME menu_activated a row emits. False
+ * when no catalog action owns the chord.
  */
 fun kayaDispatchShortcut(spelling: String): Boolean {
     fun find(items: List<KayaMenuItem>): KayaMenuItem? {
@@ -12824,13 +11155,11 @@ fun kayaDispatchShortcut(spelling: String): Boolean {
 }
 
 /**
- * Resolve a `>`-joined label path wherever the item SURFACED: while a
+ * Resolve a `>`-joined label path wherever the item SURFACED. While a
  * context menu is OPEN it owns resolution EXCLUSIVELY — paths walk the
- * attached roots (a grouping root's label IS a path segment, exactly
- * as the drill-in surfaces it), and a miss is a miss, never a bar
- * fallback; otherwise the window catalog — bar and overflow are one
- * semantic tree on this host. Returns the item plus the noun its
- * anchor stamps.
+ * attached roots and a miss is a miss, never a bar fallback — otherwise
+ * the window catalog, bar and overflow being one semantic tree here.
+ * Returns the item plus the noun its anchor stamps.
  */
 fun kayaResolveMenuPath(path: String): Pair<KayaMenuItem, ByteArray>? {
     val segments = path.split('>')
@@ -12866,11 +11195,11 @@ private fun kayaMenuDescend(
 /// A user-driven back on the top entry: an intercept_back-armed top
 /// emits back_requested and nothing pops (the veto class); an unarmed
 /// top pops here and reconciles the core post-fact.
-/** The sections materialization: the M3 bottom NavigationBar (the
- * platform's dominant idiom — hints are ignored here by physics).
- * The bar's item taps are the USER route: they move the selection
- * and emit section_selected; a programmatic select_section lands in
- * the model quietly. Each pane renders its own stack's top. */
+
+/** The sections materialization: the M3 bottom NavigationBar (hints are
+ * ignored here by physics). The bar's item taps are the USER route,
+ * moving the selection and emitting section_selected, where a
+ * programmatic select_section lands in the model quietly. */
 @Composable
 fun KayaSectionsScaffold(active: KayaSection) {
     // THE STAMP, written by the arm that runs — there is exactly one

@@ -1,6 +1,5 @@
-# The Python guests. No dependencies yet — the binding rides sys.path
-# until the packaging milestone ships it as a real distribution; this
-# file marks the project root for Python tooling in the meantime.
+# The binding rides sys.path until the packaging milestone ships it as a
+# real distribution; this file marks the project root meanwhile.
 [project]
 name = "kaya-guests"
 version = "0"

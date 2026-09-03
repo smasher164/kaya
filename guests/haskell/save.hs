@@ -1,17 +1,4 @@
--- The save conformance scene, Haskell port — the round trip an editor
--- actually walks: open, edit, save, save-as, reopen.
---
--- EVERY STATUS IS A READ-BACK OFF THE DISK, always through 'openPicked'
--- and never through 'pickedLocalPath', which is empty on both phones.
---
--- THE WORK RUNS OFF THE APP THREAD because 'openPicked' blocks.
---
--- NO EXTENSIONS ON THE NAMES: a save panel hides the extension when the
--- user's Finder preference says so (the NSSavePanel entry in
--- docs/deferred.md).
---
--- Canonical semantics in guests/rust/save.rs; the byte-frozen contract
--- in tools/scenes/save.steps.
+-- The save scene, Haskell port — guests/rust/save.rs, tools/scenes/save.steps.
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
@@ -37,8 +24,7 @@ readBack file = do
         Right text -> return text
 
 -- | Write through a handle and report what the FILE says afterwards.
--- 'fileModeWrite' truncates, on a picked file and on a save destination
--- alike — the destination only adds the create.
+-- 'fileModeWrite' truncates; a destination only adds the create.
 writeBack :: PickedFile -> String -> IO String
 writeBack file text = do
   opened <- try (openPicked file fileModeWrite)
@@ -46,18 +32,15 @@ writeBack file text = do
     Left e -> return ("save failed: " ++ show (e :: SomeException))
     Right (h, _seekable) -> do
       wrote <- try (hPutStr h text)
-      -- Closed before the reopen, so what comes back is the FILE's bytes
-      -- and not a buffer's.
+      -- Closed before the reopen, so the bytes are the FILE's.
       hClose h
       case wrote of
         Left e -> return ("write failed: " ++ show (e :: SomeException))
         Right () -> readBack file
 
--- | The handle a step holds, or Nothing when the dialog that should
--- have filled it never answered (cancelled, or swallowed under load).
--- The caller writes its OWN sentence for that — never an error: a
--- crashed guest masks the real failure (docs/deferred.md, save-jvm
--- WATCH).
+-- | The handle a step holds, or Nothing when the dialog never answered. The
+-- caller writes its OWN sentence — never an error, which masks the real
+-- failure (docs/deferred.md, save-jvm WATCH).
 held :: IORef (Maybe PickedFile) -> IO (Maybe PickedFile)
 held = readIORef
 
@@ -67,17 +50,13 @@ main = kayaMain $ \app -> do
   pid <- getProcessID
   let dir = tmp </> ("kaya-save-" ++ show pid)
   createDirectoryIfMissing True dir
-  -- The decoy must SORT BEFORE the real file: with one file in the
-  -- directory a dialog completes with it even when nothing was selected
-  -- (docs/traps.md, "Pressing Open with nothing selected still returns a
-  -- file").
+  -- The decoy must SORT BEFORE the real file (docs/traps.md, "Pressing Open
+  -- with nothing selected still returns a file").
   writeFile (dir </> "draft") "first draft"
   writeFile (dir </> "decoy") "decoy"
 
-  -- The file the user OPENED and the destination they later NAMED, held
-  -- as handles and never as paths — the phones have no re-openable path
-  -- at all. IORefs without locking: everything that touches them runs on
-  -- the app thread.
+  -- Handles, never paths — the phones have no re-openable path. IORefs
+  -- without locking: everything that touches them runs on the app thread.
   sourceRef <- newIORef Nothing
   destRef <- newIORef Nothing
 
@@ -85,8 +64,7 @@ main = kayaMain $ \app -> do
     window 0 [WTitle "save"]
     status <- signal (VStr "no file")
 
-    -- Off the app thread, because openPicked blocks; the answer comes
-    -- back through the poster.
+    -- Off the app thread, because openPicked blocks.
     let work job = do
           _ <- forkIO $ do
             text <- job
@@ -108,12 +86,9 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound status [A11yId "status"], -- label#0
-          -- NO FILTERS ON EITHER REQUEST: with allowedContentTypes set a
-          -- save panel appends the first allowed extension to an
-          -- extension-less name, and the names here carry none.
+          -- NO FILTERS: with allowedContentTypes set a save panel appends the
+          -- first allowed extension to an extension-less name.
           buttonOn "open" (buildTx app (pickFile [] picked)) [], -- button#0
-          -- Save-back needs no dialog: the handle the open picker handed
-          -- over is writable.
           buttonOn -- button#1
             "save"
             ( do

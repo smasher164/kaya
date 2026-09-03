@@ -1,7 +1,4 @@
-// The styling conformance scene, C# port — the brand accent, the role
-// tier and the window inset (docs/styling-plan.md slice 1, D2/D3). A
-// role changes a widget's chrome and its assistive trait, never what
-// pressing it does. See guests/rust/styling.rs;
+// The styling scene, C# port — guests/rust/styling.rs,
 // tools/scenes/styling.steps.
 
 static class StylingScene
@@ -21,8 +18,7 @@ static class StylingScene
 
             tx.Mount(tx.Column(() =>
             {
-                // expect_ax resolves its target through the AUTHORED id,
-                // so everything the steps read back is identified.
+                // expect_ax resolves its target through the AUTHORED id.
                 tx.SetA11yId(tx.Heading(bind: heading), "title"); // label#0
                 tx.Label(bind: status);                                             // label#1
                 tx.SetA11yId(
@@ -33,9 +29,8 @@ static class StylingScene
                     tx.Button("Save", role: Role.Prominent,
                         onClick: t => t.Write(status, "saved")),
                     "save"); // button#1
-                // Declared so every backend's caption arm runs, like the
-                // two button roles: no universal AX observable, so the
-                // walls are the arms' refusals plus this label's text.
+                // Declared so every backend's caption arm runs: no universal AX
+                // observable, so the walls are the arms' refusals.
                 tx.Caption("captioned"); // label#2
             }));
         });

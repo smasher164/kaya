@@ -3,11 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The scroll conformance scene from the JVM. See guests/rust/scroll.rs
- * and tools/scenes/scroll.steps.
- *
- * <p>THE VIEWPORT MUST GROW so the enclosing track constrains it: an
- * unconstrained viewport hugs its content and nothing overflows.
+ * The scroll scene from the JVM — guests/rust/scroll.rs,
+ * tools/scenes/scroll.steps.
  */
 public final class Scroll {
     public static void app() {

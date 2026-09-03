@@ -4,11 +4,7 @@ import dev.kaya.KayaApp;
 import dev.kaya.KayaWire;
 
 /**
- * The dirty-state conformance scene from the JVM: unsaved work as
- * window chrome (docs/dirty-plan.md). The app declares the state and
- * each backend spells its platform's own affordance. Canonical
- * semantics in guests/rust/dirty.rs; the byte-frozen contract in
- * tools/scenes/dirty.steps.
+ * The dirty scene from the JVM — guests/rust/dirty.rs, tools/scenes/dirty.steps.
  */
 public final class Dirty {
     public static void app() {
@@ -29,10 +25,8 @@ public final class Dirty {
                             if (choice == KayaWire.ALERT_CHOICE_CANCEL) {
                                 t2.write(status, "kept editing");
                             } else {
-                                // This call ABORTS if it ever runs; the
-                                // scene answers cancel so it does not
-                                // (docs/traps.md, "An app can VETO a
-                                // close but cannot AGREE to one").
+                                // Aborts if it ever runs (docs/traps.md, an app
+                                // can VETO a close but cannot AGREE to one).
                                 t2.destroyWindow(0);
                             }
                         })
@@ -42,8 +36,7 @@ public final class Dirty {
             tx.mount(tx.column(() -> {
                 tx.label(doc); // label#0
                 tx.label(status); // label#1
-                // The document and the mark are two statements: neither
-                // implies the other, so both are written here.
+                // The document and the mark are two statements.
                 tx.button("edit", t -> { // button#0
                     t.write(doc, "notes and a line");
                     t.write(status, "unsaved");

@@ -4,15 +4,10 @@ import android.content.Context
 
 /**
  * The APK's own `assets/`, for the core's asset resolver
- * (crates/kaya/src/assets.rs, `Place::Apk`). The reasoning for the
- * whole arrangement is docs/assets-plan.md.
+ * (crates/kaya/src/assets.rs, `Place::Apk`; docs/assets-plan.md).
  *
  * `InputStream.readBytes()` and not `readAllBytes`: the latter is API
- * 33 and this module compiles at minSdk 26
- * (android/kaya/build.gradle.kts).
- *
- * These are called FROM native code, not into it, so nothing here is
- * `external fun` and tools/check-jni.py holds no list for this file.
+ * 33 and this module compiles at minSdk 26.
  */
 object KayaAssets {
     /**
@@ -25,7 +20,7 @@ object KayaAssets {
 
     /**
      * One asset's bytes, or `null` if the platform would not open it.
-     * ABSENT AND UNREADABLE ARE ONE ANSWER here — an APK entry has no
+     * ABSENT AND UNREADABLE ARE ONE ANSWER — an APK entry has no
      * `ENOENT` — so the core's miss sentence prints the census too.
      */
     @JvmStatic
@@ -69,7 +64,7 @@ object KayaAssets {
     }
 
     /** The installed package this process runs out of, for the miss
-     * sentence's PLACE line. Answered by the platform, never computed. */
+     * sentence's PLACE line. */
     @JvmStatic
     fun sourceDir(context: Context): String = context.applicationInfo.sourceDir
 }

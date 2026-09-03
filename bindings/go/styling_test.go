@@ -1,14 +1,8 @@
 package kaya
 
-// The styling surface's guards (docs/styling-plan.md slice 1).
-//
-// NOTHING HERE READS A STYLING WRITE BACK THROUGH THE API THAT MADE IT:
-// every platform's accent read-back lies (docs/styling-plan.md). Two
-// surfaces answer instead — the WIRE BYTES decoded from the queued
-// record, and THE REAL ROOT, driven end-to-end in a re-exec because a
-// root refusal ends the process (fault.rs's unwatched exit) and nothing
-// in this process can recover it. A headless queue never reaches a
-// declare-time wall.
+// docs/styling-plan.md slice 1. Nothing here reads a styling write back
+// through the API that made it — every platform's accent read-back lies. The
+// re-exec: a root refusal ends the process, not a Go panic (fault.rs).
 
 import (
 	"context"
@@ -25,8 +19,7 @@ import (
 
 // ---- the wire-byte half ------------------------------------------
 
-// brandFields decodes one set_brand_accent record: seed, mask, light,
-// dark, four u32s after the 8-byte frame header.
+// seed, mask, light, dark: four u32s after the 8-byte frame header.
 func brandFields(rec []byte) (seed, mask, light, dark uint32) {
 	return binary.LittleEndian.Uint32(rec[8:12]),
 		binary.LittleEndian.Uint32(rec[12:16]),
@@ -55,8 +48,8 @@ func brandRecord(t *testing.T, build func(tx *Tx)) []byte {
 	return found
 }
 
-// One call is one record, whatever it is given: one record per override
-// would die on the root's set-once wall, on a branded app's first frame.
+// A record per override would die on the root's set-once wall, on a branded
+// app's first frame.
 func TestBrandAccentPacksOneRecord(t *testing.T) {
 	for _, c := range []struct {
 		name              string
@@ -103,8 +96,6 @@ func TestBrandAccentRefusesTheSameAppearanceTwice(t *testing.T) {
 	})
 }
 
-// A Role written through a transaction that has already shipped is a
-// lost write, not a late one.
 func TestRoleOutsideItsBuildTransactionDies(t *testing.T) {
 	app := NewApp()
 	var label Widget
@@ -117,10 +108,8 @@ func TestRoleOutsideItsBuildTransactionDies(t *testing.T) {
 	label.Role(RoleHeading)
 }
 
-// sugarRole returns the ONE role write a heading/caption call queued,
-// having read the KIND it rode on out of the create_widget that minted
-// it: the whole claim of this sugar is "a label wearing that role", and
-// half of it is the widget kind.
+// The KIND is read out of the create_widget that minted the widget: the claim
+// is "a label wearing that role", and half of it is the widget kind.
 func sugarRole(t *testing.T, build func(*Tx)) setProp {
 	t.Helper()
 	app := NewApp()
@@ -154,9 +143,8 @@ type sugarNote struct{ Body string }
 
 type sugarTodo struct{ Body string }
 
-// Heading and Caption are one label plus one role, on every surface that
-// hands out a label — and the ROLE NUMBER is what nothing else in this
-// binding reads back, so a heading spelling caption's 4 would ship.
+// The ROLE NUMBER is what nothing else in this binding reads back, so a
+// heading spelling caption's 4 would ship.
 func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 	tplRows := func(body func(Row)) func(*Tx) {
 		return func(tx *Tx) {
@@ -224,8 +212,7 @@ func TestHeadingAndCaptionSugarIsALabelWearingItsRole(t *testing.T) {
 
 // ---- the real-root half ------------------------------------------
 
-// stylingTrap builds one scene through the ordinary sugar and pumps it
-// through the root. It returns only when the root ALLOWED the scene.
+// stylingTrap returns only when the root ALLOWED the scene.
 func stylingTrap(trap string) {
 	app := NewApp()
 	app.Build(func(tx *Tx) {
@@ -240,8 +227,8 @@ func stylingTrap(trap string) {
 				tx.Button("Save", nil).Role(RoleProminent)
 			}))
 		case "role-unknown":
-			// Go spells the vocabulary as int constants, so a caller can
-			// hand it a number that is not in it; the root refuses.
+			// Go spells the vocabulary as int constants, so a caller can hand
+			// it a number that is not in it.
 			tx.Mount(tx.Column(func() { tx.Button("Delete", nil).Role(9) }))
 		case "inset-negative":
 			tx.Window(0).Inset(-1)
@@ -255,8 +242,6 @@ func stylingTrap(trap string) {
 			tx.BrandAccent(0x62A0EA)
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections") }))
 		case "brand-overrides":
-			// One call, both appearances: a record per override would
-			// die on the set-once wall.
 			tx.BrandAccent(0x3584E4, LightAccent(0x1C71D8), DarkAccent(0x62A0EA))
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections") }))
 		default:

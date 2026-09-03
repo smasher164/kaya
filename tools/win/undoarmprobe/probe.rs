@@ -1,19 +1,10 @@
-//! THROWAWAY probe for the WinUI UNDO ARM — docs/undo-plan.md §3a and
-//! the three questions §1.1 could not ask (the type verb and the
-//! ledger-quiet bracket did not exist when it ran). Measures; builds
-//! nothing.
-//!
-//! A MODULE OF THE BACKEND, driving the REAL `undo` example guest
-//! (guests/rust/undo.rs) for the reason the first probe gives, and
-//! needing no Cargo.toml edit because that example is registered.
+//! THROWAWAY probe for the WinUI UNDO ARM — docs/undo-plan.md §3a.
+//! A MODULE OF THE BACKEND, driving the REAL `undo` example guest.
 //!
 //! Wiring (temporary, reverted after the run):
 //!   crates/kaya/src/winui/mod.rs
 //!     #[path = "../../../../tools/win/undoarmprobe/probe.rs"] mod undoarmprobe;
 //!     ... and `undoarmprobe::maybe_spawn();` at the end of `setup`.
-//!
-//! Every line is prefixed PROBE with a millisecond stamp; the last line
-//! is PROBEDONE.
 
 #![allow(dead_code)]
 

@@ -1,18 +1,11 @@
-// ClipProbe (macOS) — what does this host charge for a clipboard read,
-// and what does a foreign reader see of a multi-representation clip?
-//
-// THE QUESTION THAT DECIDES THE MAC ARM: macOS 15 grew the same
-// restriction iOS 16 has — an app that programmatically reads pasteboard
-// content written by ANOTHER app gets a permission alert unless the read
-// is a user paste gesture. If this host prompts, `read_clipboard`'s mac
-// leg has to drive an alert the way the file dialog leg drives a panel.
-// The questions and their answers are docs/clipboard-plan.md §5b; the
-// Q-labels below mark which reading is which. build.sh runs the file
-// both bundled and unbundled and diffs, because the prompt may key off
-// a bundle identity and the lane's foreign writer is bare `pbcopy`.
-//
-// Answers land on stdout under "PROBE". Not a lane; nothing builds it
-// but build.sh beside it.
+// ClipProbe (macOS) — does this host prompt for a programmatic read of
+// pasteboard content another app wrote (the iOS 16 restriction macOS 15
+// grew)? If it does, `read_clipboard`'s mac leg has to drive an alert.
+// Questions and answers: docs/clipboard-plan.md §5b; the Q-labels are in
+// the print lines below. build.sh runs the file BOTH bundled and
+// unbundled and diffs, because the prompt may key off a bundle identity
+// and the lane's foreign writer is bare `pbcopy`.
+// THROWAWAY; nothing builds it but build.sh beside it.
 import AppKit
 import UniformTypeIdentifiers
 

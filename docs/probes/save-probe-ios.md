@@ -11,36 +11,36 @@ Every claim tagged MEASURED / DOCUMENTED / ASSUMED.
 
 Rust core, platform-independent half:
 
-- `crates/kaya/src/wire.rs:225-227` — the three mode codes (`FILE_MODE_READ` 0,
+- `crates/kaya/src/wire.rs:219-221` — the three mode codes (`FILE_MODE_READ` 0,
   `FILE_MODE_WRITE` 1, `FILE_MODE_READ_WRITE` 2). DOCUMENTED (source).
-- `crates/kaya/src/capi.rs:1403-1435` — `kaya_open_picked` maps the u32 to
+- `crates/kaya/src/capi.rs:1332-1367` — `kaya_open_picked` maps the u32 to
   `protocol::FileMode`, rejects anything else with EINVAL(22), and delegates to
   `source.open(mode)`. DOCUMENTED (source).
 - `crates/kaya/src/protocol.rs:111-142` — `PickedSource` trait: `open`, `name`,
   `local_path`, `locator`. DOCUMENTED (source).
-- `crates/kaya/src/capi.rs:1642-1695` — `register_picked`, "THE ONE PLACE THE
+- `crates/kaya/src/capi.rs:1548-1585` — `register_picked`, "THE ONE PLACE THE
   PLATFORM SOURCE IS CHOSEN". iOS arm (`capi.rs:1672-1677`) builds
   `swiftui_host::UrlSource { name, locator }`. DOCUMENTED (source).
 
 iOS-specific half:
 
-- `crates/kaya/src/swiftui_host.rs:51-113` — `UrlSource` (cfg `target_os = "ios"`).
+- `crates/kaya/src/swiftui_host.rs:47-104` — `UrlSource` (cfg `target_os = "ios"`).
   Its `open` calls the backend through `PICKED_OPENER`, passing
   `protocol::picked_mode_code(mode)` — **all three modes are forwarded**, no
   filtering, no read-only clamp. `local_path()` returns `""` deliberately.
   DOCUMENTED (source).
-- `crates/kaya/src/swiftui_host.rs:260-264` — `PICKED_OPENER` is resolved by
+- `crates/kaya/src/swiftui_host.rs:240-244` — `PICKED_OPENER` is resolved by
   `dlsym(handle, "kaya_swiftui_open_picked")` at backend load, and is OPTIONAL:
   a backend without it makes redemption fail with a sentence, not a crash.
   DOCUMENTED (source).
-- `swift/KayaSwiftUI.swift:2175-2212` — `kaya_swiftui_open_picked`. **This is
+- `swift/KayaSwiftUI.swift:1921-1958` — `kaya_swiftui_open_picked`. **This is
   where write mode is actually implemented on iOS.**
 
 ### A.2 The finding the string-grep missed
 
 The coordinator measured that `FILE_MODE_WRITE` appears zero times in
 `KayaSwiftUI.swift`. TRUE, and MISLEADING: the Swift side matches the
-**numeric** codes, not the C macro names (`swift/KayaSwiftUI.swift:2195-2201`):
+**numeric** codes, not the C macro names (`swift/KayaSwiftUI.swift:1941-1947`):
 
 ```swift
 let flags: Int32
@@ -55,7 +55,7 @@ let fd = open(url.path, flags, 0o644)
 
 So on iOS write mode is CODED. Whether it WORKS is the measurement below.
 The mode numbers are pinned on the Rust side by a unit test
-(`crates/kaya/src/protocol.rs:1817-1820`), and the Swift comment at 2193-2194
+(`crates/kaya/src/protocol.rs:1757-1760`), and the Swift comment at 2193-2194
 names `picked_mode_code` as the contract — but nothing mechanically checks the
 Swift literals against the Rust constants. (See "guard gap" at the end.)
 
@@ -63,7 +63,7 @@ Swift literals against the Rust constants. (See "guard gap" at the end.)
 
 MEASURED (grep over the whole repo, `*.swift` + `*.rs`): the ONLY call sites of
 `startAccessingSecurityScopedResource` / `stopAccessingSecurityScopedResource`
-in shipping code are `swift/KayaSwiftUI.swift:2191-2192`:
+in shipping code are `swift/KayaSwiftUI.swift:1937-1938`:
 
 ```swift
 let scoped = url.startAccessingSecurityScopedResource()
@@ -81,10 +81,10 @@ kind. Consequence for restarts is in A.6.
 ### A.4 What the existing lane already proves (read mode)
 
 The `filedialog` scene runs on the iOS lane: the rust suite loop
-(`tools/ios/run-sim.py:1886-1889`) builds the module's examples —
-`filedialog` among them (`tools/lib/lanes/ios.py:63`) — and queues
+(`tools/ios/run-sim.py:1824-1827`) builds the module's examples —
+`filedialog` among them (`tools/lib/lanes/ios.py:61`) — and queues
 `filedialog-swiftui`. The scene
-(`tools/scenes/filedialog.steps:66-67`) asserts the guest read the real bytes
+(`tools/scenes/filedialog.steps:35-36`) asserts the guest read the real bytes
 back out of the descriptor ("1 picked bytes"), and its header says the scene
 uniquely proves the capability SURVIVES CROSSING A THREAD.
 
@@ -104,9 +104,9 @@ service. So the harness's eyes live on the HOST:
   SimulatorKit's HID client. CLI: `simdrive <udid> <app-pid> <verb>`,
   verbs `state|choose <name>|cancel|describe|navstrip|press <label>`
   (`main.swift:459-461, 523-640`).
-- `swift/KayaSwiftUI.swift:2006-2076` — the in-app half. Request/response is a
+- `swift/KayaSwiftUI.swift:1764-1832` — the in-app half. Request/response is a
   pair of files in the app's own container; the trailing newline is the commit.
-- `swift/KayaSwiftUI.swift:5358-5366` — `file_choose` routes to
+- `swift/KayaSwiftUI.swift:4795-4803` — `file_choose` routes to
   `kayaSimdriveDrive` on iOS; the macOS arm drives NSOpenPanel in-process.
 
 **There is no `type`/text-entry verb in simdrive.** MEASURED: the verb switch
@@ -159,10 +159,10 @@ the published material — see docs/traps.md:1756-1765.
 A5 is a real divergence, and it is the same class as a bug this repo already
 caught once.
 
-- iOS (`swift/KayaSwiftUI.swift:2198`): `case 1: flags = O_WRONLY | O_CREAT | O_TRUNC`
-- desktops (`crates/kaya/src/protocol.rs:235`): `FileMode::Write => opts.write(true).truncate(true)`
+- iOS (`swift/KayaSwiftUI.swift:1944`): `case 1: flags = O_WRONLY | O_CREAT | O_TRUNC`
+- desktops (`crates/kaya/src/protocol.rs:229`): `FileMode::Write => opts.write(true).truncate(true)`
   — `std::fs::OpenOptions` with no `.create(true)`, so a missing path is ENOENT.
-- Android (`crates/kaya/src/protocol.rs:220`): `FileMode::Write => "wt"` into
+- Android (`crates/kaya/src/protocol.rs:214`): `FileMode::Write => "wt"` into
   `ContentResolver.openFileDescriptor`, which resolves an existing document.
 
 MEASURED on iOS (A5): opening a NON-EXISTENT path in write mode **succeeds and
@@ -190,7 +190,7 @@ a test, the way `android_open_mode` was.
 
 MEASURED (repo grep): kaya creates NO bookmarks. `bookmarkData`,
 `resolvingBookmarkData` and `NSURLBookmark` appear zero times in the repo.
-`kayaPickedURLs` (`swift/KayaSwiftUI.swift:2106`) is an in-memory
+`kayaPickedURLs` (`swift/KayaSwiftUI.swift:1856`) is an in-memory
 `[String: URL]` on the backend, and `capi.rs:1360` registers into a
 process-lifetime table whose miss "FAILS LOUDLY" (`capi.rs:1381-1386`).
 
@@ -220,12 +220,12 @@ decision for a later milestone, not something write mode needs.
 
 ### B.1 There is no save request on the wire
 
-`crates/kaya/src/spec.rs:827-850` — `show_file_dialog` (kind 34) carries
+`crates/kaya/src/spec.rs:764-787` — `show_file_dialog` (kind 34) carries
 `window, dialog, multiple, reserved, filters`. Open-only, exactly as the
 charge says. Two things worth noting for sizing:
 
 - **There is already a `reserved: U32` in the record**, read and discarded at
-  `crates/kaya/src/wire.rs:774` (`let _reserved = r.u32();`). A save/open
+  `crates/kaya/src/wire.rs:764` (`let _reserved = r.u32();`). A save/open
   discriminant fits it with **no change to the record's byte layout** — the
   spec hash still moves (the field is renamed), but nothing re-lays-out.
 - The result side needs nothing new at all. See B.3.
@@ -260,7 +260,7 @@ Swift: `UIDocumentPickerViewController(forExporting: [URL], asCopy: Bool)`.
 `directoryURL` and `shouldShowFileExtensions` are properties on the class, so
 they serve the export picker exactly as they serve the open one — which
 matters, because `file_dialog_goto` already drives `directoryURL`
-(`swift/KayaSwiftUI.swift:1968-1970`).
+(`swift/KayaSwiftUI.swift:1727-1729`).
 
 **THE ONE SHAPE CONSTRAINT: iOS has no "create an empty file with this name"
 picker.** Every export initializer takes URLs that ALREADY EXIST locally. So
@@ -299,7 +299,7 @@ The findings, each MEASURED:
 
 **This is why the save side is cheap on iOS.** kaya's whole result path is
 already shaped for it: `KayaPickerDelegate.answer(urls)`
-(`swift/KayaSwiftUI.swift:2134-2164`) stringifies each URL, retains the object
+(`swift/KayaSwiftUI.swift:1883-1911`) stringifies each URL, retains the object
 in `kayaPickedURLs`, and calls `emit_file_dialog_result`. A save answer is a
 list of URLs — byte-identical in shape. The saved file comes back as an
 ordinary picked-file handle the guest opens in write mode, which part A just
@@ -410,7 +410,7 @@ in the lanes would notice if it broke tomorrow. It works and it is unguarded.
    spells `case 0/1/2` with a comment naming that function and nothing that
    fails if they drift. A check-verbs-style text assertion would close it.
 2. **Write mode has no leg on any platform.** The `filedialog` scene reads
-   only (`tools/scenes/filedialog.steps:67`). A write clause in the shared
+   only (`tools/scenes/filedialog.steps:36`). A write clause in the shared
    scene would cover all five lanes at once, and would have caught A5.
 3. **`press` can pass without pressing anything.** Measured above. It should
    refuse a match on a non-actionable role, or require an observable

@@ -1,7 +1,5 @@
-// The window conformance scene, Swift port — see guests/rust/window.rs.
-// The title must MATERIALIZE (the runner reads the real title bar), and
-// 640x400 is deliberately off the 540x330 default so an ignored size
-// request cannot pass by luck. Desktop-only: phones reject the size.
+// The window scene, Swift port — guests/rust/window.rs,
+// tools/scenes/window.steps.
 
 import Foundation
 

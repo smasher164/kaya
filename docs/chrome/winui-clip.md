@@ -187,7 +187,7 @@ everything.
 back to the library's 3, `SetHeight` back to the 48 cell):
 
 ```
-thread 'main' (20160) panicked at crates/kaya/src/winui/mod.rs:3146:21:
+thread 'main' (20160) panicked at crates/kaya/src/winui/mod.rs:2662:21:
 kaya: winui: a promoted command's hover visual is not on its own icon. The
 AppBarButtonInnerBorder ... is arranged 20 DIP tall from y 6, centre 16; the
 ContentViewbox holding the icon is 16 DIP tall from y 16, centre 24; the
@@ -202,7 +202,7 @@ perturbation (a) could not make: (a) moved both sides of that comparison at
 once, which is why it needed its own:
 
 ```
-thread 'main' (18440) panicked at crates/kaya/src/winui/mod.rs:3097:5:
+thread 'main' (18440) panicked at crates/kaya/src/winui/mod.rs:2619:5:
 kaya: winui: the caption CommandBar's overflow glyph is arranged in a box 3
 DIP tall; kaya wrote 20 into the application dictionary under
 AppBarExpandButtonCircleDiameter ... A box of the library's size means the

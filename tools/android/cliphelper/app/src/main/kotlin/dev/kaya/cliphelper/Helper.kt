@@ -13,18 +13,10 @@ import android.os.PersistableBundle
 import android.util.Base64
 
 // The Android lane's FOREIGN clipboard app (docs/clipboard-plan.md
-// §0e). Two receivers and a never-shown IME:
-//
-//  SEED  writes the clipboard FROM THE BACKGROUND — writes are not
-//        focus-gated. Every seed carries the overlay-suppression extra
-//        so nothing lingers over the guest mid-assertion.
-//  READ  reads without touching the guest's focus: this package is the
-//        DEFAULT IME for the lane run (`adb shell ime enable/set`),
-//        whose reads are admitted before focus is checked.
-//
-// Results ride ORDERED broadcast result data, which `am broadcast`
-// prints on stdout and which the guest receives when it orchestrates a
-// seed app-to-app.
+// §0e): seeds from the BACKGROUND (writes are not focus-gated) and
+// reads as the DEFAULT IME, whose reads are admitted before focus is
+// checked — so the guest keeps focus for the whole leg. Results ride
+// ORDERED broadcast result data, which `am broadcast` prints.
 private const val SUPPRESS = "com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY"
 
 class SeedReceiver : BroadcastReceiver() {

@@ -5,13 +5,10 @@ import dev.kaya.KayaApp;
 import dev.kaya.KayaRecords;
 
 /**
- * The feed scene from the JVM: sum-typed elements, end to end. The
- * sealed interface is the sum and its permitted records are the
- * constructors. See guests/rust/feed.rs and tools/scenes/feed.steps.
+ * The feed scene from the JVM — guests/rust/feed.rs, tools/scenes/feed.steps.
  */
 public final class Feed {
-    /** The annotation processor reads this declaration and generates
-     * PostKaya: the collection factory and the staged eliminator. */
+    /** The annotation processor reads this and generates PostKaya. */
     @KayaGen(key = "String")
     sealed interface Post permits Note, Todo {}
 
@@ -36,8 +33,6 @@ public final class Feed {
 
             tx.mount(tx.row(() -> {
                 tx.button("promote", t -> {
-                    // The first note, promoted to a finished todo: the
-                    // update's new constructor restamps that key's copy.
                     for (KayaRecords.Entry<String, Post> entry : feed.items(t)) {
                         if (entry.value instanceof Note note) {
                             feed.update(t, entry.key, new Todo(note.text(), true));
@@ -54,9 +49,9 @@ public final class Feed {
                                 t.row(() -> {
                                     todo.checkbox(t, Todo::done,
                                             (KayaApp.Tx t2, String key, boolean checked) -> {
-                                                // The refined patch re-eliminates
-                                                // at write time, so a stale
-                                                // occurrence folds into the empty.
+                                                // The refined patch re-eliminates at
+                                                // write time: a stale occurrence
+                                                // folds into the empty.
                                                 PostKaya.asTodo(t2, feed, key)
                                                         .ifPresent(p -> p.done(checked));
                                             });

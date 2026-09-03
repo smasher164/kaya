@@ -1,39 +1,21 @@
-# The adaptive conformance scene, depth half
-# (docs/adaptive-layout-plan.md §2): the arrangement axis is a PROPERTY
-# on one node with two constructor spellings. A HANDLER flips row@dash
-# vertical and back — D2's user-driven toggle, the breakpoint
-# mechanism's effect without its trigger (the breakpoint record is the
-# milestone's next increment and drives this same prop).
-#
-# THE SUBJECT STAYS `row@dash` THROUGH BOTH STATES: identity is the
-# creation kind, presentation is the prop — which is what keeps every
-# other scene's addressing stable while an app adapts.
-#
-# expect_axis reads the axis the RENDER used (a geometry-adjacent
-# record on the container's own box reader; GTK answers its orientable
-# back), never the model's field — a backend that ignored the write
-# must fail, the expect_aligned rule one prop over.
+# docs/adaptive-layout-plan.md §2. The subject stays `row@dash` through
+# both states: identity is the creation kind, presentation is the prop.
 expect label#0 "alpha"
 expect_axis row@dash "horizontal"
 expect_axis column@steady "vertical"
 click button#0
 expect_axis row@dash "vertical"
-# And BACK — the revert half a one-way flip would leave unproven.
 click button#0
 expect_axis row@dash "horizontal"
-# THE BREAKPOINT HALF (docs/adaptive-layout-plan.md D3; size classes
-# ruled 2026-08-31): row@narrow's axis is DECLARED data — while the
-# window's size class is COMPACT it is vertical. iOS reports the
-# platform's own class; every other platform derives compact below 600
-# points; THE CORE does the one comparison either way. Every assert
-# here sits AFTER a resize because the initial state is
-# width-dependent (the panes-band rule): the desktop legs cross the
-# boundary both ways, and the phone leg CUTS at resize_window and
-# asserts its own always-narrow truth as a per-leg extra step
-# (tools/ios/run-sim.py's adaptive entry).
+# THE BREAKPOINT HALF (docs/adaptive-layout-plan.md D3): iOS reports the
+# platform's own size class, every other platform derives compact below
+# 600 points. Every assert sits AFTER a resize because the initial state
+# is width-dependent (the panes-band rule); the phone lanes cut at
+# resize_window and assert their always-narrow truth as an extra step
+# (the MODS tables in tools/lib/lanes/{ios,android}.py).
 resize_window 480x400
 expect_axis row@narrow "vertical"
-# Crossing back AUTO-REVERTS — the diff-against-base rule, no second
-# declaration anywhere.
+# Crossing back AUTO-REVERTS: the diff-against-base rule, so there is no
+# second declaration anywhere.
 resize_window 900x600
 expect_axis row@narrow "horizontal"

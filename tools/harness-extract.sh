@@ -15,21 +15,12 @@ fi
 # Usage: harness-extract.sh <video> <transcript> <anchor_ms> <outdir> [crop]
 #        harness-extract.sh --selftest
 #
-# anchor_ms is the wall-clock time (epoch ms) of the video's t=0; the
-# transcript's "KAYA_HARNESS: epoch <ms>" line supplies the harness's
-# start, so the lead is computed rather than guessed from launch times.
-# [crop] is an ffmpeg crop filter for suite-long films where each leg is
-# a region of a shared canvas; no cropped video is ever rendered.
-#
-# Action steps are sampled 300ms late (they are followed by settle
-# windows); EXPECT steps take no bias, or the still shows the next
-# action's effect. These videos are sparse VFR, so a step resolves to
-# its COVERING frame — the last pts <= t, not -ss's first frame after t
-# (docs/traps.md, recording mode).
-#
-# Exit is nonzero when anything silently degrades: steps but no frames,
-# an anchor outside the video, or fewer stills than steps. A scriptless
-# transcript extracts nothing and exits zero.
+# anchor_ms is the epoch ms of the video's t=0; the transcript's
+# "KAYA_HARNESS: epoch <ms>" line supplies the harness's start, so the
+# lead is computed rather than guessed from launch times. Action steps
+# are sampled 300ms late and EXPECT steps take no bias; a step resolves
+# to its COVERING frame, since these films are sparse VFR (docs/traps.md,
+# recording mode). Exit is nonzero when anything silently degrades.
 set -uo pipefail
 
 # --selftest: a synthesized three-color sparse video whose steps must

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- The clipboard scene's foreign app: without this the guest cannot
-         see the helper, and an explicit broadcast to a package you
-         cannot see is filtered out with no error anywhere. The reasoning
-         is spelled once, in milestone2's manifest. -->
+    <!-- The clipboard scene's foreign app: an explicit broadcast to a
+         package this one cannot see is filtered out with no error
+         anywhere (docs/traps.md: "An explicit broadcast to a package the
+         sender cannot SEE is filtered out with no error"). -->
     <queries>
         <package android:name="dev.kaya.cliphelper" />
     </queries>
-    <!-- The declared identity, read out of guests/assets/identity.toml by
-         android/build.gradle.kts. The reasoning is spelled once, in
-         milestone2's manifest. -->
+    <!-- The declared identity, read out of guests/assets/identity.toml
+         by android/build.gradle.kts (rusthost's manifest carries the
+         reasoning). -->
     <application
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
@@ -22,13 +22,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- THE HARNESS'S EYES OUTSIDE THIS APP, declared here and not
-             in the kaya library's manifest so a user's app never carries
-             an accessibility service it did not ask for. Android's file
-             picker is DocumentsUI, a separate APK, and this is what lets
-             the scene read and drive it without moving the lane to
-             instrumentation. The runner enables it over adb; it starts
-             on its own never. -->
+        <!-- THE HARNESS'S EYES OUTSIDE THIS APP (rusthost's manifest
+             carries the reasoning). -->
         <service
             android:name="dev.kaya.KayaHarnessAccessibility"
             android:exported="false"

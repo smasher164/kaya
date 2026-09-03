@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """The TEMPLATE-zone census: every widget kind AND every prop, every binding.
 
-WHY THIS IS PYTHON AND NOT SEVEN MORE GREPS IN THE GATE. Three bindings
-namespace the template zone by SCOPE rather than by name — Rust's `Tpl`
-methods are `pub fn entry` exactly like `Tx`'s, OCaml's live in
-`module Tpl = struct` — so a line-oriented pattern is satisfied by the
-LIVE constructor and reports a zone it never read. That has already been
-measured passing with the template setter deleted (2026-08-10). Each
-zone is therefore located by its real structure and read from inside it,
-and every reader is WATCHED: too few names is a broken reader, not a
-clean tree.
+PYTHON AND NOT SEVEN MORE GREPS: three bindings namespace the template
+zone by SCOPE rather than by name (Rust's `Tpl` methods are `pub fn entry`
+exactly like `Tx`'s), so a line-oriented pattern is satisfied by the LIVE
+constructor and reports a zone it never read — measured passing with the
+template setter deleted, 2026-08-10. Each zone is located by its real
+structure and read from inside it, and too few names is a broken reader
+rather than a clean tree.
 
 Usage:
     tpl-surfaces.py [--kinds a,b,c] [<repo root>]
-Exit 0 when every zone offers every kind and every prop and every façade
-is level with its zone; 1 with a message naming the binding, the zone and
-what is missing when one is not.
 """
 
 import glob
@@ -181,13 +176,10 @@ def go_tpl_methods(src):
 
 def zone_go(_):
     # DIGITS AND GENERICS BOTH COUNT: `SetA11yID` has a digit in the name
-    # and `BindA11yID[` a type parameter before its arguments.
-    #
-    # AND THE RETURN TYPE IS PART OF THE PATTERN, for the reason
-    # TABLE_POINTS states below: `offers` is prefix-loose, so the zone's
-    # table opener `Rows` would answer for the `row` KIND and hide a
-    # missing Row constructor. A constructor hands back a Node; Rows
-    # hands back *NodeRows.
+    # and `BindA11yID[` a type parameter before its arguments. AND THE
+    # RETURN TYPE IS PART OF THE PATTERN (see TABLE_POINTS): `offers` is
+    # prefix-loose, so the zone's table opener `Rows` would answer for the
+    # `row` KIND and hide a missing Row constructor.
     src = read("bindings/go/app.go")
     return {name.lower() for name, returns in go_tpl_methods(src) if returns == "Node"}
 
@@ -229,11 +221,9 @@ def zone_haskell(_):
 
 # Python and JS are EXEMPT from this census, on the record: both
 # transactions are ambient, so ONE module-level surface serves both zones
-# (Python's `_tpl_depth` flips the allocator between Widget and Node; JS's
-# `allocWidgetOrNode` reads `_tplDepth` into one Widget's `isNode`) and
-# there is no second surface for a kind to be missing from. C is exempt
-# with the rest of C: the generated kaya_tx_create_widget IS its surface
-# (invariant 5).
+# and there is no second surface for a kind to be missing from. C is
+# exempt with the rest of C: the generated kaya_tx_create_widget IS its
+# surface (invariant 5).
 ZONES = [
     # (language, reader, zone description for the message, minimum
     #  constructors the reader must find before its verdict is believed)
@@ -248,13 +238,10 @@ ZONES = [
 
 
 # --- the PROP census ---------------------------------------------------
-#
-# The zone's PROPS and the member each is spelled as INSIDE the zone.
+# The zone's PROPS and the member each is spelled as INSIDE the zone:
 # `set_grow`, `setGrow` and `SetGrow` each name two different surfaces in
-# the same file, so every name is read out of the zone's own block.
-# The seven: grow (the layout prop scroll forced), the a11y trio and
-# accepts (docs/tpl-props-plan.md P1/P2), role and inset
-# (docs/styling-plan.md D3/D4).
+# the same file, so every name is read out of the zone's own block
+# (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
 TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
@@ -403,12 +390,9 @@ PROP_ZONES = [
 # A table is a For surface rather than a widget kind. Read the nested
 # builder and its keyed re-declaration from their own blocks so the live
 # Tx/Messages methods cannot satisfy them (docs/tables-plan.md).
-#
-# KEEP A ZONE'S TABLE METHOD OUT OF ITS CONSTRUCTOR PATTERN. `offers`
-# below is prefix-loose, so a `columns` that the KIND reader can see —
-# C#'s `public Node <Name>(`, Java's, Swift's `-> KayaNodeHandle` — would
-# answer for the `column` kind and hide a missing constructor. C# returns
-# void from both zones' Columns for that reason.
+# KEEP A ZONE'S TABLE METHOD OUT OF ITS CONSTRUCTOR PATTERN: `offers` is
+# prefix-loose, so a `columns` the KIND reader can see would answer for
+# the `column` kind and hide a missing constructor.
 TABLE_POINTS = {
     "rust": ("columns", "on_sort", "keyed re-declaration"),
     "go": ("columns", "on_sort", "keyed re-declaration"),
@@ -648,12 +632,11 @@ def table_csharp(_):
 
 
 def table_swift(_):
-    # Swift spells BOTH zones `columns` on two different classes and
-    # BOTH sort registrations `onSort` on one — overloads, told apart by
-    # the receiver's type and the argument label alone. So each point is
-    # located in the class block that owns it and read for the handle it
-    # takes AND the record it emits; a line-oriented pattern here is
-    # satisfied by the live method every time.
+    # Swift spells BOTH zones `columns` on two classes and BOTH sort
+    # registrations `onSort` on one, told apart by the receiver's type and
+    # the argument label alone. So each point is located in the class
+    # block that owns it and read for the handle it takes AND the record
+    # it emits.
     src = read("bindings/swift/KayaApp.swift")
     tpl = brace_block(src, r"^final class KayaTpl\b")
     live = brace_block(src, r"^final class KayaAppTx\b")
@@ -728,11 +711,10 @@ def table_ocaml(_):
     outside = src.replace(tpl, "")
 
     got = set()
-    # THE HANDLER RIDES THE DECLARATION since 2026-08-24 — a labelled
-    # argument where this binding's ?on_click sits — so both clauses read
-    # ONE block, found by its header inside module Tpl. The live
-    # `columns` carries a labelled argument of the same name, which is
-    # why nothing here is keyed on that name alone.
+    # THE HANDLER RIDES THE DECLARATION — a labelled argument where this
+    # binding's ?on_click sits — so both clauses read ONE block, found by
+    # its header inside module Tpl. The live `columns` carries a labelled
+    # argument of the same name, so nothing here is keyed on that alone.
     tpl_columns = ocaml_binding(tpl, r"^  let columns\b", "  ")
     if tpl_columns and re.search(
         r"Kaya_wire\.tx_set_column_headers id\b.*?\(List\.length titles\) 0\b",
@@ -838,18 +820,12 @@ def haskell_scope(src, header_re):
 
 def table_haskell(_):
     src = read("bindings/haskell/KayaApp.hs")
-    # THE ZONE IS THE SCOPE NOW, not the name: every `*Node` twin died
-    # when the module's own header rule reached them (a constructor
-    # identical in both zones keeps ONE name and dispatches on it), so
-    # the template half of each point is the arm inside the TEMPLATE
-    # instance — read by its scope, never by its name, since the live arm
-    # spells the same name one scope up.
-    #
-    # The LOCATORS are the three the file cannot lose while still being
-    # KayaApp.hs: the vocabulary class, its template instance, and the
-    # occurrence loop. The points below are then present-or-missing on
-    # their own, so a deleted spelling names ITSELF rather than reporting
-    # a broken reader.
+    # THE ZONE IS THE SCOPE, not the name: a constructor identical in
+    # both zones keeps ONE name and dispatches on it, so the template half
+    # of each point is the arm inside the TEMPLATE instance, read by its
+    # scope. The LOCATORS are the three the file cannot lose while still
+    # being KayaApp.hs, so a deleted spelling names ITSELF rather than
+    # reporting a broken reader.
     declare = haskell_scope(src, r"^class Monad m => Declare m where")
     tpl_zone = haskell_scope(src, r"^instance Declare Tpl where")
     loop = haskell_decl(src, "dispatchLoop")
@@ -857,11 +833,9 @@ def table_haskell(_):
         return None
 
     got = set()
-    # BOTH HALVES, and each is a lie on its own: the class signature is
-    # what makes the bar zone-spanning rather than live-only (`El m ->
-    # … -> m ()`, the collectionOf clause's shape), and the template
-    # instance's arm is what proves the TEMPLATE zone actually got it —
-    # pathLen 0 against a template node is every stamped copy's bar.
+    # BOTH HALVES, each a lie on its own: the class signature is what
+    # makes the bar zone-spanning rather than live-only, and the template
+    # instance's arm is what proves the TEMPLATE zone got it.
     if re.search(
         r"^\s+columns\s*::\s*El m\s*->\s*\[String\]\s*->\s*Sort\s*->\s*m \(\)",
         declare,
@@ -876,9 +850,7 @@ def table_haskell(_):
 
     # The registrar is an INSTANCE ARM too, and its signature is the
     # associated type: `Keyed Node` is where "the copy's keys reach the
-    # handler" is written down — ONCE, for all six registrars — so a node
-    # arm that took the live handler shape would be caught here rather
-    # than at a name.
+    # handler" is written down ONCE, for all six registrars.
     sort_class = haskell_scope(src, r"^class HandlerTarget e where")
     node_sort = haskell_scope(src, r"^instance HandlerTarget Node where")
     arm = re.search(
@@ -1035,11 +1007,10 @@ def table_java(_):
     ):
         got.add("columns")
 
-    # The nested handler: three parts, because two of them are satisfied
-    # by shapes that already existed. The interface must carry the KEYS,
-    # the registration must be node-keyed, and the loop must route a
-    # KEYED sort_requested to it — the live arm reads the same
-    # occurrence and is discriminated by `&& occ.keys.isEmpty()`.
+    # The nested handler, three parts because two are satisfied by shapes
+    # that already existed: the interface carries the KEYS, the
+    # registration is node-keyed, and the loop routes a KEYED
+    # sort_requested to it (the live arm reads the same occurrence).
     keys_in_message = "void accept(Tx tx, List<Object> keys, int column);" in handler
     registered = re.search(
         r"public void onSort\(Node (\w+), SortHandler (\w+)\)\s*\{\s*"
@@ -1156,23 +1127,16 @@ def table_js(_):
 
 
 # --- THE ROW'S OWN FIELDS: the nested RECORD collection, all nine -----
-#
-# A table nested in a row template is FOR rows that carry named fields,
-# and two halves make that spellable. Either one missing leaves the rows
-# scalar, which is what "three of eight bindings" meant
-# (docs/deferred.md, closed 2026-08-25):
-#
-#   nested record collection   — the record-schema constructor must stand
-#     in the TEMPLATE zone, the only scope a nested collection may be
+# Two halves make a row's named fields spellable, and either one missing
+# leaves the rows scalar (docs/deferred.md, closed 2026-08-25):
+#   nested record collection   — the record-schema constructor stands in
+#     the TEMPLATE zone, the only scope a nested collection may be
 #     declared in (docs/tables-plan.md, MEASURED IN SLICE 1).
 #   record instance addressing — narrowing the handle to ONE stamped copy
-#     must keep the element type; every record mutation takes the typed
-#     collection, so a narrowing that hands back the plain handle puts
-#     the row's fields out of reach.
-#
+#     keeps the element type, since every record mutation takes the typed
+#     collection.
 # READ OUT OF THE BLOCK THAT OWNS IT, never by name: six bindings spell
-# the typed narrowing exactly as the untyped one and are told apart only
-# by the receiver's type, which no line-oriented pattern sees.
+# the typed narrowing exactly as the untyped one.
 RECORD_POINTS = ("nested record collection", "record instance addressing")
 
 
@@ -1524,22 +1488,12 @@ TABLE_ZONES = [
 
 
 # --- the TAKES-A-SOURCE census -----------------------------------------
-#
 # A constructor that EXISTS is not one that can be handed the row's own
-# data (docs/deferred.md, "the template button's caption is not
-# uniform"). WHAT IS ASKED IS A PAIR: each point must accept BOTH a
-# SIGNAL and an ELEMENT FIELD. The signal arm alone proves nothing —
-# every LIVE constructor takes a signal too — while the field arm is
-# what only a template can spell, one caption per stamped copy. So the
-# two are reported by name, never summed.
-#
-# PYTHON IS IN THIS CENSUS though it is exempt from both above, and the
-# difference is the point: a source is not a kind, and Python was the one
-# binding that could not spell the caption at all.
-#
-# Each reader returns the flavours the point accepts, or None when it
-# cannot LOCATE the constructor — refused as a broken reader, never
-# reported as a binding with no sources.
+# data (docs/deferred.md, "the template button's caption is not uniform").
+# WHAT IS ASKED IS A PAIR: a SIGNAL and an ELEMENT FIELD, reported by name
+# and never summed, since every LIVE constructor takes a signal too.
+# PYTHON IS IN THIS CENSUS though exempt from both above: a source is not
+# a kind. A reader that cannot LOCATE the constructor is refused.
 SOURCE_FLAVOURS = ("signal", "field")
 
 # The points, one per (kind, prop) that must be sourceable in the zone.
@@ -1745,41 +1699,21 @@ SOURCE_ZONES = [
 
 
 # --- the FAÇADES, held level with the zone they forward to -------------
-#
-# A template zone can have a SECOND surface: a for-statement façade that
-# forwards the zone's methods one at a time, by hand. A member on the
-# zone and not on its façade is reachable through `for_each` and not
-# through `for row in rows`, a difference no guest should have to know.
-#
-# Each façade carries its OWN NOT_FORWARDED set, because each binding
-# drew the plumbing line in its own place; reading each one's own list is
-# measuring, one shared list would be legislating.
-#
-# Java's three: `widget` is the kind floor and its absence is
-# load-bearing (it keeps a for-statement guest off the tier invariant 5
-# excludes); `addChild` is the parenting floor; `onToggleNode` is the
-# bridge the generated typed sugar reaches through `tpl()`.
-#
-# `forEach` joined this list, then left it with dynamic tables, and is
-# now GONE from the binding: the callback form died 2026-08-24 and the
-# one For form is `rows(Collection)`, an eager Iterable whose value
-# carries the handle a nested table's header bar and sort handler name.
-# So the façade forwards `rows` and the exemption has nothing left to
-# describe (docs/tables-plan.md).
+# A member on the zone and not on its for-statement façade is reachable
+# through `for_each` and not through `for row in rows`, a difference no
+# guest should have to know. Each façade carries its OWN NOT_FORWARDED
+# set: reading each binding's own list is measuring, one shared list would
+# be legislating. Java's three are the kind floor (whose absence keeps a
+# for-statement guest off the tier invariant 5 excludes), the parenting
+# floor, and the generated sugar's bridge.
 NOT_FORWARDED_JAVA = {
     "widget", "addChild", "onToggleNode",
 }
 
 # C#'s façade documents its own exclusions in its generated header
 # (guests/csharp/*Kaya.cs). ContextMenu and When are on this list and off
-# Java's RowSurface — a real divergence between two façades over one
-# zone, recorded and ledgered rather than silently blessed.
-#
-# `Collection`, `Each`, `ForEach` and `Columns` LEFT THIS LIST when the
-# generated façade closed (docs/deferred.md, 2026-08-24), for the reason
-# `forEach` left Java's: a row that cannot open a nested For cannot name
-# the Node whose header bar Columns declares, so a nested table was
-# spellable through tx.Each and not through a row at all.
+# Java's RowSurface — a real divergence between two façades over one zone,
+# recorded and ledgered rather than silently blessed.
 NOT_FORWARDED_CSHARP = {
     "Widget", "AddChild", "When", "ContextMenu",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
@@ -1787,15 +1721,12 @@ NOT_FORWARDED_CSHARP = {
 }
 
 
-# A NAME SET CANNOT SEE AN OVERLOAD. `Button` cancels against `Button`,
-# so a façade forwarding one of the zone's three Button overloads reads
-# level — measured, and it is what let C#'s generated row façade lag the
-# template button's caption arms for a milestone (docs/deferred.md).
-# The C-family façades are therefore keyed by ARITY AND TYPE, with the
-# same splitter the source census's `_overload_params` reads for.
-#
-# Rust's `Row` is still keyed by NAME: `pub fn` has no overloads to lose,
-# so the shape this exists to catch cannot occur there.
+# A NAME SET CANNOT SEE AN OVERLOAD: `Button` cancels against `Button`, so
+# a façade forwarding one of the zone's three Button overloads reads level
+# — measured, and it is what let C#'s generated row façade lag the
+# template button's caption arms for a milestone (docs/deferred.md). The
+# C-family façades are keyed by ARITY AND TYPE; Rust's `Row` stays keyed
+# by NAME, since `pub fn` has no overloads to lose.
 
 
 def _split_params(params):
@@ -1866,11 +1797,9 @@ def facade_java():
     if tpl is None or row is None:
         return None
     # `Rows<...>` is in the return types for the reason C#'s reader keeps
-    # `Collection`: the zone's `rows()` is how a nested For gets opened,
-    # and read for Node and void alone the member is invisible on BOTH
-    # sides — a façade that dropped the forward would read level.
-    # MEASURED 2026-08-24 against this very reader: with the forward
-    # deleted and `Rows` missing from the alternation the census passed.
+    # `Collection`: read for Node and void alone the member is invisible
+    # on BOTH sides, so a façade that dropped the forward reads level
+    # (MEASURED 2026-08-24 against this very reader).
     pat = (r"^\s*public\s+(?:void|Node|Rows<[^>]*>)\s+([a-zA-Z][A-Za-z0-9]*)"
            r"\s*\(([^)]*)\)")
     zone = {m for m in _typed_members(tpl, pat) if m[0] not in NOT_FORWARDED_JAVA}
@@ -1925,17 +1854,11 @@ def facade_csharp():
 
 
 # --- the TYPED ROW SUGAR, held level across the two zones it opens -----
-#
-# `<Rec>Kaya.Each` opens a For and hands its body the generated `<Rec>Row`
-# façade above. It takes the LIVE zone's `Tx` for a top-level For and the
-# TEMPLATE zone's `Tpl` for a nested one, and a generator that emits only
-# the first leaves a nested typed For's body holding the raw Tpl —
-# spelling its cells with the static tokens, which is the tier the façade
-# exists to keep guests off (docs/deferred.md, closed 2026-08-24).
-#
-# The floor is the census discipline one surface over: a reader that
-# finds no generated surface agrees with everything. Sum surfaces have no
-# `<Rec>Row` and are not counted.
+# `<Rec>Kaya.Each` takes the LIVE zone's `Tx` for a top-level For and the
+# TEMPLATE zone's `Tpl` for a nested one; a generator emitting only the
+# first leaves a nested typed For's body holding the raw Tpl
+# (docs/deferred.md, closed 2026-08-24). The floor is the census
+# discipline; sum surfaces have no `<Rec>Row`.
 CSHARP_TWIN_FLOOR = 3
 
 
@@ -1994,15 +1917,11 @@ def twins_csharp():
     return out
 
 
-# THE FAÇADES THAT ARE NOT HERE, on the record rather than merely absent
-# (gates.py's EXCLUDED rule, one file over):
-#
+# THE FAÇADES THAT ARE NOT HERE, on the record rather than merely absent:
 #   go — `type Row struct{ *Tpl }` EMBEDS the zone, so the pair cannot
-#     drift. Its two sealed surfaces are checked by
-#     bindings/go/tplzone_test.go.
-#   swift — `struct <Rec>Row` (tools/kaya-swift-gen) forwards no prop
-#     setter, and its `t: KayaTpl` is PUBLIC, so the zone is reachable
-#     anyway. Levelling it is ledgered as a slice of its own.
+#     drift (bindings/go/tplzone_test.go checks its two sealed surfaces).
+#   swift — `struct <Rec>Row` forwards no prop setter and its `t: KayaTpl`
+#     is PUBLIC, so the zone is reachable anyway; levelling it is ledgered.
 FACADES = [
     ("rust", facade_rust),
     ("java", facade_java),

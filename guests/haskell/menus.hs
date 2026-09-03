@@ -1,10 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
-{- The menus conformance scene, Haskell port: a File/View/Sort menu bar,
-   context menus on a live label and on stamped rows, and a late
-   rename/append/promotion rework. Canonical semantics in
-   guests/rust/menus.rs; the byte-frozen contract in
-   tools/scenes/menus.steps. -}
+-- The menus scene, Haskell port — guests/rust/menus.rs,
+-- tools/scenes/menus.steps.
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
@@ -13,8 +10,7 @@ import KayaWire (Value (..), kindLabel)
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- Filled right after the build and before dispatch starts: the Remove
-  -- fold reads the items collection back through here.
+  -- Filled after the build: the Remove fold reads the collection back here.
   itemsRef <- newIORef (Nothing :: Maybe Collection)
 
   (groups, itemsColl) <- buildTx app $ do
@@ -25,8 +21,7 @@ main = kayaMain $ \app -> do
 
     let onShare = submitTx app (writeSignal status (VStr "shared"))
 
-    -- File and its Export leaf share one enablement signal. File and
-    -- Share realize early because the extend handler needs their
+    -- File and Share realize early because the extend handler needs their
     -- handles; 'pure' slots them back in.
     share <- item "Share" [IPrimary True, IOnActivate onShare]
     file <-
@@ -35,9 +30,8 @@ main = kayaMain $ \app -> do
         [IEnabledBy canExport]
         [ item
             "Save"
-            -- A semantic icon names a CONCEPT, drawn by each platform in
-            -- its own symbol set; the vocabulary has no `save`, so
-            -- `done` is the checkmark idiom (docs/styling-plan.md D6).
+            -- No `save` in the symbol vocabulary; `done` is the checkmark
+            -- idiom (docs/styling-plan.md D6).
             [ ISymbol SymbolDone,
               IShortcut "primary+s",
               IOnActivate (submitTx app (writeSignal status (VStr "saved")))
@@ -81,8 +75,7 @@ main = kayaMain $ \app -> do
       ]
 
     groups <- collection
-    -- Built live: the items are SHARED across stamped copies, the
-    -- template only attaches, and each activation carries its key path.
+    -- Built live: the items are SHARED across stamped copies.
     catalog <-
       contextCatalog
         [ item
@@ -107,9 +100,7 @@ main = kayaMain $ \app -> do
     (groupList, itemsColl) <- forEach groups $ do
       itemsColl <- collection
       itemList <- each itemsColl $ do
-        -- label#2 once g2/a stamps. `element` is the scalar collection's
-        -- own token: its element IS the value, so there is no field name
-        -- to give.
+        -- label#2 once g2/a stamps.
         row <- label element
         nodeContextMenu row catalog
       _ <- columnOf [pure itemList]
@@ -123,9 +114,6 @@ main = kayaMain $ \app -> do
           buttonOn "enable export" $ -- button#0
             submitTx app (writeSignal canExport (VBool True)),
           buttonOn "reset menu state" $ -- button#1
-            -- The folds never echo the user's pick, so these two writes
-            -- are real records rather than no-ops the core could
-            -- coalesce away.
             submitTx app $ do
               writeSignal details (VBool False)
               writeSignal sort (VF64 0.0)
@@ -156,7 +144,7 @@ main = kayaMain $ \app -> do
 
   writeIORef itemsRef (Just itemsColl)
 
-  -- Seed after mount: the stamp path attaches the shared catalog and keys.
+  -- Seeded after the mount, so the copy stamps from a closed template.
   buildTx app $ do
     insert groups (VStr "g2") (VStr "Home")
     insert (itemsColl `at` VStr "g2") (VStr "a") (VStr "water plants")

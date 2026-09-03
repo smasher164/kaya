@@ -14,12 +14,8 @@ import java.util.List;
  * wire.
  */
 public final class KayaRecords {
-    /**
-     * A typed projection: one field of a record type, by wire
-     * position. The type parameter pins the Java type, so
-     * bindCheckedField rejects a {@code Field<String>} at compile
-     * time.
-     */
+    /** A typed projection: one field of a record type, by wire
+     * position. */
     public static final class Field<V> {
         final int index;
 
@@ -28,8 +24,7 @@ public final class KayaRecords {
         }
 
         /**
-         * The whole element of a scalar collection, as a field token: a
-         * scalar collection has no record, so its element is field 0.
+         * The whole element of a scalar collection, as a field token.
          * String only — a scalar collection is always strings.
          */
         public static Field<String> element() {
@@ -238,9 +233,8 @@ public final class KayaRecords {
         /**
          * The instance of this collection inside the copy keyed by
          * {@code key} of the next enclosing For; chain for deeper
-         * nesting. TYPED: {@code handle.at} hands back a bare
-         * {@link KayaApp.Collection}, and every record mutation below
-         * takes this one.
+         * nesting. Typed, unlike {@code handle.at}, which every record
+         * mutation below needs.
          */
         public Collection<K, T> at(Object key) {
             return new Collection<>(handle.at(key), info);
@@ -265,7 +259,7 @@ public final class KayaRecords {
 
         /**
          * One field's delta by selector: the rest of the record never
-         * travels ({@code todos.updateField(tx, key, Todo::done, true)}).
+         * travels.
          */
         public <V> void updateField(KayaApp.Tx tx, K key,
                 java.util.function.Function<T, V> selector, V value) {
@@ -432,10 +426,9 @@ public final class KayaRecords {
     /**
      * The generic machinery behind the generated {@code rows()}: opens
      * the For in the zone it is handed and wraps each traced row in the
-     * generated surface. ONE PER ZONE, because the For's container is
-     * the zone's own handle — a live Widget at the top, a template Node
-     * inside a row — and a generator that emitted only the first would
-     * leave a nested typed For unspellable.
+     * generated surface. ONE OVERLOAD PER ZONE: the For's container is
+     * the zone's own handle, a live Widget at the top and a template
+     * Node inside a row.
      */
     public static <K, T, R> KayaApp.Rows<KayaApp.Widget, R> rowTrace(
             KayaApp.Tx tx, Collection<K, T> c,
@@ -450,14 +443,11 @@ public final class KayaRecords {
     }
 
     /**
-     * Insert a record under a key the binding authors, and hand the key
-     * back. The contract, in full, is on {@link KayaApp.Tx#insertFresh}.
-     *
-     * <p>KEEP IT A STATIC. The minted key is I64, so the collection must
-     * be {@code Collection<Long, T>}; Java cannot constrain an instance
-     * method to one instantiation of its own class's type parameters, so
-     * as a method this would silently accept a String-keyed collection.
-     * As a function the parameter type is the wall.
+     * Insert a record under a key the binding authors, and hand it back
+     * ({@link KayaApp.Tx#insertFresh} has the contract). KEEP IT A
+     * STATIC: the key is I64, and Java cannot constrain an instance
+     * method to one instantiation of its class's type parameters, so as
+     * a method this would silently accept a String-keyed collection.
      */
     public static <T> long insertFresh(KayaApp.Tx tx, Collection<Long, T> c, T value) {
         return c.insertMinted(tx, value);
@@ -487,8 +477,7 @@ public final class KayaRecords {
 
     /**
      * collectionOf inside a ROW body — the handle {@code tx.rows(c)}
-     * hands out, and the only zone handle most Java scenes ever hold.
-     * The twin of {@link KayaApp.RowSurface#collection()}.
+     * hands out. The twin of {@link KayaApp.RowSurface#collection()}.
      */
     public static <K, T> Collection<K, T> collectionOf(KayaApp.RowSurface row, Class<T> type) {
         return collectionOf(row.tpl(), type);
@@ -505,12 +494,9 @@ public final class KayaRecords {
 
     /**
      * The field token for the component a selector reads:
-     * {@code fieldOf(Todo.class, Todo::done)}. Resolution probes: it
-     * builds a default-valued prototype, then one variant per wire field
-     * with a sentinel in that field, and the probe whose selector result
-     * changes names the field. Probes rather than SerializedLambda
-     * because D8-desugared lambdas carry no writeReplace on Android
-     * (docs/traps.md).
+     * {@code fieldOf(Todo.class, Todo::done)}. Probes rather than
+     * SerializedLambda because D8-desugared lambdas carry no
+     * writeReplace on Android (docs/traps.md).
      */
     @SuppressWarnings("unchecked")
     public static <T, V> Field<V> fieldOf(Class<T> type, java.util.function.Function<T, V> selector) {
@@ -540,8 +526,7 @@ public final class KayaRecords {
                 "kaya: selector does not read a wire field of " + type.getName());
     }
 
-    /** Selector instance -> resolved token, by identity: the probe run
-     * is the expensive path and handlers resolve per event. */
+    /** Selector instance -> resolved token, by identity. */
     private static final java.util.Map<Object, Field<?>> SELECTORS =
             java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
 

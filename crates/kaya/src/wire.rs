@@ -2,12 +2,9 @@
 //!
 //! One framing serves every channel — u32 size, u16 kind, u16 flags,
 //! 8-byte aligned, size includes the header, little-endian. Values are
-//! { u32 type; u32 len; payload padded to 8 }.
-//!
-//! The Rust API skips this module and constructs protocol values
-//! directly; decoding is for foreign guests, encoding for the pump and
-//! for tests. Malformed input fails LOUDLY: a bad buffer is a broken
-//! binding, not a runtime condition.
+//! { u32 type; u32 len; payload padded to 8 }. Decoding is for foreign
+//! guests, encoding for the pump and for tests; malformed input fails
+//! LOUDLY, because a bad buffer is a broken binding.
 
 use std::sync::Arc;
 
@@ -219,10 +216,7 @@ pub(crate) const FILL_EVEN_ODD: i64 = 1;
 
 // The size policy (§3.2.1): what a canvas does when layout gives it a
 // track that is not its viewbox. `scale` is the default — the mode a
-// guest that declares nothing gets — and the other three are what the
-// guest's declaration means: `fixed` is the one true property, `redraw`
-// is an on_draw handler, `tick` is an on_tick handler (redraw plus the
-// frame drive).
+// guest that declares nothing gets.
 pub(crate) const SIZE_POLICY_SCALE: u32 = 0;
 pub(crate) const SIZE_POLICY_FIXED: u32 = 1;
 pub(crate) const SIZE_POLICY_REDRAW: u32 = 2;
@@ -238,13 +232,10 @@ pub(crate) const TEXT_BASELINE_TOP: i64 = 2;
 pub(crate) const TEXT_BASELINE_BOTTOM: i64 = 3;
 
 /// The (value, name) table for every draw opcode, paint role, fill rule,
-/// text align and text baseline — the second spelling of the five
-/// canvas enums, read by the core's refusals and by every diagnostic
-/// that has to say WHICH op or role it could not accept. Not in the spec
-/// hash; held level with the spec by
-/// `spec::tests::canvas_names_match_the_spec_enums`, and against the
-/// three hand-copied surfaces by tools/check-symbol-parity.py —
-/// check-file-modes' hand-copied-numbers trap, one surface over.
+/// text align and text baseline — the second spelling of the five canvas
+/// enums, read by the core's refusals. Not in the spec hash; held level by
+/// `spec::tests::canvas_names_match_the_spec_enums` and, against the three
+/// hand-copied surfaces, by tools/check-symbol-parity.py.
 pub(crate) const DRAW_OPS: &[(i64, &str)] = &[
     (DRAW_MOVE_TO, "move_to"),
     (DRAW_LINE_TO, "line_to"),
@@ -289,9 +280,8 @@ pub(crate) const TEXT_BASELINES: &[(i64, &str)] = &[
 ];
 
 /// One canvas vocabulary's name for a value, or None for a value the
-/// vocabulary does not carry. ONE lookup over all five tables rather
-/// than five wrappers: the caller already names the table, and four of
-/// the wrappers had no caller outside their own pin test.
+/// vocabulary does not carry. ONE lookup over all five tables: the
+/// caller already names the table.
 pub fn vocab_name(table: &[(i64, &'static str)], value: i64) -> Option<&'static str> {
     table.iter().find(|(v, _)| *v == value).map(|(_, n)| *n)
 }
@@ -1995,9 +1985,7 @@ pub fn sort_body(tag: &[u8], column: u32) -> Vec<u8> {
 // THE TWO CANVAS OCCURRENCES (docs/canvas-plan.md §3.2.1). Both are a
 // click tag with the size the core is asking about appended as tagged
 // values — { u64 id; u32 path_len; u32 reserved; path_len keys; w; h }
-// and the same with a third value, the FRAME'S TIME. The tag shape is
-// reused rather than invented so a stamped copy is addressed exactly as
-// every other occurrence addresses one.
+// and the same with a third value, the FRAME'S TIME.
 pub fn draw_body(id: u64, path: &[Value], size: (f64, f64), time: Option<f64>) -> Vec<u8> {
     let mut b = click_tag(id, path);
     let mut blobs = Vec::new();
@@ -2012,10 +2000,9 @@ pub fn draw_body(id: u64, path: &[Value], size: (f64, f64), time: Option<f64>) -
 /// `draw_body`'s inverse: the id, the copy's key path, the size, and the
 /// frame time when there is one.
 ///
-/// TEST-ONLY, and the module's own division says why: "encoding for the
-/// pump and for tests", decoding for FOREIGN guests — which decode these
-/// bodies in their own languages off the ring. The Rust API never sees a
-/// body at all; its sink carries the `Occurrence` itself.
+/// TEST-ONLY: foreign guests decode these bodies in their own languages
+/// off the ring, and the Rust API's sink carries the `Occurrence`
+/// itself.
 #[cfg(test)]
 fn read_draw_body(body: &[u8], ticking: bool) -> (u64, Path, (f64, f64), f64) {
     let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
@@ -3088,19 +3075,11 @@ fn clip_blob(v: Option<Value>, what: &str) -> crate::protocol::Blob {
 }
 
 /// A clip's fixed header and its values, in the CANONICAL ORDER:
-/// DESCENDING CLIP VALUE, which is descending richness — custom (16),
-/// files (8), image (4), html (2), text (1).
-///
-/// THE ORDER IS PREFERENCE ORDER on every host that has one (macOS
-/// pasteboard types, X11 TARGETS), so a backend writes what it is
-/// handed, in the order it is handed, and is right. ONE ENCODER for
-/// both the tx and the apply record, because the order is the contract.
-///
-/// THE TX HALF IS TEST-ONLY, like [`decode_transaction`]: a Rust guest
-/// never crosses the wire and a foreign guest packs its own bytes, so
-/// this encoder exists to pin [`read_clip`] in
-/// `copy_records_round_trip`. The apply direction is live and goes
-/// through [`write_clip_out`].
+/// DESCENDING CLIP VALUE — custom (16), files (8), image (4), html (2),
+/// text (1). That is PREFERENCE ORDER on every host that has one (macOS
+/// pasteboard types, X11 TARGETS), so a backend writes what it is handed in
+/// the order it is handed. THE TX HALF IS TEST-ONLY, pinning [`read_clip`];
+/// the live apply direction goes through [`write_clip_out`].
 #[cfg_attr(not(test), allow(dead_code))]
 fn write_clip(
     b: &mut Vec<u8>,
@@ -3273,23 +3252,12 @@ fn write_value(b: &mut Vec<u8>, value: &Value, blobs: &mut Vec<Arc<[u8]>>) {
 mod tests {
     use super::*;
 
-    /// Every record kind survives the encode/decode round trip byte-for
-    /// semantics: what a foreign guest packs is what the core parses.
-    /// EVERY SPEC RECORD MUST HAVE A DECODE ARM, checked against this
-    /// file's own source.
-    ///
-    /// THE GAP THIS EXISTS FOR (found 2026-07-28, while adding file
-    /// dialogs). A new tx record needs an arm here or a foreign guest's
-    /// bytes hit the catch-all and panic — LOUDLY, but only when that
-    /// guest actually sends one, which is a matrix leg, not a build. The
-    /// missing arm was found by accident: a dead-code warning fired on
-    /// the unused constant. Had the constant been referenced anywhere
-    /// else, it would have shipped.
-    ///
-    /// Source inspection rather than a round-trip because every record
-    /// has different fields, and a generic encoder for all 34 would be
-    /// more machinery than the thing it guards. The Go binding's
-    /// chokepoint test uses the same shape for the same reason.
+    /// Every record kind survives the encode/decode round trip, and EVERY
+    /// SPEC RECORD MUST HAVE A DECODE ARM — checked against this file's own
+    /// source, since a missing arm only panics when a foreign guest sends
+    /// one, which is a matrix leg and not a build (docs/traps.md: "A wire
+    /// arm nobody references ships untested, and a dead-code warning is the
+    /// only symptom").
     #[test]
     fn every_spec_record_has_a_decode_arm() {
         let src = include_str!("wire.rs");
@@ -3701,13 +3669,10 @@ mod tests {
     }
 
     /// BOTH DIALOG REQUESTS, out and back, because what can break is the
-    /// difference between them: the picker carries a flag then a list,
-    /// the save request a STR AND THEN A LIST — a shape no other tx
-    /// record has, where a decoder reading the name's padding as the
-    /// list's count gets a garbage length rather than an error.
-    ///
-    /// A SAVE REQUEST WITH NO FILTERS is here deliberately: the values
-    /// list is empty, so a mis-sized name field runs off the end.
+    /// difference: the picker carries a flag then a list, the save request a
+    /// STR AND THEN A LIST — a shape no other tx record has, where a decoder
+    /// reading the name's padding as the list's count gets a garbage length.
+    /// The no-filters save request is here so a mis-sized name runs off the end.
     #[test]
     fn dialog_requests_round_trip() {
         use crate::protocol::{FileDialogId, FileDialogSpec, SaveDialogSpec};
@@ -3748,28 +3713,13 @@ mod tests {
         }
     }
 
-    /// The TX_COPY record, out and back: what a foreign binding packs
-    /// by hand is what the root reads.
-    ///
-    /// THE GAP THIS EXISTS FOR (found 2026-08-17, chasing a dead-code
-    /// warning on `write_clip`). `read_clip` had NO coverage at all —
-    /// a `panic!()` on its first line left all 356 tests green — because
-    /// its only encoder was written for a round-trip test nobody then
-    /// wrote. It is the root's reading of a record every one of the
-    /// eight bindings packs by hand, so a drift in the canonical order
-    /// or in the header counts surfaced on a matrix leg at best, and at
-    /// worst handed an app somebody else's representation.
-    ///
-    /// THE MIXED CLIP IS THE ONE THAT CAN FAIL. A clip carrying one
-    /// representation round-trips under any order at all; only a clip
-    /// carrying every kind at once can show custom/files/image/html/text
-    /// read back out of the descending order they were written in. Two
-    /// customs and two files, because a count read as a flag passes at
-    /// one.
-    ///
-    /// THE EMPTY CLIP IS THE OTHER END: the header describes nothing and
-    /// the values list is empty, so a decoder that took a slot anyway
-    /// runs off the end of the record rather than returning a wrong clip.
+    /// The TX_COPY record, out and back: what a foreign binding packs by
+    /// hand is what the root reads (docs/traps.md: "A wire arm nobody
+    /// references ships untested, and a dead-code warning is the only
+    /// symptom"). THE MIXED CLIP IS THE ONE THAT CAN FAIL — one
+    /// representation round-trips under any order — with two customs and two
+    /// files, because a count read as a flag passes at one. The empty clip
+    /// is the other end.
     #[test]
     fn copy_records_round_trip() {
         use crate::protocol::{Blob, Clip, PickedId};
@@ -3829,14 +3779,11 @@ mod tests {
         decode_transaction(&bytes);
     }
 
-    /// The two clipboard occurrences, out and back — including the
-    /// blob that never enters the record stream.
-    ///
-    /// THE BLOB HANDLE IS THE POINT: a batch-local index reused here
-    /// would name a slot in whatever batch the pump happened to be
-    /// serving. The decode below redeems through the occurrence table
-    /// exactly as a binding does, and RELEASES — a leak there is a
-    /// pasted megabyte per paste, forever.
+    /// The two clipboard occurrences, out and back — including the blob that
+    /// never enters the record stream. THE BLOB HANDLE IS THE POINT: a
+    /// batch-local index reused here would name a slot in whatever batch the
+    /// pump was serving. The decode redeems through the occurrence table as a
+    /// binding does, and RELEASES — a leak there is a megabyte per paste.
     #[test]
     fn clipboard_occurrences_round_trip() {
         use crate::protocol::Representation as R;
@@ -3899,16 +3846,12 @@ mod tests {
         }
     }
 
-    /// The undo payload's four runs survive the trip, INCLUDING the
-    /// shapes a reader gets wrong: a record with more fields than the
-    /// fixed head, an absent entry with no record at all, a non-empty
-    /// instance path, and an order group whose length differs from the
-    /// entry count.
-    ///
-    /// THE TEXTS RUN CARRIES BOTH IDENTITIES, and in that order: a live
-    /// widget (empty path) followed by a stamped copy's field named by
-    /// template node plus key path. A reader that kept a fixed-arity
-    /// pair reading takes the group's SIZE for the widget id.
+    /// The undo payload's four runs survive the trip, INCLUDING the shapes a
+    /// reader gets wrong: a record with more fields than the fixed head, an
+    /// absent entry with no record, a non-empty instance path, and an order
+    /// group whose length differs from the entry count. THE TEXTS RUN CARRIES
+    /// BOTH IDENTITIES, in that order — a reader that kept a fixed-arity pair
+    /// reading takes the group's SIZE for the widget id.
     #[test]
     fn undo_bodies_round_trip() {
         use crate::protocol::{UndoDelta, UndoEntry, UndoOrder, UndoText};

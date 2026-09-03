@@ -11,17 +11,14 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Run one lane N times and report WHICH LEGS EVER FAIL, and how often.
-# A measuring instrument, not a gate. What it is good and bad for is in
-# docs/traps.md (whole-lane repetition is too coarse for a low per-leg
-# rate; a single-leg hammer removes the contention that triggers it).
+# A measuring instrument, not a gate; what it is good and bad for is in
+# docs/traps.md.
 #
 # Usage: tools/flake-hunt.sh <lane> [runs] [--serial|--parallel]
-#        lane: mac | linux | windows
-#        runs: default 5
+#        lane: mac | linux | windows;  runs: default 5
 #
 # Narrow the sample with KAYA_ONLY (linux) or KAYA_WIN_SUITE (windows).
-# The serial pass is the expensive one and only answers "does this leg
-# ever fail ALONE"; --parallel skips it when that is already known.
+# The serial pass only answers "does this leg ever fail ALONE".
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

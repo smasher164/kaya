@@ -1,8 +1,5 @@
-// The standard-commands scene, Go port: a chord on every leaf kind,
-// the punctuation keys those chords need, and the `settings` role —
-// which macOS shows in the application menu while the item stays
-// addressable where it was declared. See guests/rust/commands.rs and
-// tools/scenes/commands.steps.
+// The standard-commands scene (tools/scenes/commands.steps): macOS moves
+// the `settings` role but the item stays addressable where declared.
 package commands
 
 import (
@@ -22,14 +19,11 @@ func App() *kaya.App {
 
 		win := tx.Window(0).Title("commands")
 
-		// The settings command declares its own punctuation chord and
 		file := win.Menu("File")
 		file.Item("Reload")
 		file.Item("Settings…").Shortcut("primary+comma").Role(kaya.RoleSettings).
 			OnActivate(func(tx *kaya.Tx) {
-				// Fires twice on purpose: once by the chord, once by
-				// activating the item at its DECLARED path, which on
-				// macOS is the application menu by then.
+				// Fires twice on purpose: the chord, then the item.
 				settingsCount++
 				tx.Write(status, fmt.Sprintf("settings %d", settingsCount))
 			})

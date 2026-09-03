@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 # ClipProbe — can the harness read the system clipboard from OUTSIDE
 # the guest, on both display protocols the linux lane runs? Answers in
-# docs/clipboard-plan.md §Weston.
-#
-# Q1 Do the tools exist / install in the lane's image?
-# Q2 X11: does xclip round-trip a selection owned by another process?
-# Q3 Wayland under Weston: does wl-copy/wl-paste round-trip at all?
-# Q4 Does either need the reader to hold focus?
-#
-# Throwaway; nothing builds or runs this but a human. Answers land on
-# stdout under "PROBE".
+# docs/clipboard-plan.md §Weston; the Q-labels are in the echoes below.
+# THROWAWAY; nothing builds or runs this but a human.
 set -uo pipefail
 say() { echo "PROBE $*"; }
 

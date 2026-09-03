@@ -7,29 +7,14 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE FLIGHT RECORDER'S CAPTURE PATHS, WATCHED FIRING.
-#
-# NOT a numbered gate, and the name says so — tools/check-gates.py's
-# census reads `tools/check-*.py` and the three `tools/gen-*.py` as gates and
-# would demand this be registered in gates.py, CLAUDE.md and AGENTS.md;
-# worse, its delegation clause forbids the mac runner from invoking
-# anything gate-shaped at all, and the mac runner is exactly who needs
-# to run this. What it proves is a RUNTIME property of a host — that
-# the capture commands on THIS machine actually answer — which a
-# static gate cannot see anyway.
-#
-# It drives the REAL MacRecorder imported from the REAL
-# tools/lib/flightrec_lane.py (the mac half since the runner
-# conversion): a paraphrase of the capture would prove only that the
-# paraphrase works. The one paraphrase left is the DRIVER's leg
-# sequence, and it is PINNED: the runner's own _leg_worker is read out
-# of tools/validate-mac.py and must make the same recorder calls in
-# the same order, or this file refuses before it drives anything.
-#
-# The tree is never modified. Every perturbation lands on a COPY, the
-# substitution count is printed, and the real files' hashes are
-# compared before and after — an unchanged copy is a failed test, not
-# a passed one.
+# THE FLIGHT RECORDER'S CAPTURE PATHS, WATCHED FIRING. NOT a numbered
+# gate, and the name says so: check-gates.py's census reads
+# `tools/check-*.py`, and its delegation clause forbids the mac runner —
+# who needs to run this — from invoking anything gate-shaped. It drives
+# the REAL MacRecorder out of tools/lib/flightrec_lane.py, with the
+# DRIVER's leg sequence PINNED against validate-mac.py's own _leg_worker.
+# The tree is never modified: the real files' hashes are compared before
+# and after.
 
 import ast
 import hashlib
@@ -363,13 +348,10 @@ print("flightrec-selftest: N4 an unwritable journal cost no leg and "
       "printed the miss once")
 
 # --- N6: A PASSING LEG COSTS THE OBSERVER NOTHING. --------------------
-#
-# THE REGRESSION THIS EXISTS FOR: the first version spent three ssh
-# round trips and a python3 spawn on EVERY leg, pass or fail — measured
-# 304ms on a quiescent VM — and took the windows lane 110s past its
-# duration ceiling on the recorder's first matrix. A lane's ceiling is
-# the only thing that noticed, and only once the whole matrix had run.
-# This is the wall that notices in seconds.
+# THE REGRESSION THIS EXISTS FOR: three ssh round trips and a python3
+# spawn on EVERY leg (measured 304ms on a quiescent VM) took the windows
+# lane 110s past its ceiling, which was the only thing that noticed and
+# only once the whole matrix had run.
 n6 = T / "n6"
 n6.mkdir()
 shutil.copy(REAL_LANE, n6 / "flightrec_lane.py")
@@ -437,19 +419,12 @@ print("flightrec-selftest: N6 a passing leg made no bundle, spawned "
       "nothing, and was journalled through the spool")
 
 # --- N5: every shipped .ps1 is pure ASCII. ----------------------------
-#
-# MEASURED, on the first run against the VM: Windows PowerShell 5.1
-# reads a .ps1 as the machine's ANSI CODEPAGE, not as UTF-8. An em-dash
-# then arrives as three CP1252 bytes CONTAINING A DOUBLE QUOTE; inside
-# a string literal it closes the string early and the file dies with
-# "Unexpected token" before its first statement — indistinguishable
-# from a capture that had nothing to collect.
-#
-# THE RULE IS CODE LINES, NOT ALL LINES, and the difference is measured
-# too: tools/guest/desk-warm.ps1 and wait-exit.ps1 have carried
-# em-dashes for months and work, because theirs are in WHOLE-LINE
-# COMMENTS. Nothing else in the tree looks: check-shell walks tools/
-# for .sh and .cmd and never .ps1.
+# MEASURED on the first run against the VM: PowerShell 5.1 reads a .ps1
+# as the machine's ANSI CODEPAGE, so an em-dash arrives as three CP1252
+# bytes CONTAINING A DOUBLE QUOTE — inside a string literal it closes the
+# string early and the file dies before its first statement. THE RULE IS
+# CODE LINES, NOT ALL LINES, measured too: two shipped .ps1 have carried
+# em-dashes in WHOLE-LINE COMMENTS for months and work.
 nonascii = ascii_findings(ROOT / "tools" / "guest")
 if nonascii:
     print("\n".join(nonascii), file=sys.stderr)
@@ -463,15 +438,10 @@ if checked < 1:
 print(f"flightrec-selftest: N5 {checked} shipped .ps1 file(s) carry no "
       f"non-ASCII on a code line")
 
-# N5's own negative, on a shadow: the exact shape that broke on the VM
-# — an em-dash inside a string literal — must be refused, while an
-# em-dash in a whole-line COMMENT must not be, or the clause is either
-# blind or unusable. Both directions are perturbed here.
-#
-# APPENDED RATHER THAN SUBSTITUTED, deliberately: what this rule is
-# about is CHARACTERS, not a construct, so there is no spelling it
-# needs to be proven against (an anchored substitution went stale once
-# already and `applied 0` caught it).
+# N5's own negative, both directions: an em-dash inside a string literal
+# refused, one in a whole-line COMMENT not. APPENDED RATHER THAN
+# SUBSTITUTED: the rule is about CHARACTERS, not a construct, so there is
+# no spelling to anchor on (one anchored substitution already went stale).
 n5 = T / "n5"
 n5.mkdir()
 shadow_ps1 = n5 / "flightrec.ps1"
@@ -491,10 +461,8 @@ n5_found = ascii_findings(n5, name_only=True)
 if not n5_found:
     fail("SELF-TEST FAIL (N5: an em-dash in a string literal was not "
          "refused — the clause is blind)")
-# EXACTLY ONE. Two findings would mean the comment line was refused as
-# well, which is the direction that would redden desk-warm.ps1 and
-# wait-exit.ps1 — files that have carried em-dashes for months and
-# work.
+# EXACTLY ONE: two findings would mean the comment line was refused too,
+# which is the direction that reddens the two shipped .ps1 that work.
 if len(n5_found) != 1:
     print("\n".join(n5_found), file=sys.stderr)
     fail(f"SELF-TEST FAIL (N5: {len(n5_found)} findings, want exactly "

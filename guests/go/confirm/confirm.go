@@ -1,7 +1,4 @@
-// The confirm conformance scene, Go port — the modal-alert grammar
-// via the chain spelling. Three rounds take the three answer paths
-// (action 0, action 1, kaya.AlertChoiceCancel). See
-// guests/rust/confirm.rs and tools/scenes/confirm.steps.
+// See guests/rust/confirm.rs and tools/scenes/confirm.steps.
 package confirm
 
 import (

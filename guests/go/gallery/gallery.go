@@ -1,7 +1,3 @@
-// The gallery scene from Go: a checkbox and a slider, each owning its
-// state and reporting each change while the app answers by writing
-// the paired signal — the uncontrolled contract with a bool and a
-// float64.
 package gallery
 
 import (
@@ -27,8 +23,7 @@ func App() *kaya.App {
 			})
 			tx.Row(func() {
 				tx.SliderBound(0.0, 1.0, pos, func(tx *kaya.Tx, value float64) {
-					// Integer percent, so every language's formatting
-					// agrees.
+					// Integer percent: every language must format alike.
 					tx.Write(volume, fmt.Sprintf("volume: %d%%", int(value*100+0.5)))
 				})
 				tx.Label(volume)
@@ -37,8 +32,7 @@ func App() *kaya.App {
 				})
 			})
 			tx.Row(func() {
-				// Deliberately invalid bytes read 0x0 — decode failure
-				// is the placeholder class, never a crash.
+				// A decode failure is the placeholder class, never a crash.
 				tx.Image(testPNG)
 				tx.Image([]byte("not an image"))
 			})

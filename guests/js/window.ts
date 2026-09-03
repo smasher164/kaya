@@ -1,6 +1,4 @@
-// The window conformance scene, JS port — see guests/rust/window.rs
-// and tools/scenes/window.steps. The north-star spelling from DESIGN.md's
-// appendix, live: the surface's props ride the window() scope itself.
+// The window conformance scene (tools/scenes/window.steps).
 
 import * as kaya from "kaya-gui";
 

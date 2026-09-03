@@ -1,36 +1,12 @@
-//! The assets conformance scene (docs/assets-plan.md, ratified
-//! 2026-08-18). The byte-frozen contract is tools/scenes/assets.steps.
-//!
-//! THE BYTES REDEMPTION, THROUGH A REAL SURFACE. `asset(name)` has two
-//! redemptions and the typeface scene already proves the other one: a
-//! font handed to kaya whose bytes never enter the guest. This scene is
-//! the one that proves `bytes()` — the guest IS the consumer here, it
-//! hands the vendored mark's bytes to an Image, and the platform's own
-//! decoder answers 64x64 off the real view. A truncation, a wrong file
-//! or a resolution rule that found the wrong root cannot survive that.
-//!
-//! AND THE MISS, WITHOUT UNWINDING. The sentence a miss raises is also
-//! readable as a total query, and that is the only shape all nine share
-//! — the C floor catches nothing at all (docs/deferred.md, the assets
-//! entry).
-//!
-//! LINE 1 ONLY. The sentence is two lines on purpose: the first names
-//! the asset, the rule and the CENSUS of what the package carries, and
-//! is the same on five platforms; the second names the resolved place
-//! and the route that chose it, which a bundle, a device directory and
-//! a repo checkout spell three different ways. A cross-platform
-//! expectation can hold the first and never the second.
+//! The assets conformance scene (tools/scenes/assets.steps). THE MISS IS A
+//! QUERY, WITHOUT UNWINDING, and LINE 1 ONLY: line 2 differs per host.
 
-/// The asset that is deliberately not there. A name that is LEGAL —
-/// relative, `/`-spelled, one component deep — so the sentence under
-/// test is the census one and not a name-fault one.
+/// Absent, and deliberately LEGAL, so the miss is the census sentence.
 const MISSING: &str = "icons/nope.png";
 
-/// The one the mark is under, and the one the census must list.
 const MARK: &str = "icons/kaya-mark.png";
 
-/// The large asset: 111400 bytes, so a reader that truncated into a
-/// fixed buffer is visible here rather than passing quietly.
+/// 111400 bytes: a reader that truncated into a fixed buffer shows here.
 const FONT: &str = "fonts/sora-wght.ttf";
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -46,9 +22,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let verdict = if complaint.is_empty() {
             "no complaint".to_owned()
         } else {
-            // Never reached on a healthy lane, and it prints the
-            // sentence rather than a word about it: a failure here has
-            // to say what was measured.
+            // Prints the sentence: a failure must say what was measured.
             complaint.lines().next().unwrap_or("").to_owned()
         };
 
@@ -59,9 +33,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let root = tx
             .column(|tx| {
                 tx.label(title); // label#0
-                // THE BYTES, not the blob handle: this scene is the
-                // consumer, and what reaches the platform's decoder is
-                // what `bytes()` handed back.
+                // THE BYTES, not the blob handle.
                 tx.image(mark.bytes()); // image#0
                 tx.label(census); // label#1
                 tx.label(sizes); // label#2

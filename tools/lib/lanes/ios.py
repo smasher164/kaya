@@ -17,12 +17,10 @@ tools/lib/scene-features.py import this instead of regexing the shell
 body's IOS_*_SCENES assignments.
 """
 
-# The swift suite's roster, in build-and-queue order. An entry is
-# `scene` or `scene:guest` — the guest source defaults to the scene's
-# own name, and names a different one where two scenes share an app
-# (`listdetail:split` is the only such pair: a scene selects a SCRIPT,
-# never an app, and the split guest is the app both list-detail scenes
-# drive; `split` itself is desktop-only below).
+# The swift suite's roster, in build-and-queue order. An entry is `scene`
+# or `scene:guest`, the source defaulting to the scene's own name and
+# naming a different one where two scenes share an app: a scene selects a
+# SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
     "milestone2", "stall", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
@@ -67,34 +65,30 @@ RUST_SCENES = [
     "dirty",
 ]
 
-# The iPad legs, queued right after their phone sibling in the
-# rust-swiftui suite: the phone pool is ALWAYS compact, so these are
-# the only observations of the regular-width lowering. The value is
-# the leg's EXTRA step — the assertion only true on that device — and
-# table's is empty by decision 5's design (the tiers present identical
-# bytes; the leg buys that the native path executes at all).
+# The iPad legs, queued right after their phone sibling: the phone pool is
+# ALWAYS compact, so these are the only observations of the regular-width
+# lowering. The value is the leg's EXTRA step; table's is empty by
+# decision 5's design — the tiers present identical bytes, and the leg
+# buys that the native path executes at all.
 PAD_EXTRAS = {
     "menus": 'expect_menu_presentation "regular/bar"',
     "listdetail": 'expect_split "regular/split"',
     "table": "",
 }
 
-# Machine-read by check-steps' wired(): a scene is wired on this lane
-# IF AND ONLY IF a suite lists it, or it is declared here. window and
-# panels drive aux windows and panel chrome no phone has; split and
-# panes drive resize_window, which this host rejects by design (the
-# system owns surfaces; DESIGN.md, Windows).
+# Machine-read by check-steps' wired(): a scene is wired on this lane IF
+# AND ONLY IF a suite lists it, or it is declared here. window/panels
+# drive chrome no phone has; split/panes drive resize_window, which this
+# host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes).
 UNWIRED_SCENES = []
 
-# Per-leg modifiers, keyed (suite, scene). `cut` names the verb this
-# host cannot express (everything from it on is dropped, printed);
-# `drop` names ONE step by verb and target; `keep` names the
-# assertions neither may take with it; `extra` appends steps only true
-# on this device. The reasons live at the runner's leg sites and in
-# the plans each names.
+# Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
+# cannot express (everything from it on is dropped, printed); `drop` names
+# ONE step by verb and target; `keep` names the assertions neither may
+# take with it; `extra` appends steps only true on this device.
 MODS = {
     # The declared NAME is read off an auxiliary window this host does
     # not have; the icon reads survive (docs/app-identity-plan.md

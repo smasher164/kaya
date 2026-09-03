@@ -14,9 +14,9 @@ recommendation.
 ### 1.1 The one backend
 
 There is one iOS backend and it is the SwiftUI interpreter, compiled to a
-dylib and embedded in the app bundle. `crates/kaya/src/lib.rs:135-150 (gone)` — for
+dylib and embedded in the app bundle. `crates/kaya/src/lib.rs:130-145 (gone)` — for
 `macos`/`ios`, `kaya::run` spawns the app thread and then calls
-`swiftui_host::run()`, which never returns. `tools/ios/run-sim.py:1600-1604`
+`swiftui_host::run()`, which never returns. `tools/ios/run-sim.py:1546-1550`
 says it directly: "The one iOS backend is the SwiftUI interpreter: every
 bundle embeds its dylib, **whatever language the guest is written in**." `[D]`
 
@@ -24,12 +24,12 @@ bundle embeds its dylib, **whatever language the guest is written in**." `[D]`
 
 | Flavor | Guest artifact | How kaya is linked | Backend |
 |---|---|---|---|
-| Rust (`rust-swiftui`) | full Mach-O executable from `cargo build --target aarch64-apple-ios-sim --example <scene>` (`tools/ios/run-sim.py:1886-1889`) | kaya is an **rlib inside the executable** (Rust static link) | `libkaya_swiftui.dylib` copied into bundle root (`:1384`) |
-| Swift | full Mach-O executable from `xcrun -sdk iphonesimulator swiftc … -L target/… -lkaya` (`tools/ios/run-sim.py:1686-1704`) | kaya is **`libkaya.a`, the staticlib crate-type** (`crates/kaya/Cargo.toml:9-12`) | same dylib, same place (`:1366`) |
+| Rust (`rust-swiftui`) | full Mach-O executable from `cargo build --target aarch64-apple-ios-sim --example <scene>` (`tools/ios/run-sim.py:1824-1827`) | kaya is an **rlib inside the executable** (Rust static link) | `libkaya_swiftui.dylib` copied into bundle root (`:1384`) |
+| Swift | full Mach-O executable from `xcrun -sdk iphonesimulator swiftc … -L target/… -lkaya` (`tools/ios/run-sim.py:1632-1649`) | kaya is **`libkaya.a`, the staticlib crate-type** (`crates/kaya/Cargo.toml:9-11`) | same dylib, same place (`:1366`) |
 
 The crate declares `crate-type = ["rlib", "cdylib", "staticlib"]` with the
 comment "staticlib is for iOS, where app bundles prefer static linking and the
-Swift validation leg links libkaya.a directly" (`crates/kaya/Cargo.toml:10-12`). `[D]`
+Swift validation leg links libkaya.a directly" (`crates/kaya/Cargo.toml:10-11`). `[D]`
 
 > #### ⚠ MEASURED CORRECTION: the Swift leg does **not** link `libkaya.a`
 >
@@ -58,7 +58,7 @@ Swift validation leg links libkaya.a directly" (`crates/kaya/Cargo.toml:10-12`).
 
 ### 1.3 Bundle layout
 
-`make_bundle` (`tools/ios/run-sim.py:219-258`) builds the whole `.app` by hand —
+`make_bundle` (`tools/ios/run-sim.py:198-237`) builds the whole `.app` by hand —
 no Xcode project anywhere in the lane:
 
 ```
@@ -73,7 +73,7 @@ The dylib is **not** linked at build time and there is no `@rpath` /
 
 ### 1.4 How the dylib gets loaded
 
-`crates/kaya/src/swiftui_host.rs:233-247`:
+`crates/kaya/src/swiftui_host.rs:216-229`:
 
 - path = `$KAYA_SWIFTUI_LIB`, defaulting to `"libkaya_swiftui.dylib"` (`:234-235`)
 - `dlopen(path, RTLD_NOW)` (`:237`), asserting with the sentence "could not
@@ -102,19 +102,19 @@ because it is only ever `dlopen`ed by explicit path. `[M]`
 
 The lane sets the path explicitly per launch:
 `SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib"`
-(`tools/ios/run-sim.py:1333`), where `$container` is
+(`tools/ios/run-sim.py:1286`), where `$container` is
 `xcrun simctl get_app_container <udid> <bundle_id> app` (`:1021`).
 
 ### 1.5 Entry point and threads
 
-- **Rust guest:** `fn main()` → `kaya::run(app)` (`guests/rust/milestone2.rs:171-172 (gone)`).
+- **Rust guest:** `fn main()` → `kaya::run(app)` (`guests/rust/milestone2.rs:160-161 (gone)`).
   `kaya::run` spawns a thread named `kaya-app` running `app_main(ctx)`
   (`lib.rs:144-147`), installs the presentation sink (`:148`), then
   `std::process::exit(swiftui_host::run())` on the calling (main) thread (`:149`).
 - **Swift guest:** the guest's top-level code is `main.swift`
   (`run-sim.py:1310-1312, 1332`); it ends with `app.run()`
-  (`guests/swift/milestone2.swift:108 (gone)`). `KayaApp.run()`
-  (`bindings/swift/KayaApp.swift:1521-1535`) checks `kaya_spec_hash() ==
+  (`guests/swift/milestone2.swift:92 (gone)`). `KayaApp.run()`
+  (`bindings/swift/KayaApp.swift:1401-1415`) checks `kaya_spec_hash() ==
   kayaSpecHash`, starts a `Thread { self.dispatchLoop() }`, and calls
   `exit(kaya_run())` on the main thread.
 - `kaya_run` on Apple is just `swiftui_host::run()` (`capi.rs:800-807`).
@@ -125,7 +125,7 @@ logic runs on a second thread it (or the binding) starts. `[D]`
 
 ### 1.6 What the runner installs and launches
 
-`run_swiftui_on` (`tools/ios/run-sim.py:1280-1400`):
+`run_swiftui_on` (`tools/ios/run-sim.py:1237-1349`):
 
 1. `xcrun simctl install "$udid" "$app"` (`:1019`)
 2. resolve the app container (`:1021`)
@@ -220,7 +220,7 @@ and the guest is Java/Kotlin classes in the dex.
 | 8. `dispatchKeyShortcutEvent` forwarded to `KayaCompose` | `MainActivity.kt:39-40` |
 
 Which scene runs is chosen **inside the guest** from `KAYA_SELFTEST`
-(`guests/rust/rusthost.rs:87-163`), and an unknown name **panics**
+(`guests/rust/rusthost.rs:84-154`), and an unknown name **panics**
 rather than silently running milestone2 (`:158-161`).
 
 **Kotlin/JVM guest (`jvm` suite)** — `android/javahost/…/MainActivity.kt`:
@@ -302,7 +302,7 @@ it, and "an app that wants to report its own health can poll it" —
 On Apple the backend never resolves kaya symbols by name. `swiftui_host::run`
 builds a `KayaHostApi` struct of 26 function pointers and passes it to
 `kaya_swiftui_run(api)` (`swiftui_host.rs:123-222, 265-294`;
-`swift/KayaSwiftUIEntry.swift:60-73`). The reason is stated at
+`swift/KayaSwiftUIEntry.swift:58-71`). The reason is stated at
 `swiftui_host.rs:5-11`: hosts may carry kaya statically (a Rust executable) or
 `RTLD_LOCAL` (ctypes), so symbol-space coupling is unreliable. On Android the
 equivalent is JNI `RegisterNatives` from `register_present_natives`
@@ -376,7 +376,7 @@ Android the scene-script interpreter is written in Swift and Kotlin
 respectively and is compiled once, per platform, not per guest:
 
 - Swift: `kayaStartSelftest()` / `kayaRunScript(script)`
-  (`swift/KayaSwiftUI.swift:3335-3346`), verdict at `:6167-6200`
+  (`swift/KayaSwiftUI.swift:2975-2986`), verdict at `:6167-6200`
 - Kotlin: `startSelftest(activity)` / `runScript(activity, script)`
   (`KayaCompose.kt:1715-1724, 3552`), verdict at `:4711` and `:4736`
 
@@ -395,7 +395,7 @@ Exactly four things, and only the first is per-language work:
    empty window and every assertion measures nothing — the interpreter has a
    dedicated diagnosis for it (`KayaSwiftUI.swift:6171-6197`).
 3. **On Android only: select the scene from `KAYA_SELFTEST`**, and panic on an
-   unknown name (`guests/rust/rusthost.rs:88-162`;
+   unknown name (`guests/rust/rusthost.rs:85-154`;
    `javahost/MainActivity.kt:36-89`). On iOS each scene is its own bundle,
    so this is unnecessary — the runner still sets `KAYA_SELFTEST` because the
    *interpreter* gates on its presence (`KayaSwiftUI.swift:3336`).
@@ -418,7 +418,7 @@ guests on iOS and for the Rust and Kotlin guests on Android — the same
 
 ### 4.4 Where a new language's legs must be declared
 
-`tools/check-steps.py:1684-1828` (`wired()`) demands that **every** scene have
+`tools/check-steps.py:1589-1712` (`wired()`) demands that **every** scene have
 live legs in **every** runner, including `tools/ios/run-sim.py` and
 `tools/android/run-emulator.py` — name-level for the two mobile runners,
 because "their legs derive mechanically from the scene list, so the name IS
@@ -438,8 +438,8 @@ sanctioned way to be partially wired** — the exemption is keyed on the
 |---|---|
 | `run-sim.py` (1627 lines) | the whole lane: gates, dylib build, per-guest builds, bundle assembly, simulator pool, legs |
 | `Info.plist.in` | the one bundle template; `@EXECUTABLE@`/`@BUNDLE_ID@`/`@NAME@` substituted in `make_bundle` (`run-sim.py:95-100`) |
-| `simdrive/{build.sh,main.swift}` | host-side driver for the document picker (built once per run, `run-sim.py:83`) |
-| `clipctl/{build.sh,main.swift}` | in-simulator clipboard reader, run under `simctl spawn` (`run-sim.py:84-88`) |
+| `simdrive/{build.sh, main.swift}` | host-side driver for the document picker (built once per run, `run-sim.py:83`) |
+| `clipctl/{build.sh, main.swift}` | in-simulator clipboard reader, run under `simctl spawn` (`run-sim.py:84-88`) |
 | `clipprobe/`, `pickerprobe/`, `scopeprobe/`, `undoprobe/` | throwaway platform probes (each its own `build.sh` + `mainN.swift`), not part of a lane |
 
 There is **no Xcode project, no `xcodebuild`, no code signing, no

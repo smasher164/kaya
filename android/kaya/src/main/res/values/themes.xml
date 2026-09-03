@@ -1,32 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- THE PLATFORM THEME EVERY KAYA APP DECLARES, and the reason it
-         exists is a measured half-dark-mode (docs/styling-plan.md D1).
-
-         An Activity's window background, its status bar and everything
-         drawn before the first Compose frame come from the MANIFEST
-         theme, which no Compose theme reaches. Every kaya app used to
-         name `@android:style/Theme.Material.Light*` — a hard LIGHT
-         theme — so a composition following the system into dark mode
-         put dark-scheme controls on a light page: screencapped on
-         emulator-5554, window #FAFAFA in both appearances while the
-         primary role moved #6750A4 -> #D0BCFF.
-
-         DAY/NIGHT WITHOUT APPCOMPAT: the `-night` resource qualifier
-         does it, which is the platform's own mechanism and needs no
-         dependency (AppCompat's DayNight themes are the same trick with
-         a compatibility layer for the pre-API-29 devices that had no
-         system dark mode; kaya's floor is API 26 and those devices
-         simply stay light, which is exactly what `isSystemInDarkTheme()`
-         reports there).
-
-         ONE entry, NoActionBar, for every validation app since
-         2026-08-19: kaya's Compose backend draws the whole chrome
-         surface, so a platform action bar above it is double chrome no
-         kaya app ships — and it shifts every window-space rectangle
-         the ranges pixel witness aims its photograph with, which is
-         how the divergence was found (ranges-jvm/-go, the day both
-         suites first ran the scene). -->
+    <!-- THE PLATFORM THEME EVERY KAYA APP DECLARES. The window
+         background and everything drawn before the first Compose frame
+         come from the MANIFEST theme, which no Compose theme reaches, so
+         a hard LIGHT theme here is a half-dark app (docs/traps.md: "A hard Light manifest theme
+         is a half-dark app the Compose theme cannot reach"; docs/styling-plan.md D1). DAY/NIGHT WITHOUT
+         APPCOMPAT, through the `-night` qualifier. NoActionBar: a
+         platform action bar is double chrome and shifts every
+         window-space rectangle the pixel witness aims at. -->
     <style name="Theme.Kaya.NoActionBar"
         parent="@android:style/Theme.Material.Light.NoActionBar" />
 </resources>

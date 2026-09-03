@@ -1,9 +1,4 @@
-(* The standard-commands scene, OCaml port: a chord on every leaf kind
-   (a checkable command, one option of a group, a plain command), the
-   punctuation keys those chords need, and the [settings] role — which
-   macOS shows in the application menu while the item stays addressable
-   where it was declared. Canonical semantics in
-   guests/rust/commands.rs; the byte-frozen contract in
+(* The commands scene, OCaml port — guests/rust/commands.rs,
    tools/scenes/commands.steps. *)
 
 open Kaya_wire
@@ -21,22 +16,19 @@ let () =
      window ~title:"commands"
        ~menus:
          [
-           (* The ordinary command sits beside Settings so the menu that
-              declared it is not left empty once macOS moves it. *)
+           (* Reload keeps this menu non-empty once macOS moves Settings out. *)
            menu ~label:"File"
              [
                item ~label:"Reload";
                item ~label:"Settings…" ~shortcut:"primary+comma"
                  ~role:role_settings
                  ~on_activate:(fun () ->
-                   (* Fires twice on purpose: once by the chord, once by
-                      activating the item at its DECLARED path, which on
-                      macOS lives in the application menu by then. *)
+                   (* Fires twice on purpose: the chord and the declared
+                      path. *)
                    incr settings_count;
                    write status (Str (Printf.sprintf "settings %d" !settings_count)));
              ];
-           (* Option order IS the index vocabulary: Name = 0,
-              Date = 1. *)
+           (* Option order IS the index vocabulary: Name = 0, Date = 1. *)
            menu ~label:"View"
              [
                toggle ~label:"Details" ~bind_checked:details

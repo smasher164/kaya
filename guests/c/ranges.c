@@ -1,15 +1,5 @@
-/* The text-ranges scene from C, on the function floor: HIGHLIGHT a set
- * of ranges, SELECT one, REVEAL one, spelled as the three wire records
- * they are (docs/ranges-plan.md D1-D4). Semantics: guests/rust/ranges.rs.
- * Contract: tools/scenes/ranges.steps.
- *
- * EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET into the app's own buffer,
- * and it goes onto the wire unchanged: the CORE converts, once, against
- * its own copy of the text (macOS/iOS/Windows/Android count UTF-16 code
- * units, GTK counts code points). The document opens in Japanese so the
- * frozen numbers catch a backend that forwards them unconverted —
- * `日本語` is three characters and NINE BYTES, so the script's 57 would
- * be 51 to a UTF-16 counter. */
+/* The text-ranges scene (tools/scenes/ranges.steps). EVERY OFFSET IS A
+ * UTF-8 BYTE OFFSET; the CORE converts, once, and no backend may. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -18,10 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Guest-allocated ids, counted from 1 per space. CREATION ORDER IS
- * CONTRACT: the script names textarea#0, label#0 and button#0..3 = find,
- * reveal last, focus editor, select first. Swapping two buttons presses
- * the wrong one rather than failing. */
+/* Guest-allocated ids (tools/check-c-ids.py). CREATION ORDER IS CONTRACT:
+ * swapping two buttons presses the wrong one rather than failing. */
 #define SIG_STATUS 1
 
 #define W_COLUMN 1
@@ -33,10 +21,8 @@
 #define W_FOCUS 7  /* button#2 */
 #define W_SELECT 8 /* button#3 */
 
-/* The document, frozen and byte-identical to the other guests': the
- * script's offsets are of THESE bytes. Forty short lines, so the last
- * match is below the viewport and REVEAL has something to do; three
- * occurrences of `alpha` and no other line containing it. */
+/* Frozen and byte-identical to the other guests': the script's offsets are
+ * of THESE bytes, and the last match must sit below the viewport. */
 static const char DOC[] =
     "line 00: 日本語 preface\n"
     "line 01: gamma kappa\n"
@@ -81,17 +67,13 @@ static const char DOC[] =
 
 static const char NEEDLE[] = "alpha";
 
-/* The floor sizes its own buffers and the packers refuse past the cap it
- * declares (bindings/c/kaya_wire.h). A highlight record is 32 bytes of
- * frame plus 16 per offset value, two values per range — 1056 bytes at
- * MAX_HITS, which is what sizes TX_BUF. */
+/* The floor sizes its buffers and the packers refuse past the cap
+ * (tools/check-c-bounds.py); MAX_HITS is what sizes TX_BUF. */
 #define DOC_CAP 4096
 #define MAX_HITS 32
 #define TX_BUF 2048
 
-/* The whole search: literal, forward, non-overlapping. kaya ships no
- * find engine — WHAT to decorate is the app's question
- * (docs/ranges-plan.md §3). */
+/* kaya ships no find engine: what to decorate is the app's question. */
 static uint32_t find_all(const char *doc, const char *needle, uint64_t *flat,
                          uint32_t max) {
     size_t len = strlen(needle);
@@ -105,8 +87,7 @@ static uint32_t find_all(const char *doc, const char *needle, uint64_t *flat,
     return n;
 }
 
-/* A Str window prop, packed by hand: the generated
- * kaya_tx_set_window_prop closes the record BEFORE the value. */
+/* Packed by hand: the generated setter closes the record BEFORE the value. */
 static void window_title(KayaTx *tx, uint64_t window, const char *title) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
     kaya_wire_u64(tx, window);
@@ -159,8 +140,7 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
 
-    /* THE APP'S OWN COPY, and the only authority on what an offset
-     * means: kaya never hands a widget's text back on request. */
+    /* The only authority on an offset: kaya never hands text back. */
     char doc[DOC_CAP];
     memcpy(doc, DOC, sizeof DOC); /* the literal's NUL comes along */
 
@@ -179,10 +159,7 @@ static void *app(void *arg) {
         if (kaya_parse_text_changed(rec, &id, keys, 2, &n_keys, &text)) {
             if (id != W_EDITOR || n_keys != 0)
                 continue;
-            /* An offset landing INSIDE a character is refused by the
-             * core, naming the character it splits — the five platforms
-             * answer a malformed range four different ways and one of
-             * them aborts. */
+            /* An offset INSIDE a character is refused by the core. */
             size_t len = text.s_len < DOC_CAP ? text.s_len : DOC_CAP - 1;
             memcpy(doc, text.s, len);
             doc[len] = '\0';
@@ -195,15 +172,14 @@ static void *app(void *arg) {
             if (id == W_FIND) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
                 KayaTx tx = {buf, 0, sizeof buf};
-                /* `count` is the number of RANGES and the values list is
-                 * 2*count OFFSETS; the core asserts the two agree. An
-                 * empty set is the clear, which this app never sends. */
+                /* `count` is RANGES and the list is 2*count OFFSETS; the
+                 * core asserts they agree, and an empty set is the clear. */
                 KayaVal ranges[2 * MAX_HITS];
                 for (uint32_t i = 0; i < 2 * n; i++)
                     ranges[i] = kaya_i64((int64_t)flat[i]);
                 kaya_tx_highlight_ranges(&tx, W_EDITOR, n, ranges, 2 * n);
-                /* The SECOND match, so a leg can tell the selection apart
-                 * from "the first thing the search found". */
+                /* The SECOND match, so a leg can tell the selection from
+                 * "the first thing found". */
                 if (n > 1)
                     kaya_tx_select_range(&tx, W_EDITOR, flat[2], flat[3]);
                 char status[32];
@@ -214,9 +190,7 @@ static void *app(void *arg) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
                 if (n == 0)
                     continue;
-                /* A PURE EFFECT: the viewport moves, the declared set and
-                 * the selection do not, and undo does not put the scroll
-                 * back (docs/undo-plan.md A2). */
+                /* A PURE EFFECT: undo does not put the scroll back. */
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_reveal_range(&tx, W_EDITOR, flat[2 * (n - 1)],
                                      flat[2 * (n - 1) + 1]);
@@ -229,9 +203,7 @@ static void *app(void *arg) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
                 if (n == 0)
                     continue;
-                /* The first match, refused mid-composition (D4). An app
-                 * that wants the selection asks again after the next
-                 * text_changed, which ends a composition. */
+                /* Refused mid-composition (docs/ranges-plan.md D4). */
                 KayaTx tx = {buf, 0, sizeof buf};
                 kaya_tx_select_range(&tx, W_EDITOR, flat[0], flat[1]);
                 kaya_submit(tx.buf, tx.len);

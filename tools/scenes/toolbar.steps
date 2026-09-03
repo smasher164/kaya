@@ -1,29 +1,20 @@
-# The window's chrome carries the app's primary actions. One catalog,
-# one `primary` bit per action, and every host promotes the same first
-# two in catalog preorder (docs/chrome-plan.md C2): the desktop's
-# toolbar, the phones' top bar. Nothing here is a styling knob — the
-# modern geometry is what having the bar produces.
+# Every host promotes the same first two actions in catalog preorder
+# (docs/chrome-plan.md C2), which is why Save and Find are the two read.
 expect label#0 "ready"
 # BARE, like expect_menu_presentation: capacity k is the platform's own
-# number, never kaya's, and this scene is compared byte-for-byte on
-# every lane — so the step asserts the invariant (the promoted set is
-# really in the chrome, the remainder is reachable) and never a count.
+# number, so the step may assert the invariant and never a count.
 expect_toolbar
-# The SEMANTIC ICON on the real chrome button, the same vocabulary the
-# menu rows draw from (docs/styling-plan.md D6). Read off the button
-# the platform rendered, never off the promotion list — the read that
-# agrees with the model is the one that hid the iOS symbol gap for a
-# whole milestone (docs/chrome/toolbar-repo.md §2.4).
+# Read off the button the platform RENDERED, never off the promotion
+# list: the model-agreeing read hid the iOS symbol gap for a whole
+# milestone (docs/chrome/toolbar-repo.md §2.4).
 expect_toolbar_item "Save" "done"
 expect_toolbar_item "Find" "search"
 expect_toolbar_item "Save" "enabled"
 
-# ONE SOURCE OF TRUTH, ASSERTED BOTH WAYS. The app disables the MENU
-# item through its bound signal and says nothing about any button; the
-# toolbar button must follow, because it is the same item. The pair is
-# the assertion: the chrome read and the menu read come from two
-# different trees, so a lowering that kept its own enablement copy
-# passes one and fails the other.
+# The app disables the MENU item and says nothing about any button, so
+# the PAIR is the assertion: the two reads come from different trees,
+# and a lowering with its own enablement copy passes one and fails the
+# other.
 click button#0
 expect_toolbar_item "Save" "disabled"
 expect_menu "File>Save" disabled

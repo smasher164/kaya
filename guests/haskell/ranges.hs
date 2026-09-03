@@ -1,15 +1,5 @@
-{- The text-ranges conformance scene, Haskell port: HIGHLIGHT a set of
-   ranges, SELECT one, REVEAL one.
-
-   THE OFFSETS ARE UTF-8 BYTE OFFSETS AND HASKELL'S OWN UNIT IS NOT: a
-   'String' is a list of 'Char', so an 'isPrefixOf' walk answers in
-   scalars and is SIX SHORT on this document, which opens with a CJK
-   word. The search therefore runs over the UTF-8 encoding, with
-   'BS.breakSubstring'. The frozen numbers and what a UTF-16 counter
-   would say instead are in tools/validate-mac.py.
-
-   Canonical semantics in guests/rust/ranges.rs; the byte-frozen
-   contract in tools/scenes/ranges.steps. -}
+-- The ranges scene, Haskell port — guests/rust/ranges.rs,
+-- tools/scenes/ranges.steps.
 
 import qualified Data.ByteString as BS
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
@@ -20,9 +10,7 @@ import Data.List (intercalate)
 import KayaApp
 import KayaWire (Value (..))
 
--- Frozen — 813 bytes, byte-identical to the other seven guests' copy.
--- Three occurrences of `alpha`; forty short lines, so the last match is
--- far below a 240x96 viewport and REVEAL has something to do.
+-- Frozen — 813 bytes, byte-identical to every other guest's copy.
 document :: String
 document =
   intercalate
@@ -72,14 +60,12 @@ document =
 needle :: String
 needle = "alpha"
 
--- The binding encodes every string it sends with this same encoder, so
--- these are the exact bytes the offsets index.
+-- The binding encodes with this same encoder, so these are the exact bytes
+-- the offsets index.
 utf8 :: String -> BS.ByteString
 utf8 = BL.toStrict . toLazyByteString . stringUtf8
 
--- The whole search: literal, forward, non-overlapping, in the byte
--- domain — half-open @(start, stop)@ pairs, which is what the three
--- range verbs take.
+-- The whole search: literal, forward, non-overlapping, in the byte domain.
 findAll :: String -> String -> [(Int, Int)]
 findAll haystack pattern = go 0 (utf8 haystack)
   where
@@ -94,26 +80,21 @@ findAll haystack pattern = go 0 (utf8 haystack)
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The app's own copy of the document, the ONLY authority on what the
-  -- offsets mean. Build is a pure state monad, so the fold lives in an
-  -- IORef out here rather than in the transaction.
+  -- The offsets index this copy; Build is pure, so the fold is an IORef.
   docRef <- newIORef document
 
   buildTx app $ do
     window 0 [WTitle "ranges"]
-    -- Bound before the widgets that close over it: a handler riding a
-    -- constructor can only see what the Build has already bound.
+    -- Bound before the widgets that close over it.
     status <- signal (VStr "0 matches")
 
-    -- The a11y id is how a leg finds this control in the platform's
-    -- accessibility tree, which is where every range assertion reads.
+    -- Every range assertion finds this control by its authored id.
     editor <-
       textareaOn
         ( \text -> do
             writeIORef docRef text
-            -- kaya has already dropped the decorations: a declared set
-            -- is bound to the text it was declared against
-            -- (docs/ranges-plan.md D2), so the app re-searches.
+            -- A declared set is bound to the text it was declared against
+            -- (docs/ranges-plan.md D2).
             submitTx app (writeSignal status (VStr "0 matches"))
         )
         [A11yId "doc", A11yLabel "Document"]
@@ -130,8 +111,8 @@ main = kayaMain $ \app -> do
                     hits <- flip findAll needle <$> readIORef docRef
                     submitTx app $ do
                       highlightRanges editor hits
-                      -- The second match, so a leg can tell the
-                      -- selection apart from "the first thing found".
+                      -- The SECOND match, so a leg can tell the selection
+                      -- apart from "the first thing found".
                       case drop 1 hits of
                         second : _ -> selectRange editor second
                         [] -> return ()

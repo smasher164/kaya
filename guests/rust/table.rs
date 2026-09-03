@@ -1,9 +1,5 @@
-//! The table scene: column headers and click-to-sort on the For
-//! vocabulary (docs/tables-plan.md). A header click is a REQUEST —
-//! this guest reorders its collection BY KEY (the reorder scene's
-//! idiom) and re-declares the header with the new indicator; the
-//! platform sorts nothing. The byte-frozen contract is
-//! tools/scenes/table.steps.
+//! The table scene (tools/scenes/table.steps): a header click is a REQUEST,
+//! and the platform sorts nothing.
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Item {
@@ -20,29 +16,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (items, table) = ctx.apply(|tx| {
         let items = tx.collection::<Item>();
-        // The root is a row so the For's container is the scene's only
-        // column-kind widget (the reorder scene's rule).
+        // The root is a row: the For's container is the only column.
         let mut table = kaya::WidgetId(0);
         let root = tx.row(|tx| {
-            // The table IS the For, with headers chained onto it —
-            // the declaration and the click handler ride the same
-            // construction that stamps the rows.
             let rows = items
                 .rows(tx)
                 .columns(&["Name", "Size"], kaya::Sort::none())
                 .on_sort(&msgs, Msg::Sort);
             table = rows.id();
             for mut row in rows {
-                // One cell per declared column, in a Row — the arity
-                // the core holds this template to.
+                // One cell per declared column: the core holds the arity.
                 row.row(|t| {
                     t.label(Item::name());
                     t.label(Item::size());
                 });
             }
-            // Grown on purpose: this scene asserts the fill-and-scroll
-            // viewport, the grown half of the empty-row ruling — ungrown
-            // would hug its rows (tables-plan decision 8).
+            // Grown on purpose: ungrown, a table hugs its rows.
             tx.grow(table, 1.0);
         })
         .id();
@@ -59,8 +48,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (items, table)
     });
 
-    // The guest's sort policy — the platform never has one: clicking
-    // the sorted column flips it, clicking another starts ascending.
+    // The guest's sort policy; the platform never has one.
     let mut sorted: Option<(u32, bool)> = None;
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
@@ -80,8 +68,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         };
                         if descending { kb.cmp(ka) } else { ka.cmp(kb) }
                     });
-                    // Keys, never indices: moving each key to the end
-                    // in the target order leaves the collection sorted.
+                    // Each key to the end, in the target order.
                     for (key, _) in &entries {
                         tx.move_to_end(&items, key.clone());
                     }

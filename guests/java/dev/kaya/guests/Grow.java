@@ -3,10 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The grow conformance scene from the JVM (KAYA_SELFTEST=grow) — see
- * guests/rust/grow.rs for the rationale. Every child is a grower, so
- * each split is exactly weight/Σweight: 1,2,1 divide the column
- * 25/50/25 and the row's 1,3 divide its width 25/75.
+ * The grow scene from the JVM — guests/rust/grow.rs, tools/scenes/grow.steps.
  */
 public final class Grow {
     public static void app() {

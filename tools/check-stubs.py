@@ -23,10 +23,9 @@ LANGS = "rust|python|go|csharp|java|swift|ocaml|haskell|compose|jvm|swiftui"
 
 PAIRS = [
     ("tools/linux/run-suites.sh", "crates/kaya/src/gtk.rs", ""),
-    # The windows, ios and android rosters are DATA since the runner
-    # conversion: a tools/lib/lanes/ row is IMPORTED with a roster
-    # floor — a regex over a module whose lists hold bare scene names
-    # would agree with everything.
+    # A tools/lib/lanes/ row is IMPORTED with a roster floor: a regex
+    # over a module whose lists hold bare scene names would agree with
+    # everything.
     ("tools/lib/lanes/win.py", "crates/kaya/src/winui/mod.rs", ""),
     ("tools/lib/lanes/mac.py", "swift/KayaSwiftUI.swift", "macos"),
     ("tools/lib/lanes/ios.py", "swift/KayaSwiftUI.swift", "ios"),
@@ -93,8 +92,8 @@ for runner, backend, platform in PAIRS:
     if findings:
         status = 1
 
-# The guard guards itself: a synthesized wired-and-stubbed pair must
-# fail — run through the REAL check above, not a re-typed copy of it.
+# A synthesized wired-and-stubbed pair must fail, run through the REAL
+# check above rather than a re-typed copy of it.
 if not check(["fakescene"], "runner.sh", "run fakescene-rust something",
              "backend.rs", 'crate::depth_stub("fakescene");', ""):
     print("check-stubs: SELF-TEST FAIL (bad sample passed)", file=sys.stderr)

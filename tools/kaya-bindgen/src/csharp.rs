@@ -1,7 +1,5 @@
 //! C# emitter: a static KayaWire class of constants, packers, and the
-//! occurrence parser. The class namespaces everything; encoder helpers
-//! are private, so shadowing is impossible and the reserved set is
-//! keywords plus nothing.
+//! occurrence parser.
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
@@ -38,10 +36,9 @@ fn camel(name: &str) -> String {
         Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
         None => String::new(),
     };
-    // C# keywords are all lowercase, so only camel-cased identifiers can
-    // collide; @ makes any keyword a plain identifier ("checked" is a
-    // spec prop). This is why csharp is exempt from the reserved-name
-    // assert in main.rs.
+    // @ makes any keyword a plain identifier ("checked" is a spec
+    // prop), which is why csharp is exempt from main.rs's reserved-name
+    // assert.
     if RESERVED.contains(&lowered.as_str()) {
         format!("@{lowered}")
     } else {
@@ -54,8 +51,7 @@ mod tests {
     use super::camel;
 
     /// The prop named "checked" must come out escaped, or TxSetChecked
-    /// fails to compile in every C# guest (found by the mac suite,
-    /// 2026-07-15).
+    /// fails to compile in every C# guest.
     #[test]
     fn camel_escapes_csharp_keywords() {
         assert_eq!(camel("checked"), "@checked");
@@ -194,10 +190,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
-        // Blob setters take the u64 kaya_blob_register handle (BlobHandle).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
             crate::PropKind::Bool => (camel(prop), "bool", format!("EncodeValue(w, {});", camel(prop))),
@@ -240,8 +235,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The window-prop duos: const + signal, element sources being
-    // rejected by the wire.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, expr) = match kind {
@@ -274,8 +268,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, expr) = match kind {
@@ -302,8 +296,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, expr) = match kind {
@@ -340,10 +334,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
 
     // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
-    // only, policy being the core's and validated on the canonical form.
-    // TxSetMenuShortcut routes through it, so no call site can bypass
-    // canonicalization. ToLowerInvariant, deliberately: a culture-
-    // sensitive ToLower turns "I" into a dotless ı under tr-TR.
+    // only, policy being the core's. TxSetMenuShortcut routes through
+    // it, so no call site can bypass canonicalization. ToLowerInvariant,
+    // deliberately: a culture-sensitive ToLower turns "I" into a dotless
+    // ı under tr-TR.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
         .iter()
         .map(|k| format!("\"{k}\""))
@@ -356,12 +350,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("    /// Canonicalize a shortcut spelling to the wire form: lowercase");
     c.line("    /// '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
-    c.line("    /// key (a-z, 0-9, or the closed named set). Accepts ASCII case");
-    c.line("    /// variants and any modifier order; throws on whitespace, empty");
-    c.line("    /// tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
-    c.line("    /// or multiple or missing keys. POLICY stays at the core: escape,");
-    c.line("    /// shift-only and bare alphanumerics, and the reserved floor are");
-    c.line("    /// validated there, on the canonical spelling, never rewritten.");
+    c.line("    /// key (a-z, 0-9, or the closed named set). Throws on whitespace,");
+    c.line("    /// empty tokens, repeated modifiers, aliases (ctrl/cmd/option), and");
+    c.line("    /// unknown or multiple or missing keys. POLICY stays at the core,");
+    c.line("    /// validated on the canonical spelling and never rewritten.");
     c.line("    public static string CanonicalizeShortcut(string spelling)");
     c.line("    {");
     c.line("        if (spelling.Length == 0)");
@@ -393,9 +385,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key;");
     c.line("    }");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root).
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, expr) = match kind {
@@ -444,18 +435,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
     }
     c.line("");
-    // The occurrence blob table. A blob in an OCCURRENCE is a table
-    // handle, not the apply channel's batch-local index, and nothing
-    // retires one here — so the decoder redeems and releases it, which
-    // is what keeps a handle from ever reaching an app.
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index, and nothing retires one here — so the
+    // decoder redeems and releases it, which keeps a handle from ever
+    // reaching an app.
     c.line("    /// One representation as the decoder hands it over: the clip");
-    c.line("    /// kind, and its values with blobs already redeemed to byte[].");
-    c.line("    /// The sum itself is the hand-written tier\'s — this is the");
-    c.line("    /// taste-free shape the wire carries.");
-    c.line("    ///");
-    c.line("    /// Kind is a SINGLE member of the clip enum and never a mask (you");
-    c.line("    /// offer many and you receive one); 0 with no values is the");
-    c.line("    /// universal empty answer.");
+    c.line("    /// kind, and its values with blobs already redeemed to byte[]. Kind");
+    c.line("    /// is a SINGLE member of the clip enum and never a mask (you offer");
+    c.line("    /// many and you receive one); 0 with no values is the universal");
+    c.line("    /// empty answer.");
     c.line("    public sealed class ClipValues");
     c.line("    {");
     c.line("        public uint Kind;");
@@ -510,9 +498,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            payload = BitConverter.ToUInt32(rec, 16);");
     c.line("            return true;");
     c.line("        }");
-    // The picker's answer: the one occurrence whose payload is a LIST
-    // OF RECORDS. The generic tail reads a KEY PATH, which would take
-    // the file count as a path length and start eight bytes early.
+    // The picker's answer is a LIST OF RECORDS, so it needs its own
+    // arm: the generic tail would take the file count for a key-path
+    // length and start eight bytes early.
     c.line("        if (kind == OccKindFileDialogResult)");
     c.line("        {");
     c.line("            // id, a count, then three Values per file");
@@ -540,9 +528,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            payload = files;");
     c.line("            return true;");
     c.line("        }");
-    // The privileged read's one answer, in its own arm: the generic
-    // tail would take the CLIP KIND for a path length, so a text answer
-    // would read the values header as a key.
+    // Its own arm: the generic tail would take the CLIP KIND for a path
+    // length and read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("        if (kind == OccKind{})", pascal(name)));
         c.line("        {");
@@ -590,7 +577,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read from its fixed offset.
+    // these — read from its fixed offset.
     for name in crate::u32_slot_occurrence_names(spec) {
         c.line(&format!("        if (kind == OccKind{})", pascal(name)));
         c.line("        {");
@@ -604,8 +591,6 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(" || ");
     c.line(&format!("        if ({with_payload})"));
     c.line("        {");
-    // Type-generic payload decode, same shape as the key loop: no
-    // per-kind logic left to drift.
     c.line("            uint ptype = BitConverter.ToUInt32(rec, at);");
     c.line("            int plen = BitConverter.ToInt32(rec, at + 4);");
     c.line("            switch (ptype)");
@@ -617,8 +602,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("        }");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OccKind{}", pascal(n)))
@@ -630,8 +614,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            payload = ParseClip(rec, at, out int _pasteEnd);");
         c.line("        }");
     }
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1).
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
     let values_tail = crate::values_tail_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OccKind{}", pascal(n)))

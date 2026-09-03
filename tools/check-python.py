@@ -7,56 +7,11 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE CONVERTED WORLD'S RULES — check-shell's opposite number.
-#
-# The gate bodies are python now (docs/deferred.md's ruling, 2026-08-27:
-# an IMPORTED tools/lib/kaya_gate.py, never a launcher). That retires the
-# `$?` class check-shell exists for and puts a different set of defects in
-# its place. Each rule below maps to a class this repo has already been
-# bitten by ONE SURFACE OVER; none of them is a style preference.
-#
-#   1. NO SWALLOWED EXCEPTIONS. An unhandled exception exiting non-zero is
-#      what we want; a caught-and-dropped one is the new false green.
-#      (ruff BLE001, plus the `except X: pass` shape ruff does not flag.)
-#   2. NO shell=True, NO os.system. The sed/awk rule's descendant: a
-#      filename with a space must not become two words. (ruff S602/4/5.)
-#   3. EVERY READ AND WRITE NAMES encoding="utf-8". The javac -encoding
-#      trap one surface over, and it bites hardest on the Windows guest,
-#      whose locale is not UTF-8.
-#   4. NO LITERAL-ZERO EXIT. A gate leaves by falling off the end or
-#      through its verdict; `sys.exit(0)` in the middle is the false-PASS
-#      class with a keyword.
-#   5. EVERY walk() IS PAIRED WITH A counted(..., floor=). The census
-#      floor rule, prose in a dozen gates today, made mechanical: a census
-#      that read nothing agrees with everything.
-#   6. re.subn IN A SELF-TEST ONLY THROUGH THE PRELUDE. "Watch the
-#      negative fail", held by the helper instead of by remembering — see
-#      SUBN_EXEMPT for the phase-0 population and why it is exempt.
-#   7. THE IMPORT HEADER IS BYTE-IDENTICAL EVERYWHERE. check-mirror's job
-#      description, on the five lines that replace the SIX drifted copies
-#      of the dev-shell preamble.
-#   8. EVERYTHING PARSES. `ast.parse` over every converted body. There is
-#      no analogue today: a SyntaxError in a rarely-taken heredoc branch
-#      is invisible until that branch runs, and bash has no compile step
-#      at all.
-#
-#   9. A SCRIPT A BODY NAMES EXISTS, AND NO `.sh` NAME IS COMPOSED. This
-#      replaced the shim rule when the shims went (2026-09-02): the word
-#      sweep that renamed 1,405 citations could not see an f-string
-#      that appends `.sh` to a name, and three lanes died at their first step on
-#      the matrix that followed — a name a caller spells at run time is
-#      checked only on the lane that runs it. See SCRIPT_EXEMPT.
-#
-# AND THE PRELUDE'S OWN NEGATIVES (10), run here rather than left to a
-# gate list nobody reads: kaya_gate.py --selftest, on this sweep.
-#
-# AND COMMAND HYGIENE FOLLOWS THE COMMAND INTO PYTHON (11). check-shell's
-# four per-command rules — cargo --locked, javac -encoding UTF-8, no
-# sed/awk, ffmpeg -nostdin — police *.sh, and the conversion moved 12
-# such invocations into these bodies where they policed nothing (audit
-# 2026-08-31). Both python spellings are read: an argv LIST naming the
-# tool, and EMBEDDED SHELL in a multi-line string, scanned line-wise
-# with check-shell's own command-position patterns.
+# THE CONVERTED WORLD'S RULES — check-shell's opposite number. Eleven
+# rules over every gate body that opens with the prelude header, plus ruff
+# and the prelude's own negatives; CLAUDE.md's validation-ladder paragraph
+# lists each rule with the defect it maps to (ruled 2026-08-27,
+# docs/deferred.md). Each is numbered where it is enforced in census().
 
 import ast
 import re
@@ -65,16 +20,10 @@ import subprocess
 gate = Gate("check-python")
 
 # The rule set, spelled HERE rather than in a config file: a hidden
-# pyproject would also reach the python binding, and a gate whose rules
-# live somewhere else is a gate whose rules can move without it.
-#
-# E402 is ignored BY DESIGN — the header is the top of the file, and the
-# gate's prose block sits between it and the body's own imports, which is
-# exactly the shape rule 7 pins.
-# S607 (partial executable path) is not selected: `git`, `sh` and
-# `shellcheck` are resolved off the dev shell's PATH on purpose, which is
-# the whole point of the fingerprint. S602/S604/S605 — the shell=True and
-# os.system family rule 2 wants — ARE selected.
+# pyproject would also reach the python binding.
+# E402 is ignored BY DESIGN — rule 7 pins a header above the body's own
+# imports. S607 (partial executable path) is not selected: `git`, `sh` and
+# `shellcheck` are resolved off the dev shell's PATH on purpose.
 RUFF = [
     "ruff", "check", "--no-cache", "--output-format", "concise",
     "--select", "E,F,W,BLE,PLR1722,S602,S604,S605",
@@ -82,10 +31,8 @@ RUFF = [
     "--line-length", "100",
 ]
 
-# The five lines every converted gate opens with. Not four and not six:
-# this is the whole reach from "a file python runs" to "the prelude is
-# importable", and holding it byte-identical is what stops it drifting
-# back into six variants.
+# The five lines every converted gate opens with — the whole reach from
+# "a file python runs" to "the prelude is importable", byte-identical.
 HEADER = '''#!/usr/bin/env python3
 import pathlib
 import sys
@@ -93,19 +40,15 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 '''
 
-# The one depth the tree actually has below tools/: a runner in
-# tools/<dir>/ reaches the same prelude one parent up. One variant per
-# depth, byte-identical at each — the runner conversion's stage 2 put
-# tools/ios/run-sim.py in this population.
+# The one depth the tree has below tools/: a runner in tools/<dir>/
+# reaches the same prelude one parent up.
 HEADER_SUB = HEADER.replace(".resolve().parent / ",
                             ".resolve().parent.parent / ")
 
 
-# Rule 6's population as of phase 0. Every entry must name a file that
-# EXISTS — an exemption that can rot into a skip is worse than none
-# (check-assets' EXEMPT table, same shape). This list SHRINKS: phase 1's
-# conversions are held to the rule, and the day it empties the clause
-# below stops needing a table at all.
+# Rule 6's exemptions. Every entry must name a file that EXISTS — an
+# exemption that can rot into a skip is worse than none. This list only
+# SHRINKS.
 SUBN_EXEMPT = {
     "tools/check-gates.py":
         "converted verbatim in phase 0 under the ledger's byte-identity "
@@ -133,11 +76,8 @@ def converted():
     """Every tools/**/*.py carrying a prelude header, plus the prelude.
 
     Membership is READ FROM THE FILE, never from a list here: a gate
-    converted next month is held by this the moment it is written, with
-    nothing to remember to add. The walk is the prelude's pruned one —
-    tools/ holds 323k entries of build output against ~213 tracked
-    files — and the depth decides WHICH header a file must open with
-    (rule 7's per-depth clause in census()).
+    written next month is held by this with nothing to remember to add.
+    The depth decides WHICH header a file must open with (census(), rule 7).
     """
     out = {}
     for p in sorted(gate.walk("*.py", under="tools")):
@@ -180,12 +120,9 @@ READ_WRITE = {"read_text", "write_text", "read_bytes", "write_bytes"}
 BINARY = {"read_bytes", "write_bytes"}
 
 # Rule 11's shell-line scanners are check-shell's own patterns verbatim
-# (tools/check-shell.py holds the reasoning beside each): embedded shell
-# is still shell, so the string half of the rule reads it with the same
-# eyes. The tool names are spelled as SETS below and BUILT in the
-# fixtures, because this gate is inside the population it scans and a
-# literal argv would be reported as a real one (check-shell's own
-# fixture lesson).
+# (tools/check-shell.py holds the reasoning beside each). The tool names
+# are spelled as SETS and BUILT in the fixtures: this gate is inside the
+# population it scans, and a literal argv would be reported as a real one.
 SH_CARGO = re.compile(r"(?:^|[^-\w])cargo\s+"
                       r"(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?"
                       r"(?:build|check|test|run)(?!\S)")
@@ -193,9 +130,7 @@ SH_TOOLCMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                         r"(sed|awk)\b")
 SH_FFMPEG = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*"
                        r"ffmpeg\b")
-# `run` resolves dependencies exactly as `build` does — it joined both
-# cargo rules 2026-08-31, when gen-bindings' bare `cargo run` turned
-# out to be the one invocation outside the alternation.
+# `run` resolves dependencies exactly as `build` does.
 RESOLVING = {"build", "check", "test", "run"}
 COMPILING = {"-d", "-proc:only"}
 BANNED_TOOLS = {"sed", "awk"}
@@ -290,8 +225,7 @@ def census(files):
 
         # 7. THE HEADER, byte for byte, THE RIGHT ONE FOR THE DEPTH: a
         # depth-2 runner reaching `parent / "lib"` imports nothing and
-        # dies at the wrong moment. The prelude is the one file that
-        # carries neither — it is what the headers reach.
+        # dies at the wrong moment. The prelude carries neither header.
         if path != "tools/lib/kaya_gate.py":
             depth = path.count("/")
             want_header = HEADER if depth == 1 else HEADER_SUB
@@ -385,11 +319,8 @@ def census(files):
 
                 # 6. re.subn IN A SELF-TEST ONLY THROUGH THE PRELUDE.
                 # READ OFF THE AST, never off a pattern: this gate is
-                # inside the population it scans, and its own prose has to
-                # be able to NAME the call it forbids. A regex reported
-                # the sentence explaining the rule (measured, first run) —
-                # check-gates draws the same line between a citation and
-                # an invocation, one gate over.
+                # inside the population it scans, and a regex reported the
+                # sentence explaining the rule (measured, first run).
                 if (isinstance(fn, ast.Attribute) and fn.attr == "subn"
                         and getattr(fn.value, "id", None) == "re"
                         and path not in SUBN_EXEMPT
@@ -411,10 +342,8 @@ def census(files):
                                 f"is the false-PASS class — see rule 4.")
 
         # 5. EVERY FILESYSTEM walk() PAIRED WITH A counted(..., floor=).
-        # ast.walk is a TREE traversal, not a census, and owes no floor
-        # — the receivers named here are the two the population spells;
-        # an aliased ast import gets a false RED and a rename, never a
-        # silenced one.
+        # ast.walk is a TREE traversal, not a census, and owes no floor;
+        # an aliased ast import gets a false RED and a rename.
         walks = [m.group(1) for m in
                  re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\.walk\(", text)
                  if m.group(1) not in ("ast", "ast_mod")]
@@ -432,10 +361,8 @@ def census(files):
 files = converted()
 
 # ------------------------------------------------------------ self-tests
-#
 # Every rule watched failing against a DOCTORED COPY of a real converted
-# gate, the substitution count printed, scored against the census the real
-# run uses. A rule nobody has seen fire is a guess.
+# gate, scored against the census the real run uses.
 
 victim = "tools/check-jni.py"
 real = files[victim]
@@ -481,10 +408,8 @@ for label, pattern, repl, want in N:
     body = gate.doctor(label, real, pattern, repl, want=1, flags=re.M)
     gate.negative(label, lambda b=body: doctored(b), want=want)
 
-# N11 — rule 6, which needs a NON-EXEMPT path to bite: the exempt table is
-# phase 0's whole population, so scoring it against check-jni.py would
-# always be quiet. Watched under a name the table does not carry.
-#
+# N11 — rule 6 needs a NON-EXEMPT path to bite, so it is watched under a
+# name the exempt table does not carry.
 body = gate.doctor("N11 rule 6 — a bare re.subn in a gate", real,
                    r"^import re$", "import re\nre.subn('a', 'b', 'c')", want=1,
                    flags=re.M)
@@ -493,9 +418,8 @@ gate.negative("N11 rule 6 — a bare re.subn in a gate",
               want="bare re.subn in a gate")
 
 # N14-N18 — rule 11, one negative per sub-clause, every fixture BUILT
-# rather than written literally: this gate is inside the population it
-# scans, and a literal offending argv here would be reported as a real
-# one (check-shell's own fixture lesson, one language over).
+# rather than written literally: a literal offending argv here would be
+# reported as a real one.
 CARGO_W = "car" + "go"
 SED_W = "s" + "ed"
 for label, planted, want in [
@@ -519,8 +443,8 @@ for label, planted, want in [
                        flags=re.M)
     gate.negative(label, lambda b=body: doctored(b), want=want)
 
-# N19 — and rule 11 is not over-eager: the SAME shapes with the flag in
-# place must be quiet, or every future cargo call reddens regardless.
+# N19 — rule 11 is not over-eager: the SAME shapes with the flag in place
+# must be quiet.
 quiet = gate.doctor(
     "N19 rule 11 — the compliant spellings are quiet", real,
     r"^import re$",
@@ -537,7 +461,7 @@ else:
           "flag and not the tool")
 
 # N12 — rule 6's exemption is not a blanket: the SAME body under an EXEMPT
-# name must be quiet, or the table is doing nothing and the rule is off.
+# name must be quiet.
 if any("re.subn" in f for f in census({victim: body})):
     gate.finding("self-test N12: the re.subn clause fired on an EXEMPT path — "
                  "the exemption table is not being read")
@@ -578,8 +502,7 @@ for name, why in sorted(SCRIPT_EXEMPT.items()):
 print(f"check-python: rule 9 exemptions: {len(SCRIPT_EXEMPT)} "
       f"(each a fake some body names, none on disk)")
 
-# RUFF, over the same population. Three of the rules above come off it
-# for free; the rest it cannot see.
+# RUFF, over the same population.
 run = subprocess.run(RUFF + sorted(files), cwd=ROOT, stdout=subprocess.PIPE,
                      stderr=subprocess.STDOUT, text=True, check=False)
 if run.returncode != 0:
@@ -589,9 +512,8 @@ else:
     print(f"check-python: ruff clean over {len(files)} file(s) "
           f"({' '.join(RUFF[4:])})")
 
-# THE PRELUDE'S OWN NEGATIVES, on a path nobody can avoid. Every converted
-# gate's dev-shell refusal, perturbation count, census floor and scratch
-# cleanup is that file's; a gate list nobody reads is not where it belongs.
+# THE PRELUDE'S OWN NEGATIVES, on a path nobody can avoid: every converted
+# gate's refusals are that file's.
 proof = subprocess.run([sys.executable, "tools/lib/kaya_gate.py", "--selftest"],
                        cwd=ROOT, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, text=True, check=False)

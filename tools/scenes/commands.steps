@@ -1,32 +1,21 @@
-# Standard commands and the chords the whole leaf vocabulary can carry.
-# Two menus: File holds an ordinary command and the app's settings
-# command, View holds a checkable command and a group of view modes.
 expect label#0 "ready"
 expect_menus 2
 expect_menu "File>Settings…" enabled
 expect_menu "View>Details" unchecked
 expect_menu "View>Sort" value 0
 
-# A chord on a CHECKABLE command — the checkmark and the key belong to
-# one item, and the chord fires the same occurrence a click does.
 shortcut "primary+backslash"
 expect_menu "View>Details" checked
 expect label#0 "details on"
 
-# A chord on ONE OPTION of a group: the view-mode pattern, selecting an
-# option straight from the keyboard.
 shortcut "primary+2"
 expect_menu "View>Sort" value 1
 expect label#0 "sorted date"
 
-# A punctuation chord, which is what makes the settings command
-# reachable the way users expect. macOS shows this item in the
-# application menu; the chord is the app's declaration, never the
-# platform's invention, so every host answers the same key.
+# macOS displays this item in the application menu, but it stays
+# addressed where the app DECLARED it, and the chord is the app's own.
 shortcut "primary+comma"
 expect label#0 "settings 1"
 
-# The item is still addressed where the app DECLARED it, wherever the
-# platform chose to display it — the role moves chrome, not the model.
 menu_activate "File>Settings…"
 expect label#0 "settings 2"

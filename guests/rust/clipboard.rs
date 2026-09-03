@@ -1,19 +1,10 @@
-//! The clipboard conformance scene: one clip in several
-//! representations, and the privileged read that takes one back
-//! (DESIGN.md, Clipboard; docs/clipboard-plan.md). The byte-frozen
-//! contract, and why every assertion crosses a process boundary, is
-//! tools/scenes/clipboard.steps.
-//!
-//! The read of a pasted file runs OFF THE APP THREAD, which is what
-//! `PickedFile::open` documents: it blocks.
+//! The clipboard conformance scene (tools/scenes/clipboard.steps), whose
+//! assertions all cross a process boundary.
 
 use std::io::Read;
 
-/// The scene's own directory, computed identically on both sides; the
-/// pid keeps parallel legs from colliding. The phones must use the
-/// shared collections, not the temp dir — the OUTSIDE process has to
-/// reach these files and cannot see an app's private cache
-/// (guests/rust/filedialog.rs carries the per-platform reasoning).
+/// The phones must use the shared collections, not the temp dir: the
+/// OUTSIDE process cannot see an app's private cache.
 #[cfg(target_os = "android")]
 fn scene_root() -> std::path::PathBuf {
     let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
@@ -35,9 +26,7 @@ fn scene_dir() -> std::path::PathBuf {
     scene_root().join(format!("kaya-clip-{}", std::process::id()))
 }
 
-/// A 4x4 PNG, spelled out rather than generated: the scene asserts
-/// "4x4" through a foreign decoder, so the size has to be knowable from
-/// the script.
+/// A real 4x4 PNG: the scene asserts "4x4" through a FOREIGN decoder.
 const PIXEL_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -51,12 +40,9 @@ const PIXEL_PNG: &[u8] = &[
     0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 ];
 
-/// The app-defined format's id. Reverse-DNS and space-free: it reaches
-/// every platform's own registry VERBATIM.
+/// Reverse-DNS and space-free: it reaches every registry VERBATIM.
 const NOTE_ID: &str = "dev.kaya/note";
-/// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are `\n`, `\r`
-/// and `\\` with no `\"`, so a quoted byte could not be spelled in the
-/// expectation.
+/// NO QUOTES IN THE PAYLOAD: the step grammar has no `\"` escape.
 const NOTE_BYTES: &[u8] = b"note=1";
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -118,9 +104,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
                 plain_field = Some(tx.entry().a11y_id("plain").id()); // entry#1
 
-                // A STAMPED paste target: the accept list comes from the
-                // TEMPLATE (docs/tpl-props-plan.md P1), and without it
-                // the hook registers and waits forever.
+                // On a STAMPED copy the accept list rides the TEMPLATE, and
+                // without it the hook waits forever.
                 tx.label(row_status).a11y_id("row-status"); // label#1
                 let rows = tx.collection::<String>();
                 for mut r in rows.rows(tx) {
@@ -138,9 +123,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::CopyRich => {
-                // One clip, four representations: kaya derives none of
-                // them from any other, and the wire order is kaya's
-                // (descending richness), not this call's.
+                // One clip, four representations; kaya derives none of them.
                 ctx.apply(|tx| {
                     tx.copy()
                         .text("kaya clip")
@@ -186,9 +169,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| tx.write(row_status, format!("row {path:?} pasted {other:?}")));
             }
             Msg::Answer(clip) => match clip {
-                // Empty is the universal no, and its four causes —
-                // denied, unfocused, absent, not accepted — cannot be
-                // told apart: the platforms decline to say which.
+                // EMPTY IS THE UNIVERSAL NO; no platform says which cause.
                 None => ctx.apply(|tx| tx.write(status, "empty")),
                 Some(kaya::Representation::Text(text)) => {
                     ctx.apply(|tx| tx.write(status, format!("text {text}")));
@@ -201,9 +182,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     ctx.apply(|tx| tx.write(status, format!("custom {id} {body}")));
                 }
                 Some(kaya::Representation::Image(bytes)) => {
-                    // Straight back out: the assertion is a foreign
-                    // DECODER's, since a byte count differs per host for
-                    // one picture and a decoded size does not.
+                    // A foreign DECODER's size: byte counts differ per host.
                     let bytes = bytes.0.to_vec();
                     ctx.apply(|tx| {
                         tx.copy().image(bytes).send();

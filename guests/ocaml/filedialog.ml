@@ -1,30 +1,10 @@
-(* The filedialog conformance scene, OCaml port — the picker's
-   request/result grammar and the capability it hands back (DESIGN.md,
-   File dialogs).
-
-   The guest does not assert that a dialog closed: it opens the handle it
-   was given, reads the file with ORDINARY [Unix] calls, and writes what
-   it read into a signal.
-
-   THE FILE IS THE GUEST'S OWN, written before anything is shown, so
-   guest and interpreter agree on a path with no runner involvement —
-   [Filename.get_temp_dir_name] honours TMPDIR exactly as the harness's
-   $TMP does.
-
-   THE READ RUNS OFF THE APP THREAD, which is what [open_picked] tells
-   every caller to do: it blocks, and a cloud provider may download the
-   whole file first. The worker PARKS between reading and posting and
-   only a click releases it, so a guest that read inline is caught by
-   [expect label#0 "reading"] and one that did the work on the app thread
-   wedges everything after.
-
-   See guests/rust/filedialog.rs and tools/scenes/filedialog.steps. *)
+(* The filedialog scene, OCaml port — guests/rust/filedialog.rs,
+   tools/scenes/filedialog.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* A plain Mutex + Condition, as background.ml's is: kaya supplies no
-   waiting primitive and should not. *)
+(* A plain Mutex + Condition: kaya supplies no waiting primitive. *)
 let release_lock = Mutex.create ()
 let release_cond = Condition.create ()
 let released = ref false
@@ -40,11 +20,9 @@ let write_file path contents =
 
 let () =
   (try Unix.mkdir picked_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  (* THE DECOY MATTERS: with one file in the directory a chooser
-     completes with it when nothing is selected. "decoy" sorts before
-     "picked" and holds different bytes, so a backend that skips
-     selection fails both assertions (docs/traps.md, the file-dialog
-     selection notes). *)
+  (* THE DECOY MUST SORT BEFORE "picked" and hold different bytes
+     (docs/traps.md, "Pressing Open with nothing selected still returns a
+     file"). *)
   write_file (Filename.concat picked_dir "picked.txt") "picked bytes";
   write_file (Filename.concat picked_dir "decoy.txt") "decoy";
 
@@ -74,9 +52,7 @@ let () =
                   s
                 with e -> "open failed: " ^ Printexc.to_string e
               in
-              (* Parks holding the result, standing in for the tail of a
-                 slow transfer: on the app thread the release click could
-                 never be processed and the scene would deadlock. *)
+              (* Parks holding the result, standing in for a slow transfer. *)
               Mutex.lock release_lock;
               while not !released do
                 Condition.wait release_cond release_lock
@@ -91,8 +67,7 @@ let () =
       in
 
       let ask () =
-        (* Filters are ADVISORY on every platform — a default view,
-           never a guarantee — so a guest still validates what it got. *)
+        (* Filters are ADVISORY: a guest still validates what it got. *)
         ignore (pick_files ~filters:[ ("Text", "txt") ] ~on_result:picked ())
       in
       let ask_one () =

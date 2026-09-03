@@ -1,50 +1,32 @@
-# The panes scene: a THREE-pane ceiling as assertions
-# (docs/multicolumn-plan.md D1/D4/D5). The window declares depth 3 once;
-# how many columns fit is the platform's re-decision at every width,
-# driven here with real resizes. Positions, not counts: the defect this
-# scene exists to catch is a lowering that shows the WRONG panes, and a
-# count cannot see it.
-#
-# WHICH WIDTHS THIS SCENE MAY SAMPLE: the extremes, only. The
-# three-pane floors disagree more than the two-pane ones did (Material
-# wants 1200dp, GNOME 860sp — 1075px at large text — and WinUI's nest
-# wants the outer AND the leftover above 641), so this file samples
-# 1400, above every floor, and 360, below every boundary; check-steps
-# enforces that band. The MIDDLE rung — which panes shed first when
-# only some fit — is where the platforms genuinely differ and no shared
-# byte can pin it; each lane's own gate holds its ladder
+# docs/multicolumn-plan.md D1/D4/D5. POSITIONS, NOT COUNTS: the defect
+# is a lowering that shows the WRONG panes. THE EXTREMES ONLY, since the
+# three-pane floors disagree (Material 1200dp, GNOME 860sp, WinUI above
+# 641): 1400 is above every floor, 360 below every boundary, and
+# check-steps holds the band. The MIDDLE rung is each lane's own gate
 # (tools/check-pane-ladder.py is the macOS one).
 expect_entries 0
 expect_title "panes"
 expect_panes
-# Wide: every pane slot fits. The stack holds only the base root; the
-# two empty slots are the platform's own empty state — visible columns,
-# but not PANES (D1: a pane is a surface from this window's stack).
+# The two empty slots are visible COLUMNS but not PANES (D1: a pane is a
+# surface from this window's stack), which is why this reads "regular/0".
 resize_window 1400x800
 expect_panes "regular/0"
-# Push the content entry: it lands in the MIDDLE slot, beside the root.
 click button#0
 expect_entries 1
 expect_panes "regular/0,1"
-# Push the detail FROM the content pane: the trailing slot fills and
-# every stack surface is on screen at once.
 click button#1
 expect_entries 2
 expect_panes "regular/0,1,2"
-# All three AT ONCE, from each platform's REAL tree — the model reads
+# All three AT ONCE, from each platform's REAL tree: the model reads
 # above pass for an arm that ran and drew nothing.
 expect_ax label#0 "label/root pane"
 expect_ax label#1 "label/content pane"
 expect_ax label#last "label/detail pane"
-# Fully spread, the top covers nothing: the back affordance is absent
-# and the verb refuses to drive what the screen does not offer
-# (DESIGN.md's back rule).
+# Fully spread, the top covers nothing, so the verb refuses to drive an
+# affordance the screen does not offer (DESIGN.md's back rule).
 back
 expect_entries 2
 expect_panes "regular/0,1,2"
-# Narrow: compact, one pane — the deepest. Back now reveals the covered
-# content pane, then the root: the collapse is a PRESENTATION of the
-# stack, not a second lifecycle.
 resize_window 360x600
 expect_panes "compact/2"
 back
@@ -53,8 +35,5 @@ expect_panes "compact/1"
 back
 expect_entries 0
 expect_panes "compact/0"
-# And back out, because a transition that only works one way is half a
-# feature. Only the root remains, so the wide window shows the root
-# pane and two empty slots again.
 resize_window 1400x800
 expect_panes "regular/0"

@@ -1,8 +1,6 @@
 // kaya's idiomatic surface for Go: the structural core, over the
 // runtime (runtime.go) and the generated wire vocabulary
-// (kaya_wire.go). Id allocation, template scoping and occurrence
-// dispatch. The core never calls into the guest — dispatch runs on the
-// app goroutine after it pulls from the ring.
+// (kaya_wire.go).
 package kaya
 
 import (
@@ -15,8 +13,6 @@ import (
 )
 
 // Scalar is the signal-value constraint: the wire's value types.
-// []byte is the blob channel — each write registers the bytes with the
-// core at encode time (handles are single-submit).
 type Scalar interface {
 	~string | ~bool | ~int64 | ~float64 | ~[]byte
 }
@@ -25,10 +21,9 @@ type Scalar interface {
 // and When demands a Signal[bool] instead of panicking in the scene.
 type Signal[V Scalar] struct{ id uint64 }
 
-// Widget is a live widget: exactly one thing on screen. It carries the
-// transaction that minted it so construction chains read declaratively;
-// a Widget stored past its build transaction still names the same
-// widget — only the chain methods die with it.
+// Widget is a live widget: exactly one thing on screen. A Widget stored
+// past its build transaction still names the same widget — only the
+// chain methods die with it.
 type Widget struct {
 	id uint64
 	tx *Tx
@@ -54,8 +49,6 @@ func (c Collection) At(key any) Collection {
 	return Collection{c.id, path}
 }
 
-// A For binds the collection itself — its template stamps per entry of
-// every instance — so handing it an At(...) handle is a bug.
 func assertRoot(c Collection) {
 	if len(c.path) > 0 {
 		panic("kaya: Rows binds the collection itself, not an instance — drop the At(...)")
@@ -180,15 +173,13 @@ type App struct {
 	// does not have to repeat it (docs/canvas-plan.md §2.2).
 	canvasViewboxes map[uint64]Viewbox
 	// A canvas's drawing as a FUNCTION OF ITS SIZE (docs/canvas-plan.md
-	// §3.2.1). Not a handler table like the ones above: these produce a
-	// DRAWING rather than a mutation, so Serve answers the ask itself and
-	// the guest never sees one. The float64 is the frame's time in
-	// seconds, 0 for a plain redraw.
+	// §3.2.1). Not a handler table: Serve answers the ask itself and the
+	// guest never sees one. The float64 is the frame's time in seconds,
+	// 0 for a plain redraw.
 	draws map[uint64]func(*Draw, Viewbox, float64)
 	// Non-zero exactly while a template body is being declared: the
-	// record-time mirror-read guard's arm. openFors is For-only (it
-	// carries collection ids for nesting), so the guard has its own
-	// depth, bumped by every scope opener in both zones.
+	// record-time mirror-read guard's arm. openFors is For-only, so the
+	// guard has its own depth, bumped by every scope opener in both zones.
 	tplDepth int
 	// How to undo the open transaction's model edits: a deep snapshot
 	// per touched collection, taken on first touch. Non-nil exactly
@@ -466,9 +457,6 @@ type pendingDerived struct {
 // transaction. Every constructor, setter and chain method goes through
 // it so the closed check cannot be forgotten at a new callsite; a write
 // through a Tx that outlived its Build vanishes silently otherwise.
-//
-// A Tx is valid ONLY inside the Build or handler that made it, on the
-// app thread. To mutate from anywhere else, post.
 func (tx *Tx) emit(rec []byte) {
 	tx.alive()
 	tx.records = append(tx.records, rec)
@@ -484,16 +472,10 @@ func (tx *Tx) alive() {
 }
 
 // requireAppThread is the other half of the rule alive() states: OPEN is
-// not enough, the transaction also belongs to the app thread. A closed
-// flag cannot see a goroutine spawned inside a handler writing through
-// the transaction the handler is still holding, nor a background Build
-// opening one of its own — both race the app goroutine's model.
-//
-// The three ambient bindings check exactly this at their build entry and
-// spell it the same (python's _require_app_thread, ocaml's
-// require_app_thread, haskell's requireAppThread); the handle bindings
-// check it here AND at Build, since a Build with no records reaches no
-// chokepoint. tools/check-tx-liveness.py holds both halves.
+// not enough, the transaction also belongs to the app thread. The handle
+// bindings check it here AND at Build, since a Build with no records
+// reaches no chokepoint; the ambient three check it at their build entry
+// and print the same sentence. tools/check-tx-liveness.py holds both.
 func requireAppThread() {
 	owner := appThread.Load()
 	if owner == 0 {
@@ -521,8 +503,7 @@ func (tx *Tx) mirror(c Collection) *instance {
 
 // Build runs fn with a fresh transaction and submits it. A panic out of
 // fn abandons the transaction — the records never ship and the journal
-// restores the mirror — then the panic continues to the caller. The tx
-// boundary rolls back and propagates; surviving is dispatch's job.
+// restores the mirror — then the panic continues to the caller.
 func (a *App) Build(fn func(*Tx)) {
 	requireAppThread()
 	if a.journal != nil {
@@ -543,8 +524,6 @@ func (a *App) Build(fn func(*Tx)) {
 			a.tplDepth = 0
 		}
 		a.journal = nil
-		// Committed or abandoned, this transaction is over: late
-		// construction chains must die loudly either way.
 		tx.closed = true
 	}()
 	fn(tx)
@@ -561,11 +540,6 @@ func (a *App) Build(fn func(*Tx)) {
 // out of it: by the time the panic crosses the boundary the model is
 // restored and the records dropped. Aborts the runtime cannot recover
 // still die, uniformly with every other binding's fatal floor.
-
-
-
-
-
 func (a *App) dispatch(fn func(*Tx)) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -576,22 +550,10 @@ func (a *App) dispatch(fn func(*Tx)) {
 }
 
 // Post runs fn as a transaction on the app goroutine, soon. It is the
-// ONE method safe to call from another goroutine.
-//
-//	go func() {
-//		data, err := os.ReadFile(name)      // blocks this goroutine
-//		app.Post(func(tx *kaya.Tx) {        // back on the app goroutine
-//			tx.Write(content, string(data))
-//		})
-//	}()
-//
-// What must NOT cross is a *Tx: it belongs to the Build or handler that
-// made it, and capturing one is refused (Tx.emit). Ids are values and
-// are meant to be captured.
-//
-// A posted closure runs in its OWN transaction, after whatever is
-// running now: posting from inside a handler queues for AFTER, never
-// nests.
+// ONE method safe to call from another goroutine: capture ids, never a
+// *Tx (Tx.emit refuses one that crossed). A posted closure runs in its
+// OWN transaction, after whatever is running now — posting from inside
+// a handler queues for AFTER, never nests.
 func (a *App) Post(fn func(*Tx)) {
 	if fn == nil {
 		return
@@ -656,10 +618,9 @@ func (tx *Tx) autoParent(id uint64) {
 }
 
 // SetText writes a widget's text — a label's caption, and on a text
-// field or textarea the "open a document into the editor" write.
-//
-// THE TEXT WIDGETS ARE UNCONTROLLED: this is one write, not a binding
-// the app keeps pushing. A write that CHANGES the text drops whatever
+// field or textarea the "open a document into the editor" write. THE
+// TEXT WIDGETS ARE UNCONTROLLED: this is one write, not a binding the
+// app keeps pushing, and a write that CHANGES the text drops whatever
 // the app declared over it (Tx.HighlightRanges) and spends the field's
 // native undo history.
 func (tx *Tx) SetText(w Widget, text string) {
@@ -699,9 +660,7 @@ func (w Widget) Inset(pad float64) Widget {
 }
 
 // Grow weights this widget within its row/column at construction — the
-// declarative chain: tx.Label(s).Grow(1). It appends to the transaction
-// that minted the widget, so it belongs in the build expression and
-// fails loudly on a Widget that outlived its build.
+// declarative chain: tx.Label(s).Grow(1).
 func (w Widget) Grow(weight float64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Grow on a widget outside its build transaction — use Tx.SetGrow inside a live transaction")
@@ -719,11 +678,9 @@ type SizeClass int64
 
 // StackWhen stacks this row's children vertically while the window's
 // SIZE CLASS is the named one (SizeClassCompact, the only class today),
-// reverting on leaving the class — the container-riding spelling of a
-// core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). Same
-// transaction discipline as Grow. Live zone only: a template row is a
-// blueprint stamped per entry, and Node carries no chain to spell this
-// on.
+// reverting on leaving the class (docs/adaptive-layout-plan.md D3).
+// Live zone only: a template row is a blueprint stamped per entry, and
+// Node carries no chain to spell this on.
 func (w Widget) StackWhen(when SizeClass) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: StackWhen on a widget outside its build transaction — a breakpoint's setters name live widgets, so it belongs in the build expression that created the row")
@@ -755,9 +712,7 @@ func (w Widget) Align(mode int64) Widget {
 // SetAxis sets a container's arrangement axis — AxisHorizontal or
 // AxisVertical. One node, two constructor spellings: a widget created
 // as a row stays addressable as row#N whatever its axis says today
-// (docs/adaptive-layout-plan.md D1, D2). No constructor spells it, so
-// this is the only path; the declarative class-driven one is
-// Widget.StackWhen.
+// (docs/adaptive-layout-plan.md D1, D2).
 func (tx *Tx) SetAxis(w Widget, axis int64) {
 	tx.emit(TxSetAxis(w.id, axis))
 }
@@ -822,10 +777,8 @@ func (tx *Tx) SetA11yHint(w Widget, hint string) {
 }
 
 // The SIGNAL-SOURCED forms of the trio — the live zone's half of what
-// Tpl.BindA11yID and friends give a stamped copy, spelled as BindText is:
-// a spoken name that follows app state (a play/pause button's name
-// flipping with its state). Since 2026-09-02, uniform across the nine
-// bindings (docs/deferred.md, the live-zone a11y entry).
+// Tpl.BindA11yID and friends give a stamped copy. Uniform across the
+// nine bindings (docs/deferred.md, the live-zone a11y entry).
 func (tx *Tx) BindA11yID(w Widget, s Signal[string]) {
 	tx.emit(TxBindA11yId(w.id, s.id))
 }
@@ -915,8 +868,7 @@ func (tx *Tx) AddChild(parent, child Widget) {
 }
 
 // Clear drops the widget's owned content — a one-shot command riding
-// this transaction like any write, so the insert and the clear beside
-// it commit together or not at all. The widget answers through its
+// this transaction like any write. The widget answers through its
 // normal occurrence path (a clear arrives back as an empty text
 // change), never a side assignment.
 func (tx *Tx) Clear(w Widget) {
@@ -941,9 +893,8 @@ type TextRange struct{ Start, End int }
 // GO REPRESENTATION matter: Go's int is signed and the wire's offset is
 // not, so a strings.Index miss (-1) would reach the core as
 // 18446744073709551615 and be refused under a number the app never
-// wrote. Everything else — start <= end, end inside the text,
-// code-point boundaries — is the CORE's, checked against the text it
-// holds; this binding has no copy and could not check them honestly.
+// wrote. Everything else is the CORE's, checked against the text it
+// holds.
 func (r TextRange) check(verb string, w Widget) {
 	if r.Start < 0 || r.End < 0 {
 		panic(fmt.Sprintf("kaya: %s on widget %d: the range %d:%d has a negative "+
@@ -955,7 +906,6 @@ func (r TextRange) check(verb string, w Widget) {
 
 // HighlightRanges DECLARES the decorated ranges of a textarea, replacing
 // whatever was declared before; a nil or empty slice is the clear.
-//
 // APP-OWNED AND NEVER TRACKED: the first edit of any kind drops the set,
 // and the app re-declares from the fold its change handler already
 // drives. A malformed offset fails loudly in the CORE rather than in a
@@ -972,13 +922,10 @@ func (tx *Tx) HighlightRanges(w Widget, ranges []TextRange) {
 }
 
 // SelectRange puts the textarea's selection at one range; an empty range
-// is a caret. Same offsets and validation as HighlightRanges.
-//
-// REFUSED WHILE THE USER IS COMPOSING through an input method, in every
-// backend: honouring it commits the composition mid-word — measured on
-// macOS, where the half-typed kana land in the document and in the app's
-// own model. The refusal is a no-op, not an error: composition state is
-// on no kaya channel, so an app cannot avoid the race.
+// is a caret. Same offsets and validation as HighlightRanges. REFUSED
+// WHILE THE USER IS COMPOSING through an input method, in every backend
+// (docs/ranges-plan.md D4): a no-op, not an error, because composition
+// state is on no kaya channel and an app cannot avoid the race.
 func (tx *Tx) SelectRange(w Widget, r TextRange) {
 	r.check("SelectRange", w)
 	tx.emit(TxSelectRange(w.id, uint64(r.Start), uint64(r.End)))
@@ -1083,11 +1030,10 @@ func (tx *Tx) Columns(w Widget, titles []string, sort Sort) {
 
 // ColumnsAt re-declares ONE stamped copy's header bar: the nested For's
 // Node, then that copy's keys outermost first — the per-copy sort
-// indicator OnSortNode asks for. Empty keys re-declare the
-// template-wide bar for every copy, which is what NodeRows.Columns
-// spells at build time. The core walls the rest (a template bar must
-// exist first,
-// the keys must name a live copy).
+// indicator OnSortNode asks for. Empty keys re-declare the template-wide
+// bar for every copy, which is what NodeRows.Columns spells at build
+// time. The core walls the rest (a template bar must exist first, the
+// keys must name a live copy).
 func (tx *Tx) ColumnsAt(n Node, keys []any, titles []string, sort Sort) {
 	values := make([]any, 0, len(keys)+len(titles))
 	values = append(values, keys...)
@@ -1195,8 +1141,7 @@ type TextBaseline int64
 
 // Draw is the drawing scope's recorder. The calls read as immediate-mode
 // drawing; they are recorded, and ONE record is submitted when the scope
-// closes — the For template trace's fiction with a drawing scope instead
-// of a loop (docs/canvas-plan.md §2.1).
+// closes (docs/canvas-plan.md §2.1).
 type Draw struct {
 	viewbox Viewbox
 	ops     []any
@@ -1268,10 +1213,8 @@ func (d *Draw) Text(x, y float64, s string, paint Paint, align TextAlign,
 // then it is present and empty.
 func (tx *Tx) Canvas(vb Viewbox) Widget {
 	w := tx.Widget(KindCanvas)
-	// The viewbox rides the DRAWING on the wire, not a prop, so a canvas
-	// with no declaration yet has nothing to be inconsistent about; the
-	// guest side remembers it so a redraw in a later handler does not
-	// repeat it.
+	// The viewbox rides the DRAWING on the wire, not a prop; the guest
+	// side remembers it so a redraw in a later handler need not repeat it.
 	tx.app.canvasViewboxes[w.id] = vb
 	return w
 }
@@ -1305,34 +1248,22 @@ func (tx *Tx) DrawAt(n Node, keys []any, vb Viewbox, body func(d *Draw)) {
 }
 
 // Fixed declares that THIS CANVAS REFUSES COERCION: it draws at its
-// viewbox and is placed in whatever track layout gives it, never
-// adapting to it (docs/canvas-plan.md §3.2.1, ruling 2).
-//
-// The ONE TRUE PROPERTY of the size policy, because it ASSERTS
-// something about the drawing rather than providing a capability: the
-// content is not a function of the assigned track. That buys an
-// intrinsic size from the viewbox, a strictly 1:1 blit
-// (tools/check-canvas-blit.py) and NO promise of raster-once — a
-// display-scale or appearance change re-runs the same display list.
-//
-// The other two policies are HANDLERS (OnDraw, OnTick), and a canvas
-// that declares nothing is `scale`.
+// viewbox in whatever track layout gives it (docs/canvas-plan.md
+// §3.2.1, ruling 2). It buys an intrinsic size and a strictly 1:1 blit
+// (tools/check-canvas-blit.py), and promises NO raster-once. The other
+// two policies are handlers (OnDraw, OnTick); a canvas that declares
+// nothing is `scale`.
 func (w Widget) Fixed() Widget {
 	w.tx.emit(TxSetSizePolicy(w.id, SizePolicyFixed))
 	return w
 }
 
 // OnDraw declares that THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE:
-// the core hands it the size layout assigned and takes back what fn
-// draws for that size, which becomes the viewbox — so a chart re-lays
-// out for the width instead of scaling its old pixels.
-//
-// THE BINDING OPENS THE TRANSACTION, not the guest
-// (tools/check-ambient-tx.py): Serve answers the request and keeps
-// looping, so it never surfaces as an occurrence.
-//
-// LATEST-WINS: a size the guest never caught up with is dropped rather
-// than drawn late, so a drag-resize storm cannot queue.
+// the core hands fn the size layout assigned and takes back what it
+// draws, which becomes the viewbox. THE BINDING OPENS THE TRANSACTION,
+// not the guest (tools/check-ambient-tx.py). LATEST-WINS: a size the
+// guest never caught up with is dropped rather than drawn late, so a
+// drag-resize storm cannot queue.
 func (w Widget) OnDraw(fn func(d *Draw, size Viewbox)) Widget {
 	return w.registerDraw(SizePolicyRedraw,
 		func(d *Draw, size Viewbox, _ float64) { fn(d, size) })
@@ -1340,12 +1271,9 @@ func (w Widget) OnDraw(fn func(d *Draw, size Viewbox)) Widget {
 
 // OnTick is OnDraw on the platform's FRAME CLOCK: fn is handed the
 // assigned size and the frame's time in seconds (docs/canvas-plan.md
-// §15.4).
-//
-// THE TIME IS THE PLATFORM'S. A guest that reads its own clock
-// re-imports exactly the jitter Choreographer's frame time and
-// CADisplayLink's targetTimestamp were built to remove. Under the
-// harness it is the core's deterministic step, advanced by a verb.
+// §15.4). THE TIME IS THE PLATFORM'S — a guest that reads its own clock
+// re-imports the jitter the frame clocks remove. Under the harness it is
+// the core's deterministic step, advanced by a verb.
 func (w Widget) OnTick(fn func(d *Draw, size Viewbox, time float64)) Widget {
 	return w.registerDraw(SizePolicyTick, fn)
 }
@@ -1353,9 +1281,8 @@ func (w Widget) OnTick(fn func(d *Draw, size Viewbox, time float64)) Widget {
 // registerDraw is the ONE ACT the two handlers above are: the closure
 // and the policy record together. NOT EXPORTED on purpose — a guest
 // that could register without declaring would have a handler nothing
-// ever calls, which is the "one more thing to keep consistent" the
-// ruling refused (docs/canvas-plan.md §3.2.1). The emit comes first so
-// a chain through a dead transaction dies before the table moves.
+// ever calls (docs/canvas-plan.md §3.2.1). The emit comes first so a
+// chain through a dead transaction dies before the table moves.
 func (w Widget) registerDraw(policy uint32, fn func(*Draw, Viewbox, float64)) Widget {
 	w.tx.emit(TxSetSizePolicy(w.id, policy))
 	w.tx.app.draws[w.id] = fn
@@ -1441,7 +1368,6 @@ func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
 // Image displays encoded bytes: the toolkit decodes natively, and a
 // decode failure renders the placeholder, never a crash. One
 // registration copy into core memory, consumed by the next submit.
-// ImageSignal is the signal-bound flavor.
 func (tx *Tx) Image(source []byte) Widget {
 	w := tx.Widget(KindImage)
 	tx.SetSource(w, source)
@@ -1478,9 +1404,7 @@ func (tx *Tx) Collection() Collection {
 }
 
 // rowsState is one For traced as a for statement, shared by the value
-// Rows/NodeRows hand out and by every value their chain returns: the
-// eagerly minted id, the scope the For folds into, and the header bar
-// the chain records for the trace's end.
+// Rows/NodeRows hand out and by every value their chain returns.
 type rowsState struct {
 	tx     *Tx
 	id     uint64
@@ -1549,9 +1473,7 @@ func titleValues(titles []string) []any {
 	return values
 }
 
-// Rows is a live For traced as a for statement: the container exists
-// from here on, the chain declares the table, and the loop body runs
-// once to author the blueprint.
+// Rows is a live For traced as a for statement.
 //
 //	rows := tx.Rows(items).Columns([]string{"Name"}, kaya.SortNone())
 //	for row := range rows.All() { … }
@@ -1566,9 +1488,8 @@ func (r *Rows) Widget() Widget { return Widget{id: r.st.id, tx: r.st.tx} }
 
 // Columns declares the column header bar: one title per column, plus the
 // indicator. The row template's root must be a Row of exactly one cell
-// per column, refused loudly otherwise. Recorded here and emitted when
-// the trace ends; Tx.Columns re-declares it after a sort
-// (docs/tables-plan.md).
+// per column, refused loudly otherwise. Tx.Columns re-declares it after
+// a sort (docs/tables-plan.md).
 func (r *Rows) Columns(titles []string, sort Sort) *Rows {
 	r.st.bar = &headerBar{titles, sort}
 	return r
@@ -1583,8 +1504,8 @@ func (r *Rows) OnSort(fn func(*Tx, uint32)) *Rows {
 	return r
 }
 
-// All traces the template: `for row := range rows.All()` runs the body
-// ONCE, authoring the blueprint; stamping is the core's replay.
+// All traces the template: the body runs ONCE, authoring the blueprint;
+// stamping is the core's replay.
 func (r *Rows) All() iter.Seq[Row] { return r.st.all }
 
 // NodeRows is Rows one zone in: a For declared inside another template,
@@ -1620,9 +1541,9 @@ func (r *NodeRows) OnSort(fn func(*Tx, []any, uint32)) *NodeRows {
 func (r *NodeRows) All() iter.Seq[Row] { return r.st.all }
 
 // Row is the row surface a trace yields: the whole template vocabulary
-// (the embedded Tpl) plus the element's own token. A scalar collection
-// has exactly one field; a record collection's typed row surface comes
-// from the generator instead (cmd/kaya-gen).
+// (the embedded Tpl) plus the element's own token. A record
+// collection's typed row surface comes from the generator instead
+// (cmd/kaya-gen).
 type Row struct{ *Tpl }
 
 // Value is the element's token: what a stamped copy's bindings read.
@@ -1685,16 +1606,11 @@ func (tx *Tx) insertEntry(c Collection, key any, variant uint32, value any, fiel
 }
 
 // InsertFresh inserts a value under a key the binding authors, and hands
-// the key back — FOR DATA THAT HAS NO IDENTITY OF ITS OWN.
-//
-// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
-// counter+1 as an I64. MIXING IS SAFE BY ABSORPTION: an explicit Insert
-// whose key is a number at or above the counter carries it up.
-//
-// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument:
-// undo and redo replay captured keys inside the core and never re-enter
-// this path, and an abandoned transaction restores the model, not the
-// counter. A fresh key is fresh forever.
+// the key back — FOR DATA THAT HAS NO IDENTITY OF ITS OWN. One counter
+// per collection INSTANCE, starting at 0; the minted key is counter+1 as
+// an I64, and an explicit Insert whose numeric key is at or above the
+// counter carries it up. NO DECREMENT IS EXPRESSIBLE, so a fresh key is
+// fresh forever (docs/fresh-key-plan.md).
 func (tx *Tx) InsertFresh(c Collection, value any) int64 {
 	key := tx.app.mintKey(c.id, c.path)
 	tx.Insert(c, key, value)
@@ -1795,8 +1711,7 @@ func (tx *Tx) recomputeDerived(coll uint64, path []any) {
 
 // guardMirrorRead panics on a model read inside a template body: the
 // template records once and replays, so the read would bake today's
-// value into the blueprint. Bind a signal, use the element's field, or
-// Derive. Handler and build reads stay legal.
+// value into the blueprint. Handler and build reads stay legal.
 func (a *App) guardMirrorRead() {
 	if a.tplDepth > 0 {
 		panic("kaya: model read inside a template body — the template records " +
@@ -1846,19 +1761,10 @@ func LightAccent(hex uint32) AccentOverride { return AccentOverride{mask: 1, hex
 func DarkAccent(hex uint32) AccentOverride { return AccentOverride{mask: 2, hex: hex} }
 
 // BrandAccent REQUESTS the app's brand accent (docs/styling-plan.md
-// D1/D2): one packed sRGB hex (0xRRGGBB) is the whole call.
-//
-//	tx.BrandAccent(0x3584E4)
-//	tx.BrandAccent(0x3584E4, kaya.DarkAccent(0x62A0EA))
-//
-// NAMED OVERRIDES RATHER THAN TWO POSITIONAL ARGUMENTS: light and dark
-// are the same type, so a positional pair lets a caller swap them with
-// nothing able to notice.
-//
-// SET ONCE, BEFORE THE FIRST MOUNT; the root refuses a second write and
-// a late one. A REQUEST, uniformly: a platform may let its user override
-// it. The app NEVER writes a foreground or contrast variants — one could
-// be illegible with nothing to catch it.
+// D1/D2): one packed sRGB hex (0xRRGGBB), plus optional LightAccent and
+// DarkAccent overrides — NAMED rather than two positional arguments,
+// which a caller could swap with nothing able to notice. SET ONCE,
+// BEFORE THE FIRST MOUNT; the root refuses a second write and a late one.
 func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 	var mask, light, dark uint32
 	for _, o := range overrides {
@@ -1879,14 +1785,10 @@ func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 }
 
 // Asset opens an asset — a file the app's own BUILD shipped beside it,
-// named by a relative path under the asset root:
-//
-//	font := tx.Asset("fonts/sora-wght.ttf")
-//	defer font.Close()
-//
+// named by a relative path under the asset root (docs/assets-plan.md).
 // Queues no record: opening one is a read. A MISS PANICS, WITH THE
-// CORE'S SENTENCE AND NOTHING ADDED, so a Go guest and a Haskell guest
-// are handed the same bytes. EACH CALL READS: no cache, no reload.
+// CORE'S SENTENCE AND NOTHING ADDED, so every binding says the same
+// thing. EACH CALL READS: no cache, no reload.
 func (tx *Tx) Asset(name string) *Asset {
 	// The transaction's liveness, asked because Go can: Rust gets it
 	// from the borrow checker, which makes a dead Tx unnameable.
@@ -1907,12 +1809,11 @@ func (tx *Tx) Asset(name string) *Asset {
 }
 
 // AssetMissSentence is why Tx.Asset(name) would panic — the sentence it
-// would carry, handed over without panicking. "" means the name resolves.
-// Line 1 (name, rule, census) is the same on every platform and is the
-// line a scene freezes; line 2 names the resolved place, which three
-// platforms spell three ways.
-//
-// Why a query and not just the panic: docs/deferred.md, the assets entry.
+// would carry, handed over without panicking. "" means the name
+// resolves. Line 1 (name, rule, census) is the same on every platform
+// and is the line a scene freezes; line 2 names the resolved place,
+// which three platforms spell three ways. Why a query and not just the
+// panic: docs/deferred.md, the assets entry.
 func (tx *Tx) AssetMissSentence(name string) string {
 	// The transaction's liveness, for Tx.Asset's reason.
 	tx.alive()
@@ -1939,10 +1840,9 @@ type TypefaceOverride struct {
 }
 
 // PlatformFamily overrides the default family on ONE platform, named by
-// the generated platform constants. THE CONSTANT RATHER THAN FIVE NAMED
-// CONSTRUCTORS, because the vocabulary is a SPEC ENUM that regenerates.
-// The pairs travel UNRESOLVED: this binding cannot know its platform
-// (the JVM says "Linux" on Android), but every lowering IS one.
+// the generated platform constants. The pairs travel UNRESOLVED: this
+// binding cannot know its platform (the JVM says "Linux" on Android),
+// but every lowering IS one.
 func PlatformFamily(platform int64, family string) TypefaceOverride {
 	return TypefaceOverride{platform: platform, family: family}
 }
@@ -1968,23 +1868,11 @@ func FontAsset(asset *Asset) TypefaceOverride {
 }
 
 // BrandTypeface REQUESTS the app's brand typeface (docs/styling-plan.md
-// D6, Slice 2b): one family name is the whole call.
-//
-//	tx.BrandTypeface("Georgia")
-//	tx.BrandTypeface("Georgia", kaya.PlatformFamily(kaya.PlatformLinux, "DejaVu Serif"))
-//	tx.BrandTypeface("Inter", kaya.FontBytes(interRegular))
-//
-// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights and
-// the whole type ramp stay the platform's, which is what makes the swap
-// safe. Emphasis is the role tier's, never a font size.
-//
-// SET ONCE, BEFORE THE FIRST MOUNT, the accent's wall verbatim: the root
-// refuses a second write and a late one.
-//
-// A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface
-// in place, deliberately and silently — every font API renders SOMETHING
-// for a name it cannot match — which is why the conformance scene reads
-// the RESOLVED family off the real text system.
+// D6): one family name, plus optional PlatformFamily and
+// FontBytes/FontAsset overrides. THE FAMILY, NEVER THE SCALE (ratified
+// DESIGN.md). SET ONCE, BEFORE THE FIRST MOUNT, the accent's wall
+// verbatim. A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own
+// typeface in place, silently: a font API renders something for any name.
 func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	var (
 		mask      uint32
@@ -2019,22 +1907,11 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 }
 
 // AppIdentity DECLARES the app's identity (docs/app-identity-plan.md):
-// the name it goes by and the picture that stands for it.
-//
-//	tx.AppIdentity("Aurora Notes", markPNG)
-//
-// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-// tile, the Windows taskbar icon and an X11 window's icon; the same
-// FILE, read at build time, becomes the Android launcher and iOS Home
-// Screen icons. Send a PNG: each lowering converts.
-//
-// SET ONCE, BEFORE THE FIRST MOUNT. The root refuses a second write, a
-// late one, and an empty name.
-//
-// THE BYTES ARE NEVER INSPECTED between here and the platform's own
-// decoder, so bytes that are not an image leave every platform's default
-// in place — which is why the conformance scene reads what the DECODER
-// produced. Nil bytes die at the root as the empty blob they are.
+// the name it goes by and the picture that stands for it — the same
+// bytes at run time, the same FILE at build time, so send a PNG. SET
+// ONCE, BEFORE THE FIRST MOUNT; the root refuses a second write, a late
+// one and an empty name. THE BYTES ARE NEVER INSPECTED here, so
+// non-image bytes leave every platform's default in place.
 func (tx *Tx) AppIdentity(name string, icon []byte) {
 	// The bytes go to the core ONCE, by handle, exactly as an image's
 	// do — the record carries the handle, never the picture itself.
@@ -2042,13 +1919,8 @@ func (tx *Tx) AppIdentity(name string, icon []byte) {
 }
 
 // AppIdentityAsset is AppIdentity with the mark THE APP'S OWN BUILD
-// SHIPPED, opened by name through the core:
-//
-//	mark := tx.Asset("icons/kaya-mark.png")
-//	defer mark.Close()
-//	tx.AppIdentityAsset("Aurora Notes", mark)
-//
-// Same declaration by a different route: the picture never enters Go.
+// SHIPPED, opened by name through tx.Asset: the same declaration by a
+// different route, and the picture never enters Go.
 func (tx *Tx) AppIdentityAsset(name string, icon *Asset) {
 	if icon == nil {
 		panic("kaya: AppIdentityAsset got no asset — open one with tx.Asset(\"icons/...\"), or declare the name alone with AppIdentityNamed")
@@ -2292,22 +2164,11 @@ func (r FileDialogRef) Show() uint64 {
 }
 
 // SaveFile asks the platform WHERE TO SAVE. The picker's twin: the same
-// chain, the same one id space, the same one-live-dialog rule
-// (docs/save-plan.md D2).
-//
-//	tx.SaveFile("notes").OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
-//	    if file == nil { return } // the user cancelled
-//	    …
-//	}).Show()
-//
-// suggestedName rides the CONSTRUCTOR rather than the chain because a
+// chain, the same id space, the same one-live-dialog rule
+// (docs/save-plan.md D2). suggestedName rides the CONSTRUCTOR because a
 // save dialog with an empty name box is one no platform lets the user
-// complete. Every platform takes it and none guarantees it — Android may
-// append an extension — so READ THE NAME YOU GOT.
-//
-// WHAT COMES BACK OPENS EMPTY: the handle's Open CREATES, so
-// FileModeWrite yields an empty file on every platform
-// (docs/save-plan.md D1).
+// complete; none guarantees it (Android may append an extension), so
+// READ THE NAME YOU GOT. WHAT COMES BACK OPENS EMPTY (save-plan D1).
 func (tx *Tx) SaveFile(suggestedName string) SaveDialogRef {
 	tx.app.c.fileDialog++
 	return SaveDialogRef{tx: tx, id: tx.app.c.fileDialog, name: suggestedName}
@@ -2332,12 +2193,10 @@ func (r SaveDialogRef) In(window uint64) SaveDialogRef {
 
 // Filter adds one advisory (label, extensions) pair — extensions
 // space-separated, the picker's rule verbatim: a default view, never a
-// guarantee.
-//
-// AND IT IS NOT FREE ON A SAVE DIALOG the way it is on a picker: with an
-// allowed type set, NSSavePanel APPENDS the first extension to a name
-// that has none, so a filter changes the name the user gets rather than
-// only what they see (measured — docs/probes/save-probe-mac.md).
+// guarantee. NOT FREE ON A SAVE DIALOG, though: with an allowed type set
+// NSSavePanel APPENDS the first extension to a name that has none, so a
+// filter changes the name the user gets (measured,
+// docs/probes/save-probe-mac.md).
 func (r SaveDialogRef) Filter(label, extensions string) SaveDialogRef {
 	r.filters = append(r.filters, label, extensions)
 	return r
@@ -2381,21 +2240,13 @@ func (r SaveDialogRef) Show() uint64 {
 
 // --- The clipboard (DESIGN.md, Clipboard) --------------------------
 //
-// A clip is not a string: every host models it as ONE item available in
-// several types, with the consumer taking the richest it understands. So
-// COPY TAKES A RECORD and the two answers are a SUM.
-//
 // kaya DERIVES NOTHING between representations: a bad auto-derivation
 // degrades every paste into a plain field silently.
 
 // Representation is one representation, arriving — the sum a copy is the
-// record of, as a sealed interface with one struct per constructor:
-//
-//	switch clip := clip.(type) {
-//	case nil:                 // the universal empty answer
-//	case kaya.TextClip:       _ = clip.Text
-//	case kaya.FilesClip:      _ = clip.Files
-//	}
+// record of, as a sealed interface with one struct per constructor
+// (TextClip, HTMLClip, ImageClip, FilesClip, CustomClip), switched on by
+// type. A nil Representation is the universal empty answer.
 type Representation interface{ isRepresentation() }
 
 // TextClip is plain text.
@@ -2404,17 +2255,17 @@ type TextClip struct{ Text string }
 // HTMLClip is an html fragment.
 type HTMLClip struct{ HTML string }
 
-// ClipImage is encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE
+// ImageClip is encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE
 // — the hosts convert freely between image types — so compare what the
 // image IS, never the bytes it arrived in.
 type ImageClip struct{ Bytes []byte }
 
-// ClipFiles is files, plural INSIDE one representation — the nesting
+// FilesClip is files, plural INSIDE one representation — the nesting
 // text/uri-list and CF_HDROP already have. A pasted file opens with the
 // call the picker already has.
 type FilesClip struct{ Files []PickedFile }
 
-// ClipCustom is an app-defined format, round-tripped verbatim.
+// CustomClip is an app-defined format, round-tripped verbatim.
 type CustomClip struct {
 	ID    string
 	Bytes []byte
@@ -2565,13 +2416,11 @@ func (r CopyRef) Send() {
 	r.tx.emit(TxCopy(present, uint32(len(r.files)), uint32(len(r.custom)), values))
 }
 
-// ReadClipboard begins the privileged read.
-//
-// A user's paste costs nothing; this asks without a gesture, which the
-// platforms have made expensive: iOS 16 PROMPTS when the content came
-// from another app and blocks until the user answers, Android returns
-// nothing unless the app has focus, and Wayland delivers no offer to an
-// unfocused client. Never to implement Paste — that is the Paste
+// ReadClipboard begins the privileged read. A user's paste costs
+// nothing; this asks without a gesture, which the platforms have made
+// expensive: iOS 16 PROMPTS and blocks until the user answers, Android
+// answers nothing unless the app has focus, Wayland delivers no offer to
+// an unfocused client. Never to implement Paste — that is the Paste
 // command, and it is free.
 func (tx *Tx) ReadClipboard() ClipReadRef {
 	tx.app.c.clipboard++
@@ -2630,17 +2479,11 @@ func (tx *Tx) SetAccepts(w Widget, kinds ...string) {
 }
 
 // Accepts declares what this widget takes from a paste, at construction:
-// tx.Entry(nil).Accepts("text").
-//
-// ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
-// live while this widget is focused, it filters what can reach the paste
-// hook, and on Android it IS the native registration. Per-widget because
-// Paste's enablement is the INTERSECTION of what the clipboard offers
-// and what the FOCUSED target takes.
-//
-// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT: a widget that declares
-// nothing gets the platform's own insertion and reports it through the
-// ordinary change path.
+// tx.Entry(nil).Accepts("text"). ONE DECLARATION, THREE JOBS: the Paste
+// command's enablement while this widget is focused, the filter on what
+// reaches the paste hook, and on Android the native registration. A
+// widget that declares nothing gets the platform's own insertion and
+// reports it through the ordinary change path.
 func (w Widget) Accepts(kinds ...string) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Accepts on a widget outside its build transaction — use Tx.SetAccepts inside a live transaction")
@@ -2706,10 +2549,7 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 // present side by side: 1 is the serial stack, 2 and 3 are columns on a
 // window wide enough, the shallowest shed first as it narrows
 // (docs/multicolumn-plan.md carries the ruling and the measured
-// mechanics). There is deliberately no argument for WHICH entries show —
-// the stack's order is the priority order — and the live count is the
-// platform's own judgment where it has one. The root refuses 0 and
-// anything above 3.
+// mechanics). The root refuses 0 and anything above 3.
 func (w WindowRef) Panes(ceiling uint32) WindowRef {
 	w.tx.emit(TxSetWindowPanes(w.id, int64(ceiling)))
 	return w
@@ -2717,11 +2557,9 @@ func (w WindowRef) Panes(ceiling uint32) WindowRef {
 
 // Dirty says this surface holds UNSAVED WORK: each backend shows its
 // platform's own affordance, and the phones have none
-// (docs/dirty-plan.md D2/D4).
-//
-// STATE, NOT CHROME: the title you declared is left alone. It ARMS
-// NOTHING either — "unsaved changes, close anyway?" is VetoClose plus a
-// dialog, which is yours to compose.
+// (docs/dirty-plan.md D2/D4). STATE, NOT CHROME: the title you declared
+// is left alone, and it ARMS NOTHING — "unsaved changes, close anyway?"
+// is VetoClose plus a dialog, which is yours to compose.
 func (w WindowRef) Dirty(on bool) WindowRef {
 	w.tx.emit(TxSetWindowDirty(w.id, on))
 	return w
@@ -2729,11 +2567,9 @@ func (w WindowRef) Dirty(on bool) WindowRef {
 
 // Inset sets the window's CONTENT INSET in layout units — LAYOUT, not
 // appearance (docs/styling-plan.md D3). 16 unless you say otherwise; 0
-// is full bleed, honored unconditionally because the inset is kaya's
-// own padding.
-//
-// A platform's SAFE AREA is a separate fact and is not removed by it:
-// a phone keeps its notch and home indicator whatever this says.
+// is full bleed, honored unconditionally because the inset is kaya's own
+// padding. A platform's SAFE AREA is a separate fact and is not removed
+// by it: a phone keeps its notch and home indicator whatever this says.
 func (w WindowRef) Inset(units float64) WindowRef {
 	w.tx.emit(TxSetWindowInset(w.id, units))
 	return w
@@ -2757,14 +2593,10 @@ func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
 
 // OnUndone binds the undone handler to THIS window: it fires each time
 // kaya routes an undo there, with the group's label (EMPTY for a typing
-// episode — kaya invents no user-facing strings) and what the core put
-// back. NOT one-shot: a history is walked as often as the user likes.
-//
-// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
-// programmatic write, so the echo doctrine silences every occurrence it
-// would cause. The binding has already folded this payload into its own
-// mirror before the handler runs; this is where an app folds it into
-// ITS model.
+// episode) and what the core put back. NOT one-shot. THE DELTA IS THE
+// ONLY NOTIFICATION — applying an inverse is a programmatic write, so
+// the echo doctrine silences every occurrence it would cause; the
+// binding's mirror is folded already, and this is where an app folds ITS.
 func (w WindowRef) OnUndone(fn func(*Tx, string, UndoDelta)) WindowRef {
 	w.tx.app.undone[w.id] = fn
 	return w
@@ -3020,17 +2852,12 @@ func (m MenuItem) Icon(data []byte) MenuItem {
 	return m
 }
 
-// Symbol sets the item's SEMANTIC ICON (docs/styling-plan.md D6). The app
-// names a CONCEPT and each backend draws its own platform's glyph — SF
-// Symbols are license-locked to Apple, so a shared asset is not even
-// legal. BESIDE Icon, not instead of it.
-//
-// SymbolBack and SymbolForward mean BACKWARD and FORWARD in READING
-// ORDER, never left and right. SymbolDelete is the wastebasket,
-// SymbolRemove takes an item out of a list, SymbolClose is the ✕.
-//
-// The vocabulary is CLOSED and an out-of-vocabulary number dies AT THE
-// ROOT at declare time. Const-only.
+// Symbol sets the item's SEMANTIC ICON (docs/styling-plan.md D6): the app
+// names a CONCEPT, each backend draws its own glyph, and it sits BESIDE
+// Icon rather than instead of it. SymbolBack and SymbolForward mean
+// BACKWARD and FORWARD IN READING ORDER, never left and right;
+// SymbolDelete is the wastebasket, SymbolRemove takes an item out of a
+// list, SymbolClose is the ✕. Closed vocabulary, const-only.
 func (m MenuItem) Symbol(symbol int64) MenuItem {
 	m.chain().emit(TxSetMenuSymbol(m.id, symbol))
 	return m
@@ -3243,10 +3070,8 @@ func (t *Tpl) Widget(kind uint32) Node {
 }
 
 // setText is the template zone's FLOOR prop write, UNEXPORTED so the
-// floor gate can tell it from the live verb Tx.SetText — the two were
-// both spelled SetText, and no line-oriented reader sees a receiver
-// type. A guest reaching for it now fails to compile
-// (docs/tpl-props-plan.md F3).
+// floor gate can tell it from the live verb Tx.SetText: no line-oriented
+// reader sees a receiver type (docs/tpl-props-plan.md F3).
 func (t *Tpl) setText(n Node, text string) {
 	t.tx.emit(TxSetText(n.id, text))
 }
@@ -3257,16 +3082,12 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 	t.tx.emit(TxBindTextElement(n.id, level, 0))
 }
 
-// SetGrow weights a template node within its stamped row or column —
-// the template twin of Tx.SetGrow, spelled as a METHOD rather than a
-// chain because a Node is a plain id with no transaction to chain from.
-// EVERY PROP BELOW FOLLOWS THAT SENTENCE.
-//
-// Scroll needs it: an unconstrained viewport hugs its content, so a
-// template scroll without a grow weight cannot scroll.
-//
-// Spacing and align stay unreachable on a Node and stay ledgered
-// (docs/deferred.md).
+// SetGrow weights a template node within its stamped row or column — the
+// template twin of Tx.SetGrow, a METHOD rather than a chain because a
+// Node is a plain id with no transaction. EVERY PROP BELOW FOLLOWS THAT
+// SENTENCE. Scroll needs it: an unconstrained viewport hugs its content,
+// so a template scroll without a grow weight cannot scroll. Spacing and
+// align stay unreachable on a Node and stay ledgered (docs/deferred.md).
 func (t *Tpl) SetGrow(n Node, weight float64) {
 	t.tx.emit(TxSetGrow(n.id, weight))
 }
@@ -3297,12 +3118,9 @@ func (t *Tpl) SetA11yLabel(n Node, label string) {
 }
 
 // BindA11yLabel sources each stamped copy's spoken name from a varying
-// source — the row's own field being the case it exists for:
-//
-//	row.BindA11yLabel(done, row.Value()) // "Milk", not "checkbox"
-//
-// The binding is LIVE rather than a one-shot seed: a later UpdateField
-// on that field re-speaks the copy.
+// source — the row's own field being the case it exists for. The binding
+// is LIVE rather than a one-shot seed: a later UpdateField on that field
+// re-speaks the copy.
 func (t *Tpl) BindA11yLabel[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
@@ -3314,8 +3132,7 @@ func (t *Tpl) BindA11yLabel[S interface {
 // by TalkBack.
 //
 // ACTIVATION KINDS ONLY, and no wall here DELIBERATELY: a Node is a bare
-// id and carries no kind, so a kind table here would be the root's list
-// written a second time. The root rejects a misfit at DECLARE time.
+// id and carries no kind. The root rejects a misfit at DECLARE time.
 func (t *Tpl) SetA11yHint(n Node, hint string) {
 	t.tx.emit(TxSetA11yHint(n.id, hint))
 }
@@ -3330,21 +3147,16 @@ func (t *Tpl) BindA11yHint[S interface {
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry
-// and textarea only, checked at the root.
-//
-// CONST ONLY: an accept list describes the PROTOTYPE, not the row. THIS
-// IS THE DECLARATION THAT TURNS App.OnPasteNode ON — every backend gates
-// the paste occurrence on the focused widget's accept list
-// (docs/tpl-props-plan.md §1).
+// and textarea only, checked at the root. CONST ONLY: an accept list
+// describes the PROTOTYPE, not the row. THIS IS THE DECLARATION THAT
+// TURNS App.OnPasteNode ON — every backend gates the paste occurrence on
+// the focused widget's accept list (docs/tpl-props-plan.md §1).
 func (t *Tpl) SetAccepts(n Node, kinds ...string) {
 	t.tx.emit(TxSetAccepts(n.id, acceptList(kinds)))
 }
 
 // SetRole declares what each stamped copy MEANS — semantic emphasis,
-// never appearance (docs/styling-plan.md D4). int64 because Go's closed
-// vocabularies are untyped integer constants in the generated wire
-// file, and a named type here would make the two tiers of one binding
-// disagree about one prop's type.
+// never appearance (docs/styling-plan.md D4).
 //
 // CONST ONLY, like SetAccepts: what a copy MEANS is a fact about the
 // PROTOTYPE. No kind wall here deliberately — the root refuses a misfit
@@ -3376,8 +3188,7 @@ func (t *Tpl) LabelText(text string) Node {
 // stamped for. The const flavor is LabelText.
 //
 // The BASE surface takes no field PROJECTION, only a resolved token: a
-// projection is func(*T) *string and *Tpl knows no T. The typed
-// surfaces do, and that is the whole of what they add here.
+// projection is func(*T) *string and *Tpl knows no T.
 func (t *Tpl) LabelBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
@@ -3423,10 +3234,9 @@ func (t *Tpl) CaptionBound[S interface {
 
 // Button creates a button with its caption in the blueprint.
 //
-// IT TAKES NO HANDLER, and the omission is the design: a click names
-// WHICH copy by key path, so the app registers one handler centrally
-// against the template node (App.OnClickNode). The live zone's
-// func(*Tx) has nowhere to put the keys.
+// IT TAKES NO HANDLER: a click names WHICH copy by key path, so the app
+// registers one handler centrally against the template node
+// (App.OnClickNode).
 func (t *Tpl) Button(text string) Node {
 	n := t.Widget(KindButton)
 	t.setText(n, text)
@@ -3446,7 +3256,7 @@ func (t *Tpl) ButtonBound[S interface {
 
 // Entry creates an empty text field in the blueprint, UNCONTROLLED the
 // same way Tx.Entry is: every stamped copy starts empty and owns its own
-// text from the first keystroke. EntryBound seeds each copy from its row.
+// text from the first keystroke.
 //
 // IT TAKES NO HANDLER, for Tpl.Button's reason: the app registers once
 // against the node (App.OnChangeNode).
@@ -3456,12 +3266,9 @@ func (t *Tpl) Entry() Node {
 
 // EntryBound creates a text field whose INITIAL text comes from a
 // varying source: one write per stamped copy, not a leash — the copy
-// owns its text afterwards.
-//
-// The copy's edits do NOT flow back to the field, and a later
-// UpdateField on that row WILL overwrite what the user typed, because
-// the seed is recorded as a real element binding. Same rule in all
-// eight bindings.
+// owns its text afterwards. The copy's edits do NOT flow back, and a
+// later UpdateField on that row WILL overwrite what the user typed,
+// because the seed is a real element binding. Same rule in every binding.
 func (t *Tpl) EntryBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
@@ -3566,13 +3373,11 @@ func (t *Tpl) SliderBound[S interface {
 }
 
 // Select creates a dropdown over fixed options in the blueprint at
-// selected, the initial 0-based index. SelectBound sources the index
-// per row; picks register against the node (App.OnValueChangedNode).
-//
-// THE OPTION LIST CANNOT VARY PER ROW — the protocol's limit, not this
-// surface's: a choice widget's options are its label CHILDREN and a
-// blueprint's children are fixed at declaration. The selected INDEX is
-// the part that varies (docs/sugar-pass-plan.md §2).
+// selected, the initial 0-based index; picks register against the node
+// (App.OnValueChangedNode). THE OPTION LIST CANNOT VARY PER ROW — a
+// choice widget's options are its label CHILDREN and a blueprint's
+// children are fixed at declaration (docs/sugar-pass-plan.md §2). The
+// selected INDEX is the part that varies, through SelectBound.
 func (t *Tpl) Select(options []string, selected int) Node {
 	n := t.choiceOf(KindSelect, options)
 	t.tx.emit(TxSetValue(n.id, float64(selected)))
@@ -3618,16 +3423,12 @@ func (t *Tpl) Image(source []byte) Node {
 	return n
 }
 
-// Canvas creates a canvas per stamped copy — a sparkline in a table
-// cell, which is the case set_drawing grew its keys-first addressing for
-// (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
-// every copy is born with it; Tx.DrawAt re-declares one copy's
-// afterwards.
-//
-// NO SIZE POLICY HERE, and the missing methods are the refusal: Fixed,
-// OnDraw and OnTick are Widget's and a Node has none of them, so a
-// stamped canvas keeps `scale` and the compiler says so (docs/deferred.md,
-// the template-zone size policy entry).
+// Canvas creates a canvas per stamped copy — the case set_drawing grew
+// its keys-first addressing for (docs/canvas-plan.md §3.1). The drawing
+// is declared with the node, so every copy is born with it; Tx.DrawAt
+// re-declares one copy's afterwards. NO SIZE POLICY HERE, and the
+// missing methods are the refusal: Fixed, OnDraw and OnTick are Widget's,
+// so a stamped canvas keeps `scale` (docs/deferred.md).
 func (t *Tpl) Canvas(vb Viewbox, body func(d *Draw)) Node {
 	n := t.Widget(KindCanvas)
 	d := &Draw{viewbox: vb}
@@ -3815,15 +3616,12 @@ func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 
 // --- Undo: one history over two tiers (docs/undo-plan.md D1-D6, §3) ---
 
-// Undoable makes this transaction ONE undoable step, under label. The
+// Undoable makes this transaction ONE undoable step, under label: the
 // unit of undo is a NAMED GROUP, so grouping is opt-in
-// (docs/undo-plan.md D2, D8).
-//
-// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the head.
-//
-// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-// collection deltas. Focus rides along and is not restored. Anything
-// else fails AT APPLY, naming the op.
+// (docs/undo-plan.md D2, D8). Callable anywhere in the chain — the
+// marker still rides at the head. A group holds the reactive half,
+// signal writes and collection deltas; focus rides along and is not
+// restored, and anything else fails AT APPLY, naming the op.
 func (tx *Tx) Undoable(label string) {
 	tx.UndoableIn(0, label)
 }
@@ -3868,13 +3666,11 @@ type UndoSignal struct {
 	Value  any
 }
 
-// UndoText is one text field's restored text.
-//
-// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping: an empty
-// Path means ID is a live widget's id, a non-empty Path means ID is a
-// TEMPLATE NODE and Path is the stamped copy's keys — the same pair
-// OnChangeNode hands that copy's own edits. The core's internal widget
-// id for a copy never leaves the core.
+// UndoText is one text field's restored text. THE IDENTITY IS THE
+// OCCURRENCE'S, not the core's bookkeeping: an empty Path means ID is a
+// live widget's id, a non-empty Path means ID is a TEMPLATE NODE and
+// Path is the stamped copy's keys — the same pair OnChangeNode hands
+// that copy's own edits. The core's widget id for a copy never leaves it.
 type UndoText struct {
 	ID   uint64
 	Path []any
@@ -3923,24 +3719,17 @@ var scalarShape = undoShape{
 
 // undoReport is one decoded step: what ParseOccurrence hands the loop
 // for the two undo records, with the window riding the tuple's id.
-// Unexported — an app hears the label and the delta as OnUndone's
-// arguments.
 type undoReport struct {
 	label string
 	delta UndoDelta
 }
 
-// absorbUndo folds an undo's payload into the collection mirror — the
-// rollback journal in reverse, and the payload is core-authoritative so
-// nothing here re-derives anything. Signals and text are not mirrored
-// by this binding and pass straight to the app's handler.
-//
-// NO DERIVED RECOMPUTE HERE, DELIBERATELY. A derived signal's write rode
-// the SAME transaction as the mutation that caused it, so a named step
-// banked the derived value in both directions and the core has already
-// restored it. A recompute added here would write a value the ledger
-// never banked, and where it disagreed the screen and the ledger's
-// record of the step would part company (docs/deferred.md's residual).
+// absorbUndo folds an undo's payload into the collection mirror; the
+// payload is core-authoritative, so nothing here re-derives anything and
+// signals and text pass straight to the app's handler. NO DERIVED
+// RECOMPUTE HERE, DELIBERATELY: a derived write rode its mutation's own
+// transaction, so the core restored it already and recomputing would
+// write a value the ledger never banked (docs/deferred.md's residual).
 func (a *App) absorbUndo(delta UndoDelta) {
 	for _, e := range delta.Entries {
 		shape, known := a.shapes[e.Collection]
@@ -4014,8 +3803,7 @@ func (a *App) OnClick(w Widget, fn func(*Tx)) {
 // OnSort registers the table's header-click handler at its For — the
 // handler receives the 0-based column of a sort REQUEST: nothing has
 // changed on screen; reorder the collection by key and re-declare the
-// header with Columns (docs/tables-plan.md). Rows.OnSort is the same
-// registration co-located with the For that stamps the rows.
+// header with Columns (docs/tables-plan.md).
 func (a *App) OnSort(w Widget, fn func(*Tx, uint32)) {
 	a.sortHandlers[w.id] = fn
 }
@@ -4055,8 +3843,7 @@ func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
 
 // OnValueChangedNode registers a value handler for a template slider,
 // select or radio group; the handler also receives the stamped copy's
-// keys, outermost first. The live/node pairing this completes is
-// docs/sugar-pass-plan.md §D2, and tplzone_test.go holds it.
+// keys, outermost first.
 func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
 	a.nodeValues[n.id] = fn
 }
@@ -4075,7 +3862,6 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 
 // answerCanvasAsk answers one draw_requested or tick. A method rather
 // than an inline arm so sizepolicy_test.go can drive it with no ring.
-//
 // ONE CALL SHAPE, decided at registration: OnDraw widens its closure to
 // the tick's arity, so a TICK canvas — which the core asks once as a
 // draw_requested before its first frame — is answered here with time 0
@@ -4130,11 +3916,8 @@ func drawAsk(kind uint16, tail []any) (Viewbox, float64) {
 }
 
 // Serve dispatches occurrences ON THE CALLING GOROUTINE and returns when
-// the core has shut down. Separate from Run because WHO OWNS THE PROCESS
-// ENTRY differs by platform and nothing else does
-// (docs/go-mobile-plan.md §D3).
-//
-// A guest never calls this directly on a platform where Run works.
+// the core has shut down (docs/go-mobile-plan.md §D3). A guest never
+// calls this directly on a platform where Run works.
 func (a *App) Serve() {
 	// From here on this goroutine IS the app thread, and every
 	// transaction gate compares against it (requireAppThread).
@@ -4167,9 +3950,8 @@ func (a *App) Serve() {
 		tail, _ := payload.([]any)
 		switch {
 		// THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER MAPPED
-		// (docs/canvas-plan.md §3.2.1): the guest registered a
-		// drawing-as-a-function-of-size, so this draws it, submits the
-		// one record and keeps looping. The transaction is the binding's
+		// (docs/canvas-plan.md §3.2.1): this draws it, submits the one
+		// record and keeps looping. The transaction is the binding's
 		// (tools/check-ambient-tx.py), and an unclaimed ask drops like
 		// any other.
 		case kind == occDrawRequested || kind == occTick:
@@ -4328,17 +4110,11 @@ func (a *App) Serve() {
 var served atomic.Bool
 
 // Run gives kaya the calling goroutine and RETURNS WHEN THE APP IS OVER,
-// on every platform, with the app's exit code. A guest's last line is
-//
-//	os.Exit(build().Run())
-//
-// and that line is the same on mac, linux, windows, iOS and Android.
-// What differs per platform is WHICH THREAD kaya was given, never
-// whether this call comes back (docs/go-mobile-plan.md §D3, which also
-// carries the Gio wart this refuses).
-//
-// runtime.GOOS IS A CONSTANT, so exactly one arm survives compilation
-// while BOTH are type-checked by every `go build` on every platform.
+// on every platform, with the app's exit code — so os.Exit(build().Run())
+// is a guest's last line on all five. What differs per platform is WHICH
+// THREAD kaya was given, never whether this call comes back
+// (docs/go-mobile-plan.md §D3). runtime.GOOS IS A CONSTANT, so one arm
+// survives compilation while BOTH are type-checked everywhere.
 func (a *App) Run() int {
 	return a.runWith(hostedEntry, a.Serve, Run)
 }

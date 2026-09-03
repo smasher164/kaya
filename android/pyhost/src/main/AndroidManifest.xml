@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Without this, an explicit broadcast to the clipboard helper is
-         FILTERED OUT with no error anywhere (package visibility,
-         API 30+); its absence was half of what kept clipboard-go off
-         this lane. -->
+         FILTERED OUT with no error anywhere (docs/traps.md: "An explicit broadcast to a package the
+         sender cannot SEE is filtered out with no error"). -->
     <queries>
         <package android:name="dev.kaya.cliphelper" />
     </queries>
-    <!-- The declared identity, read out of guests/assets/identity.toml by
-         android/build.gradle.kts. The reasoning is spelled once, in
-         milestone2's manifest. -->
+    <!-- The declared identity, read out of guests/assets/identity.toml
+         by android/build.gradle.kts (rusthost's manifest carries the
+         reasoning). -->
     <application
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
@@ -22,16 +21,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- THE HARNESS'S EYES OUTSIDE THIS APP, declared by the
-             validation apps and never by the kaya library, so a user's
-             app never carries an accessibility service it did not ask
-             for. The reasoning is spelled once, in javahost's
-             manifest. Declared here even though the go suite runs one
-             scene that needs no picker: tools/android/run-emulator.py
-             enables and WAITS FOR this service on every leg it runs,
-             and an app that does not declare it fails the bind wait
-             three arms and a reboot later, saying the picker never
-             appeared. -->
+        <!-- THE HARNESS'S EYES OUTSIDE THIS APP (rusthost's manifest
+             carries the reasoning). Declared even by an app whose suite
+             runs no scene that needs a picker:
+             tools/android/run-emulator.py enables and WAITS FOR this
+             service on every leg it runs, and an app that does not
+             declare it fails the bind wait three arms and a reboot
+             later, saying the picker never appeared. -->
         <service
             android:name="dev.kaya.KayaHarnessAccessibility"
             android:exported="false"

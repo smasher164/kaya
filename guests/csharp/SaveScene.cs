@@ -1,14 +1,4 @@
-// The save conformance scene, C# port — the round trip an editor walks:
-// open, edit, save, save-as, reopen (docs/save-plan.md §0, D1/D3/D5).
-//
-// Every status is a READ-BACK off the disk, and every file operation
-// runs off the app thread because Open blocks. A destination is read
-// back through the HANDLE, never LocalPath — that is empty on both
-// phones. The names carry no extension and neither request sends a
-// filter (docs/deferred.md: NSSavePanel appends the first allowed
-// extension, and a Finder preference can hide a known one).
-//
-// See guests/rust/save.rs and tools/scenes/save.steps.
+// The save scene, C# port — guests/rust/save.rs, tools/scenes/save.steps.
 
 using System;
 using System.Collections.Generic;
@@ -42,9 +32,8 @@ static class SaveScene
         }
     }
 
-    /// Write text through a handle and report what the FILE says
-    /// afterwards. FileModeWrite truncates on a picked file and on a
-    /// save destination alike; the destination only adds the create.
+    /// Write text through a handle and report what the FILE says afterwards.
+    /// FileModeWrite truncates; a save destination only adds the create.
     static string WriteBack(PickedFile file, string text)
     {
         FileStream stream;
@@ -58,13 +47,12 @@ static class SaveScene
         }
         try
         {
-            // Bytes rather than a StreamWriter, so no encoder preamble
-            // can put a BOM in front of a byte-frozen string.
+            // Bytes, not a StreamWriter: no encoder preamble may put a BOM in
+            // front of a byte-frozen string.
             byte[] bytes = Encoding.UTF8.GetBytes(text);
             using (stream)
                 stream.Write(bytes, 0, bytes.Length);
-            // Disposed before the reopen, so what comes back is the
-            // FILE's bytes and not a buffer's.
+            // Disposed before the reopen, so the bytes are the FILE's.
         }
         catch (Exception e)
         {
@@ -77,10 +65,8 @@ static class SaveScene
     {
         var app = new KayaApp();
 
-        // Guest and interpreter are one process and compute this path
-        // identically; the pid keeps parallel legs from colliding. The
-        // decoy must sort BEFORE "draft" (docs/traps.md, "Pressing Open
-        // with nothing selected still returns a file").
+        // The pid keeps parallel legs from colliding, and the decoy must sort
+        // BEFORE "draft" (docs/traps.md, Open with nothing selected).
         string dir = Path.Combine(
             Path.GetTempPath(),
             $"kaya-save-{System.Environment.ProcessId}");
@@ -88,16 +74,13 @@ static class SaveScene
         File.WriteAllText(Path.Combine(dir, "draft"), "first draft");
         File.WriteAllText(Path.Combine(dir, "decoy"), "decoy");
 
-        // Held as handles, never as paths — the phones have no
-        // re-openable path.
+        // Handles, never paths — the phones have no re-openable path.
         PickedFile? source = null;
         PickedFile? destination = null;
 
         Signal status = default;
 
-        // Every file operation runs on a thread of the guest's own,
-        // because Open blocks; the answer comes back through Post, the
-        // one method safe to call from another thread.
+        // Open blocks; Post is the one method safe from another thread.
         void Work(Func<string> job)
         {
             var thread = new Thread(() =>
@@ -148,9 +131,8 @@ static class SaveScene
 
                 tx.Button("save", onClick: inner =>       // button#1
                 {
-                    // A missing handle is an open that never landed —
-                    // its OWN sentence, never a throw: a crashed guest
-                    // masks the real failure (docs/deferred.md,
+                    // A missing handle gets its OWN sentence, never a throw: a
+                    // crashed guest masks the real failure (docs/deferred.md,
                     // save-jvm WATCH).
                     if (source is not PickedFile file)
                     {
@@ -160,14 +142,12 @@ static class SaveScene
                     Work(() => "saved " + WriteBack(file, "second draft"));
                 });
 
-                // "copy" is the name the dialog OPENS with; the harness
-                // types over it.
+                // "copy" is the name the dialog OPENS with; the harness types over it.
                 tx.Button("save as", onClick: inner =>    // button#2
                     inner.SaveFile("copy", onResult: Saved));
 
                 tx.Button("reopen", onClick: inner =>     // button#3
                 {
-                    // The missing-handle guard, same reason as save's.
                     if (source is not PickedFile first
                         || destination is not PickedFile second)
                     {

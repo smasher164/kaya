@@ -58,17 +58,14 @@ GUEST = ROOT / "guests" / "python" / "portfolio.py"
 DAYS = 1096  # three years, fixed span ending 2026-08-24
 SEED = 0x6B617961  # "kaya"
 
-# The ledger's DECLARED size. The per-day lot count is a draw, so the
-# walk overshoots and the tail is taken: without a declared number every
-# density tweak would move `total` in three byte-frozen scenes at once.
-# 15,000 is above WinUI's measured 12,000-row choke
-# (docs/measurements/choke-windows-2026-08-24.txt), which is the size row
-# windowing exists to make ordinary (docs/virtualization-plan.md §5).
+# The ledger's DECLARED size: without a declared number every density
+# tweak would move `total` in three byte-frozen scenes at once. 15,000 is
+# above WinUI's measured 12,000-row choke
+# (docs/measurements/choke-windows-2026-08-24.txt).
 ROWS = 15_000
-# Lots per account-day, 1..LOTS. ODD ON PURPOSE: this LCG's low bits
-# have short periods (bit 0 alternates), so an even modulus draws a
-# visibly periodic pattern — `below(8)` and `below(6)` produce the same
-# skip sequence here, measured.
+# Lots per account-day, 1..LOTS. ODD ON PURPOSE: this LCG's low bits have
+# short periods, so an even modulus draws a visibly periodic pattern —
+# `below(8)` and `below(6)` produce the same skip sequence, measured.
 LOTS = 11
 # Shares per lot, 1..LOT, and the room a position may run above what the
 # book holds. BAND bounds the settling lot: a position that wandered

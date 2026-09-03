@@ -28,7 +28,7 @@ android runner's undo legs, hold seven gates green, run the lane twice.
 - CLAUDE.md's four-layer rule for interpreter backends.
 
 Tree at start: HEAD `aadbe9e`, working tree DIRTY with sibling work
-(bindings/{go,haskell,java,ocaml,python}, guests/*/todos.*,
+(bindings/{go, haskell, java, ocaml, python}, guests/*/todos.*,
 crates/kaya/src/app.rs, docs/deferred.md, tools/scenes/todos.steps).
 None of those are mine.
 
@@ -131,7 +131,7 @@ spelling and a future slice must not invent a sentence.
 
 `undo-compose` (rust guest) at the end of the compose block, `undo-jvm`
 (Java guest) at the end of the jvm block. Both guest selector arms
-already existed (`guests/rust/rusthost.rs:125`,
+already existed (`guests/rust/rusthost.rs:121`,
 `android/javahost/.../MainActivity.kt:75 (gone)`), each with a comment
 saying it was registered ahead of the arm on purpose.
 
@@ -225,7 +225,7 @@ worse than none. I broke the bracket and the lane stayed green. The
 reason is not that the bracket is wrong; it is that **the core has a
 second wall and this backend's ordering always puts it in front**:
 
-`Scene::note_text_changed` (crates/kaya/src/scene.rs:2269) opens with
+`Scene::note_text_changed` (crates/kaya/src/scene.rs:2180) opens with
 `if before == text { return; }` — "an event that tells the ledger
 nothing it already knows is not a step". And
 `Scene::note_native_undo` (scene.rs:2373) writes
@@ -547,8 +547,7 @@ runs of the shipped source, comment-only change or not.
   AFTER the removals; §4.4's pair is the final word.
 - **Untracked files in the repo: NONE** (`git status --porcelain | grep
   '^??'` empty). Nothing of mine leaked into the tree.
-- **Rebuilt in place, not created:** `android/{kaya,rusthost,
-  javahost}/build` (8.7M / 356M / 190M) and
+- **Rebuilt in place, not created:** `android/{kaya, rusthost, javahost}/build` (8.7M / 356M / 190M) and
   `target/aarch64-linux-android` (970M) — the lane's own artifacts,
   rebuilt by every run of the runner, pre-existing, not mine to delete.
 - **Scratchpad: 128 KB kept, everything else deleted.** Deleted after

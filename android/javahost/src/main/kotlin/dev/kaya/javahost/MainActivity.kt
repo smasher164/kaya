@@ -14,8 +14,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Map KAYA_* intent extras to environment variables; see the
-        // milestone2 module for the reasoning.
+        // Map KAYA_* intent extras to environment variables (rusthost's
+        // shell carries the reasoning).
         intent.extras?.let { extras ->
             for (key in extras.keySet()) {
                 if (key.startsWith("KAYA_")) {
@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
             "filedialog" -> FileDialog::app
             "styling" -> Styling::app
             // The asset root arrives from outside: the leg pushes it and
-            // names it in KAYA_ASSET_DIR, an extra that reaches the core
-            // through the Os.setenv loop above.
+            // names it in KAYA_ASSET_DIR, which reaches the core through
+            // the Os.setenv loop above.
             "typeface" -> Typeface::app
             "toolbar" -> Toolbar::app
             "table" -> Table::app
@@ -91,21 +91,18 @@ class MainActivity : ComponentActivity() {
             "panels" -> Panels::app
             else -> Milestone2::app
         }
-        // KAYA STARTS THE APP THREAD, not this shell: a configuration
-        // change re-runs onCreate in the same process, and a shell that
-        // spawned its own would run the guest's whole entry again
-        // (KayaRing.startGuest, docs/deferred.md's mount entry).
+        // KAYA STARTS THE APP THREAD, not this shell — a configuration
+        // change re-runs onCreate in the same process (KayaRing.startGuest).
         KayaRing.startGuest(scene)
     }
 
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
         KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 
-    // The save-jvm WATCH's second discriminator (docs/deferred.md): the
-    // fifth sighting proved the registered callback never runs for the
-    // lost save. This logs every result the ACTIVITY receives — a line
-    // here without a KAYA_SAVE_RESULT beside it convicts the registry's
-    // dispatch; no line at all convicts delivery upstream of the app.
+    // The save-jvm WATCH's second discriminator (docs/deferred.md): a
+    // line here without a KAYA_SAVE_RESULT beside it convicts the
+    // registry's dispatch; no line at all convicts delivery upstream of
+    // the app.
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         Log.i("kaya", "KAYA_ACTIVITY_RESULT: rc=$requestCode code=$resultCode data=${data != null}")

@@ -1,5 +1,5 @@
-// The select conformance scene, C# port. See
-// guests/rust/select.rs and tools/scenes/select.steps.
+// The select scene, C# port — guests/rust/select.rs,
+// tools/scenes/select.steps.
 
 static class SelectScene
 {

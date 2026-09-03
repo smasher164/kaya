@@ -1,10 +1,5 @@
-//! The windowed scene's guest (docs/virtualization-plan.md §6.3): 400
-//! uniform rows in a grown table — enough to overflow every tier's
-//! band — with the guest writing no windowing code at all. The
-//! COMPILED guest is the point: ledger/varied are Python and cannot
-//! reach the mobile lanes, so this one carries expect_window and
-//! scroll_to_row to all five. The byte-frozen contract is
-//! tools/scenes/windowed.steps.
+//! The windowed scene (tools/scenes/windowed.steps): 400 rows and no
+//! windowing code. THE COMPILED GUEST is what reaches the phone lanes.
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Item {
@@ -42,8 +37,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         }
     });
 
-    // No handlers: the harness drives the window; the guest only holds
-    // the scene open.
+    // No handlers: the guest only holds the scene open.
     while let Some(msg) = msgs.next(&ctx) {
         match msg {}
     }

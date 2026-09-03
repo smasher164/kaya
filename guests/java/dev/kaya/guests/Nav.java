@@ -3,13 +3,7 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The nav conformance scene from the JVM — the serial navigation
- * grammar via the chain spelling. See guests/rust/nav.rs and
- * tools/scenes/nav.steps.
- *
- * <p>Two behaviours the scene asserts: a covered root is RETAINED and
- * keeps taking writes, and a programmatic popEntry does NOT echo
- * entry_popped.
+ * The nav scene from the JVM — guests/rust/nav.rs, tools/scenes/nav.steps.
  */
 public final class Nav {
     private static final long DETAIL = 7;
@@ -36,8 +30,7 @@ public final class Nav {
                     inner.write(s, "pushed detail");
                 });
                 tx.button("open settings", inner -> { // button#1
-                    // The veto class: nothing has popped when the
-                    // handler runs, so it agrees and confirms.
+                    // Nothing has popped when the handler runs, so it confirms.
                     long entry = inner.pushEntry(SETTINGS)
                             .title("settings")
                             .interceptBack(true)

@@ -1,7 +1,5 @@
-/* The accessibility conformance scene from C, on the function floor.
- * EXACTLY ONE CONTAINER OF EACH CONTAINER KIND: the script addresses
- * containers ordinally, so a second one moves the targets.
- * Contract: tools/scenes/a11y.steps. */
+/* The a11y conformance scene (tools/scenes/a11y.steps).
+ * EXACTLY ONE CONTAINER OF EACH KIND: container targets are ordinal. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -9,7 +7,7 @@
 #include <pthread.h>
 #include <stdio.h>
 
-/* Guest-allocated ids, counted from 1 per space. */
+/* Guest-allocated ids; tools/check-c-ids.py holds the one id space. */
 #define W_FORM 1
 #define W_SAVE 2
 #define W_DETAILS 3
@@ -55,8 +53,7 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_FORM, "form");
     kaya_tx_set_a11y_label(&tx, W_FORM, "Form");
 
-    /* Caption-bearing controls: identified, deliberately NOT labelled.
-     * The platform must speak the caption. */
+    /* Deliberately NOT labelled: the platform must speak the caption. */
     kaya_tx_create_widget(&tx, W_SAVE, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_SAVE, "Save");
     kaya_tx_set_a11y_id(&tx, W_SAVE, "save");
@@ -72,7 +69,6 @@ static void build_scene(void) {
     kaya_tx_set_text(&tx, W_STATUS, "Ready");
     kaya_tx_set_a11y_id(&tx, W_STATUS, "status");
 
-    /* Caption-less controls: an app MUST name these. */
     kaya_tx_create_widget(&tx, W_NAME, KAYA_KIND_ENTRY);
     kaya_tx_set_a11y_id(&tx, W_NAME, "name");
     kaya_tx_set_a11y_label(&tx, W_NAME, "Full name");
@@ -145,9 +141,6 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_ACTIONS, W_CANCEL);
     kaya_tx_add_child(&tx, W_ACTIONS, W_OK);
 
-    /* A spoken name that FOLLOWS A SIGNAL: the bind record the floor
-     * always had, the sugar tiers' live a11y setters take it since
-     * 2026-09-02. */
     kaya_tx_create_signal(&tx, SIG_SPOKEN, kaya_str("Before"));
     kaya_tx_create_widget(&tx, W_SPOKEN, KAYA_KIND_LABEL);
     kaya_tx_set_text(&tx, W_SPOKEN, "Spoken");

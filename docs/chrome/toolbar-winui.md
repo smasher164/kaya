@@ -19,13 +19,13 @@ All **[MEASURED]**, read from the tree on 2026-08-16:
 
 | thing | version | where it is written |
 |---|---|---|
-| Windows App SDK (meta) | **2.2.0** | `tools/fetch-winappsdk.sh:98` (Runtime), header comment "component versions come from its nuspec (2.2.0)" |
-| WASDK **WinUI** component (the XAML framework + `Microsoft.UI.Xaml.winmd`) | **2.2.1** | `tools/fetch-winappsdk.sh:95`, `tools/winui-bindgen/src/main.rs` (`Microsoft.WindowsAppSDK.WinUI-2.2.1/.../Microsoft.UI.Xaml.winmd`) |
-| WASDK Foundation | 2.1.0 | `tools/fetch-winappsdk.sh:91` |
-| WASDK InteractiveExperiences (`Microsoft.UI.winmd`) | 2.0.15 | `tools/fetch-winappsdk.sh:93` |
-| WASDK Base | 2.0.4 | `tools/fetch-winappsdk.sh:89` |
-| `windows` / `windows-core` crates | **0.62** | `crates/kaya/Cargo.toml:34,52` |
-| `windows-collections` / `-numerics` / `-future` | 0.3 | `crates/kaya/Cargo.toml:120-124` |
+| Windows App SDK (meta) | **2.2.0** | `tools/fetch-winappsdk.sh:95` (Runtime), header comment "component versions come from its nuspec (2.2.0)" |
+| WASDK **WinUI** component (the XAML framework + `Microsoft.UI.Xaml.winmd`) | **2.2.1** | `tools/fetch-winappsdk.sh:92`, `tools/winui-bindgen/src/main.rs` (`Microsoft.WindowsAppSDK.WinUI-2.2.1/.../Microsoft.UI.Xaml.winmd`) |
+| WASDK Foundation | 2.1.0 | `tools/fetch-winappsdk.sh:88` |
+| WASDK InteractiveExperiences (`Microsoft.UI.winmd`) | 2.0.15 | `tools/fetch-winappsdk.sh:90` |
+| WASDK Base | 2.0.4 | `tools/fetch-winappsdk.sh:86` |
+| `windows` / `windows-core` crates | **0.62** | `crates/kaya/Cargo.toml:22,52` |
+| `windows-collections` / `-numerics` / `-future` | 0.3 | `crates/kaya/Cargo.toml:66-66` |
 | `windows-bindgen` | 0.62 (`.1` in the cargo cache) | `tools/winui-bindgen/Cargo.toml` |
 | guest OS | Windows 11 arm64 in UTM (`tools/deploy-win.py akhil@192.168.64.2`) | CLAUDE.md ladder rung 4 |
 
@@ -398,7 +398,7 @@ dll-hosted guests (python/java/dotnet) die at first layout.
 with no `PrimaryCommands`. Reading the generated file at that point
 says "WinUI's CommandBar has no command collections", which is false —
 the same disguise the D6 icon comment describes at
-`tools/winui-bindgen/src/main.rs:376-400`. The filter needs, at minimum:
+`tools/winui-bindgen/src/main.rs:297-313`. The filter needs, at minimum:
 
     Microsoft.UI.Xaml.Controls.CommandBar
     Microsoft.UI.Xaml.Controls.AppBar                  (ClosedDisplayMode)

@@ -1,44 +1,19 @@
-//! The filedialog conformance scene: the picker's request/result
-//! grammar, and the capability it hands back (DESIGN.md, File dialogs).
-//! The byte-frozen contract is tools/scenes/filedialog.steps.
-//!
-//! The file is the guest's own — guest and interpreter are the same
-//! process, so they agree on `<root>/kaya-picked-<pid>/picked.txt` with
-//! no runner involvement, and the pid keeps parallel legs from
-//! colliding. The scene names only the BASENAME, so one script serves
-//! five lanes whose roots differ.
-//!
-//! THE READ RUNS OFF THE APP THREAD, which is what `PickedFile::open`
-//! tells every caller to do: it blocks. The worker also PARKS between
-//! reading and posting, so a guest that read inline, or that parked on
-//! the app thread, fails rather than passing by being fast.
-//!
-//! Cancel is the empty list: no platform can confirm an empty
-//! selection, so there is no sentinel to invent.
+//! The filedialog scene (tools/scenes/filedialog.steps). THE READ RUNS OFF
+//! THE APP THREAD, and the worker PARKS between reading and posting.
 
 use std::io::Read;
 use std::sync::mpsc;
 
-/// Both sides compute this identically; see the module note.
-///
-/// NOT THE TEMP DIRECTORY ON ANDROID: DocumentsUI browses document
-/// providers and none exposes an app's private cache, so a picker aimed
-/// there opens on Recent instead, silently. The shared Documents
-/// collection is the one directory both halves can have
-/// (docs/file-dialogs-plan.md). EXTERNAL_STORAGE rather than a written
-/// out /storage/emulated/0, which rots the first time a device numbers
-/// its users differently.
+/// NOT THE TEMP DIRECTORY ON ANDROID: DocumentsUI browses providers and
+/// none exposes an app's private cache, so a picker there opens on Recent.
 #[cfg(target_os = "android")]
 fn scene_root() -> std::path::PathBuf {
     let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
     std::path::PathBuf::from(root).join("Documents")
 }
 
-/// iOS is the same story with a different spelling. The app's own
-/// Documents directory is reachable only because the bundle declares
-/// `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`
-/// (tools/ios/Info.plist.in); `HOME` is the container in every iOS
-/// process.
+/// Reachable only because the bundle declares `UIFileSharingEnabled` and
+/// `LSSupportsOpeningDocumentsInPlace` (tools/ios/Info.plist.in).
 #[cfg(target_os = "ios")]
 fn scene_root() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -63,12 +38,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         Release,
     }
 
-    // The files the scene will choose between, written before anything
-    // is shown. THE DECOY IS REQUIRED: with one file in the directory a
-    // dialog completes with it when nothing is selected (measured on
-    // GTK), so `file_choose picked.txt` would pass on a backend that
-    // ignored the name. "decoy" sorts first and its bytes differ, so
-    // such a backend fails both assertions (docs/traps.md).
+    // THE DECOY IS REQUIRED: a dialog with ONE file completes with it
+    // having selected nothing (docs/traps.md).
     let dir = picked_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
     std::fs::write(dir.join("picked.txt"), b"picked bytes").expect("failed to write the file");
@@ -93,10 +64,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         status
     });
 
-    // The release channel: the app thread sends, the worker receives.
-    // A handler that blocked handing this over would fail the very claim
-    // being tested, so the send must not wait for the receiver — mpsc's
-    // does not.
+    // The send must NOT wait for the receiver — mpsc's does not.
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let mut release_tx = Some(release_tx);
     let mut release_rx = Some(release_rx);
@@ -107,16 +75,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let one = matches!(msg, Msg::AskOne);
                 let dialog = ctx.apply(|tx| {
                     let r = if one { tx.pick_file() } else { tx.pick_files() };
-                    // Advisory on every platform: a default view, never
-                    // a guarantee.
+                    // Advisory on every platform, never a guarantee.
                     r.filter("Text", "txt").show()
                 });
                 msgs.on_files(dialog, Msg::Picked);
             }
             Msg::Picked(files) => {
                 if files.is_empty() {
-                    // The empty list IS cancel. Nothing to read, so no
-                    // worker and no release.
+                    // The empty list IS cancel.
                     ctx.apply(|tx| tx.write(status, "cancelled"));
                     continue;
                 }
@@ -127,9 +93,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 std::thread::Builder::new()
                     .name("filedialog-reader".into())
                     .spawn(move || {
-                        // The handle crossed a thread boundary and is
-                        // redeemed here, not in the handler: `open`
-                        // blocks, and kaya is not in this data path.
                         let count = files.len();
                         let mut text = String::new();
                         match files[0].open(kaya::FileMode::Read) {
@@ -140,15 +103,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             }
                             Err(e) => text = format!("open failed: {e}"),
                         }
-                        // Parks holding the result. On the app thread
-                        // the release click could never be processed and
-                        // the scene would deadlock — the discriminator.
+                        // Parks: on the app thread the release click could
+                        // never be processed.
                         let _ = rx.recv();
                         poster.post(move |tx| tx.write(status, format!("{count} {text}")));
                     })
                     .expect("failed to spawn the reader");
-                // The handler RETURNED without reading; a guest that read
-                // eagerly arrives here already showing the final text.
+                // The handler RETURNED without reading; the scene reads this.
                 ctx.apply(|tx| tx.write(status, "reading"));
             }
             Msg::Release => {

@@ -1,16 +1,10 @@
-(* kaya's idiomatic surface for OCaml: the structural core, over the runtime
-   (kaya_runtime.ml) and the generated wire vocabulary (kaya_wire.ml). THE
-   TEMPLATE ZONE IS THE Tpl SUBMODULE. OCaml has no overloading, so the
-   module path spells the zone. THE TRANSACTION IS AMBIENT: [build] (and
-   each handler dispatch) sets it for its extent and every builder reads it,
-   so plain [let] and [;] compose scenes. The price is that "declared
-   outside a transaction" is a loud RUNTIME error rather than a type error
-   (see [the_tx]). THE TRAILING-UNIT CONVENTION: every creator ends in [()].
-   Apply it to realize a widget where you stand; OMIT it and the partial
-   application is a pure [unit -> widget] thunk, which is the child form
-   containers take in lists and realize left to right ([List.iter]'s
-   specified order, so document order never rides on OCaml's unspecified
-   list-literal evaluation order). *)
+(* kaya's idiomatic surface for OCaml, over kaya_runtime.ml and the
+   generated kaya_wire.ml. THE TEMPLATE ZONE IS THE Tpl SUBMODULE. THE
+   TRANSACTION IS AMBIENT, so a builder called outside [build] is a loud
+   RUNTIME error ([the_tx]). THE TRAILING-UNIT CONVENTION: a creator ends
+   in [()]; omit it and the partial application is the [unit -> widget]
+   child form, realized left to right ([List.iter]'s specified order —
+   never OCaml's unspecified list-literal order). *)
 
 type signal = Signal of int64
 type widget = Widget of int64
@@ -18,16 +12,12 @@ type node = Node of int64
 
 (* A canvas's coordinate system AND its natural size in
    device-independent points (docs/canvas-plan.md §3.2). The op stream is
-   written in these units on every platform and in every language, so a
-   scene can freeze it. *)
+   written in these units on every platform, so a scene can freeze it. *)
 type viewbox = float * float
 
-(* The drawing scope's recorder. The calls read as immediate-mode
-   drawing; they are recorded, and ONE record is submitted when the scope
-   closes — the For template trace's fiction with a drawing scope instead
-   of a loop (docs/canvas-plan.md §2.1). [d_ops] accumulates reversed.
-   Declared up here because the app's registry of size-dependent drawings
-   names it. *)
+(* The drawing scope's recorder: the calls read as immediate-mode
+   drawing but are recorded, and ONE record is submitted when the scope
+   closes (docs/canvas-plan.md §2.1). [d_ops] accumulates reversed. *)
 type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
 
 (* WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
@@ -47,8 +37,7 @@ type menu_item = MenuItem of int64
 
 (* A context catalog built UNANCHORED ([context_catalog]) for a template
    node: menu items are live and shared across stamped copies, so the
-   catalog is built in the live zone and [Tpl.context_menu] attaches it
-   inside the template, where each activation carries the copy's key path. *)
+   catalog is built live and [Tpl.context_menu] attaches it. *)
 type context_catalog = { cc_roots : int64 list; mutable cc_attached : bool }
 
 (* A collection instance handle: the collection plus the key path selecting
@@ -72,37 +61,24 @@ type instance = {
 type picked_file = { handle : int64; name : string; local_path : string }
 
 (* AN ASSET — a file this app's own BUILD put where the running program
-   can find it (docs/assets-plan.md). [asset "fonts/sora-wght.ttf"]
-   opens one; the name is a relative path under a root the CORE
-   resolves, and no guest reads an asset environment variable or carries
-   a repo-relative default (tools/check-assets.py).
-
-   A MISS RAISES [Failure] carrying the core's sentence and nothing
-   added, so an OCaml guest and a Java guest name the fault in the same
-   words. EACH CALL READS: no cache, no watch, no reload. Release is
-   explicit ([asset_close]) and automatic (a [Gc.finalise] per handle).
-
-   In OCaml the byte value IS the reader — there is no in-memory-channel
-   wrapper, which is the stated carve-out (DESIGN.md, Binding
-   conventions). *)
+   can find it (docs/assets-plan.md; tools/check-assets.py refuses a guest
+   that resolves one itself). A MISS RAISES [Failure] carrying the core's
+   sentence and nothing added; EACH CALL READS, and release is explicit
+   ([asset_close]) and automatic (a [Gc.finalise] per handle). The byte
+   value IS the reader here (DESIGN.md, Binding conventions). *)
 type asset = Kaya_runtime.asset
 
 let asset = Kaya_runtime.open_asset
 
 (* Why [asset name] would raise — the sentence it would carry, handed
-   over without raising. [""] means the name resolves. LINE 1 (name,
-   rule, census) is the same on every platform and is the line a scene
-   freezes; line 2 names the resolved place, which three platforms spell
-   three ways. Authored by [asset_why_not] in
+   over without raising. [""] means the name resolves. LINE 1 is the same
+   on every platform and is the line a scene freezes; line 2 names the
+   resolved place. Authored by [asset_why_not] in
    crates/kaya/src/assets.rs. *)
 let asset_miss_sentence = Kaya_runtime.asset_miss_sentence
 let asset_bytes = Kaya_runtime.asset_bytes
 let asset_close = Kaya_runtime.asset_close
 
-(* One representation, arriving — the sum a copy is the record of.
-   Bytes ride as [string], OCaml's own binary buffer. [Image] may be a
-   RE-ENCODE of what was copied, so compare what the image IS, never the
-   bytes it arrived in. *)
 (* One collection entry's restored state, as the core states it. *)
 type undo_entry = {
   ue_collection : int64;
@@ -142,6 +118,9 @@ type undo_delta = {
   ud_orders : undo_order list;
 }
 
+(* One representation, arriving. Bytes ride as [string], OCaml's own
+   binary buffer. [Image] may be a RE-ENCODE of what was copied, so
+   compare what the image IS, never the bytes it arrived in. *)
 type representation =
   | Text of string
   | Html of string
@@ -172,9 +151,8 @@ type app = {
      the 0-based column. *)
   node_sorts : (int64, Kaya_wire.value list -> int -> unit) Hashtbl.t;
   (* Menu dispatch tables, keyed by MENU ITEM id — their own id space,
-     separate from every widget/node table ("two tables, always" — now
-     N tables, still always). The node flavors receive the stamped
-     copy's key path (the keys ARE the noun). *)
+     separate from every widget/node table. The node flavors receive the
+     stamped copy's key path. *)
   menu_activated : (int64, unit -> unit) Hashtbl.t;
   menu_activated_node : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   menu_toggled : (int64, bool -> unit) Hashtbl.t;
@@ -202,26 +180,19 @@ type app = {
   widget_pastes : (int64, representation -> unit) Hashtbl.t;
   node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
-  (* The history, per window and NOT one-shot: a history is walked as often
-     as the user likes, so these outlive every step (the section_selected
-     stance, not the alert's). *)
+  (* The history, per window and NOT one-shot: a history is walked as
+     often as the user likes. *)
   undone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   redone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
   (* A stamped slider's move and a stamped choice's pick, the node flavor of
      [widget_values]. *)
   node_values : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
-  (* The collection is the model — the only copy: every mutation op edits it
-     and queues the wire delta in the same call, so reads (items, count) are
-     exactly the writes. *)
   model : (int64, instance list) Hashtbl.t;
-  (* The minter's counters: the highest I64 key each collection
-     INSTANCE has minted or absorbed, keyed by path the way [model] is
-     (a path is a [value list], and a [value] carries a float, so it is
-     compared structurally here exactly as instances are). Kept on the
-     app and NOT in the transaction's rollback journal, on purpose —
-     see [insert_fresh]: the journal restores the model, never the
-     counter, so a key spent by an abandoned transaction stays spent. *)
+  (* The minter's counters, keyed by path the way [model] is. Kept on the
+     app and NOT in the transaction's rollback journal, on purpose: the
+     journal restores the model, never the counter, so a key spent by an
+     abandoned transaction stays spent ([insert_fresh]). *)
   fresh : (int64, (Kaya_wire.value list * int64 ref) list) Hashtbl.t;
   children : (int64, int64 list) Hashtbl.t;
   mutable open_fors : int64 list;
@@ -236,14 +207,10 @@ type app = {
      does not have to repeat it (docs/canvas-plan.md §2.2). *)
   canvas_viewboxes : (int64, viewbox) Hashtbl.t;
   (* A canvas's DRAWING AS A FUNCTION OF THE SIZE IT WAS ASSIGNED
-     (docs/canvas-plan.md §3.2.1), keyed by canvas id. Not a handler
-     table like the others: these produce a DRAWING rather than reaching
-     the guest, so [dispatch_loop] answers the ask itself and the guest
-     never hears it.
-     ONE SHAPE, NOT TWO. [~on_tick]'s handler is stored verbatim and
-     [~on_draw]'s is widened with an ignored time, because a tick canvas
-     is asked as a plain draw_requested once before its first frame and
-     the arity must not depend on the record kind. *)
+     (docs/canvas-plan.md §3.2.1), keyed by canvas id. [dispatch_loop]
+     answers the ask itself and the guest never hears it. ONE SHAPE, NOT
+     TWO: [~on_draw]'s handler is widened with an ignored time, so the
+     arity never depends on the record kind. *)
   canvas_draws : (int64, draw -> viewbox -> float -> unit) Hashtbl.t;
 }
 
@@ -253,22 +220,16 @@ and tx = {
   app : app;
     mutable records : string list;
   (* The undo group's (window, label), kept OUT of [records] because it
-     rides at the HEAD of the batch wherever [undoable] was called: a
-     handler builds first and names the step once it knows what the step
-     was, and the wire's head-of-batch rule must not turn that into a
-     footgun. *)
+     rides at the HEAD of the batch wherever [undoable] was called. *)
   mutable undo_group : (int64 * string) option;
   mutable journal : (int64 * instance list) list;
-  (* Deriveds registered in this transaction: promoted to the app
-     registry on submit, abandoned with a rolled-back tx (their signals
-     were never created). *)
+  (* Deriveds registered in this transaction: promoted on submit,
+     abandoned with a rolled-back tx (their signals were never made). *)
   mutable pending_derived : (int64 * (unit -> unit)) list;
 }
 
-(* The ambient transaction: set for the extent of [build] (handler dispatch
-   runs through build, so handlers get it too). Builders read it instead of
-   threading a reader, so plain [let] and [;] compose scenes — the let*/decl
-   reader retired with this (ratified 2026-07-22). *)
+(* The ambient transaction: set for the extent of [build] (handler
+   dispatch runs through build, so handlers get it too). *)
 let ambient_tx : tx option ref = ref None
 
 (* The app thread's id, learned when the dispatch loop starts. None
@@ -351,8 +312,6 @@ let emit tx record = tx.records <- record :: tx.records
 
 let instances_of app cid = Option.value ~default:[] (Hashtbl.find_opt app.model cid)
 
-(* One instance's fresh-key counter, made if this is the first anyone has
-   asked. *)
 let counter_of app cid path =
   let instances = Option.value ~default:[] (Hashtbl.find_opt app.fresh cid) in
   match List.assoc_opt path instances with
@@ -362,13 +321,11 @@ let counter_of app cid path =
       Hashtbl.replace app.fresh cid (instances @ [ (path, counter) ]);
       counter
 
-(* The next fresh key for one instance: counter+1, and the counter keeps it. *)
 let mint_key app cid path =
   let counter = counter_of app cid path in
   counter := Int64.add !counter 1L;
   !counter
 
-(* An explicit key, shown to the minter on its way into the table. *)
 let absorb_key app cid path key =
   match key with
   | Kaya_wire.I64 n ->
@@ -464,8 +421,6 @@ let model_move tx cid path key before =
          end)
        (instances_of tx.app cid))
 
-(* Every derived signal rooted at this collection, recomputed and written
-   into this transaction. *)
 let recompute_derived tx cid path =
   if path = [] then begin
     (match Hashtbl.find_opt tx.app.derived cid with
@@ -492,10 +447,8 @@ let build app (program : unit -> 'a) =
           Hashtbl.replace app.derived cid
             (Option.value ~default:[] (Hashtbl.find_opt app.derived cid) @ [ f ]))
         (List.rev tx.pending_derived);
-      (* The group marker leads the batch, whatever order the program
-         wrote it in — the wire has no header for per-transaction
-         metadata, so head-of-batch is the one position that cannot be
-         ambiguous. *)
+      (* The group marker leads the batch whatever order the program
+         wrote it in: head-of-batch is the one unambiguous position. *)
       let records =
         match tx.undo_group with
         | Some (window, label) ->
@@ -510,10 +463,6 @@ let build app (program : unit -> 'a) =
       List.iter (fun (cid, saved) -> Hashtbl.replace app.model cid saved) tx.journal;
       raise e
 
-(* One handler dispatch: an exception crosses the build boundary
-   (which restored the model and dropped the records), is logged, and
-   the loop moves to the next occurrence -- the uniform dispatch
-   discipline across every binding. *)
 (* Run [program] as a transaction on the app thread, soon. THE ONE
    function safe to call from another thread. A posted thunk runs in its
    OWN transaction, after whatever is running now, so posting from inside
@@ -527,17 +476,19 @@ let post app (program : unit -> unit) =
      only way it hears about it. *)
   Kaya_runtime.wake ()
 
+(* One handler dispatch: an exception crosses the build boundary (which
+   restored the model and dropped the records), is logged, and the loop
+   moves to the next occurrence. *)
 let dispatch app (program : unit -> unit) =
   try build app program
   with e ->
     Printf.eprintf "kaya: handler raised (transaction rolled back): %s\n%!"
       (Printexc.to_string e)
 
-(* Make this transaction ONE undoable step, under [label] (docs/undo-plan.md
-   D2). CALLABLE ANYWHERE IN THE TRANSACTION and the marker still rides at
-   the HEAD of the batch: the transaction is the unit, so where the call
-   sits changes nothing. WHAT A GROUP MAY HOLD is the reactive half — signal
-   writes and collection deltas. *)
+(* Make this transaction ONE undoable step, under [label]
+   (docs/undo-plan.md D2). CALLABLE ANYWHERE IN THE TRANSACTION — the
+   marker still rides at the HEAD of the batch. WHAT A GROUP MAY HOLD is
+   the reactive half: signal writes and collection deltas. *)
 let undoable ?(window = 0L) label =
   let tx = the_tx () in
   if tx.undo_group <> None then
@@ -562,12 +513,9 @@ let widget kind =
 
 (* A widget's text: a button's caption, a label's line — and, on the
    uncontrolled text widgets, the "open a document into the editor"
-   write. One write, after which the user owns the field again.
-
-   A write that CHANGES a textarea's text DROPS whatever ranges were
-   declared over it (see [highlight_ranges]) and spends the field's
-   native undo history, which is why undo's D7 treats it as an episode
-   boundary. *)
+   write. A write that CHANGES a textarea's text DROPS whatever ranges
+   were declared over it and spends the field's native undo history,
+   which is why undo's D7 treats it as an episode boundary. *)
 let set_text (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
 
 (* Set a widget's flex weight within its row/column: 0 is natural size,
@@ -579,11 +527,9 @@ let set_grow (Widget id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id wei
    tooling and UI automation address it by, and which is NEVER spoken. *)
 let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
 
-(* What an assistive client SPEAKS for a widget. Universal, and deliberately
-   separate from the identifier — an automation key is not a spoken name.
-   Leave it unset to keep whatever the platform derives from the control's
-   own content; setting it OVERRIDES that, so a button whose caption already
-   reads well needs nothing here. *)
+(* What an assistive client SPEAKS for a widget, deliberately separate
+   from the identifier. Leave it unset to keep whatever the platform
+   derives from the control's own content; setting it OVERRIDES that. *)
 let set_a11y_label (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
 
@@ -593,11 +539,8 @@ let set_a11y_label (Widget id) value =
 let set_a11y_hint (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
 
-(* The SIGNAL-SOURCED forms of the trio — the live zone's half of
-   [Floor.bind_a11y_id] and friends, spelled as [bind_text] is: a spoken
-   name that follows app state. Since 2026-09-02, uniform across the nine
-   bindings (docs/deferred.md, the live-zone a11y entry); the constructors
-   take them as [?a11y_id_bind] and [?a11y_label_bind]. *)
+(* The SIGNAL-SOURCED forms of the trio, spelled as [bind_text] is; the
+   constructors take them as [?a11y_id_bind] and [?a11y_label_bind]. *)
 let bind_a11y_id (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s)
 let bind_a11y_label (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
 let bind_a11y_hint (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s)
@@ -633,18 +576,15 @@ let align_wire = function
 
 let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
 
-(* A container's ARRANGEMENT AXIS — one node, two constructor spellings
-   (docs/adaptive-layout-plan.md D1/D2): identity is the creation kind,
-   presentation is this prop, so a widget built by [row] stays
-   addressable as [row#N] whatever its axis says today. No constructor
-   spells it; the runtime toggle and a breakpoint's setters do. *)
+(* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2):
+   identity is the creation kind, presentation is this prop, so a widget
+   built by [row] stays addressable as [row#N] whatever its axis says.
+   No constructor spells it; the runtime toggle and a breakpoint do. *)
 type axis = Horizontal | Vertical
 
-(* A window's named SIZE CLASS (spec enum "size_class"; ruled
-   2026-08-31): what [~stack_when] speaks in place of an author-invented
-   width. [Compact] is the whole surface today — the platform's own
-   class on iOS, narrower than 600 points everywhere else. An app names
-   a class, it never asks which one the window is. *)
+(* A window's named SIZE CLASS (spec enum "size_class"): what
+   [~stack_when] speaks in place of an author-invented width. An app
+   names a class, it never asks which one the window is. *)
 type size_class = Compact
 
 let axis_wire = function
@@ -655,13 +595,8 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
 
 (* SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
    never how it looks. [Destructive] and [Prominent] are an ACTION's
-   emphasis — what pressing it does to the user's data, and which of a
-   surface's actions is THE one — so they belong to a button and nothing
-   else. [Heading] is a text hierarchy fact: the platform's own heading
-   text style AND the trait assistive users skim a screen by, which is
-   why it is a role and not a font size. [Caption] is its counterpart
-   one tier down — the platform's footnote text, under the content it
-   explains — so it too belongs to a label and not to a button. *)
+   emphasis and belong to a button; [Heading] and [Caption] are text
+   hierarchy facts and belong to a label. *)
 type role = Destructive | Prominent | Heading | Caption
 
 let role_wire = function
@@ -729,13 +664,10 @@ let symbol_wire = function
   | Home -> Int64.of_int Kaya_wire.symbol_home
 
 (* WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
-   "platform"; docs/styling-plan.md Slice 2b): one entry per backend
-   roster row, closed like [role] and [symbol] above.
+   "platform"; docs/styling-plan.md Slice 2b).
 
-   AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS, and there is no
-   [current]: OCaml cannot answer that question — [Sys.os_type] is "Unix"
-   for macOS, Linux, iOS and Android alike. Every row travels to every
-   backend and each LOWERING picks its own. *)
+   AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS: [Sys.os_type] is
+   "Unix" for macOS, Linux, iOS and Android alike. *)
 type platform = Mac | Ios | Linux | Windows | Android
 
 let platform_wire = function
@@ -766,10 +698,6 @@ let bind_source (Widget id) (Signal s) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_bind_source id s)
 
-(* One-shot commands: momentary verbs into widget-owned state, riding the
-   open transaction like any record — the insert and the clear beside it
-   submit together or not at all. *)
-
 (* Drop an entry's content now (the field stays authoritative). *)
 let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_clear)
 
@@ -777,25 +705,15 @@ let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wi
 let focus (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_focus)
 
 (* --- Text ranges: the three primitives an editor cannot write itself -
-
-   A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS [(start, stop)] into the
-   widget's current text, half-open. OCaml's [string] IS a byte sequence,
-   so the offsets an app already has are the offsets kaya wants and this
-   binding converts nothing. The offsets are [int], not [int64], because
-   an offset is arithmetic the APP does with the stdlib.
-
-   THE CORE VALIDATES AND REFUSES at one chokepoint before any of this
-   reaches a platform ([start <= stop], inside the text, both endpoints
-   on a code-point boundary). A malformed offset gets loud treatment
-   because macOS ABORTS THE PROCESS on one (crates/kaya/src/spec.rs;
-   docs/traps.md). An endpoint inside a grapheme cluster is NOT
-   refused. *)
+   A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS [(start, stop)], half-open;
+   OCaml's [string] IS a byte sequence, so this binding converts nothing.
+   THE CORE VALIDATES AND REFUSES at one chokepoint, loudly, because
+   macOS ABORTS THE PROCESS on a malformed offset (docs/traps.md). An
+   endpoint inside a grapheme cluster is NOT refused. *)
 
 (* DECLARE the decorated ranges of a textarea, replacing whatever was
    declared before; [[]] is the clear. APP-OWNED AND NEVER TRACKED
-   (docs/ranges-plan.md D2): the first edit of any kind DROPS the set, with
-   nothing said, and the app re-declares from the fold [~on_change] already
-   drives. *)
+   (docs/ranges-plan.md D2): the first edit of any kind DROPS the set. *)
 let highlight_ranges (Widget id) ranges =
   emit (the_tx ())
     (Kaya_wire.tx_highlight_ranges id (List.length ranges)
@@ -805,10 +723,9 @@ let highlight_ranges (Widget id) ranges =
           ranges))
 
 (* Put the textarea's selection at one range; [(at, at)] is a caret.
-   REFUSED WHILE THE USER IS COMPOSING through an input method, in every
-   backend (D4), and the refusal is a NO-OP rather than an exception:
-   composition state is on no kaya channel, so an app cannot avoid the
-   race. Ask again after the next [~on_change]. *)
+   REFUSED WHILE THE USER IS COMPOSING through an input method (D4), and
+   the refusal is a NO-OP rather than an exception: composition state is
+   on no kaya channel. Ask again after the next [~on_change]. *)
 let select_range (Widget id) (start, stop) =
   emit (the_tx ())
     (Kaya_wire.tx_select_range id (Int64.of_int start) (Int64.of_int stop))
@@ -824,7 +741,6 @@ let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_child parent child)
 
-(* --- Construction sugar: the tree reads as a tree ------------------- *)
 
 let button ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?role ?text ?on_click () =
   let tx = the_tx () in
@@ -924,12 +840,10 @@ let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0
   | None -> ());
   w
 
-(* A dropdown select over fixed [options] — each option becomes a
-   label child (labels only, scene-checked) — at [~selected], the
-   initial 0-based index (domain-checked at the root against the
-   option count). Uncontrolled, like the slider: [~on_select]
-   receives each USER pick's new 0-based index (programmatic writes
-   never echo). *)
+(* A dropdown select over fixed [options] — each option becomes a label
+   child (labels only, scene-checked) — at [~selected], the initial
+   0-based index (domain-checked at the root). [~on_select] receives each
+   USER pick's new index; programmatic writes never echo. *)
 let select ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_select in
@@ -990,12 +904,10 @@ let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hin
   | None -> ());
   w
 
-(* An image displaying encoded bytes (PNG, JPEG, ...): the toolkit decodes
-   natively, and decode failure renders the placeholder, never a crash.
-   [~source] ships the bytes and [~source_asset] the same slot with the
-   picture NAMED rather than read (the bytes never enter the OCaml heap).
-   The two are EXCLUSIVE — naming both is refused, [~font]/[~font_asset]'s
-   rule verbatim. *)
+(* An image displaying encoded bytes (PNG, JPEG, ...): decode failure
+   renders the placeholder, never a crash. [~source] ships the bytes and
+   [~source_asset] names the picture instead (the bytes never enter the
+   OCaml heap). The two are EXCLUSIVE. *)
 let image ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?source ?source_asset ?bind () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1110,18 +1022,11 @@ let drawing_record id keys ((vb_w, vb_h) as vb) body =
     (List.length ops) (List.length keys) (keys @ ops)
 
 (* WHAT THIS CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
-   (docs/canvas-plan.md §3.2.1), lowered for [~fixed], [~on_draw] and
-   [~on_tick]. The guest never spells the number, and a canvas that
-   declares nothing is `scale`.
-
-   THE SIZE POLICY IS A LIVE-ZONE DECLARATION IN THIS SLICE. OCaml's
-   [Tpl.canvas] is refused by the compiler — it has none of the three
-   labels — but the LIVE [canvas] can be CALLED inside a template body,
-   where [widget] mints a template node and the [Widget] wrapper says
-   nothing about which zone the id landed in. So the refusal here is
-   [tpl_depth], the same reading [guard_mirror_read] and
-   [alloc_menu_item] take (docs/deferred.md, the template-zone size
-   policy entry). *)
+   (docs/canvas-plan.md §3.2.1). THE SIZE POLICY IS A LIVE-ZONE
+   DECLARATION IN THIS SLICE: the LIVE [canvas] can be CALLED inside a
+   template body, where [Widget] says nothing about which zone the id
+   landed in, so the refusal is [tpl_depth] (docs/deferred.md, the
+   template-zone size policy entry). *)
 let declare_size_policy tx id policy =
   if tx.app.tpl_depth > 0 then
     failwith
@@ -1131,19 +1036,11 @@ let declare_size_policy tx id policy =
   emit tx (Kaya_wire.tx_set_size_policy id policy)
 
 (* A drawing surface. [~viewbox] is the coordinate system the ops are
-   written in AND the canvas's natural size in points, which is what
-   keeps one op stream identical on five platforms (§3.2). [~draw]
-   declares what it draws at construction; [draw] re-declares it later,
-   and until one of them runs the canvas is present and empty.
-
-   THE THREE SIZE-POLICY DECLARATIONS RIDE HERE, where this binding's
-   other handlers ride (§3.2.1, ruling 1). [~fixed:true] refuses
-   coercion; [~on_draw] hands the drawing the size it was assigned and
-   [~on_tick] the size and the frame's time in seconds, and REGISTERING
-   IS DECLARING — each puts its policy on the wire in the same act, so a
-   handler nothing can call is unspellable. Writing none of the three is
-   `scale`. The binding answers both asks itself (see [dispatch_loop]);
-   they never reach the guest. *)
+   written in AND the canvas's natural size in points (§3.2). [~draw]
+   declares what it draws at construction; [draw] re-declares it later.
+   THE THREE SIZE-POLICY DECLARATIONS RIDE HERE (§3.2.1, ruling 1):
+   [~fixed:true] refuses coercion, [~on_draw] and [~on_tick] take the
+   assigned size, and REGISTERING IS DECLARING. Writing none is `scale`. *)
 let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ~viewbox ?draw ?(fixed = false)
     ?(on_draw : (draw -> viewbox -> unit) option)
     ?(on_tick : (draw -> viewbox -> float -> unit) option) () =
@@ -1152,10 +1049,8 @@ let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ~viewbox ?d
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
   let (Widget id) = w in
-  (* The viewbox rides the DRAWING on the wire, not a prop, so a canvas
-     with no declaration yet has nothing to be inconsistent about; the
-     guest side remembers it so a redraw in a later handler does not
-     repeat it. *)
+  (* The viewbox rides the DRAWING on the wire, not a prop; the guest
+     side remembers it so a later redraw need not repeat it. *)
   Hashtbl.replace tx.app.canvas_viewboxes id viewbox;
   (* The policy is a PROP and rides ahead of the drawing, as it does in
      the Rust model's chain. *)
@@ -1195,18 +1090,11 @@ let draw (Widget id) ~f =
 let draw_at (Node id) keys ~viewbox ~f =
   emit (the_tx ()) (drawing_record id keys viewbox f)
 
-(* A container from its children. A child is a PARTIALLY APPLIED
-   creator — every creator ends in [()], and omitting that unit
-   leaves a pure [unit -> widget] thunk, so the child list literal
-   only allocates closures (OCaml's unspecified literal evaluation
-   order cannot reorder anything observable). The container realizes
-   the thunks itself, left to right — [List.iter]'s specified order
-   IS document order — attaching each result. The trailing unit is
-   the convention's hinge: write [()] to realize a widget where you
-   stand, omit it to hand the creator to a container. Construction
-   props are labeled optional arguments, the lablgtk idiom: [~grow]
-   weights the container within ITS parent, [~spacing] sets its own
-   inter-child gap, [~inset] its own padding. *)
+(* A container from its children. A child is a PARTIALLY APPLIED creator
+   — omitting the trailing [()] leaves a [unit -> widget] thunk, so the
+   child list literal only allocates closures and the container realizes
+   them left to right ([List.iter]'s specified order IS document order).
+   Props are labeled optional arguments, the lablgtk idiom. *)
 let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
@@ -1217,10 +1105,9 @@ let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
-(* A grid from its children, laid out row-major into [~columns]
-   columns — each column takes its NATURAL width, aligned across rows
-   (the thing nested rows cannot express). [~spacing] is the
-   inter-cell gap on both axes. The columns record lands BEFORE the
+(* A grid from its children, laid out row-major into [~columns] columns —
+   each column takes its NATURAL width, aligned across rows (the thing
+   nested rows cannot express). The columns record lands BEFORE the
    add_childs (backends re-flow either way). *)
 let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?inset children () =
   let tx = the_tx () in
@@ -1252,16 +1139,11 @@ let column ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?a
 let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind children =
   container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind Kaya_wire.kind_scroll children
 
-(* [~stack_when] stacks this row's children vertically while the
-   window's SIZE CLASS is the named one ([Compact], the only class
-   today), reverting on leaving the class — a core-evaluated
-   breakpoint, the one-label sugar over
-   [Kaya_wire.tx_create_breakpoint] (docs/adaptive-layout-plan.md D3;
-   classes ruled 2026-08-31: iOS answers with the platform's own class,
-   every other platform is compact below 600 points).
-   LIVE ONLY: [Tpl.row] carries no such label, so a blueprint cannot ask
-   for one — a breakpoint's setters name live widgets, and a template
-   row is stamped per entry. *)
+(* [~stack_when] stacks this row's children vertically while the window's
+   SIZE CLASS is the named one, reverting on leaving it — a
+   core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
+   ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
+   name live widgets and a template row is stamped per entry. *)
 let row ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset ?stack_when children () =
   let parent =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset Kaya_wire.kind_row
@@ -1281,10 +1163,9 @@ let row ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?alig
     stack_when;
   parent
 
-(* An existing widget as a child: [w field] wraps an already-realized
-   handle in an inert thunk, so a widget created earlier (because
-   handlers needed its handle first) slots into a child list — the
-   container merely attaches it. *)
+(* An existing widget as a child: [w wid] wraps an already-realized
+   handle in an inert thunk, so a widget created earlier slots into a
+   child list. *)
 let w wid () = wid
 
 
@@ -1306,32 +1187,24 @@ let collection () =
    the next enclosing For; chain for deeper nesting. *)
 let at c key = { c with cpath = c.cpath @ [ key ] }
 
-(* A For binds the collection itself — its template stamps per entry of
-   every instance — so handing it an [at] handle is a bug. *)
 let assert_root c =
   if c.cpath <> [] then
     invalid_arg "kaya: for_each binds the collection itself, not an instance — drop the at"
 
 let insert c key value =
   let tx = the_tx () in
-  (* ABSORPTION, on the one path every explicit key of a scalar
-     collection travels: a numeric key at or above the minter's counter
-     carries it up, so hand-chosen and minted keys share one space
-     safely and in either order ([insert_fresh]'s contract). *)
+  (* ABSORPTION, the one path every explicit key travels: a numeric key
+     at or above the minter's counter carries it up ([insert_fresh]). *)
   absorb_key tx.app c.cid c.cpath key;
   model_set tx c.cid c.cpath key 0 [ value ];
   emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ value ]);
   recompute_derived tx c.cid c.cpath
 
-(* Insert a value under a key the binding authors, and hand the key back
-   — [let key = insert_fresh todos (Str draft)].
-
+(* Insert a value under a key the binding authors, and hand the key back.
    ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
-   [I64] and is counter+1. MIXING IS SAFE BY ABSORPTION: an explicit
-   [insert] whose key is an [I64] at or above the counter carries it up.
-   NO DECREMENT IS EXPRESSIBLE — a history walk never moves the counter,
-   and an abandoned transaction does not move it back either (the
-   rollback journal restores the model, not the counter). *)
+   [I64] and is counter+1. MIXING IS SAFE BY ABSORPTION, and NO DECREMENT
+   IS EXPRESSIBLE — a history walk never moves the counter, and an
+   abandoned transaction does not move it back either. *)
 let insert_fresh c value =
   let tx = the_tx () in
   let key = mint_key tx.app c.cid c.cpath in
@@ -1355,8 +1228,6 @@ let entry_keys tx cid path =
   | Some i -> List.map fst i.entries
   | None -> []
 
-(* The same checks the scene makes, made where the guest can see the stack:
-   a missing key or anchor is a guest bug, never a fallback. *)
 let move_entry c key before =
   let tx = the_tx () in
   let keys = entry_keys tx c.cid c.cpath in
@@ -1372,24 +1243,20 @@ let move_entry c key before =
     recompute_derived tx c.cid c.cpath
   end
 
-(* Reposition an entry before another's: order is collection data, so the
-   model reorders and the wire carries the same keys-only delta. *)
+(* Reposition an entry before another's. *)
 let move_before c key anchor = move_entry c key (Some anchor)
 
 (* Reposition an entry at the end of its collection. *)
 let move_to_end c key = move_entry c key None
 
-(* Reposition an entry at the front: sugar for move_before the current
-   first key, lowering to the same wire op. *)
+(* Reposition an entry at the front. *)
 let move_to_front c key =
   let tx = the_tx () in
   match entry_keys tx c.cid c.cpath with
   | [] -> invalid_arg "kaya: move of missing key"
   | first :: _ -> move_entry c key (Some first)
 
-(* Reposition an entry directly after another's: sugar for move_before
-   the anchor's successor (move_to_end when the anchor is last),
-   lowering to the same wire op. *)
+(* Reposition an entry directly after another's. *)
 let move_after c key anchor =
   let tx = the_tx () in
   let keys = entry_keys tx c.cid c.cpath in
@@ -1449,19 +1316,14 @@ let i64_field index : ('a, int64) field =
 let f64_field index : ('a, float) field =
   { fd_index = index; fd_to_value = (fun x -> Kaya_wire.F64 x) }
 
-(* A blob field's MODEL value carries the guest's own bytes (as a
-   binary Str — OCaml strings are byte sequences), so record_items
-   reads back exactly what was written; the wire side registers a
-   fresh copy with the core at encode time (see encode_field). *)
+(* A blob field's MODEL value carries the guest's own bytes (a binary
+   Str), so record_items reads back exactly what was written. *)
 let blob_field index : ('a, bytes) field =
   { fd_index = index; fd_to_value = (fun d -> Kaya_wire.Str (Bytes.to_string d)) }
 
-(* The model-to-wire crossing for one record field: scalars pass
-   through; a blob field's model value (the guest's bytes) registers a
-   fresh copy with the core here, at encode time — handles are
-   single-submit, so insert, update, and update_field each re-register
-   (one copy into core memory per write; the model keeps the guest's
-   own bytes). *)
+(* The model-to-wire crossing for one record field: a blob field's model
+   value registers a fresh copy with the core here — handles are
+   single-submit, so insert, update and update_field each re-register. *)
 let encode_field tag v =
   if tag = Kaya_wire.value_blob then
     match v with
@@ -1480,12 +1342,10 @@ type 'a record_collection = {
 (* The plain handle, for for_each. *)
 let record_handle rc = rc.rc_handle
 
-(* The instance of this record collection inside the copy keyed by [key]
-   of the next enclosing For; chain for deeper nesting. THE TYPED TWIN OF
-   [at]: OCaml has no overloading, so the name says which handle it
-   narrows — [at (record_handle rc) key] loses ['a] and every record
-   mutation below takes ['a record_collection] (docs/deferred.md, the
-   nested-record-collection gap). *)
+(* The instance of this record collection inside the copy keyed by [key].
+   THE TYPED TWIN OF [at]: [at (record_handle rc) key] loses ['a] and
+   every record mutation below takes ['a record_collection]
+   (docs/deferred.md, the nested-record-collection gap). *)
 let record_at rc key = { rc with rc_handle = at rc.rc_handle key }
 
 (* Declare a collection of records; the descriptor is the schema. *)
@@ -1576,14 +1436,11 @@ let derive rc compute =
     :: tx.pending_derived;
   s
 
-(* REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one
-   sRGB hex — [brand_accent 0x3584E4] — is the whole call, and the core
-   derives the rest. THE APP NEVER WRITES A FOREGROUND and never writes
-   a contrast variant. [~light] and [~dark] are the per-appearance form;
-   whatever they leave unstated comes from the seed.
-
-   SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write and
-   a late one. *)
+(* REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one sRGB
+   hex is the whole call and the core derives the rest. THE APP NEVER
+   WRITES A FOREGROUND. [~light] and [~dark] are the per-appearance form;
+   whatever they leave unstated comes from the seed. SET ONCE, BEFORE THE
+   FIRST MOUNT: the root refuses a second write and a late one. *)
 let brand_accent ?light ?dark seed =
   let mask =
     (match light with Some _ -> 1 | None -> 0)
@@ -1594,17 +1451,12 @@ let brand_accent ?light ?dark seed =
        (Option.value light ~default:0)
        (Option.value dark ~default:0))
 
-(* REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
-   one family name — [brand_typeface "Georgia"] — is the whole call.
-   THE FAMILY, NEVER THE SCALE. [~platforms] rows TRAVEL UNRESOLVED, so
-   each backend picks its own; [~font] ships a font file's bytes and
-   [~font_asset] the same slot with the font NAMED (the bytes never enter
-   the OCaml heap). The two are EXCLUSIVE — naming both is refused.
-
-   SET ONCE, BEFORE THE FIRST MOUNT. A FAMILY A PLATFORM DOES NOT HAVE
-   leaves that platform's own typeface in place, deliberately and
-   silently: each lowering gates on the family being PRESENT rather than
-   letting the platform pick a stranger. *)
+(* REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b): one
+   family name is the whole call. THE FAMILY, NEVER THE SCALE.
+   [~platforms] rows TRAVEL UNRESOLVED; [~font] and [~font_asset] are the
+   one font slot and are EXCLUSIVE. SET ONCE, BEFORE THE FIRST MOUNT. A
+   FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface in
+   place, deliberately and silently. *)
 let brand_typeface ?(platforms = []) ?font ?font_asset family =
   let pairs =
     (* The filters' encoding one tier over: a FLAT list read in twos,
@@ -1627,22 +1479,15 @@ let brand_typeface ?(platforms = []) ?font ?font_asset family =
     (Kaya_wire.tx_set_brand_typeface
        (match slot with Some _ -> 1 | None -> 0)
        (Kaya_wire.Str family) pairs
-       (* THE FONT SLOT IS ALWAYS WRITTEN and the mask above is what
-          says whether it means anything: an absent font rides as an
-          empty Str, so the record's field count never varies with the
-          payload (the accent mask's discipline, verbatim). *)
+       (* THE FONT SLOT IS ALWAYS WRITTEN and the mask says whether it
+          means anything, so the record's field count never varies. *)
        (Option.value slot ~default:(Kaya_wire.Str "")))
 
 (* DECLARE this app's identity (docs/app-identity-plan.md): the name it
-   goes by and the picture that stands for it, as the bytes of one image
-   file — [app_identity ~icon:mark "Aurora Notes"]. Send a PNG; each
-   lowering converts. [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION, and
-   [~icon_asset] is the same slot with the mark NAMED rather than read;
-   the two are exclusive.
-
-   SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write, a
-   late one and an empty name. THE BYTES ARE NEVER INSPECTED between here
-   and the platform's own decoder. *)
+   goes by and the picture that stands for it, as one PNG's bytes.
+   [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION and [~icon_asset] names
+   the mark instead; the two are exclusive. SET ONCE, BEFORE THE FIRST
+   MOUNT: the root refuses a second write, a late one and an empty name. *)
 let app_identity ?icon ?icon_asset name =
   let slot =
     match (icon, icon_asset) with
@@ -1658,20 +1503,13 @@ let app_identity ?icon ?icon_asset name =
     (Kaya_wire.tx_set_app_identity
        (match slot with Some _ -> 1 | None -> 0)
        (Kaya_wire.Str name)
-       (* THE ICON SLOT IS ALWAYS WRITTEN and the mask above is what
-          says whether it means anything: an absent icon rides as an
-          empty Str, so the record's field count never varies with the
-          payload (the brand mask's discipline, verbatim). *)
+       (* THE ICON SLOT IS ALWAYS WRITTEN and the mask says whether it
+          means anything, so the record's field count never varies. *)
        (Option.value slot ~default:(Kaya_wire.Str "")))
 
-(* Mount into the default window; per-window targets arrive with the
-   window vocabulary. *)
 (* Set a window's attributes in one construct — the attribute set is
-   EXACTLY [create_window]'s (a window's attributes ride its window
-   construct; the primary differs only in having no creation moment —
-   the process owns it): [window ~title:"sections"
-   ~sections_presentation:(Int64.of_int
-   Kaya_wire.sections_presentation_bar) ()]. *)
+   EXACTLY [create_window]'s; the primary differs only in having no
+   creation moment, since the process owns it. *)
 let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
@@ -1679,59 +1517,40 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
-  (* [~inset] is the space kaya's own interpreters put around the mounted
-     root, in layout units — LAYOUT, not appearance (docs/styling-plan.md
-     D3), which is why it rides here beside the size and not in any styling
-     vocabulary. *)
+  (* [~inset] is LAYOUT, not appearance (docs/styling-plan.md D3), which
+     is why it rides here beside the size. *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_inset id v)) inset;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
-  (* [~dirty] declares that this surface holds unsaved work; the backend
-     spells its own platform's affordance (the dot in the close button on
-     macOS, a leading [*] in the rendered caption on Windows, a bullet in
-     the GTK header bar, nothing on the phones, which have none —
-     docs/dirty-plan.md D2/D4). THE TITLE STRING IS NEVER TOUCHED: a
-     marker composed into the app's own title is Qt's [*] template, the
-     named rejection (D1). *)
+  (* [~dirty] declares that this surface holds unsaved work; each backend
+     spells its own platform's affordance (docs/dirty-plan.md D2/D4). THE
+     TITLE STRING IS NEVER TOUCHED (D1). *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_dirty id v)) dirty;
   (* [~panes] is the CEILING on how many of this window's stack entries
-     present side by side: 1 is the serial stack, 2 and 3 are columns on a
-     window wide enough, the shallowest shed first as it narrows
-     (docs/multicolumn-plan.md carries the ruling and the measured
-     mechanics). There is deliberately no argument for WHICH entries show —
-     the stack's order is the priority order — and the live count is the
-     platform's own judgment where it has one. The root refuses 0 and
-     anything above 3. *)
+     present side by side: 1 is the serial stack, 2 and 3 are columns on
+     a window wide enough, the shallowest shed first as it narrows
+     (docs/multicolumn-plan.md). The root refuses 0 and anything above 3. *)
   Option.iter
     (fun v -> emit tx (Kaya_wire.tx_set_window_panes id (Int64.of_int v)))
     panes;
   Option.iter
     (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
     sections_presentation;
-  (* The handlers ride the declaration (per-window — handlers scope
-     to the thing that creates them): [~on_close_requested] fires per
-     chrome close while veto_close is armed (answer with
-     [destroy_window] to agree); [~on_closed] fires when the non-veto
-     auxiliary is chrome-closed and retires with it. *)
+  (* The handlers ride the declaration: [~on_close_requested] fires per
+     chrome close while veto_close is armed (answer with [destroy_window]
+     to agree); [~on_closed] fires when the non-veto auxiliary is
+     chrome-closed and retires with it. *)
   Option.iter
     (fun f -> Hashtbl.replace tx.app.close_requested id f)
     on_close_requested;
   Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed;
-  (* The history handlers ride the window construct for the same reason
-     the close ones do — a ledger is per window — and they are NOT
-     one-shot: the user walks a history as often as they like, so these
-     outlive every step. Each receives the step's label (empty for a
-     typing episode) and the state the core put back; the collection
-     mirror has already been reconciled from it when the handler runs.
-     [~on_undone] hears every undo kaya ROUTED, which is every one it
-     was asked for through the Undo role or the chord; an affordance
-     kaya does not intercept (a platform context menu) moves the field's
-     own stack and says nothing (docs/undo-plan.md A6). *)
+  (* The history handlers ride the window construct — a ledger is per
+     window — and are NOT one-shot. [~on_undone] hears every undo kaya
+     ROUTED; an affordance kaya does not intercept moves the field's own
+     stack and says nothing (docs/undo-plan.md A6). *)
   Option.iter (fun f -> Hashtbl.replace tx.app.undone_handlers id f) on_undone;
   Option.iter (fun f -> Hashtbl.replace tx.app.redone_handlers id f) on_redone;
-  (* The menubar rides the window construct (the window-attribute
-     unification rule): [~menus] realizes its thunks left to right — the
-     curried-children convention, [w file] for a retained handle — and
-     appends each top-level grouping node (menu or radio_group) to this
+  (* The menubar rides the window construct: [~menus] realizes its thunks
+     left to right and appends each top-level grouping node to this
      window's command catalog. *)
   Option.iter
     (List.iter (fun th ->
@@ -1746,9 +1565,6 @@ let create_window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
-  (* [~dirty] rides the creation like every other window attribute: an
-     auxiliary editor can be born with unsaved work, and the mark has to
-     survive the surface not existing yet. *)
   window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
@@ -1776,15 +1592,11 @@ let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
     (fun f -> Hashtbl.replace tx.app.back_requested id f)
     on_back_requested
 
-(* Append a section to the window's section set (section ids are
-   guest-allocated in the shared surface namespace); the set is
-   append-only — sections have no destruction grammar, and every
-   section's root is retained while covered (switching is SELECTION,
-   not lifecycle). [mount_in] fills its pane:
-   [add_section ~title:"Feed" ~on_selected:(fun tx -> …) 7L].
-   [~on_selected] rides the add (per-section): fires each time the
-   USER switches to it — post-fact and NOT one-shot; a programmatic
-   [select_section] does not fire it (the echo doctrine). *)
+(* Append a section to the window's section set; the set is append-only —
+   sections have no destruction grammar, and every section's root is
+   retained while covered (switching is SELECTION, not lifecycle).
+   [~on_selected] fires each time the USER switches to it — NOT one-shot;
+   a programmatic [select_section] does not fire it (the echo doctrine). *)
 let add_section ?(window = 0L) ?title ?symbol ?on_selected id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_section window id);
@@ -1806,12 +1618,10 @@ let select_section ?(window = 0L) id =
    back-veto grammar's confirmation after [on_back_requested]. *)
 let pop_entry ?(window = 0L) () = emit (the_tx ()) (Kaya_wire.tx_pop_entry window)
 
-(* Request a modal alert (the request/result grammar); labeled arguments are
-   the OCaml spelling: [show_alert ~title ~message ~actions:["Delete";
-   "Archive"] ~cancel:"Keep" ~on_result:(fun choice tx -> ...) tx]. The
-   result handler rides the REQUEST (the widget-handler precedent) and
-   retires with its one answer — choice is an action index (0 or 1) or
-   [alert_cancel], every platform-native dismissal. *)
+(* Request a modal alert (the request/result grammar). The result handler
+   rides the REQUEST and retires with its one answer — choice is an
+   action index (0 or 1) or [alert_cancel], every platform-native
+   dismissal. *)
 let show_alert ?(window = 0L) ?(title = "") ?(message = "")
     ?(actions = []) ~cancel ?on_result () =
   let tx = the_tx () in
@@ -1831,8 +1641,6 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
        (Kaya_wire.Str cancel));
   id
 
-(* The alert_choice cancel sentinel, for handlers: the wire u32 0xFFFFFFFF
-   as an OCaml int32 (-1l). *)
 
 (* The filters encoding, written ONCE because two requests carry it:
    alternating label and space-separated extensions. *)
@@ -1860,11 +1668,10 @@ let pick ?(window = 0L) ?(filters = []) ~multiple ?on_result () =
        (filter_values filters));
   id
 
-(* Ask the platform for files. THE PICK, NOT THE OPEN — the result carries
-   handles you redeem later (DESIGN.md, File dialogs). [filters] is a list
-   of (label, space-separated extensions), ADVISORY on every platform.
-   [on_result] fires exactly once and retires with its answer; CANCEL IS THE
-   EMPTY LIST. *)
+(* Ask the platform for files. THE PICK, NOT THE OPEN — the result
+   carries handles you redeem later (DESIGN.md, File dialogs). [filters]
+   is (label, space-separated extensions), ADVISORY everywhere.
+   [on_result] fires exactly once; CANCEL IS THE EMPTY LIST. *)
 let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:true ?on_result ()
 
@@ -1873,19 +1680,12 @@ let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
 let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:false ?on_result ()
 
-(* Ask the platform WHERE TO SAVE. The picker's twin on the same grammar
+(* Ask the platform WHERE TO SAVE — the picker's twin on the same grammar
    and out of the same one-live-dialog slot (docs/save-plan.md D2).
-
    [suggested_name] is the name the dialog OPENS with; every platform
-   TAKES it and none guarantees it, so read the name you GOT — or read
-   the bytes instead. On macOS, with allowed content types set,
-   NSSavePanel appends the first allowed extension to a name that has
-   none (docs/deferred.md).
-
-   [on_result] fires exactly once; CANCEL IS [None]. WHAT YOU GET BACK
-   OPENS EMPTY on every platform (docs/save-plan.md D1): the handle opens
-   with CREATE, so [file_mode_write] on a fresh destination succeeds and
-   yields an empty file everywhere. *)
+   TAKES it and none guarantees it, so read the name you GOT (on macOS
+   NSSavePanel appends the first allowed extension — docs/deferred.md).
+   CANCEL IS [None], and WHAT YOU GET BACK OPENS EMPTY (D1). *)
 let save_file ?(window = 0L) ?(filters = []) ?on_result suggested_name =
   let tx = the_tx () in
   let app = tx.app in
@@ -1968,34 +1768,29 @@ let read_clipboard ?on_result accepting =
   id
 
 (* Declare what a widget takes from a paste — the closed kinds by name
-   ("text", "html", "image", "files") plus any custom format ids. It
-   drives whether Paste is live while this widget is focused, filters
-   what reaches the paste hook, and on Android IS the native
-   registration. A widget that declares NOTHING gets the platform's own
-   insertion, which is why a plain text editor writes none of this and
-   has working cut, copy and paste. *)
+   plus any custom format ids. It drives whether Paste is live while this
+   widget is focused, filters what reaches the paste hook, and on Android
+   IS the native registration. A widget that declares NOTHING gets the
+   platform's own insertion. *)
 let set_accepts (Widget id) kinds =
   emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
+(* The alert_choice cancel sentinel, for handlers: the wire u32
+   0xFFFFFFFF as an OCaml int32 (-1l). *)
 let alert_cancel = Kaya_wire.alert_choice_cancel
 
 
 
+(* Mount a root into the default window; mounting presents. *)
 let mount (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount 0L root)
 
 (* --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+   The curried-children convention extends to items; the window
+   construct's [~menus] is the bar anchor, [context_menu] the noun's. *)
 
-   The curried-children convention extends to items: creators end in
-   [()], omitted unit is the child form, and a grouping creator's list
-   holds bare partial applications the parent realizes left to right. The
-   window construct's [~menus] is the bar anchor;
-   [context_menu]/[context_catalog] are the noun anchors. *)
-
-(* Create one item in the menu-item id space. Menu records are
-   live-zone only: a template body records a blueprint, and items are
-   live and shared across stamped copies — build the catalog outside
-   ([context_catalog]) and attach it inside the template with
-   [Tpl.context_menu]. *)
+(* Create one item in the menu-item id space. Menu records are live-zone
+   only: items are live and shared across stamped copies — build the
+   catalog with [context_catalog] and attach it with [Tpl.context_menu]. *)
 let alloc_menu_item kind label =
   let tx = the_tx () in
   if tx.app.tpl_depth > 0 then
@@ -2009,11 +1804,9 @@ let alloc_menu_item kind label =
   Option.iter (fun l -> emit tx (Kaya_wire.tx_set_menu_label id l)) label;
   id
 
-(* The shared optional-prop tail: [?enabled] a constant, [?bind_enabled]
-   a Bool signal, [?icon] the blob channel and [?symbol] the SEMANTIC
-   one. The two icon slots are different channels, not alternatives.
-   Both live on the TAIL so every leaf and every grouping node gets them
-   from one place. *)
+(* The shared optional-prop tail. The two icon slots ([?icon] the blob
+   channel, [?symbol] the SEMANTIC one) are different channels, not
+   alternatives. Both live on the TAIL so every item gets them once. *)
 let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
   let tx = the_tx () in
   Option.iter (fun e -> emit tx (Kaya_wire.tx_set_menu_enabled id e)) enabled;
@@ -2028,12 +1821,10 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
     (fun s -> emit tx (Kaya_wire.tx_set_menu_symbol id (symbol_wire s)))
     symbol
 
-(* An action — a leaf command firing exactly one menu_activated occurrence
-   (menu click OR its shortcut: ONE occurrence, one dispatch path;
-   [~on_activate] rides the declaration and covers both).
-   [~on_activate_node] is the template-node flavor: an item attached to a
-   stamped copy reports the copy's key path, outermost first — the keys ARE
-   the noun. *)
+(* An action — a leaf command firing exactly one menu_activated
+   occurrence (menu click OR its shortcut: ONE occurrence, one dispatch
+   path). [~on_activate_node] is the template-node flavor: the copy's key
+   path arrives first — the keys ARE the noun. *)
 let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role
     ?on_activate ?on_activate_node ~label () =
   let tx = the_tx () in
@@ -2101,12 +1892,9 @@ let menu ?enabled ?bind_enabled ?icon ?symbol ~label children () =
   MenuItem id
 
 (* A radio group — the Choice contract with the platform's checkmark
-   idiom, admissible wherever a menu grouping node is. The children
-   are [option]s only (the closed grammar, root-checked); [~value] /
-   [~bind_value] is the selected 0-based index, applied AFTER the
-   options so the index has options to address (programmatic writes
-   are quiet); [~on_select] receives each USER pick's new index, and
-   [~on_select_node] the stamped keys first. *)
+   idiom. The children are [option]s only (root-checked); [~value] /
+   [~bind_value] is the selected 0-based index, applied AFTER the options
+   so the index has options to address; [~on_select] gets each USER pick. *)
 let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?symbol
     ?on_select ?on_select_node ~label options () =
   let tx = the_tx () in
@@ -2136,19 +1924,15 @@ let context_menu (Widget target) children =
     children
 
 (* Build a context catalog UNANCHORED — free root items for a
-   template-node anchor (menu items are live and shared across stamped
-   copies): [Tpl.context_menu] attaches it inside the template, and
-   each activation carries the copy's key path. *)
+   template-node anchor; [Tpl.context_menu] attaches it inside the
+   template, and each activation carries the copy's key path. *)
 let context_catalog children =
   {
     cc_roots = List.map (fun th -> let (MenuItem m) = th () in m) children;
     cc_attached = false;
   }
 
-(* The dynamic tier for a RETAINED item — every mutable prop, each
-   judged by the root against the item's kind and anchor, plus
-   [menu_append], the reopening of a grouping node. Label and
-   enablement writes never emit anything; programmatic checked/value
+(* The dynamic tier for a RETAINED item. Programmatic checked/value
    writes are configuration and stay QUIET (the echo doctrine). *)
 let set_menu_label (MenuItem id) text =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_label id text)
@@ -2178,10 +1962,8 @@ let set_menu_icon (MenuItem id) data =
   emit (the_tx ())
     (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data))
 
-(* The SEMANTIC icon on a retained item ([symbol], the closed
-   vocabulary) — [set_menu_icon]'s sibling, and the dynamic spelling of
-   the constructors' [~symbol], exactly as [set_role] is the dynamic
-   spelling of [~role]. *)
+(* The SEMANTIC icon on a retained item — the dynamic spelling of the
+   constructors' [~symbol]. *)
 let set_menu_symbol (MenuItem id) s =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_symbol id (symbol_wire s))
 
@@ -2191,9 +1973,6 @@ let set_menu_symbol (MenuItem id) s =
 let set_menu_primary (MenuItem id) on =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_primary id on)
 
-(* The closed standard-command vocabulary (DESIGN.md, Menus): macOS
-   places this one in the application menu, and every other host leaves
-   the item where the app declared it. *)
 (* A named vocabulary for the accept list's closed half. A MISTYPED BARE
    STRING IS SILENT: it becomes a custom format id no clipboard will ever
    offer, so Paste stays dead and the paste hook never fires, with
@@ -2224,10 +2003,8 @@ let role_redo = "redo"
 let set_menu_role (MenuItem id) name =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_role id name)
 
-(* The shortcut of any LEAF command — an action, a toggle, or one
-   option of a group (window-anchored only). Canonicalized
-   by the binding's one parser (Kaya_wire.canonicalize_shortcut); the
-   shortcut is another affordance of the same item — it fires the SAME
+(* The shortcut of any LEAF command (window-anchored only), canonicalized
+   by [Kaya_wire.canonicalize_shortcut]. It fires the SAME
    menu_activated occurrence as a click. *)
 let set_menu_shortcut (MenuItem id) spelling =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_shortcut id spelling)
@@ -2275,12 +2052,10 @@ let sort_asc column = { sort_column = Int32.of_int column; sort_direction = 0l }
 let sort_desc column = { sort_column = Int32.of_int column; sort_direction = 1l }
 
 (* Declare the column header bar on a For's container — the widget
-   [for_each] returns. One title per column; the row template's root
-   must be a row of exactly one cell per column, refused loudly
-   otherwise. Re-call after sorting to move the indicator.
-   [~on_sort] answers the header clicks with the 0-based column, where
-   [?on_click] answers a button's: reorder the collection by key and
-   re-declare here with the new indicator. *)
+   [for_each] returns. One title per column; the row template's root must
+   be a row of exactly one cell per column, refused loudly otherwise.
+   Re-call after sorting to move the indicator. [~on_sort] answers the
+   header clicks with the 0-based column. *)
 let columns ?(on_sort : (int -> unit) option) (Widget id) titles sort =
   let tx = the_tx () in
   Option.iter
@@ -2296,11 +2071,10 @@ let columns ?(on_sort : (int -> unit) option) (Widget id) titles sort =
        (List.map (fun t -> Kaya_wire.Str t) titles))
 
 (* Re-declare ONE stamped copy's header bar — the per-copy sort arrows.
-   [node] is the nested For's template node ([Tpl.for_each]'s first
-   result) and [keys] the copy's key path outermost first, exactly as
-   [Tpl.columns ~on_sort] handed it over; an empty [keys] re-declares the
-   template-wide bar for every copy. The core walls a keyed target whose
-   template bar was never declared (docs/tables-plan.md). *)
+   [node] is the nested For's template node and [keys] the copy's key path
+   outermost first; an empty [keys] re-declares the template-wide bar. The
+   core walls a keyed target whose template bar was never declared
+   (docs/tables-plan.md). *)
 let columns_at (Node id) keys titles sort =
   let tx = the_tx () in
   emit tx
@@ -2476,21 +2250,14 @@ let when_ (Signal sid) body () =
 
 module Tpl = struct
   (* The template zone, direct style like the outer zone: the ambient
-     transaction serves template bodies too (they only ever run inside
-     [build]), so plain [let] and [;] compose blueprints — the tpl
-     reader retired with the outer decl reader (2026-07-22). *)
+     transaction serves template bodies too. *)
 
   (* --- THE FLOOR, IN A MODULE THAT SAYS SO -------------------------
-     Node allocation, the child link and one prop write per record: the
-     tier every constructor below is sugar over, and the tier no example
-     scene may spell (invariant 5).
-
      A MODULE AND NOT A NAME because the receiver's type is the whole
-     difference between [set_text editor doc] (a live verb every binding
-     must have) and [set_text n "add"] (the floor spelling of [~text]),
-     and no pattern over a guest file sees a type. The qualifier is what
-     a pattern CAN see: the floor says [Floor.] at every callsite
-     (docs/tpl-props-plan.md F3). *)
+     difference between [set_text editor doc] and [set_text n "add"], and
+     no pattern over a guest file sees a type; the qualifier is what a
+     pattern CAN see (docs/tpl-props-plan.md F3). No example scene may
+     spell this tier (invariant 5). *)
   module Floor = struct
     let widget kind =
       let tx = the_tx () in
@@ -2499,11 +2266,9 @@ module Tpl = struct
       Node id
 
     (* --- The const setters ------------------------------------------
-       A template node's props travel the wire exactly as a widget's do
-       — only the handle's constructor differs — so these are the live setters with
-       [Node] destructured instead of [Widget], and the constructor of
-       the wrapper is what keeps a live setter off a blueprint and a
-       template setter off a widget. *)
+       The live setters with [Node] destructured instead of [Widget]; the
+       wrapper's constructor is what keeps a live setter off a blueprint
+       and a template setter off a widget. *)
 
     let set_text (Node id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
 
@@ -2525,28 +2290,16 @@ module Tpl = struct
 
     let set_grow (Node id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
 
-    (* --- What a stamped copy MEANS, and how far it holds its children
-       off its own edge -------------------------------------------------
-
-       CONST ONLY, like [set_accepts]: what a copy means, and how far its
+    (* CONST ONLY, like [set_accepts]: what a copy means, and how far its
        prototype holds its children off its edge, are facts about the
-       PROTOTYPE rather than about the row's data.
-
-       NEITHER NEEDS A TYPE-LEVEL WALL HERE, because [node] is not typed
-       by kind and the root judges the combination while the blueprint is
-       recorded, before a single row stamps
-       (crates/kaya/src/scene.rs). *)
+       PROTOTYPE. Neither needs a type-level wall — the root judges the
+       combination while the blueprint is recorded, before a row stamps. *)
 
     let set_role (Node id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
     let set_inset (Node id) pad = emit (the_tx ()) (Kaya_wire.tx_set_inset id pad)
 
-    (* --- What a stamped copy carries for assistive tech --------------
-       Grouped by PROP rather than by source, because that is how they
-       arrive: the three sources of ONE prop are the choice the
-       constructor's caller makes.
-
-       A DUPLICATE ID ACROSS COPIES IS LEGAL and often right: nothing in
-       the core deduplicates a11y ids and the harness addresses by
+    (* A DUPLICATE a11y ID ACROSS COPIES IS LEGAL and often right:
+       nothing in the core deduplicates them and the harness addresses by
        kind#index, never by id. *)
 
     let set_a11y_id (Node id) value =
@@ -2555,10 +2308,9 @@ module Tpl = struct
     let bind_a11y_id (Node id) (Signal s) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s)
 
-    (* A (_, string) field only: Prop::A11yId is Str in the spec and
-       the scene refuses a field whose schema column type differs from
-       the prop's, so the phantom moves that abort to compile time —
-       see [bind_value_field] for the same argument at length. *)
+    (* A (_, string) field only: Prop::A11yId is Str in the spec and the
+       scene refuses a field whose column type differs, so the phantom
+       moves that abort to compile time. *)
     let bind_a11y_id_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id_element ~level ~field:fd.fd_index id)
 
@@ -2573,11 +2325,9 @@ module Tpl = struct
     let bind_a11y_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label_element ~level ~field:fd.fd_index id)
 
-    (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. The
-       restriction cannot be a type here: [node] is not typed by kind,
-       because a container's children are one list and OCaml's lists are
-       homogeneous. So the wall is the constructors, and a hint reaching
-       a template label dies at DECLARE time in the root's own words. *)
+    (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. It cannot
+       be a type here ([node] is not typed by kind), so the wall is the
+       constructors and the root's own refusal at DECLARE time. *)
     let set_a11y_hint (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
 
@@ -2587,15 +2337,11 @@ module Tpl = struct
     let bind_a11y_hint_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint_element ~level ~field:fd.fd_index id)
 
-    (* The two universal props as they ride every constructor here, applied
-       together in one place so a new constructor cannot pick up [~grow]
-       and quietly miss them.
-
-       [~a11y_level] is how many Fors up the FIELD source sits and
-       defaults to the constructor's own [~level]. ONE SHARED [~level]
-       WOULD HAVE BEEN THE TRAP: [~bind_field:x ~level:1
-       ~a11y_label_field:y] would have moved the label's source out one
-       For as well, silently. *)
+    (* The two universal props as they ride every constructor here,
+       applied in one place so a new constructor cannot pick up [~grow]
+       and quietly miss them. [~a11y_level] is separate from [~level] on
+       purpose: ONE SHARED LEVEL would have moved the label's source out
+       one For as well, silently. *)
     let set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
         ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) n =
       Option.iter (fun v -> set_a11y_id n v) a11y_id;
@@ -2606,28 +2352,16 @@ module Tpl = struct
       Option.iter (fun fd -> bind_a11y_label_field ~level:a11y_level n fd) a11y_label_field
 
     (* What a stamped copy takes from a paste — and the prop that lets a
-       copy's paste hook fire at all. Every backend gates the paste
-       occurrence on the focused widget's ACCEPT LIST and falls back to
-       the platform's own insertion when it is empty, so without this
-       [on_paste_node] would register a handler and wait forever
-       (docs/tpl-props-plan.md §1). CONST ONLY: an accept list describes
-       the PROTOTYPE. *)
+       copy's paste hook fire at all: every backend gates the paste
+       occurrence on the focused widget's ACCEPT LIST, so without this
+       [on_paste_node] would wait forever (docs/tpl-props-plan.md §1).
+       CONST ONLY: an accept list describes the PROTOTYPE. *)
     let set_accepts (Node id) kinds =
       emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
     (* --- The signal leg ----------------------------------------------
-       The zone's second addressable source, and the one that was
-       missing here entirely: [Tpl] could take a constant or the row's
-       own field and had no way to say "every copy follows this
-       signal". A signal is app-wide, so every stamped copy reads the
-       SAME value — that is the point of it, not a limitation: one
-       download's fraction on every row's bar, one setting in every
-       row's caption. The core carries it on the template path like any
-       other prop value, checking the signal's current value against
-       the prop at declaration (crates/kaya/src/scene.rs:3590) and
-       re-registering each stamped copy in the binding table so a later
-       [write] fans out to all of them
-       (crates/kaya/src/scene.rs:4328). *)
+       A signal is app-wide, so every stamped copy reads the SAME value:
+       one download's fraction on every row's bar. *)
 
     let bind_text (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
 
@@ -2659,11 +2393,9 @@ module Tpl = struct
       emit (the_tx ()) (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
 
     (* Bind a fraction, a slider position or a choice's selected index to
-       one field of the element. A (_, float) field, and a choice's index is
-       no exception: Prop::Value is F64 in the spec, and the scene refuses a
-       field whose schema column type differs from the prop's
-       (crates/kaya/src/scene.rs:3629), so an i64 field would typecheck here
-       and abort at declaration. *)
+       one field of the element. A (_, float) field, and a choice's index
+       is no exception: Prop::Value is F64 and the scene refuses a field
+       whose column type differs, so an i64 field would abort at declare. *)
     let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
 
@@ -2679,10 +2411,8 @@ module Tpl = struct
   let collection () = collection ()
 
   (* The record-schema constructor, in the zone a NESTED collection must
-     be declared in. The ambient transaction serves both zones, so this
-     is the outer one — re-exported here so the template zone's own
-     surface carries it, exactly as [collection] is (docs/deferred.md,
-     the nested-record-collection gap). *)
+     be declared in; re-exported so the template zone's own surface
+     carries it (docs/deferred.md, the nested-record-collection gap). *)
   let collection_of rt = collection_of rt
 
   let for_each c body () =
@@ -2697,25 +2427,16 @@ module Tpl = struct
     (Node id, result)
 
   (* A nested For AS A CHILD: [for_each] with the body's result thrown
-     away, so the partial application is a [unit -> node] creator and
-     slots into a child list like any constructor. The outer zone's
-     [each] is the same one line over its own [for_each], and this zone
-     went without it for two milestones — guests/ocaml/milestone2.ml
-     apologised for the gap in a comment, and the workaround it named
-     ([w item_list] over a For realized on a line of its own) is the
-     shape a nested For had to take in every OCaml scene. Swift and C#
-     have [each] in both zones; this is invariant 1, one line wide. *)
+     away, so the partial application is a [unit -> node] creator that
+     slots into a child list. *)
   let each c body () = fst (for_each c body ())
 
   (* Declare the header bar of a nested For — one bar per stamped copy
-     from ONE declaration on the template node [for_each] just handed
-     back. It goes on the NEXT LINE, inside the still-open parent scope:
-     the nested For folds into that parent at its TemplateEnd and this
-     op looks for it there, so a grandparent-scope target is not
-     expressible (measured in slice 1, docs/tables-plan.md).
-     ONE [~on_sort] answers every stamped copy, and the handler receives
-     that copy's key path outermost first before the column — hand those
-     same keys to [columns_at] to move that copy's arrows alone. *)
+     from ONE declaration on the template node. It goes on the NEXT LINE,
+     inside the still-open parent scope: the nested For folds into that
+     parent at its TemplateEnd and this op looks for it there, so a
+     grandparent-scope target is not expressible (docs/tables-plan.md).
+     ONE [~on_sort] answers every copy, keys before the column. *)
   let columns
       ?(on_sort : (Kaya_wire.value list -> int -> unit) option)
       (Node id) titles sort =
@@ -2740,7 +2461,6 @@ module Tpl = struct
     emit tx (Kaya_wire.tx_template_end ());
     (Node id, result)
 
-  (* --- The construction sugar, template flavor -------------------- *)
 
   let button ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
@@ -2795,10 +2515,8 @@ module Tpl = struct
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
-    (* [Heading] and [Caption] are the label's roles — the platform's own
-       heading text style AND the trait assistive users skim by, and the
-       footnote tier under it, which is what makes a stamped section
-       title and its note readable as such. *)
+    (* [Heading] and [Caption] are the label's roles; the two button
+       emphases die at the root. *)
     Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -2823,10 +2541,9 @@ module Tpl = struct
       ?a11y_label_bind ?a11y_label_field ~role:Caption ?text ?bind ?bind_field
       ?level ?a11y_level ()
 
-  (* A single-line text field per stamped copy. UNCONTROLLED exactly as
-     its live twin is: the copy owns its text, every edit arrives at
-     [~on_change] with that copy's keys first, and the app folds it into
-     its own state — there is no read-back, by doctrine. *)
+  (* A single-line text field per stamped copy. UNCONTROLLED as its live
+     twin is: the copy owns its text and every edit arrives at
+     [~on_change] with that copy's keys first. *)
   let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
@@ -2881,10 +2598,8 @@ module Tpl = struct
     n
 
   (* A dropdown select per stamped copy, over fixed [options] — each
-     option becomes a label child, exactly as in the live zone (labels
-     only). The SELECTED INDEX is what varies per row and takes any of
-     the three sources; [~bind_field] wants a (_, float) field, because
-     Prop::Value is F64 (see [bind_value_field]). *)
+     option becomes a label child. The SELECTED INDEX varies per row;
+     [~bind_field] wants a (_, float) field (see [bind_value_field]). *)
   let select ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
@@ -2968,11 +2683,9 @@ module Tpl = struct
     | None -> ());
     n
 
-  (* An image per stamped copy: [~source] gives every copy the same
-     encoded bytes (one registration copy into core memory, consumed by
-     the next submit), [~bind] a Blob signal, [~bind_field] each row's
-     own (_, bytes) field — the per-row picture that a list of anything
-     with a thumbnail wants. *)
+  (* An image per stamped copy: [~source] gives every copy the same bytes,
+     [~bind] a Blob signal, [~bind_field] each row's own (_, bytes)
+     field — the per-row thumbnail. *)
   let image ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?source ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) () =
@@ -2985,11 +2698,9 @@ module Tpl = struct
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
     n
 
-  (* A canvas per stamped copy — a sparkline in a table cell, which is
-     the case set_drawing grew its keys-first addressing for
-     (docs/canvas-plan.md §3.1). The drawing is declared with the node,
-     so every copy is born with it; [draw_at] re-declares one copy's
-     afterwards. *)
+  (* A canvas per stamped copy — a sparkline in a table cell
+     (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
+     every copy is born with it; [draw_at] re-declares one copy's. *)
   let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ~viewbox ~draw () =
     let n = Floor.widget Kaya_wire.kind_canvas in
@@ -3011,18 +2722,14 @@ module Tpl = struct
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level parent;
     (* Every stamped copy's own padding. [~spacing] and [~align] stay
-       floor-only on template containers, in every binding alike — this
-       one prop comes over because a stamped row with no margin is what
-       the editor's find bar was. *)
+       floor-only on template containers, in every binding alike. *)
     Option.iter (fun p -> Floor.set_inset parent p) inset;
     List.iter (fun child -> Floor.add_child parent (child ())) children;
     parent
 
-  (* A grid per stamped copy, laid out row-major into [~columns]
-     columns — each column takes its NATURAL width, aligned across rows
-     (the thing nested rows cannot express). The column count describes
-     the prototype, so it stays a required constant. The columns record
-     lands BEFORE the add_childs, as in the live zone. *)
+  (* A grid per stamped copy, laid out row-major into [~columns] columns —
+     each column takes its NATURAL width. The count describes the
+     prototype, so it stays a required constant. *)
   let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ?inset children () =
     let n = Floor.widget Kaya_wire.kind_grid in
@@ -3052,34 +2759,28 @@ module Tpl = struct
       ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset
       Kaya_wire.kind_column children
 
-  (* A vertical scroll viewport per stamped copy, over EXACTLY ONE
-     child. Pass [~grow] so the enclosing track CONSTRAINS it — an
-     unconstrained viewport hugs its content and nothing overflows.
-     CAUTION: the scene enforces the one-child rule on the live path
-     only (crates/kaya/src/scene.rs:1860); the template declare arm does
-     not check it yet, so a second child here is accepted in silence
-     until that gap closes. *)
+  (* A vertical scroll viewport per stamped copy, over EXACTLY ONE child.
+     Pass [~grow] so the enclosing track CONSTRAINS it. CAUTION: the scene
+     enforces the one-child rule on the live path only; the template
+     declare arm does not check it yet, so a second child here is accepted
+     in silence until that gap closes. *)
   let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_level children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_scroll
       children
 
-  (* [~inset] rides the two flex containers and the grid and stops
-     there, exactly as it does live: the root admits the prop on Column,
-     Row and Grid alone (crates/kaya/src/scene.rs:552), so [scroll]
-     above forwards no inset and a viewport asking for one dies at
-     declare time rather than reaching four backends. *)
+  (* [~inset] rides the two flex containers and the grid and stops there,
+     exactly as it does live: the root admits the prop on Column, Row and
+     Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset Kaya_wire.kind_row
       children
 
-  (* Attach a live-built context catalog ([context_catalog]) to a template
-     node: every stamped copy shows the same catalog, and each activation
-     carries that copy's key path — the keys ARE the noun (received by the
-     [_node] handler flavors). *)
+  (* Attach a live-built context catalog to a template node: each
+     activation carries that copy's key path — the keys ARE the noun. *)
   let context_menu (Node n) catalog =
     if catalog.cc_attached then
       invalid_arg "kaya: a context catalog takes exactly one anchor";
@@ -3103,9 +2804,6 @@ let on_click app (Widget id) (handler : unit -> unit) =
 let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit) =
   Hashtbl.replace app.node_handlers id handler
 
-(* Register a change handler for a live entry: the widget owns its text
-   and reports each edit here; the app folds the text into its own
-   state — there is no read-back, by doctrine. *)
 (* Take pasted content at a live widget. *)
 let on_paste app (Widget id) (handler : representation -> unit) =
   Hashtbl.replace app.widget_pastes id handler
@@ -3116,6 +2814,9 @@ let on_paste_node app (Node id)
     (handler : Kaya_wire.value list -> representation -> unit) =
   Hashtbl.replace app.node_pastes id handler
 
+(* Register a change handler for a live entry: the widget owns its text
+   and reports each edit here; the app folds it into its own state —
+   there is no read-back, by doctrine. *)
 let on_change app (Widget id) (handler : string -> unit) =
   Hashtbl.replace app.widget_changes id handler
 
@@ -3223,11 +2924,9 @@ let decode_undo body =
     if n = 0 then List.rev acc
     else begin
       let start = !pos in
-      (* size, id, path_len — then the path, then the text. [size]
-         counts itself, exactly as the two group runs below do, and it
-         is what the cursor is advanced by: the path is what NAMES a
-         stamped copy's field, and the old fixed pair had nowhere to
-         put it. *)
+      (* size, id, path_len — then the path, then the text. [size] counts
+         itself, exactly as the two group runs below do, and it is what
+         the cursor is advanced by. *)
       let size = int () in
       let id = i64 () in
       let path = take_n (int ()) in
@@ -3318,9 +3017,8 @@ let absorb_undo app delta =
              if i.path <> o.uo_path then i
              else
                (* The payload's order first, then anything it does not
-                  name: the delta describes one instance's whole order,
-                  and an entry it never mentions is one this step did
-                  not touch. *)
+                  name: an entry the delta never mentions is one this
+                  step did not touch. *)
                let named =
                  List.filter_map
                    (fun k ->
@@ -3354,9 +3052,8 @@ let dispatch_loop app =
            (* THE CANVAS'S TWO ASKS ARE ANSWERED HERE AND NEVER HANDED
               ON (docs/canvas-plan.md §3.2.1): the guest declared a
               drawing as a function of size, so this draws it inside the
-              transaction the BINDING opens and keeps looping. The size
-              and a tick's time ride as the record's bare trailing
-              values. No handler drops the ask like any unclaimed one. *)
+              transaction the BINDING opens. The size and a tick's time
+              ride as the record's bare trailing values. *)
            (match (Hashtbl.find_opt app.canvas_draws id, tail) with
            | Some handler, Kaya_wire.F64 bw :: Kaya_wire.F64 bh :: rest ->
                let box = (bw, bh) in
@@ -3504,10 +3201,8 @@ let dispatch_loop app =
          then
            (* ONE STEP CAME BACK, and this record is the whole of what
               the app hears: applying an inverse is programmatic, so the
-              echo doctrine silences everything it did — no text_changed
-              for the text it restored, no value_changed for the
-              signals. NOT one-shot: a history is walked as often as the
-              user likes. *)
+              echo doctrine silences everything it did. NOT one-shot: a
+              history is walked as often as the user likes. *)
            (match undo with
            | None -> ()
            | Some body ->
@@ -3522,10 +3217,8 @@ let dispatch_loop app =
                | None -> ()))
          else if kind = Kaya_wire.occ_kind_menu_activated then
            (* Menu occurrences key the menu-item tables — their own id
-              space, so neither widget nor node ids can collide with
-              them. Node-anchored context items carry the stamped
-              copy's keys (the keys ARE the noun); toggles carry the
-              new state, radio groups the new 0-based index. *)
+              space. Node-anchored context items carry the stamped copy's
+              keys; toggles carry the state, radio groups the index. *)
            (match keys with
            | [] ->
                (match Hashtbl.find_opt app.menu_activated id with

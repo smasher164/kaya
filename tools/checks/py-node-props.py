@@ -1,25 +1,14 @@
 # The python clause of check-sugar-surface's template-prop sweep
 # (docs/tpl-props-plan.md P2). Reads the CLASS STRUCTURE with `ast`: a
 # file-scoped grep cannot tell a method on `Widget` from one a node can
-# reach, and an import probe would need the built dylib and could go
-# green against a stale one.
+# reach. Takes the binding path, so the gate keeps its one list of paths.
 #
-#   tpl_props_py=$(python3 tools/checks/py-node-props.py) || { ... }
-#
-# Argument: the binding path, so the gate keeps its one list of paths.
-#
-# TWO STRUCTURES, NOT ONE. The a11y trio, `accepts`, `on_paste` and
-# `role` are METHODS ON THE SHARED BASE, so one drifting up into
-# `Widget` leaves the template zone silently. `inset` is a CONSTRUCTOR
-# KEYWORD, already the template spelling because Python has one
-# constructor surface for both zones — checked anyway, because that is a
-# three-link chain (the container takes the kwarg, PASSES it, and
-# allocates through the zone-agnostic `_widget`) and cutting any link
-# leaves the live zone working while every stamped row loses its padding.
-#
-# The dynamic setters (`Widget.inset`, `.grow`, `.align`, `.spacing`)
-# are deliberately NOT wanted on `Node` and this file must never ask for
-# them: a blueprint is declared once and never mutated.
+# TWO STRUCTURES, NOT ONE: most props are METHODS ON THE SHARED BASE, so
+# one drifting up into `Widget` leaves the template zone silently, while
+# `inset` is a CONSTRUCTOR KEYWORD whose three-link chain (kwarg ->
+# passed -> zone-agnostic `_widget`) can be cut anywhere and leave the
+# live zone working. The dynamic setters are deliberately NOT wanted on
+# `Node`: a blueprint is declared once and never mutated.
 import ast
 import sys
 

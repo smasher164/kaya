@@ -3,24 +3,10 @@
 //
 //	//go:generate go run dev.kaya/cmd/kaya-gen -type Post -key string
 //
-// it reads the package's own declarations (the type is the schema;
-// nothing is restated) and the declaration's shape decides what is
-// generated, the one KayaGen story every language tells:
-//
-//   - an interface (the sealed marker over its implementing structs)
-//     is a sum: the collection factory spelling the constructor order
-//     exactly once, and the compile-total eliminator — a function with
-//     one parameter per constructor. Go struct literals are open (an
-//     omitted field is a nil func, not an error) but a call must
-//     supply every argument, so totality is a compile error here, and
-//     the scene checks it again.
-//   - a struct is a record: the collection factory and a named-setter
-//     patch (each setter records one update_field — a patch is
-//     recorded writes, never a diff).
-//
-// The generated file is checked in (the go:generate convention);
-// tools/gen-guests.py --check regenerates and diffs, so a drifted
-// file fails the gates rather than shipping.
+// it reads the package's own declarations and the DECLARATION'S SHAPE
+// decides what comes out. The generated file is checked in;
+// tools/gen-guests.py --check regenerates and diffs, so a drifted file
+// fails the gates rather than shipping.
 package main
 
 import (

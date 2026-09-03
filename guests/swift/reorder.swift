@@ -1,9 +1,5 @@
-// The reorder scene from Swift: order as collection data. Each handler
-// repositions an entry BY KEY (collection_move on the wire) and never
-// touches a widget. THE ROOT IS A ROW so the For's container is the
-// scene's only column-kind widget: languages disagree on whether
-// containers are created before or after their children, and column#0
-// must name the same widget everywhere.
+// The reorder scene, Swift port — guests/rust/reorder.rs,
+// tools/scenes/reorder.steps.
 
 import Foundation
 
@@ -21,8 +17,7 @@ app.build { tx in
             items.moveToEnd(tx, entries[0].key)
         }
         tx.button("lift") { tx in
-            // Last entry to the front — the same wire op, keys never
-            // indices.
+            // Keys, never indices.
             let entries = items.items(tx)
             items.moveToFront(tx, entries[entries.count - 1].key)
         }

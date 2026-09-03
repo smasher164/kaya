@@ -1,5 +1,4 @@
-(* The panels conformance scene, OCaml port — the auxiliary-window
-   grammar via labeled arguments. See guests/rust/panels.rs and
+(* The panels scene, OCaml port — guests/rust/panels.rs,
    tools/scenes/panels.steps. *)
 
 open Kaya_wire

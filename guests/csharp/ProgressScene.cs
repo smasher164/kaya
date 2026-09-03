@@ -1,5 +1,5 @@
-// The progress conformance scene, C# port. See
-// guests/rust/progress.rs and tools/scenes/progress.steps.
+// The progress scene, C# port — guests/rust/progress.rs,
+// tools/scenes/progress.steps.
 
 static class ProgressScene
 {

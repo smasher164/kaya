@@ -6,28 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The text-ranges conformance scene from the JVM: HIGHLIGHT a set of
- * ranges, SELECT one, REVEAL one. kaya ships no find engine, so
- * {@code String.indexOf} is the whole search (docs/ranges-plan.md §3).
- * Canonical semantics in guests/rust/ranges.rs; the byte-frozen
- * contract in tools/scenes/ranges.steps.
- *
- * <p>THE OFFSETS ARE NOT JAVA'S: {@code indexOf} answers in UTF-16 code
- * units and {@link KayaApp.TextRange#in} is the conversion a Java app
- * must not skip (docs/traps.md, "A range offset is a UTF-8 BYTE
- * offset").
+ * The ranges scene from the JVM — guests/rust/ranges.rs,
+ * tools/scenes/ranges.steps.
  */
 public final class Ranges {
-        /**
-         * The document, frozen: three occurrences of {@code alpha} and
-         * nothing else containing that substring, over forty short lines so
-         * the last match is below the viewport and REVEAL has work to do.
-         *
-         * <p>THE CJK WORD IS SPELLED IN {@code \}{@code u} ESCAPES: a Java
-         * literal's bytes depend on the encoding the compiler was told the
-         * file is in, and the Android build that also compiles this
-         * directory passes no {@code -encoding}.
-         */
+    /** The document, frozen. THE CJK WORD IS IN {@code \}{@code u} ESCAPES: a
+     * literal's bytes follow the compiler's encoding, and the Android build
+     * that also compiles this directory passes no {@code -encoding}. */
     private static final String DOC =
             """
             line 00: \u65e5\u672c\u8a9e preface
@@ -73,11 +58,9 @@ public final class Ranges {
 
     private static final String NEEDLE = "alpha";
 
-        /** The app's own copy: the only authority on what the offsets mean. */
     private static String doc = DOC;
 
-        /** The whole search: literal, forward, non-overlapping, converted
-         * once per hit into the unit kaya's ranges are made of. */
+    /** The whole search: literal, forward, non-overlapping. */
     private static List<KayaApp.TextRange> findAll(String text, String needle) {
         List<KayaApp.TextRange> hits = new ArrayList<>();
         for (int at = text.indexOf(needle); at >= 0;
@@ -95,21 +78,15 @@ public final class Ranges {
             tx.window(0).title("ranges");
             KayaApp.Signal<String> status = tx.signal("0 matches");
 
-            // Java lambdas cannot assign captured locals, so handles
-            // declared inside a container body come back out through
-            // one-slot arrays.
+            // Java lambdas cannot assign captured locals.
             KayaApp.Widget[] editor = new KayaApp.Widget[1];
             tx.mount(tx.column(() -> {
-                // The a11y id is not decoration: every range assertion
-                // reads the platform's accessibility tree, and the id
-                // is how a leg finds this control there.
+                // Every range assertion finds this control by its authored id.
                 editor[0] = tx.textarea().a11yId("doc").a11yLabel("Document"); // textarea#0
                 tx.setText(editor[0], DOC);
                 app.onChange(editor[0], (t, text) -> {
                     doc = text;
-                    // kaya has already dropped the decorations: a
-                    // declared set is bound to the text it was declared
-                    // against, so an edit means search again.
+                    // A declared set is bound to the text it was declared against.
                     t.write(status, "0 matches");
                 });
                 tx.label(status); // label#0
@@ -117,8 +94,8 @@ public final class Ranges {
                     tx.button("find", t -> { // button#0
                         List<KayaApp.TextRange> hits = findAll(doc, NEEDLE);
                         t.highlightRanges(editor[0], hits);
-                        // The SECOND match, so a leg can tell the
-                        // selection apart from "the first thing found".
+                        // The SECOND match, so a leg can tell the selection apart
+                        // from "the first thing found".
                         if (hits.size() > 1) {
                             t.selectRange(editor[0], hits.get(1));
                         }

@@ -1,7 +1,4 @@
-// The accessibility conformance scene from C#: the two universal props
-// (SetA11yId, SetA11yLabel), read back out of the PLATFORM'S OWN
-// accessibility tree. EXACTLY ONE CONTAINER OF EACH KIND — container
-// targets are ordinal. See guests/rust/a11y.rs, tools/scenes/a11y.steps.
+// The a11y scene, C# port — guests/rust/a11y.rs, tools/scenes/a11y.steps.
 
 static class A11yScene
 {
@@ -13,8 +10,7 @@ static class A11yScene
         {
             var form = tx.Column(() =>
             {
-                // Caption-bearing controls: identified, deliberately NOT
-                // labelled — the platform must speak the caption.
+                // Deliberately not labelled: the platform must speak the caption.
                 var save = tx.Button("Save");
                 tx.SetA11yId(save, "save");
                 tx.SetA11yHint(save, "save the draft");
@@ -23,8 +19,6 @@ static class A11yScene
                 tx.SetA11yHint(details, "show more detail");
                 tx.SetA11yId(tx.Button("Reset"), "reset");
                 tx.SetA11yId(tx.Label("Ready"), "status");
-                // Caption-less controls: an app MUST name these, and
-                // the tree must report the authored name.
                 var name = tx.Entry();
                 tx.SetA11yId(name, "name");
                 tx.SetA11yLabel(name, "Full name");
@@ -37,10 +31,7 @@ static class A11yScene
                 var loading = tx.Progress(0.25);
                 tx.SetA11yId(loading, "loading");
                 tx.SetA11yLabel(loading, "Loading");
-                // THE MARK THE APP'S OWN BUILD SHIPPED: the bytes go
-                // from the core's read straight to the decoder, and the
-                // `using` releases the core's handle once the blob
-                // table holds its own reference.
+                // Safe: the blob table holds its own reference by now.
                 using var mark = tx.Asset("images/a11y-logo.png");
                 var logo = tx.Image(mark);
                 tx.SetA11yId(logo, "logo");
@@ -68,8 +59,6 @@ static class A11yScene
                 });
                 tx.SetA11yId(actions, "actions");
                 tx.SetA11yLabel(actions, "Actions");
-                // A spoken name that FOLLOWS A SIGNAL: the live trio's
-                // Signal overloads, the template zone's shape live.
                 var spoken = tx.Signal("Before");
                 var spokenLabel = tx.Label("Spoken");
                 tx.SetA11yId(spokenLabel, "spoken");

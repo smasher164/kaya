@@ -1,13 +1,5 @@
-// The typeface conformance scene, C# port (docs/styling-plan.md Slice
-// 2b): the brand typeface swaps the FAMILY and leaves the platform's
-// ramp alone.
-//
-// The scene names no size anywhere: sizes, weights and metrics stay the
-// platform's and the role tier carries emphasis. It requests the
-// VENDORED font so the resolved family is one string on every lane —
-// the canonical note is guests/rust/typeface.rs's doc comment.
-//
-// The byte-frozen contract is tools/scenes/typeface.steps.
+// The typeface scene, C# port — guests/rust/typeface.rs,
+// tools/scenes/typeface.steps.
 
 static class TypefaceScene
 {
@@ -20,10 +12,7 @@ static class TypefaceScene
 
         app.Build(tx =>
         {
-            // BEFORE THE FIRST MOUNT, per the set-once wall. The asset's
-            // bytes go from the core's read straight to the platform's
-            // app-font machinery, and the "Sora" request then resolves to
-            // what that registration produced.
+            // BEFORE THE FIRST MOUNT, per the set-once wall.
             using var font = tx.Asset("fonts/sora-wght.ttf");
             tx.BrandTypeface("Sora", font);
             tx.Window(title: "typeface", width: 480, height: 360);
@@ -32,15 +21,11 @@ static class TypefaceScene
 
             tx.Mount(tx.Column(() =>
             {
-                // The heading's text style OVERRIDES the root font, so
-                // this label is the one a root-only lowering leaves in
-                // the system face.
+                // The heading's text style OVERRIDES the root font: a root-only
+                // lowering leaves this label in the system face.
                 tx.SetA11yId(tx.Label(bind: heading, role: Role.Heading), "title"); // label#0
                 tx.Label(bind: status);                                             // label#1
-                // Both, because they take the swap by DIFFERENT routes: the
-                // field inherits the root font, the textarea names its own
-                // ramp rung. One alone could not tell a half-applied
-                // lowering from a whole one.
+                // Both, because they take the swap by DIFFERENT routes.
                 tx.Entry((t, text) => draft = text);  // entry#0
                 tx.Textarea();                        // textarea#0
                 tx.Button("Go",                       // button#0

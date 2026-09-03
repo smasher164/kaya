@@ -1,11 +1,5 @@
-/* The assets conformance scene from C, on the function floor: the whole
- * asset surface written longhand (docs/assets-plan.md).
- *
- * ZERO IS THE MISS, NEVER A PANIC — kaya_asset_open answers 0 and
- * kaya_asset_why_not says why, because a panic inside an `extern "C"`
- * frame is an uncatchable abort in every guest.
- *
- * Contract: tools/scenes/assets.steps. */
+/* The assets conformance scene (tools/scenes/assets.steps).
+ * ZERO IS THE MISS: a panic in an `extern "C"` frame is uncatchable. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -15,9 +9,8 @@
 #include <string.h>
 #include <unistd.h> /* _exit: the app thread cannot return an exit code */
 
-/* Guest-allocated ids, counted from 1 per space. CREATION ORDER IS READ
- * BY THE SCRIPT: label#0 is the title, image#0 the mark, label#1 the
- * miss sentence's first line, label#2 the font's size. */
+/* Guest-allocated ids (tools/check-c-ids.py). CREATION ORDER IS READ BY
+ * THE SCRIPT: label#0 title, image#0 mark, label#1 miss, label#2 size. */
 #define SIG_TITLE 1
 #define SIG_CENSUS 2
 #define SIG_SIZES 3
@@ -28,15 +21,12 @@
 #define W_CENSUS 4 /* label#1 */
 #define W_SIZES 5  /* label#2 */
 
-/* The asset that is deliberately not there: a LEGAL name — relative,
- * `/`-spelled, one component deep — so the sentence under test is the
- * census one and not a name-fault one. */
+/* Absent, and deliberately LEGAL, so the miss is the census sentence. */
 static const char MISSING[] = "icons/nope.png";
 static const char MARK[] = "icons/kaya-mark.png";
 static const char FONT[] = "fonts/sora-wght.ttf";
 
-/* A window prop with its value, packed by hand: the generated
- * kaya_tx_set_window_prop closes the record BEFORE the value. */
+/* Packed by hand: the generated setter closes the record BEFORE the value. */
 static void window_prop(KayaTx *tx, uint64_t window, uint32_t prop, KayaVal value) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
     kaya_wire_u64(tx, window);
@@ -46,16 +36,9 @@ static void window_prop(KayaTx *tx, uint64_t window, uint32_t prop, KayaVal valu
     kaya_wire_end(tx, start);
 }
 
-/* Open an asset or die naming the CORE's own sentence: there is one
- * author for the diagnostic, so the bytes a C guest prints and the
- * bytes a Haskell guest raises are the same. */
 static uint64_t open_or_die(const char *name);
 
-/* SIZED, THEN READ: the first call passes a NULL buffer and cap 0 and
- * returns the sentence's TRUE length, the second fills a buffer of that
- * size. A guessed buffer cuts the half naming the root and the route,
- * so a sentence that does not fit is a hard error rather than a quiet
- * truncation. */
+/* SIZED, THEN READ: a NULL buffer with cap 0 answers the true length. */
 static void why_not(const char *name, char *out, size_t cap) {
     size_t needed = kaya_asset_why_not((const uint8_t *)name, strlen(name), NULL, 0);
     if (needed + 1 > cap) {
@@ -69,9 +52,7 @@ static void why_not(const char *name, char *out, size_t cap) {
     if (needed > 0)
         kaya_asset_why_not((const uint8_t *)name, strlen(name), (uint8_t *)out, needed);
     out[needed] = '\0';
-    /* LINE 1 ONLY: line 2 names the resolved place and the route that
-     * chose it, which a bundle, a device directory and a repo checkout
-     * spell three different ways. */
+    /* LINE 1 ONLY: line 2 names a place that differs per host. */
     char *newline = strchr(out, '\n');
     if (newline != NULL)
         *newline = '\0';
@@ -99,15 +80,10 @@ static void build_scene(void) {
     uint64_t mark = open_or_die(MARK);
     uint64_t font = open_or_die(FONT);
 
-    /* THE BLOB REDEMPTION: kaya_tx_set_source takes exactly the handle
-     * kaya_asset_blob mints, and the Arc is cloned rather than the
-     * bytes. The registration is valid for exactly ONE submit, drained
-     * whether referenced or not, so it happens inside the transaction
-     * that mounts. */
+    /* The registration is valid for exactly ONE submit, referenced or not. */
     uint64_t mark_blob = kaya_asset_blob(mark);
 
-    /* THE BYTES REDEMPTION: the pointer borrows core memory and stays
-     * valid until the release below — copy, then release. */
+    /* The pointer borrows core memory until the release: copy, then release. */
     uintptr_t font_len = 0;
     const uint8_t *font_bytes = kaya_asset_bytes(font, &font_len);
     if (font_bytes == NULL) {

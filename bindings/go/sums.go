@@ -1,8 +1,5 @@
 // Sum-typed collections: the sealed marker interface is the sum, the
-// prototype structs are its constructors, elimination is a type switch
-// on the guest side and typed case arms on the core's. Totality of the
-// template arms is the scene's declaration-time check; mutation is
-// witnessed. DESIGN.md, Sum-typed elements.
+// prototype structs are its constructors. DESIGN.md, Sum-typed elements.
 
 package kaya
 
@@ -24,9 +21,7 @@ type SumCollection[K Key, T any] struct {
 }
 
 // SumOf declares a sum collection: one variant per prototype, in
-// order — each prototype's struct is that constructor's schema. A
-// one-constructor sum is what CollectionOf already declares; ask for
-// at least two.
+// order — each prototype's struct is that constructor's schema.
 func SumOf[K Key, T any](tx *Tx, prototypes ...T) SumCollection[K, T] {
 	if len(prototypes) < 2 {
 		panic("kaya: a sum needs two constructors or more (CollectionOf declares a record)")
@@ -164,10 +159,9 @@ func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []Recor
 }
 
 // Case declares one arm of the template eliminator: the records the
-// arm's body writes are constructor V's blueprint. The scene holds the
-// arms to totality at template_end. The head token (Case[Note]) is the
-// arm's match label — Go function literals cannot infer parameter
-// types, so the SumCase carries the Tpl.
+// arm's body writes are constructor V's blueprint. The head token
+// (Case[Note]) is the arm's match label — Go function literals cannot
+// infer parameter types, so the SumCase carries the Tpl.
 func (c SumCollection[K, T]) Case[V any](t *Tpl, arm func(SumCase[K, V])) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
 	t.tx.emit(TxVariantCase(variant))
@@ -184,11 +178,6 @@ type SumCase[K Key, V any] struct {
 // The arm's construction vocabulary, and it must be the WHOLE of one:
 // the *Tpl behind this surface is unexported, so a constructor missing
 // here cannot be spelled at any tier, floor included.
-//
-// Every constructor is its *Tpl twin with the FIELD SELECTOR
-// substituted for the source, resolved against constructor V's own
-// schema. Structure and captions name the prototype rather than the row
-// and stay plain values.
 
 // Row is the template container sugar, on the arm's own recorder:
 // the body's constructors parent into it ambiently.
@@ -276,7 +265,7 @@ func (sc SumCase[K, V]) onClick(n Node, onClick func(*Tx, K)) {
 
 // Entry is an EMPTY text field with its change handler co-located:
 // uncontrolled, so every stamped copy of this arm starts empty and owns
-// its text (Tpl.Entry has the contract). EntryBound seeds from a field.
+// its text (Tpl.Entry has the contract).
 func (sc SumCase[K, V]) Entry(onChange func(*Tx, K, string)) Node {
 	n := sc.t.Widget(KindEntry)
 	sc.onChange(n, onChange)
@@ -373,9 +362,7 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 }
 
 // The arm's PROPS, forwarded one at a time for the constructors' reason:
-// a prop missing here cannot be spelled at any tier. Set is the
-// constant, Bind is the source, and the source is ALWAYS the field
-// selector.
+// a prop missing here cannot be spelled at any tier.
 
 // SetGrow weights this arm's node within its stamped row or column.
 func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight) }

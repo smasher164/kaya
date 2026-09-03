@@ -1,39 +1,18 @@
-//! THE VERB TRACE: what each harness verb did, attempt by attempt, kept
-//! in a ring and written ONLY WHEN THE RUN FAILS.
+//! THE VERB TRACE: what each harness verb did, attempt by attempt, kept in
+//! a ring and written ONLY WHEN THE RUN FAILS (docs/deferred.md's
+//! flight-recorder entry; docs/HACKING.md for the hand run).
 //!
-//! A STATIC, not a local and not a field on the run. The thread that
-//! most needs to dump this is the step watchdog (harness.rs's
-//! `StepWatchdog`), which fires from its own thread and leaves through
-//! `std::process::exit` — it never returns to `run_with_log` and can
-//! reach nothing the run owns. Backends answer partly on the platform's
-//! UI thread as well, so a thread_local would record half the story. The
-//! idiom is crates/kaya/src/fault.rs's `FAULT`: a const-constructible
-//! Mutex with no lazy init. (Not to be confused with crate::ring, which
-//! is the wire's shared-memory occurrence ring.)
+//! A STATIC, not a local: the step watchdog fires from its own thread and
+//! leaves through `std::process::exit`, so it can reach nothing the run
+//! owns, and backends answer partly on the UI thread. The idiom is fault.rs's
+//! `FAULT`. (Not crate::ring, which is the wire's occurrence ring.)
 //!
-//! It generalizes tools/ios/simdrive/main.swift's counters — globals in
-//! a ONE-SHOT Swift process, written to the file `KAYA_SIMDRIVE_LOG`
-//! names and appended to every failure sentence (docs/deferred.md,
-//! "WATCH — the iOS sheets shrug off single taps under a concurrent
-//! matrix (2026-08-20)"). One Rust harness process runs dozens of steps,
-//! so counters would be summed over the whole run: a ring of per-attempt
-//! records is what says which attempt of which step saw what.
+//! One line adds a verb — `vtrace::note(verb, format_args!(...))`, or
+//! `poll_named` for a retried observation's per-attempt records. THE `what`
+//! CONVENTION: `->` opens a call to the platform and `<-` is what came back,
+//! so a `->` with no `<-` after it is a call that never returned.
 //!
-//! ONE LINE ADDS A VERB:
-//!
-//! ```ignore
-//! vtrace::note("file_choose", format_args!("<- dialog listing {rows:?}"));
-//! ```
-//!
-//! and an observation that retries gets its attempts for free by calling
-//! `poll_named("<verb>", …)` instead of `poll`. The `what` convention:
-//! `->` opens a call to the platform and `<-` is what came back, so a
-//! `->` with no `<-` after it is a call that never returned — which is
-//! the wedge this exists for.
-//!
-//! `KAYA_VERB_TRACE` names the file; unset means no instrument and no
-//! recording at all, which is what keeps the harness usable by hand
-//! (the `KAYA_SIMDRIVE_LOG` rule).
+//! `KAYA_VERB_TRACE` names the file; unset means no instrument at all.
 
 use std::fmt::Arguments;
 use std::sync::Mutex;
@@ -42,9 +21,8 @@ use std::time::Instant;
 
 const ENV_VAR: &str = "KAYA_VERB_TRACE";
 
-/// Records kept before the oldest goes. A ring that silently forgets is
-/// a diagnostic that lies about what it saw, so the count of what it
-/// dropped is in the dump's first line.
+/// Records kept before the oldest goes. A ring that silently forgets is a
+/// diagnostic that lies, so the drop count is in the dump's first line.
 pub(crate) const CAP: usize = 2048;
 
 struct Rec {
@@ -112,9 +90,8 @@ pub(crate) fn on() -> bool {
     ON.load(Ordering::Relaxed)
 }
 
-/// The start of a run: the ring is that run's alone, and `start` is the
-/// zero every record's `t=` counts from — the same instant the step log
-/// counts from, so the two transcripts line up.
+/// The start of a run. `start` is the zero every record's `t=` counts
+/// from — the step log's own zero, so the two transcripts line up.
 pub(crate) fn begin(start: Instant) {
     let on = std::env::var_os(ENV_VAR).is_some_and(|p| !p.is_empty());
     ON.store(on, Ordering::Relaxed);
@@ -140,8 +117,8 @@ pub(crate) fn note(verb: &'static str, what: Arguments<'_>) {
     record(verb, 0, what);
 }
 
-/// One attempt of a retried verb, numbered from 1. `poll_named` in
-/// harness.rs is what feeds this for every observation that retries.
+/// One attempt of a retried verb, numbered from 1; harness.rs's
+/// `poll_named` feeds it.
 pub(crate) fn attempt(verb: &'static str, n: u32, what: Arguments<'_>) {
     record(verb, n, what);
 }
@@ -163,9 +140,8 @@ fn quoted(s: &str) -> String {
 }
 
 /// Append the whole ring under `reason`. FAILURE ONLY — the two callers
-/// (harness.rs's failed verdict and the step watchdog's fire path)
-/// decide that; a green run leaves no file, which is what keeps a lane's
-/// trace directory to the legs that need reading.
+/// (harness.rs's failed verdict and the step watchdog's fire path) decide
+/// that; a green run leaves no file.
 pub(crate) fn dump(reason: &str) {
     if !on() {
         return;
@@ -200,8 +176,7 @@ pub(crate) fn dump(reason: &str) {
         }
     }
     // O_APPEND and ONE write: the block stays whole against any other
-    // writer of the same file, which is simdrive's rule for the same
-    // reason (a runner's watcher writes lines to its log too).
+    // writer of the same file (a runner's watcher writes lines to it too).
     use std::io::Write;
     let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
         return;
@@ -209,9 +184,7 @@ pub(crate) fn dump(reason: &str) {
     let _ = f.write_all(out.as_bytes());
     let _ = f.flush();
     // NOT IN THE VERDICT: that text is byte-compared across the three
-    // harnesses and this instrument exists in one of them
-    // (tools/check-verbs.py). A pointer line on stderr, printed only
-    // when the env var asked for a trace.
+    // harnesses and this instrument exists in one (tools/check-verbs.py).
     eprintln!(
         "KAYA_HARNESS: verb trace ({kept} records, {dropped} dropped) appended to {}",
         path.to_string_lossy()

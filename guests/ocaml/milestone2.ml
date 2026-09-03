@@ -1,21 +1,5 @@
-(* The milestone-2 scene from OCaml, on the let surface with the
-   construction sugar. A local open (Tpl.( ... )) switches into the
-   template zone; handles declared inside a template escape as the
-   body's result.
-
-   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER: the remove handler
-   is registered CENTRALLY, after the build, against the handle the
-   build returned. It is also why the group For keeps its result —
-   [each] discards what the template body returns.
-
-   The app authors [g1] and [a] itself because it looks them up again;
-   [insert_fresh] is for data that identifies nothing.
-
-   Build the library first (cargo build), then, from a scratch dir
-   holding this file plus the contents of bindings/ocaml:
-       ocamlfind ocamlopt -package ctypes,ctypes-foreign,threads.posix \
-           -linkpkg kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml \
-           kaya_app.ml milestone2.ml -o milestone2-ocaml *)
+(* The milestone2 scene, OCaml port — guests/rust/milestone2.rs,
+   tools/scenes/milestone2.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -31,15 +15,11 @@ let () =
 
        let groups = collection () in
        (* Both Fors keep their results because the central registration
-          below needs the handles they carry. A nested For whose body
-          keeps nothing is [Tpl.each] instead, and sits in a child list
-          directly (guests/ocaml/menus.ml). *)
+          below needs the handles they carry. *)
        let group_list, (items, remove_button) =
          for_each groups (fun () ->
              Tpl.(
                let items = collection () in
-               (* A scalar collection's element IS its value, so
-                  [element] is the whole source. *)
                let name = label ~bind_field:element () in
                let item_list, (_cell, remove_button) =
                  for_each items (fun () ->

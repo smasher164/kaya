@@ -1,7 +1,5 @@
-// The window conformance scene, Go port — see guests/rust/window.rs
-// and tools/scenes/window.steps. The primary surface's props as
-// assertions: the title must materialize in the real title bar, the
-// advisory 640x400 request must be honored on a desktop.
+// The window conformance scene (tools/scenes/window.steps): the title and
+// the advisory 640x400 must both materialize.
 package window
 
 import (

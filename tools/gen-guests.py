@@ -9,19 +9,11 @@ dev_shell_or_die()
 
 # Regenerate the per-language guest surfaces from the guests' own
 # KayaGen-marked declarations (DESIGN.md's eliminator-convergence note).
-# Generated files are checked in. --check compares what the generators
-# produce against the tree AS IT STOOD and then puts every byte back —
-# the four generators only write in place, so the check snapshots first,
-# regenerates, diffs against the snapshot, restores, and REFUSES A
-# VERDICT if the restore left the tree changed. The old --check
-# regenerated in place and diffed against git, which silently reverted
-# any hand-edit to a generated file and then called the tree clean
+# --check snapshots the tree AS IT STOOD, regenerates in place, diffs,
+# puts every byte back on every exit path, and REFUSES A VERDICT if the
+# restore left the tree changed. Diffing against GIT instead silently
+# reverts any hand-edit to a generated file and calls the tree clean
 # (docs/traps.md).
-#
-# ONE upgrade over the shell body (2026-08-31, stated rather than
-# silent): a generator that DIES mid---check used to leave the tree
-# doctored — the snapshot existed and nothing restored it. The restore
-# runs on every --check exit now, and the failure still exits 1.
 
 import hashlib
 import os
@@ -150,10 +142,10 @@ def check_mode(tmp):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dst)
             # The pre-check mtime, kept so an in-place rewrite of
-            # IDENTICAL bytes can be undone below: a fresh mtime on
-            # unchanged sources makes cargo relink libkaya on every
-            # sweep, and every relink mints a new LC_UUID (measured
-            # 2026-08-20 — the artifact gate keys never hit).
+            # IDENTICAL bytes can be undone below: a fresh mtime makes
+            # cargo relink libkaya on every sweep, and every relink mints
+            # a new LC_UUID (measured 2026-08-20 — the artifact gate keys
+            # never hit).
             (saved / f"{f}.mtime").write_text(
                 str(p.stat().st_mtime_ns), encoding="utf-8")
             before.append(f)
@@ -200,8 +192,8 @@ def check_mode(tmp):
             ns = int(m.read_text(encoding="utf-8"))
             os.utime(f, ns=(ns, ns))
     if gen_rc != 0:
-        # The shell body left a doctored tree here; the restore above
-        # ran regardless now, and the generator's failure still wins.
+        # The restore above ran regardless; the generator's failure still
+        # wins.
         sys.exit(gen_rc)
     # Drift's sibling, omission: a generated file the tree carries but
     # git does not.

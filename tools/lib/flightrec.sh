@@ -1,18 +1,10 @@
 # shellcheck shell=bash
 # The flight recorder, shared by the lane runners — source, don't execute.
-# No shebang for that reason; line 1's directive is what names the dialect,
-# and without it check-shell errors out. (No comment line below may begin
-# with the word shellcheck — it would parse as a second directive.)
-#
-# ONE FAILURE IS ENOUGH EVIDENCE. A leg that fails once and passes on the
-# rerun currently leaves nothing behind but a verdict, so the next sighting
-# starts from zero. This appends every leg to a journal outside the build
-# tree (tools/lib/flightrec.py says why that location and no other), and on
-# a FAIL collects a bundle of the state that was live at the time.
-#
-# THE RECORDER MAY NEVER COST A LANE ITS LEGS. Every entry point is a
-# no-op when the journal could not be opened, the miss is printed ONCE by
-# flightrec_start, and no function here returns nonzero to its caller.
+# No shebang for that reason; line 1's directive names the dialect. (No
+# comment below may begin with the word shellcheck — a second directive.)
+# THE RECORDER MAY NEVER COST A LANE ITS LEGS: every entry point is a
+# no-op when the journal could not be opened, the miss is printed ONCE,
+# and no function here returns nonzero.
 
 FLIGHTREC_OK=0
 FLIGHTREC_RUN=""
@@ -72,15 +64,10 @@ flightrec_bundle() {
 }
 
 # flightrec_leg <lane> <leg> <verdict> <secs> [<fail sentence>] [<bundle>]
-#
-# NO SUBPROCESS. This runs on EVERY leg of two lanes, and the pass path is
-# where an observer has to be free: one python3 spawn per leg measured 27ms
-# on the mac host, and it was part of the 110s that took the windows lane
-# over its ceiling on the recorder's first matrix. One `printf` appends a
-# TAB-separated line; flightrec_flush turns the whole spool into JSONL once.
+# NO SUBPROCESS: one python3 spawn per leg measured 27ms on the mac host
+# and was part of the 110s that took the windows lane over its ceiling.
 # `printf` is a bash BUILTIN, and one write under the pipe-buffer size is
-# atomic on O_APPEND, which is what keeps the concurrent leg pools from
-# interleaving a line.
+# atomic on O_APPEND, which keeps concurrent pools from interleaving.
 flightrec_leg() {
     [ "${FLIGHTREC_OK:-0}" = 1 ] || return 0
     local lane="$1" leg="$2" verdict="$3" secs="$4" fail="${5:-}" bundle="${6:-}"
@@ -208,22 +195,14 @@ PY
     return 0
 }
 
-# The Windows half lives in tools/lib/flightrec_lane.py since the
-# runner conversion — it crossed with tools/deploy-win.py, the first
-# runner that stopped sourcing this file.
+# The Windows half lives in tools/lib/flightrec_lane.py.
 
 # ---------------------------------------------------------------- macOS --
-#
-# THE SAMPLER IS THE ONLY HONEST WAY TO HAVE A STACK AT FAIL TIME. A leg's
+# THE SAMPLER IS THE ONLY HONEST WAY TO HAVE A STACK AT FAIL TIME: a leg's
 # verdict is known only once the guest has exited, and `sample` needs a
-# LIVE process — so by the time the runner knows the leg failed there is
-# nothing left to sample. The runner therefore starts a cheap poller
-# alongside each leg and keeps its output only when the leg fails, which
-# is also what makes a HANG legible: the mac lane's `timeout 120` is a
-# KILL that takes the buffered log with it (docs/traps.md), and this
-# samples the wedged process a few seconds BEFORE that kill lands.
+# LIVE process. It also makes a HANG legible — the mac lane's
+# `timeout 120` is a KILL that takes the buffered log with it
+# (docs/traps.md).
 
-# The mac half — the per-leg sampler, the window-scoped shot and
-# flightrec_mac_leg's capture — crossed into tools/lib/flightrec_lane.py's
-# MacRecorder with the runner conversion (validate-mac was its only
-# caller; tools/flightrec-selftest.py drives the crossed capture).
+# The mac half lives in tools/lib/flightrec_lane.py's MacRecorder;
+# tools/flightrec-selftest.py drives it.

@@ -1,10 +1,4 @@
-// The table scene: column headers and click-to-sort on the For
-// vocabulary (docs/tables-plan.md). A header click is a REQUEST — this
-// guest reorders its collection BY KEY (the reorder scene's idiom) and
-// re-declares the header with the new indicator; the platform sorts
-// nothing. The byte-frozen contract is tools/scenes/table.steps.
-//
-// Build the library first (cargo build), then:
+// The table scene: a header click is a REQUEST, and the platform sorts none.
 //     KAYA_SELFTEST=table node guests/js/table.ts
 
 import * as kaya from "kaya-gui";
@@ -14,8 +8,7 @@ type ItemFields = kaya.Fields<typeof Item.schema>;
 
 const app = new kaya.App();
 
-// The guest's sort policy — the platform never has one: clicking the
-// sorted column flips it, clicking another starts ascending.
+// The guest's sort policy; the platform never has one.
 let sorted: [number, boolean] | null = null;
 
 function onSort(column: number): void {
@@ -30,8 +23,7 @@ function onSort(column: number): void {
     const order = x < y ? -1 : x > y ? 1 : 0;
     return descending ? -order : order;
   });
-  // Keys, never indices: moving each key to the end in the target
-  // order leaves the collection sorted.
+  // Each key to the end, in the target order.
   for (const [key] of entries) {
     items.moveToEnd(key);
   }
@@ -43,13 +35,9 @@ let items!: kaya.Collection<ItemFields, kaya.Row<typeof Item.schema>>;
 
 app.window(() => {
   items = kaya.collection(Item);
-  // The root is a row so the For's container is the scene's only
-  // column-kind widget (the reorder scene's rule). The table IS the
-  // For, with headers on the same loop that stamps the rows.
+  // The root is a row: the For's container is the only column.
   kaya.row(() => {
-    // Grown on purpose: this scene asserts the fill-and-scroll
-    // viewport, the grown half of the empty-row ruling — ungrown
-    // would hug its rows (tables-plan decision 8).
+    // Grown on purpose: ungrown, a table hugs its rows.
     for (const item of items.columns(["Name", "Size"], { onSort, grow: 1 })) {
       kaya.row(() => {
         kaya.label({ bind: item.name });

@@ -1,15 +1,4 @@
-// The entry scene from C#: the uncontrolled contract end to end. The
-// field owns its text and reports each edit through OnChange; the app
-// folds those into a plain variable (draft).
-//
-// This scene documents CENTRAL REGISTRATION: the build body hands the
-// widget handles back out and app.OnChange/app.OnClick attach to them
-// afterwards, so the constructors below deliberately pass no handler
-// argument. That is the only thing separating this build body from
-// TodosScene.cs's.
-//
-//     KAYA_SELFTEST=entry KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project guests/csharp
+// The entry scene, C# port — guests/rust/entry.rs, tools/scenes/entry.steps.
 
 static class EntryScene
 {
@@ -28,13 +17,9 @@ static class EntryScene
 
             tx.Mount(tx.Column(() =>
             {
-                // The two handles the registrations below need. No
-                // onChange:/onClick: here — see the header.
                 field = tx.Entry();
                 add = tx.Button("add");
                 tx.Label(bind: status);
-                // A scalar collection IS its one field, so the row's
-                // label addresses field 0 of the element.
                 tx.Each(todos, t => t.Label(KayaRecords.FieldAt<string>(0)));
             }));
         });

@@ -1,42 +1,17 @@
-(* The assets conformance scene, OCaml port (docs/assets-plan.md,
-   ratified 2026-08-18). The byte-frozen contract is
-   tools/scenes/assets.steps.
-
-   THIS ONE PROVES THE BYTES. [asset] has two redemptions and the
-   typeface scene already covers the other — a font whose bytes go from
-   the core's read straight to the platform's font machinery and never
-   enter the OCaml heap. Here the guest IS the consumer: [asset_bytes]
-   copies the mark out, [image ~source] hands those bytes on, and the
-   platform's own decoder answers 64x64 off the real view.
-
-   THE MISS IS A QUESTION, NOT A [try ... with]. [asset_miss_sentence]
-   answers the same sentence [asset] would raise with, without raising,
-   and that is the only shape all nine share — the C floor catches
-   nothing at all (docs/deferred.md, the assets entry). OCaml could catch
-   [Failure] here and deliberately does not — one shape for the
-   observation, in every language.
-
-   LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
-   and the route that chose it, which a bundle, a device directory and a
-   repo checkout spell three different ways; line 1 is the same
-   everywhere, so it is the line a scene can freeze. *)
+(* The assets scene, OCaml port — guests/rust/assets.rs,
+   tools/scenes/assets.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* Deliberately not there, and a LEGAL name — relative, one component
-   deep — so what comes back is the census sentence and not a name-fault
-   one. *)
+(* Deliberately absent, and a LEGAL name: the answer is the census sentence. *)
 let missing_name = "icons/nope.png"
 
-(* The one the mark is under, and the one the census must list. *)
 let mark_name = "icons/kaya-mark.png"
 
-(* The large one: 111400 bytes, so a reader that truncated into a fixed
-   buffer shows up here rather than passing quietly. *)
+(* 111400 bytes, so a reader that truncated into a fixed buffer shows here. *)
 let font_name = "fonts/sora-wght.ttf"
 
-(* The census half of the sentence. Empty in, empty out. *)
 let first_line sentence =
   match String.index_opt sentence '\n' with
   | Some at -> String.sub sentence 0 at
@@ -57,17 +32,13 @@ let () =
 
      let census = first_line (asset_miss_sentence missing_name) in
      let complaint = asset_miss_sentence font_name in
-     (* The other arm is never taken on a healthy lane, and it shows the
-        sentence rather than a word about it: a failure here has to say
-        what was measured. *)
      let verdict =
        if complaint = "" then "no complaint" else first_line complaint
      in
 
      let title = signal (Str "assets") in
      let found = signal (Str census) in
-     (* [%d] renders an OCaml int with no separator and no padding, and
-        [Printf] consults no locale. *)
+     (* [%d] renders an OCaml int with no separator and no locale. *)
      let sizes =
        signal
          (Str (Printf.sprintf "%s: %d bytes, %s" font_name font_length verdict))
@@ -77,9 +48,6 @@ let () =
        column
          [
            label ~bind:title (* label#0 *);
-           (* THE BYTES, not the blob redemption: this scene is the
-              consumer, so what reaches the decoder is what
-              [asset_bytes] handed back. *)
            image ~source:mark_bytes (* image#0 *);
            label ~bind:found (* label#1 *);
            label ~bind:sizes (* label#2 *);

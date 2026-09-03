@@ -1,5 +1,4 @@
-//! The feed scene: sum-typed elements, end to end. The byte-frozen
-//! contract is tools/scenes/feed.steps.
+//! The feed scene, sum-typed elements (tools/scenes/feed.steps).
 
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
@@ -26,14 +25,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             format!("{n} done")
         });
 
-        // The root is a row so the For's container stays the scene's only
-        // column-kind widget (the reorder scene's lesson).
+        // The root is a row: the For's container is the only column.
         let root = tx.row(|tx| {
             let promote = tx.button("promote").id();
             msgs.on_click(promote, Msg::Promote);
             tx.label(done_count);
-            // The eliminator as a record of arms: one field per
-            // constructor, so a missing arm is a missing field.
+            // One field per constructor: a missing arm is a missing field.
             tx.for_each_sum(&feed, PostCases {
                 note: |t: &mut kaya::Tpl| {
                     t.label(Post::note_text());
@@ -58,9 +55,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Promote => {
-                // The MODEL is asked which entry is a Note; the handler
-                // never counts widgets. An update carrying a different
-                // constructor restamps that key's copy in place.
+                // The MODEL says which entry is a Note; an update restamps.
                 ctx.apply(|tx| {
                     let note = tx.items(&feed).into_iter().find_map(|(k, p)| match p {
                         Post::Note { text } => Some((k, text)),
@@ -72,9 +67,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Toggle(path, checked) => {
-                // The match arm as an accessor: Some exactly when the
-                // entry still holds Todo, so a stale occurrence folds
-                // into nothing rather than writing a wrong constructor.
+                // Some only while the entry holds Todo: a stale one folds away.
                 ctx.apply(|tx| {
                     if let Some(todo) = Post::todo(tx, &feed, path[0].clone()) {
                         todo.done(checked);

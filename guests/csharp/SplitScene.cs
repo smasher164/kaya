@@ -1,11 +1,4 @@
-// The split conformance scene, C# port — adaptive panes via named
-// arguments. The guest asks for the presentation ONCE and does nothing
-// adaptive after that; there is no prop for WHICH entries present.
-//
-// TWO scripts drive this ONE app: split resizes and names the
-// presentation on each side, listdetail asserts the bare invariant at
-// whatever width its host gives. See guests/rust/split.rs,
-// tools/scenes/split.steps and tools/scenes/listdetail.steps.
+// The split scene, C# port — guests/rust/split.rs, tools/scenes/split.steps.
 
 static class SplitScene
 {
@@ -23,10 +16,8 @@ static class SplitScene
 
             tx.Mount(tx.Column(() =>
             {
-                // Authored ids so the REAL-TREE read can address these: an
-                // index read passes whether or not anything reached the
-                // screen, which once let a non-rendering split arm look
-                // green.
+                // Authored ids: an index read passes whether or not anything
+                // reached the screen.
                 tx.SetA11yId(tx.Label(bind: status), "list"); // label#0
                 tx.Button("open detail", onClick: inner => // button#0
                 {

@@ -1,8 +1,6 @@
 //! Haskell emitter: module KayaWire — a Value type, constants, Builder
 //! packers, and the occurrence parser (peeks relative to a record
-//! pointer). Module scope namespaces everything; parameters are
-//! lower-camel locals, so the reserved set is keywords plus the helper
-//! names.
+//! pointer).
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
@@ -131,10 +129,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
-        // Blob setters take the u64 kaya_blob_register handle (VBlob).
+        // Blob setters take the u64 kaya_blob_register handle.
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
@@ -163,8 +160,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    <> word32LE level <> word32LE field)");
     }
 
-    // The window-prop duos: const + signal, element sources being
-    // rejected by the wire.
+    // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, ctor) = match kind {
@@ -188,8 +184,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    <> word64LE signalId)");
     }
 
-    // The entry-prop duos (const + signal), the window shape on the
-    // navigation-entry table (DESIGN.md, Navigation).
+    // The entry-prop duos, the window shape on the navigation-entry
+    // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, ctor) = match kind {
@@ -211,8 +207,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    <> word64LE signalId)");
     }
 
-    // The section-prop duos (const + signal), the entry shape on the
-    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    // The section-prop duos; icon rides the blob channel (DESIGN.md,
+    // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, ctor) = match kind {
@@ -236,10 +232,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
 
     // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
-    // only, policy being the core's and validated on the canonical form.
-    // txSetMenuShortcut routes through it, so no call site can bypass
-    // canonicalization (wireRecord materializes the body strictly, so
-    // a bad spelling errors at record construction, before submit).
+    // only, policy being the core's. txSetMenuShortcut routes through
+    // it; wireRecord materializes the body strictly, so a bad spelling
+    // errors at record construction, before submit.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
         .iter()
         .map(|k| format!("\"{k}\""))
@@ -251,12 +246,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("-- | Canonicalize a shortcut spelling to the wire form: lowercase");
     c.line("-- '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
-    c.line("-- key (a-z, 0-9, or the closed named set). Accepts ASCII case");
-    c.line("-- variants and any modifier order; errors on whitespace, empty");
-    c.line("-- tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
-    c.line("-- or multiple or missing keys. POLICY stays at the core: escape,");
-    c.line("-- shift-only and bare alphanumerics, and the reserved floor are");
-    c.line("-- validated there, on the canonical spelling, never rewritten.");
+    c.line("-- key (a-z, 0-9, or the closed named set). Errors on whitespace,");
+    c.line("-- empty tokens, repeated modifiers, aliases (ctrl/cmd/option), and");
+    c.line("-- unknown or multiple or missing keys. POLICY stays at the core,");
+    c.line("-- validated on the canonical spelling and never rewritten.");
     c.line("canonicalizeShortcut :: String -> String");
     c.line("canonicalizeShortcut spelling");
     c.line("  | null spelling = error \"kaya: shortcut is empty\"");
@@ -288,9 +281,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    alnum [ch] = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')");
     c.line("    alnum _ = False");
 
-    // The menu-prop setters: a const setter for every prop, signal
-    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
-    // dies at the root).
+    // Signal binders only for the bindable props (SOURCE_SIGNAL on the
+    // rest dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = pascal(prop);
         let (p, ty, ctor_expr) = match kind {
@@ -351,20 +343,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                    return (VStr (map (chr . fromIntegral) bytes))");
     c.line("  return (v, next)");
     c.line("");
-    // The occurrence blob table. A blob in an OCCURRENCE is a table
-    // handle, not the apply channel's batch-local index, and nothing
-    // retires one here — so the decoder redeems and releases it, which
-    // is what keeps a handle from ever reaching an app. The redeemer is THREADED AS AN
+    // A blob in an OCCURRENCE is a table handle, not the apply
+    // channel's batch-local index, and nothing retires one here — so the
+    // decoder redeems and releases it. The redeemer is THREADED AS AN
     // ARGUMENT rather than installed in a global, because KayaRuntime
-    // imports this module and never the reverse — Haskell's answer to
-    // an effect a module cannot reach on its own.
+    // imports this module and never the reverse.
     c.line("-- | One representation as the decoder hands it over: the clip");
     c.line("-- kind, and its values with blobs already redeemed to bytes. The");
-    c.line("-- sum itself is the hand-written tier\'s — this is the taste-free");
-    c.line("-- shape the wire carries.");
-    c.line("--");
-    c.line("-- The kind is a SINGLE member of the clip enum and never a mask");
-    c.line("-- (you offer many and you receive one); 0 with no values is the");
+    c.line("-- kind is a SINGLE member of the clip enum and never a mask (you");
+    c.line("-- offer many and you receive one); 0 with no values is the");
     c.line("-- universal empty answer.");
     c.line("data ClipValues = ClipValues");
     c.line("  { clipKind :: !Word32,");
@@ -421,11 +408,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
     c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, []))");
-    // The picker's answer is a LIST OF RECORDS, and no single Value
-    // can carry one — so the three values per file ride the VALUES
-    // slot, flattened, and KayaApp regroups them in threes. The
-    // generic tail would read that slot as a key path and take the
-    // file count as its length, starting eight bytes early.
+    // The picker's answer is a LIST OF RECORDS and no single Value can
+    // carry one, so the three values per file ride the VALUES slot
+    // flattened and KayaApp regroups them in threes. Its own arm: the
+    // generic tail would take the file count for a key-path length.
     c.line("      else if kind == occKindFileDialogResult");
     c.line("        then do");
     c.line("          -- id, a count, then three Values per file (handle,");
@@ -478,7 +464,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          (keys, at') <- go (24 :: Int) pathLen []");
     c.line("          payload <-");
     // The u32 slot the tag family calls `reserved` is a real value on
-    // these (sort_requested's column) — read from its fixed offset.
+    // these — read from its fixed offset.
     for name in crate::u32_slot_occurrence_names(spec) {
         c.line(&format!("            if kind == occKind{}", pascal(name)));
         c.line("              then do");
@@ -497,8 +483,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                return (Just v)");
     c.line("              else return Nothing");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it. One record kind, path_len
-    // deciding.
+    // already read and the clip sits after it.
     {
         let pasted = crate::pasted_occurrence_names(spec)
             .iter()
@@ -516,10 +501,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line("              else return Nothing");
         }
     }
-    // The canvas asks: bare values after the key path, no count in front
-    // of them, so they are read until the record ends (§3.2.1). Its own
-    // slot because the run is 2 values for a redraw and 3 for a tick,
-    // and `payload` is one.
+    // The canvas asks: bare values after the key path with no count in
+    // front, read until the record ends (docs/canvas-plan.md §3.2.1).
+    // Its own slot because the run is 2 values for a redraw and 3 for a
+    // tick, and `payload` is one.
     {
         let values_tail = crate::values_tail_occurrence_names(spec)
             .iter()

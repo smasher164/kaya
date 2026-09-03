@@ -1,8 +1,5 @@
-// The menus conformance scene, JS port: the command vocabulary (a
-// File/View/Sort menu bar, context menus on a live label and on stamped
-// rows), the uncontrolled-menu echo doctrine, and a late
-// rename/append/promotion rework. Canonical semantics in
-// guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
+// The menus conformance scene (tools/scenes/menus.steps). Canonical
+// semantics in guests/rust/menus.rs.
 
 import * as kaya from "kaya-gui";
 
@@ -31,9 +28,7 @@ function onShare(): void {
 }
 
 function onReset(): void {
-  // The folds never echo the user's pick, so details/sort still hold
-  // false/0; these two prop writes are real checked/value records (never
-  // coalesced) that reset the backend's user-state mirror.
+  // The folds never echo, so these reset the user-state mirror.
   details.set(false);
   sort.set(0);
   status.set("ready");
@@ -49,8 +44,6 @@ function onRemove(group: kaya.Key, item: kaya.Key): void {
 }
 
 function onRework(): void {
-  // Append-only: rename the retained File, move the promotion hint from
-  // Share to Publish, grow the bar by Tools.
   share.primary(false);
   file.label("Document");
   file.append(() => {
@@ -77,9 +70,7 @@ app.window({ title: "menus" }, () => {
   sort = kaya.signal(0);
 
   file = app.menu("File", { enabled: canExport }, () => {
-    // The symbol is a CONCEPT drawn by each platform in its own set
-    // (docs/styling-plan.md D6). The vocabulary has no `save`, so
-    // `done` — the checkmark idiom — is the spelling.
+    // The vocabulary has no `save` glyph, so `done` is the spelling.
     kaya.item("Save", { symbol: kaya.Symbol.DONE, shortcut: "primary+s", onActivate: onSave });
     kaya.item("Export", { enabled: canExport, symbol: kaya.Symbol.FORWARD });
     share = kaya.item("Share", { primary: true, onActivate: onShare });
@@ -89,7 +80,7 @@ app.window({ title: "menus" }, () => {
     kaya.toggle("Details", { checked: details, symbol: kaya.Symbol.INFO, onToggle: onDetails });
   });
 
-  // Option order IS the index vocabulary: Name = 0, Date = 1.
+  // Option order IS the index.
   app.radioGroup("Sort", { value: sort, onSelect: onSorted }, () => {
     kaya.option("Name");
     kaya.option("Date");

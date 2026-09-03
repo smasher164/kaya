@@ -1,25 +1,9 @@
-// record-win: window-scoped capture of kaya guest windows via
-// Windows.Graphics.Capture, for recording mode.
-//
-//   record-win <outdir>
-//
-// Why WGC: GDI-family APIs (gdigrab, PrintWindow even with
-// PW_RENDERFULLCONTENT, BitBlt) return a blank client area for WinUI's
-// DirectComposition content — DComp windows carry
-// WS_EX_NOREDIRECTIONBITMAP, so there is no GDI surface to read. WGC
-// composites the true DWM output, works over WARP in GPU-less VMs, and
-// window scoping makes captures occlusion-proof and crop-free — the
-// same shape as the macOS recorder.
-//
-// While a kaya window exists, saves frames as <slot>-<epoch_ms>.png into
-// <outdir>; when it closes, goes back to watching, so one invocation
-// films every serial leg of a suite run. Exits when <outdir>\stop
-// appears. The epoch is this machine's clock, the same one the harness
-// transcripts stamp, so extraction needs no other anchor.
-//
-// The interop follows robmikh's ManagedScreenshotDemo / CsWinRT interop
-// docs verbatim; Vortice supplies D3D11, so there are no hand-rolled COM
-// vtables.
+// record-win <outdir>: window-scoped capture of kaya guest windows via
+// Windows.Graphics.Capture. WHY WGC: DComp windows carry
+// WS_EX_NOREDIRECTIONBITMAP, so gdigrab/PrintWindow/BitBlt read WinUI's
+// client area as blank. Frames are <slot>-<epoch_ms>.png in THIS
+// machine's clock, the one the harness transcripts stamp; exits when
+// <outdir>\stop appears. The interop follows robmikh's samples.
 
 using System.Runtime.InteropServices;
 using SharpGen.Runtime;
@@ -55,9 +39,8 @@ internal static class Program
     private static extern uint CreateDirect3D11DeviceFromDXGIDevice(
         IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
-    // typeof(GraphicsCaptureItem).GUID is WRONG under CsWinRT (it
-    // yields the projected class's guid); the riid must be the
-    // interface's, hardcoded — robmikh's samples carry the same note.
+    // typeof(GraphicsCaptureItem).GUID is WRONG under CsWinRT (it yields
+    // the projected class's guid); the riid must be the interface's.
     private static readonly Guid GraphicsCaptureItemGuid =
         new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
 
@@ -82,16 +65,11 @@ internal static class Program
         IntPtr GetInterface([In] ref Guid iid);
     }
 
-    // A GUEST WINDOW IS A WinUI WINDOW, not a window whose title happens
-    // to start with "kaya": a scene that titles its own window
-    // (`tx.window(...).title("undo")`) was filmed NOT AT ALL by the title
-    // test, the run reported "the capturer produced no frames", and the
-    // leg still passed.
-    //
-    // Microsoft.UI.Xaml.Window's HWND carries the class
-    // WinUIDesktopWin32WindowClass and this VM runs no other WinUI app,
-    // so the class is the whole identification. The title test stays too,
-    // to keep any window a future helper names "kaya*" in the film.
+    // A GUEST WINDOW IS A WinUI WINDOW, not one whose title starts with
+    // "kaya": a scene that titles its own window was filmed NOT AT ALL by
+    // the title test, and the leg still passed. The class is the whole
+    // identification (this VM runs no other WinUI app); the title test
+    // stays for any window a future helper names "kaya*".
     private const string WinUiClass = "WinUIDesktopWin32WindowClass";
 
     private static List<IntPtr> FindKayaWindows()
@@ -112,9 +90,8 @@ internal static class Program
         return found;
     }
 
-    // Parallel legs tile into slots, and the slot rides the window
-    // TITLE ("kaya milestone 2 [3]") so each window's frames carry an
-    // unambiguous leg identity. Untiled legs fall back to slot 0.
+    // The tiling slot rides the window TITLE ("kaya milestone 2 [3]"), so
+    // each window's frames carry an unambiguous leg identity.
     private static string WindowSlot(IntPtr hwnd)
     {
         var sb = new System.Text.StringBuilder(256);
@@ -138,9 +115,8 @@ internal static class Program
         Directory.CreateDirectory(outdir);
         var stopFile = Path.Combine(outdir, "stop");
 
-        // Hardware first, WARP fallback (the WPFCaptureSample order):
-        // in this VM the "GPU" is the Basic Render Driver and WARP is
-        // the working path; DWM itself composites via WARP here.
+        // Hardware first, WARP fallback: in this VM the "GPU" is the
+        // Basic Render Driver and WARP is the working path.
         ID3D11Device d3d;
         var hr = D3D11.D3D11CreateDevice(null, DriverType.Hardware,
             DeviceCreationFlags.BgraSupport, null, out d3d);
@@ -153,9 +129,8 @@ internal static class Program
             return 1;
         }
 
-        // Vortice's own generic helper casts via GetObjectForIUnknown
-        // and breaks under CsWinRT — marshal the raw pointer with
-        // MarshalInterface, per Vortice discussion #227.
+        // Vortice's generic helper casts via GetObjectForIUnknown and
+        // breaks under CsWinRT (Vortice discussion #227).
         using var dxgi = d3d.QueryInterface<IDXGIDevice>();
         var rc = CreateDirect3D11DeviceFromDXGIDevice(dxgi.NativePointer, out var inspPtr);
         if (rc != 0)
@@ -167,16 +142,11 @@ internal static class Program
         Marshal.Release(inspPtr);
 
         Console.WriteLine("RECORDER_READY");
-        // One worker per live kaya window; it retires when its window
-        // closes.
-        //
-        // KAYA_RECORD_LANES > 1 puts SEVERAL workers on the same window,
-        // staggered across the sample period. A cycle is mostly WAITING,
-        // so overlapping cycles is what raises the true frame rate;
-        // shortening the sleep alone cannot go below the cycle's own
-        // cost. It exists because a WinUI leg is FASTER THAN THE
-        // RECORDER: undo_rust's 90 steps run in 313ms, and at one lane
-        // the whole scripted part of the leg lands in two frames.
+        // KAYA_RECORD_LANES > 1 puts SEVERAL workers on one window,
+        // staggered: a cycle is mostly WAITING, so overlapping cycles is
+        // the only way to raise the true frame rate. A WinUI leg is
+        // FASTER THAN THE RECORDER — undo_rust's 90 steps run in 313ms,
+        // two frames at one lane.
         var lanes = 1;
         if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_LANES"),
                 out var l) && l >= 1 && l <= 8)
@@ -220,13 +190,10 @@ internal static class Program
     private static void CaptureWindow(ID3D11Device d3d, IDirect3DDevice device,
         IntPtr hwnd, string outdir, string stopFile, int lane = 0, int lanes = 1)
     {
-        // Screenshot-by-session: on this VM's WARP compositor a
-        // capture session delivers exactly ONE frame (the compositor
-        // never signals further updates — FrameArrived stays silent
-        // and Recreate rejects same-size pools). Attaching a fresh
-        // session each cycle reliably yields one frame of the CURRENT
-        // composited content, so the recorder polls sessions at ~3fps
-        // of true pixels.
+        // Screenshot-by-session: on this VM's WARP compositor a session
+        // delivers exactly ONE frame (FrameArrived then stays silent and
+        // Recreate rejects same-size pools), so a fresh session each
+        // cycle is what yields the CURRENT composited content.
         var slot = WindowSlot(hwnd);
         var title = new System.Text.StringBuilder(256);
         GetWindowText(hwnd, title, 256);
@@ -234,10 +201,8 @@ internal static class Program
         GetClassName(hwnd, cls, 256);
         if (lane == 0)
             Console.WriteLine($"CAPTURING {hwnd:x} slot={slot} title=\"{title}\" class={cls} lanes={lanes}");
-        // 150ms (~3fps of true pixels) is what a matrix run wants: enough
-        // for the extractor's covering frame, cheap on a VM running four
-        // legs at once. KAYA_RECORD_PERIOD_MS buys a denser showcase film
-        // without changing what any other run does.
+        // 150ms (~3fps of true pixels): enough for the extractor's
+        // covering frame, cheap on a VM running four legs at once.
         var period = 150;
         if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_PERIOD_MS"),
                 out var p) && p >= 10 && p <= 5000)
@@ -257,11 +222,10 @@ internal static class Program
             {
                 Console.Error.WriteLine($"record-win: shot: {e.Message} (0x{e.HResult:x})");
             }
-            // SPREAD THE LANES OVER A MEASURED CYCLE, not over the sleep:
-            // a cycle is the sleep PLUS the session round trip (~90ms
-            // here), so staggering by the sleep alone leaves four lanes
-            // firing within a few ms of each other. The first cycle
-            // measures itself and the lane shifts by its share of it.
+            // SPREAD THE LANES OVER A MEASURED CYCLE, not over the
+            // sleep: a cycle is the sleep PLUS the session round trip
+            // (~90ms here), so staggering by the sleep alone leaves four
+            // lanes firing within a few ms of each other.
             if (!staggered)
             {
                 var cycle = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - c0 + period;
@@ -287,8 +251,7 @@ internal static class Program
         }
         catch
         {
-            // The window died between discovery and capture; the
-            // caller's IsWindow check ends the cycle.
+            // The window died between discovery and capture.
             return false;
         }
 
@@ -320,8 +283,8 @@ internal static class Program
         }
         catch
         {
-            // A reserved name that never got written would reach the
-            // film assembly as a zero-byte png.
+            // A reserved name never written reaches the film assembly as
+            // a zero-byte png.
             try { File.Delete(path); } catch { }
             throw;
         }
@@ -335,10 +298,9 @@ internal static class Program
     private static readonly object NameLock = new();
 
     // <slot>-<epoch_ms>.png is the contract the host-side extraction
-    // parses, so a second lane landing in the same millisecond takes the
-    // next millisecond rather than a suffix. RESERVED, not just checked:
-    // the encoder's write comes later, so two lanes would otherwise both
-    // pass the existence test and one would encode into the other's file.
+    // parses, so a colliding lane takes the next millisecond rather than
+    // a suffix. RESERVED, not just checked: the encode comes later, so
+    // two lanes would both pass an existence test.
     private static string ReserveName(string outdir, string slot, long now)
     {
         lock (NameLock)
@@ -383,12 +345,10 @@ internal static class Program
             CPUAccessFlags = CpuAccessFlags.Read,
             MiscFlags = ResourceOptionFlags.None,
         });
-        // ONLY THE CONTEXT WORK IS SERIALIZED. With the PNG encode inside
-        // this lock, several capture lanes convoy: each queues on the
-        // encode, leaves in single file and returns to the compositor in
-        // step, so four lanes sample ONE instant four times over
-        // (measured: 40 frames arriving as 10 instants). Copy and map
-        // under the lock, encode outside it.
+        // ONLY THE CONTEXT WORK IS SERIALIZED: with the PNG encode inside
+        // this lock the lanes convoy and return to the compositor in
+        // step, sampling one instant several times over (measured: 40
+        // frames arriving as 10 instants).
         var stride = width * 4;
         var pixels = new byte[stride * height];
         lock (CtxLock)

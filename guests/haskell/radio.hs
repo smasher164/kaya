@@ -1,5 +1,5 @@
--- The radio conformance scene, Haskell port. See
--- guests/rust/radio.rs and tools/scenes/radio.steps.
+-- The radio scene, Haskell port — guests/rust/radio.rs,
+-- tools/scenes/radio.steps.
 
 import KayaApp
 import KayaWire (Value (..))

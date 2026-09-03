@@ -1,22 +1,12 @@
 //! The stall watchdog: is the app thread still coming back for its
-//! occurrences? An app thread stuck inside a handler LOOKS ALIVE — the
-//! backend keeps drawing and input silently stops meaning anything.
+//! occurrences? One stuck inside a handler LOOKS ALIVE.
 //!
-//! WHAT COUNTS AS A STALL is narrower than it looks: a consumer
-//! advances its cursor BEFORE handing the record over, so a handler
-//! that blocks while nothing is queued is indistinguishable from an
-//! idle app. A stall is PENDING WORK NOBODY HAS PICKED UP.
-//!
-//! BOTH TRANSPORTS, EACH IN ITS OWN TERMS. The occurrence RING is asked
-//! through its cursors (every foreign guest, whether it goes through
-//! `wait_pop` or maps the ring and advances `head` itself); the mpsc
-//! CHANNEL, which has no cursor, through its counters (the Rust
-//! binding's in-process path). Asking either in the other's terms
-//! reports a stall on a healthy app — docs/traps.md, "A watchdog that
-//! reports a stall on a HEALTHY app, in five of eight languages".
-//!
-//! Not gated on the harness feature: a shipped app is precisely where
-//! an unreported stall costs the most.
+//! A STALL IS PENDING WORK NOBODY HAS PICKED UP — a consumer advances its
+//! cursor BEFORE handing the record over, so a handler blocked with nothing
+//! queued is an idle app. BOTH TRANSPORTS, EACH IN ITS OWN TERMS: the ring
+//! through its cursors, the mpsc channel through its counters (docs/traps.md,
+//! "A watchdog that reports a stall on a HEALTHY app, in five of eight
+//! languages"). Not harness-gated: a shipped app is where it costs most.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -46,10 +36,9 @@ pub(crate) fn watch_ring(ring: Arc<crate::ring::OccRing>) {
 /// One occurrence has entered the mpsc transport, bound for the app
 /// thread.
 ///
-/// STARTS THE WATCHDOG. The first occurrence to reach any transport
-/// starts it, which no path can avoid and no new entry point can
-/// forget — an entry point is not a place to start it from, there
-/// being three of them (docs/deferred.md).
+/// STARTS THE WATCHDOG, on the first occurrence to reach any transport:
+/// an entry point is not a place to start it from, there being three
+/// (docs/deferred.md).
 pub(crate) fn enqueued() {
     watch();
     ENQUEUED.fetch_add(1, Ordering::Release);
@@ -162,8 +151,7 @@ impl Watch {
         }
         let claimed = reading.claimed();
         if self.last_claimed != Some(claimed) {
-            // The consumer moved (or this is the first look at pending
-            // work): the clock starts here.
+            // The consumer moved, or this is the first look: clock starts.
             self.last_claimed = Some(claimed);
             self.waiting_since = Some(now);
             return Verdict::KeepingUp;
@@ -243,14 +231,12 @@ mod tests {
         }
     }
 
-    /// A direct-ring guest never moves a counter; its consumer moves
-    /// the ring's head (docs/traps.md).
+    /// A direct-ring guest never moves a counter; its consumer moves the
+    /// ring's head (docs/traps.md).
     ///
-    /// A BACKLOG THE WHOLE TIME, deliberately: an app that drains to
-    /// empty between polls resets the clock on emptiness alone, and the
-    /// test would then pass with the cursor unread. Two records always
-    /// waiting with the consumer always moving is the ONE shape that
-    /// separates the two readings.
+    /// A BACKLOG THE WHOLE TIME, deliberately: draining to empty between
+    /// polls resets the clock on emptiness alone and the test would pass
+    /// with the cursor unread.
     #[test]
     fn a_consumer_that_only_moves_the_ring_cursor_is_keeping_up() {
         let mut watch = Watch::default();

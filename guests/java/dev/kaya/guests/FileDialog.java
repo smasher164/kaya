@@ -12,21 +12,8 @@ import java.nio.file.Paths;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * The filedialog conformance scene from the JVM — the picker's
- * request/result grammar and the capability it hands back (DESIGN.md,
- * File dialogs). See guests/rust/filedialog.rs and
+ * The filedialog scene from the JVM — guests/rust/filedialog.rs,
  * tools/scenes/filedialog.steps.
- *
- * <p>The Java binding builds a {@link java.io.FileDescriptor} from JNI:
- * reflecting into its private field throws on JDK 17 and would force
- * every kaya application to launch with --add-opens
- * (docs/file-dialogs-plan.md §6f).
- *
- * <p>THE READ RUNS OFF THE APP THREAD — open blocks. The worker MUST be
- * a daemon thread: a parked non-daemon thread keeps the JVM alive,
- * which turns a FAILING run into a timeout instead of a report. It
- * parks between reading and posting, so a guest that read inline fails
- * {@code expect label#0 "reading"}.
  */
 public final class FileDialog {
     private FileDialog() {}
@@ -34,18 +21,14 @@ public final class FileDialog {
     public static void app() {
         KayaApp app = new KayaApp();
 
-        // TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
-        // Java's java.io.tmpdir ignores TMPDIR on macOS
-        // (docs/traps.md, "java.io.tmpdir").
+        // TMPDIR FIRST: java.io.tmpdir ignores it on macOS (docs/traps.md,
+        // "java.io.tmpdir").
         String tmp = System.getenv("TMPDIR");
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
-        // THE PHONE USES THE SHARED COLLECTION, and must: no document
-        // provider publishes an app's private storage, so a picker
-        // aimed at temp opens on Recent instead — the Clipboard guest
-        // draws the same line, for the same reader-outside-the-app
-        // reason.
+        // THE PHONE USES THE SHARED COLLECTION: no document provider publishes
+        // an app's private storage, so a picker aimed at temp opens on Recent.
         if (System.getProperty("java.specification.vendor", "")
                 .contains("Android")) {
             String ext = System.getenv("EXTERNAL_STORAGE");
@@ -55,9 +38,7 @@ public final class FileDialog {
         try {
             Files.createDirectories(dir);
             // The decoy MUST sort before the picked file (docs/traps.md,
-            // "Pressing Open with nothing selected still returns a
-            // file"), so a backend that skips selection gets the wrong
-            // one and fails the byte assertion too.
+            // "Pressing Open with nothing selected still returns a file").
             Files.write(dir.resolve("picked.txt"),
                     "picked bytes".getBytes(StandardCharsets.UTF_8));
             Files.write(dir.resolve("decoy.txt"),
@@ -90,12 +71,8 @@ public final class FileDialog {
         app.dispatchLoop();
     }
 
-    /**
-     * This process's id, without NAMING {@code ProcessHandle}: the same
-     * file is compiled into the Android APK, whose SDK has no such
-     * class, so naming it is a compile error there. Reached
-     * reflectively; /proc/self answers directly on linux and Android.
-     */
+    /** This process's id, without NAMING {@code ProcessHandle}: the Android
+     * SDK has no such class, so naming it is a compile error there. */
     private static long pid() {
         try {
             return Long.parseLong(
@@ -134,8 +111,7 @@ public final class FileDialog {
             } catch (IOException e) {
                 text = "open failed: " + e.getMessage();
             }
-            // Parks holding the result: work on the app thread could
-            // never process the release click, and would deadlock.
+            // Parks holding the result: this work on the app thread would deadlock.
             try {
                 release.await();
             } catch (InterruptedException e) {

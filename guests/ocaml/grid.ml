@@ -1,5 +1,4 @@
-(* The grid conformance scene, OCaml port. See
-   guests/rust/grid.rs and tools/scenes/grid.steps. *)
+(* The grid scene, OCaml port — guests/rust/grid.rs, tools/scenes/grid.steps. *)
 
 open Kaya_app
 

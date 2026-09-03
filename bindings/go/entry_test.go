@@ -1,11 +1,9 @@
 package kaya
 
-// The entry-point contract (docs/go-mobile-plan.md §D3): App.Run blocks
-// until the app is over on EVERY platform including Android, and
-// androidEntry decides which function is the app. Both are invisible to
-// every compiler and unreachable from the matrix, which ends in
-// App.Serve rather than App.Run. The structural half — the android arm
-// compiling and the linkname resolving — is tools/check-targets.py.
+// The entry-point contract (docs/go-mobile-plan.md §D3). It is invisible to
+// every compiler and unreachable from the matrix, which ends in App.Serve
+// rather than App.Run; the structural half — the android arm compiling and
+// the linkname resolving — is tools/check-targets.py.
 
 import (
 	"runtime"
@@ -16,9 +14,9 @@ import (
 // How long a "did it come back?" assertion waits before believing it.
 const settle = 250 * time.Millisecond
 
-// The Android arm. Run must not come back while the dispatch loop is
-// running, and must run it on the CALLING goroutine — that goroutine is
-// the locked OS thread attach made, and the ring has one consumer.
+// The Android arm runs the dispatch loop on the CALLING goroutine: that
+// goroutine is the locked OS thread attach made, and the ring has one
+// consumer.
 func TestRunBlocksWhereTheOSOwnsTheEntry(t *testing.T) {
 	var app App
 	release := make(chan struct{})
@@ -54,8 +52,8 @@ func TestRunBlocksWhereTheOSOwnsTheEntry(t *testing.T) {
 	}
 }
 
-// The same-goroutine part, directly: a panic unwinds ONE goroutine, so
-// the recover below sees it only if serve ran here.
+// A panic unwinds ONE goroutine, so the recover below sees it only if serve
+// ran here.
 func TestHostedRunServesOnTheCallingGoroutine(t *testing.T) {
 	var app App
 	defer func() {
@@ -74,9 +72,9 @@ func TestHostedRunServesOnTheCallingGoroutine(t *testing.T) {
 	t.Fatal("runWith returned normally; serve did not run on this goroutine")
 }
 
-// The desktop and iOS arm: the dispatch loop on a second goroutine, the
-// core on the caller's thread, and Run waits for BOTH — a Run that
-// raced past the loop would let the guest's os.Exit run mid-drain.
+// The desktop and iOS arm: the dispatch loop on a second goroutine, the core
+// on the caller's thread, and Run waits for BOTH — a Run that raced past the
+// loop would let the guest's os.Exit run mid-drain.
 func TestRunBlocksWhereTheGuestOwnsTheEntry(t *testing.T) {
 	var app App
 	releaseServe := make(chan struct{})
@@ -121,9 +119,9 @@ func TestHostedEntryIsAndroidAndNothingElse(t *testing.T) {
 	}
 }
 
-// The rule attach uses to decide what to boot. guests/go/cmd registers
-// an app AND carries `func main() {}`, so a linkname that won would
-// boot an empty function and the whole Android lane would go dark.
+// guests/go/cmd registers an app AND carries `func main() {}`, so a linkname
+// that won would boot an empty function and the whole Android lane would go
+// dark.
 func TestAndroidEntryPrefersARegistration(t *testing.T) {
 	// Which one RAN: func values are not comparable in Go.
 	var ran string

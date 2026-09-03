@@ -3,8 +3,8 @@ package dev.kaya.guests;
 import dev.kaya.KayaApp;
 
 /**
- * The progress conformance scene from the JVM. See
- * guests/rust/progress.rs and tools/scenes/progress.steps.
+ * The progress scene from the JVM — guests/rust/progress.rs,
+ * tools/scenes/progress.steps.
  */
 public final class Progress {
     public static void app() {

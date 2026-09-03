@@ -1,7 +1,4 @@
-//! The menus conformance scene: the command vocabulary (a File/View/Sort
-//! menu bar, context menus on a live label and on stamped rows), the
-//! uncontrolled-menu echo doctrine, and a rename/append/promotion
-//! rework. The byte-frozen contract is tools/scenes/menus.steps.
+//! The menus conformance scene (tools/scenes/menus.steps).
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Task {
@@ -29,14 +26,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let details = tx.signal(false);
         let sort = tx.signal(0.0);
 
-        // File and its Export leaf share one enablement signal: one write
-        // moves both.
+        // File and its Export leaf share one enablement signal.
         let (file, share) = tx
             .window(kaya::DEFAULT_WINDOW)
             .title("menus")
             .menu("File", |m| {
-                // `done` is the checkmark idiom: the symbol vocabulary
-                // has no `save` (docs/styling-plan.md D6).
+                // The vocabulary has no `save` glyph, so `done` is it.
                 let save = m
                     .item("Save")
                     .symbol(kaya::Symbol::Done)
@@ -63,7 +58,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .out;
         msgs.on_menu_toggle(details_item, Msg::Details);
 
-        // Option order IS the index vocabulary: Name = 0, Date = 1.
+        // Option order IS the index.
         let sort_group = tx
             .window(kaya::DEFAULT_WINDOW)
             .radio_group("Sort", |o| {
@@ -75,8 +70,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         msgs.on_menu_select(sort_group, Msg::Sorted);
 
         let groups = tx.collection::<String>();
-        // Built LIVE and shared across stamped copies: the template only
-        // attaches, and each activation carries its key path.
+        // Built LIVE: the template only attaches, and keys ride activation.
         let catalog =
             tx.context_catalog(|m| m.item("Remove").symbol(kaya::Symbol::Delete).id());
         msgs.on_menu_item_node(catalog.out, Msg::Remove);
@@ -98,7 +92,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
                 msgs.on_menu_item(rename, Msg::Rename);
 
-                // Remove's activation names BOTH keys (group, then item).
                 // Slots because a trace body runs exactly once and the
                 // compiler cannot see it (milestone2.rs models this).
                 let mut items = None;
@@ -143,9 +136,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "saved");
             }),
             Msg::Reset => ctx.apply(|tx| {
-                // The folds never echo the user's pick, so these signals
-                // still hold false/0 and these writes are real records
-                // (never coalesced) that reset the user-state mirror.
+                // The folds never echo, so these reset the user-state mirror.
                 tx.write(details, false);
                 tx.write(sort, 0.0);
                 tx.write(status, "ready");
@@ -163,8 +154,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Rework => {
-                // Append-only: rename the retained File, move the
-                // promotion hint, grow the bar by Tools.
                 let publish = ctx.apply(|tx| {
                     tx.menu(share).primary(false);
                     let publish = tx

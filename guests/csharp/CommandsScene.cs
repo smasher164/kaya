@@ -1,7 +1,4 @@
-// The standard-commands scene, C# port: a chord on every leaf kind, the
-// punctuation keys those chords need, and the `settings` role — which
-// macOS shows in the application menu while the item stays addressable
-// where it was declared. See guests/rust/commands.rs and
+// The commands scene, C# port — guests/rust/commands.rs,
 // tools/scenes/commands.steps.
 
 using System;
@@ -19,8 +16,7 @@ static class CommandsScene
             var details = tx.Signal(false);
             var sort = tx.Signal(0.0);
 
-            // Reload sits beside Settings so this menu is not left empty
-            // once a platform moves the settings item elsewhere.
+            // Reload keeps this menu non-empty once macOS moves Settings out.
             var file = tx.Menu("File", items: new[]
             {
                 tx.Item("Reload"),
@@ -28,8 +24,7 @@ static class CommandsScene
                     role: Tx.RoleSettings,
                     onActivate: t =>
                     {
-                        // Fires twice on purpose: once by the chord, once
-                        // by activating the item at its DECLARED path.
+                        // Fires twice on purpose: the chord and the declared path.
                         settingsCount++;
                         t.Write(status, $"settings {settingsCount}");
                     }),

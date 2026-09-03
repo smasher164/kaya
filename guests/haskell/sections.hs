@@ -1,8 +1,5 @@
--- The sections conformance scene, Haskell port: two peer roots in the
--- primary window's section set. The archive pane folds 'SOnSelected'
--- into a visit count, which pins the echo doctrine from both sides — a
--- user's switch emits, a programmatic 'selectSection' does not.
--- See guests/rust/sections.rs and tools/scenes/sections.steps.
+-- The sections scene, Haskell port — guests/rust/sections.rs,
+-- tools/scenes/sections.steps.
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Word (Word64)
@@ -13,10 +10,8 @@ feedId, archiveId :: Word64
 feedId = 7
 archiveId = 8
 
--- The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
--- shared scene covers BOTH arms. It opens from a handler only the
--- desktop tail's click reaches, so 'createWindow' never runs where the
--- capability is absent: REACHABILITY is the gate, not a capability read.
+-- The SIDEBAR half rides an AUX WINDOW opened only from the desktop tail's
+-- click, so 'createWindow' never runs where the capability is absent.
 libraryId, shelvesId, loansId :: Word64
 libraryId = 1
 shelvesId = 2
@@ -28,9 +23,7 @@ main = kayaMain $ \app -> do
   _ <- buildTx app $ do
     window 0 [WTitle "sections", WSectionsPresentation 1]
     visits <- signal (VStr "archive: 0 visits")
-    -- A semantic icon names a CONCEPT; each platform draws it from its
-    -- own set, and no shared asset would be legal (docs/styling-plan.md
-    -- D6).
+    -- A symbol names a CONCEPT (docs/styling-plan.md D6).
     addSection feedId [STitle "Feed", SSymbol SymbolHome]
     addSection
       archiveId
@@ -51,8 +44,7 @@ main = kayaMain $ \app -> do
             ready <- signal (VStr "feed ready")
             labelBound ready, -- label#0
           buttonOn "to archive" $
-            -- Programmatic selection does NOT echo: 'SOnSelected' must
-            -- not fire, and the scene asserts the count holds.
+            -- Programmatic selection does NOT echo: 'SOnSelected' must not fire.
             buildTx app (selectSection archiveId), -- button#0
           buttonOn "open library" $ -- button#1
             buildTx app $ do

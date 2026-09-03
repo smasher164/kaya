@@ -1,27 +1,11 @@
-(* The text-ranges conformance scene, OCaml port of guests/rust/ranges.rs
-   against the byte-frozen tools/scenes/ranges.steps: highlight a set of
-   ranges, select one, reveal one, driven by the search in [find_all].
-
-   THE OFFSETS ARE UTF-8 BYTES, kaya's unit everywhere, and an OCaml
-   [string] is already a byte sequence — so [String.length] and the scan
-   below hand [highlight_ranges] the right numbers unchanged. The
-   document opens with a CJK word deliberately: every match then sits
-   SIX BYTES further along than it does in UTF-16, the unit four of the
-   five backends count, so a backend that forwards kaya's offsets as its
-   own decorates six characters early and the frozen offsets say so.
-
-   Build with [dune build], then run with KAYA_SELFTEST=ranges. *)
+(* The ranges scene, OCaml port — guests/rust/ranges.rs,
+   tools/scenes/ranges.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* The document, byte-identical to every other language's copy (813
-   bytes): three occurrences of [alpha] and forty short lines, so the
-   last match is below the viewport and REVEAL has something to do.
-
-   A QUOTED string literal, because [{doc|...|doc}] takes its bytes
-   verbatim — no escape rule stands between this file's UTF-8 and the
-   offsets the scene asserts. *)
+(* The document, 813 bytes, byte-identical to every other guest's copy. A
+   QUOTED literal, because [{doc|...|doc}] takes its bytes verbatim. *)
 let doc_source =
   {doc|line 00: 日本語 preface
 line 01: gamma kappa
@@ -66,9 +50,7 @@ line 39: the last line|doc}
 
 let needle = "alpha"
 
-(* The whole search: literal, forward, non-overlapping, in byte offsets.
-   kaya ships no find engine — case folding, word boundaries and regex
-   dialect are the app's to write, here. *)
+(* The whole search: literal, forward, non-overlapping, in byte offsets. *)
 let find_all doc needle =
   let n = String.length needle in
   let last = String.length doc - n in
@@ -82,23 +64,20 @@ let find_all doc needle =
 let () =
   let app = Kaya_app.create () in
 
-  (* The app's own copy is the ONLY authority on what the offsets mean;
-     kaya is never asked what the text is. *)
+  (* The offsets index this copy; kaya is never asked what the text is. *)
   let doc = ref doc_source in
 
   build app (fun () ->
       window ~title:"ranges" ();
       let status = signal (Str "0 matches") in
 
-      (* Every range assertion reads the platform's accessibility tree, and
-         the a11y id is how a leg finds this control there. *)
+      (* Every range assertion finds this control by its authored id. *)
       let editor =
         textarea ~a11y_id:"doc" ~a11y_label:"Document"
           ~on_change:(fun text ->
             doc := text;
-            (* kaya has already dropped the decorations — a declared set
-               is bound to the text it was declared against (D2) — so the
-               app must search again before claiming anything. *)
+            (* A declared set is bound to the text it was declared against
+               (D2), so the app must search again. *)
             write status (Str "0 matches"))
           ()
       in
@@ -116,7 +95,7 @@ let () =
                    ~on_click:(fun () ->
                      let hits = find_all !doc needle in
                      highlight_ranges editor hits;
-                     (* The second match, so a leg can tell the selection
+                     (* The SECOND match, so a leg can tell the selection
                         apart from "the first thing found". *)
                      (match List.nth_opt hits 1 with
                      | Some second -> select_range editor second
@@ -129,13 +108,11 @@ let () =
                      match List.rev (find_all !doc needle) with
                      | last :: _ -> reveal_range editor last
                      | [] -> ());
-                 (* button#2 — focus editor, so the script's next
-                    keystroke is a USER edit through the platform's own
-                    input path, not a write kaya made. *)
+                 (* button#2 — focus editor, so the next keystroke is a USER
+                    edit through the platform's own input path. *)
                  button ~text:"focus editor" ~on_click:(fun () -> focus editor);
-                 (* button#3 — select first, clicked while a composition
-                    is live: the backend refuses it (D4) and the caret
-                    stays where the marked text parked it. *)
+                 (* button#3 — clicked while a composition is live: the
+                    backend refuses it (D4). *)
                  button ~text:"select first"
                    ~on_click:(fun () ->
                      match find_all !doc needle with

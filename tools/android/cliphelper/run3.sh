@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 
-# ClipHelper campaign — the CROSS-PACKAGE clipboard cells (C1..C6 below).
-# The same-package clipprobe run could not measure them: its reader owned
-# the provider, so the grant/revocation/clear traps were vacuously green.
-# Results: docs/clipboard-plan.md:1223.
-#
-# Throwaway; results on stdout via ordered-broadcast result data.
+# ClipHelper campaign — the CROSS-PACKAGE clipboard cells. The
+# same-package clipprobe run could not measure them: its reader owned the
+# provider, so the grant/revocation/clear traps were vacuously green.
+# Results: docs/clipboard-plan.md:1223. THROWAWAY.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

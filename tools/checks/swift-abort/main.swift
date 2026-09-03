@@ -1,15 +1,7 @@
-// The uniform-abort guard, Swift arm. Runs HEADLESS: the library links
-// and records submit, but the core loop is never entered. Compiled as
-// ONE MODULE with bindings/swift/*.swift, so the internal mirrors
-// (signalMirrors, signalDeps) are in reach.
-//
-// Build and run (from the repo root, inside `nix develop`):
-//   swiftc -o /tmp/swift-abort-check bindings/swift/*.swift \
-//     tools/checks/swift-abort/main.swift \
-//     -import-objc-header crates/kaya/include/kaya.h \
-//     -I crates/kaya/include -L target/debug -lkaya \
-//     -Xlinker -rpath -Xlinker "$PWD/target/debug"
-//   /tmp/swift-abort-check
+// The uniform-abort guard, Swift arm; tools/check-abort.py builds and
+// runs it. HEADLESS: the library links and records submit, but the core
+// loop is never entered. Compiled as ONE MODULE with bindings/swift/*.swift,
+// so the internal mirrors (signalMirrors, signalDeps) are in reach.
 
 import Foundation
 
@@ -49,13 +41,10 @@ func entryKeys(_ tx: KayaAppTx, _ c: KayaCollection) -> [KayaValue] {
 
 let app = KayaApp()
 
-// ONE ID SPACE: a template node draws from the WIDGET counter, so an app
-// hands out one number sequence and the core's two "already exists" walls
-// can never fire on an id this binding minted (DESIGN.md, Binding
-// conventions). FIRST, so the run starts at 1. THE CONTIGUOUS RUN IS THE
-// ASSERTION, not inequality — a private node counter restarted at 1 sits
-// under the live ids an app has already spent and passes a `!=` while
-// being exactly the defect.
+// ONE ID SPACE: a template node draws from the WIDGET counter (DESIGN.md,
+// Binding conventions). FIRST, so the run starts at 1. THE CONTIGUOUS RUN
+// IS THE ASSERTION, not inequality — a private node counter restarted at 1
+// sits under the live ids an app has spent and passes a `!=`.
 var idRun: [UInt64] = []
 app.build { tx in
     idRun.append(tx.label("live").id)
@@ -135,8 +124,7 @@ app.build { tx in
 
 // The menu construction surface must REACH the record stream: a
 // constructor that emits nothing passes every surface gate until a scene
-// fails live. Each frame is u32 length then u16 kind at offset 4,
-// little-endian.
+// fails live. Each frame is u32 length then u16 kind at offset 4, LE.
 func recordKinds(_ data: Data, from start: Int) -> [UInt16] {
     var kinds: [UInt16] = []
     var at = start

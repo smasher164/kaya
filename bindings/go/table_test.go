@@ -1,10 +1,7 @@
 package kaya
 
-// The NESTED table's Go spelling, read off the records it queues: a bar
-// declared on the template node for every copy, a sort request that
-// carries the clicking copy's keys, and those same keys handed back to
-// move that one copy's indicator (docs/tables-plan.md, dynamic tables).
-// Headless, like the rest of this package's tests.
+// The NESTED table's Go spelling, read off the records it queues
+// (docs/tables-plan.md, dynamic tables).
 
 import (
 	"bytes"
@@ -19,9 +16,9 @@ type columnHeaders struct {
 	values            []any
 }
 
-// decodeColumnHeaders reads the record rather than re-calling the helper
-// that wrote it: the defect it catches is a wrong ARGUMENT — titles
-// where keys belong, or a path length counting the wrong slice.
+// decodeColumnHeaders reads the record rather than re-calling the helper that
+// wrote it: the defect it catches is a wrong ARGUMENT — titles where keys
+// belong, or a path length counting the wrong slice.
 func decodeColumnHeaders(t *testing.T, rec []byte) columnHeaders {
 	t.Helper()
 	if kind := binary.LittleEndian.Uint16(rec[4:]); kind != txSetColumnHeaders {
@@ -57,19 +54,12 @@ func decodeColumnHeaders(t *testing.T, rec []byte) columnHeaders {
 // abandonProbe is the panic queued() rides back out on.
 type abandonProbe struct{}
 
-// queued runs fn as a transaction and hands back the records it wrote,
-// keeping them OFF the wire: kaya_submit decodes eagerly and ABORTS the
-// process on a malformed record (crates/kaya/src/wire.rs — measured:
-// "kaya: a column title is I64(7), wanted a string" when the keys and
-// titles are swapped). That is the right wall in a guest, and the wrong
-// one here — it takes a perturbation's red away from the assertion that
-// names the defect and hands it to a crash, so these assertions could
-// never be watched failing. Build abandons on a panic and ships nothing,
-// which is the documented exit. The shipped-bytes half is covered by the
-// handler test below, which submits for real.
-// The return is NAMED: the records are assigned before the panic, and a
-// bare `return out` after a recovered panic would hand back the zero
-// value instead.
+// queued keeps the records OFF the wire: kaya_submit ABORTS the process on a
+// malformed record (crates/kaya/src/wire.rs), so a perturbation would crash
+// instead of reddening the assertion that names the defect.
+//
+// The return is NAMED: a bare `return out` after a recovered panic hands back
+// the zero value instead.
 func queued(t *testing.T, app *App, fn func(*Tx)) (out [][]byte) {
 	t.Helper()
 	defer func() {
@@ -97,10 +87,9 @@ func recordsOfKind(recs [][]byte, kind uint16) []int {
 	return at
 }
 
-// A nested For's bar is declared against the TEMPLATE NODE with no key
-// path — one declaration, stamped onto every copy — and the record lands
-// in the OPEN PARENT scope, after the nested template closed and before
-// the enclosing one does (docs/tables-plan.md, MEASURED IN SLICE 1).
+// A nested For's bar is declared against the TEMPLATE NODE with no key path
+// — one declaration stamped onto every copy — and the record lands in the
+// OPEN PARENT scope (docs/tables-plan.md, MEASURED IN SLICE 1).
 func TestNestedColumnsDeclareTheTemplateNodesBarForEveryCopy(t *testing.T) {
 	app := NewApp()
 	var positions Node
@@ -159,8 +148,7 @@ func TestNestedColumnsDeclareTheTemplateNodesBarForEveryCopy(t *testing.T) {
 	}
 }
 
-// One copy's re-declaration: the template node, then that copy's keys
-// OUTERMOST FIRST ahead of the titles, with path_len counting the keys.
+// One copy's keys ride OUTERMOST FIRST, ahead of the titles.
 func TestColumnsAtEmitsTheCopyKeysBeforeTheTitles(t *testing.T) {
 	app := NewApp()
 	table := Node{41}
@@ -199,17 +187,13 @@ func TestColumnsAtEmitsTheCopyKeysBeforeTheTitles(t *testing.T) {
 				"first, then the titles", i, h.values[i], want[i])
 		}
 	}
-	// And the generator's own encoder agrees, byte for byte: what this
-	// binding owns is the ARGUMENTS, never the layout.
+	// What this binding owns is the ARGUMENTS, never the layout.
 	frame := TxSetColumnHeaders(table.id, 1, 1, 3, 2, want)
 	if !bytes.Equal(recs[0], frame) {
 		t.Fatalf("ColumnsAt queued %x, the wire encoder writes %x", recs[0], frame)
 	}
 }
 
-// The handler scopes to its creator — the nested For — and the copy's
-// key path IS the message: what arrives is what goes back out, which is
-// how one copy's arrows move while its siblings' stay put.
 func TestACopysSortHandlerIsRegisteredAtItsForAndKeepsTheKeyPath(t *testing.T) {
 	app := NewApp()
 	var positions Node
@@ -261,14 +245,11 @@ func TestACopysSortHandlerIsRegisteredAtItsForAndKeepsTheKeyPath(t *testing.T) {
 	}
 }
 
-// A NESTED table's rows carrying NAMED FIELDS: the record-schema
-// constructor stands in the template zone, and narrowing the handle to
-// one stamped copy keeps the element type (docs/deferred.md, the
-// nested-record-collection gap). Both halves are read off the wire and
-// the model, because both lie in ways that COMPILE: a constructor that
-// opened its own transaction would emit the create_collection outside
-// the parent's scope, and a narrowing that dropped the key would write
-// the PARENT's table with no error anywhere.
+// docs/deferred.md, the nested-record-collection gap. Both halves are read
+// off the wire and the model because both lie in ways that COMPILE: a
+// constructor that opened its own transaction emits the create_collection
+// outside the parent's scope, and a narrowing that dropped the key writes the
+// PARENT's table with no error anywhere.
 type nestedPosition struct {
 	Symbol string
 	Shares string
@@ -283,9 +264,8 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 	recs := queued(t, app, func(tx *Tx) {
 		accounts := tx.Collection()
 		for account := range tx.Rows(accounts).All() {
-			// THE TEMPLATE ZONE'S OWN CONSTRUCTOR: the row surface embeds
-			// *Tpl and Tpl.tx is unexported, so this free function is the
-			// only way into the scope from here.
+			// The row surface embeds *Tpl and Tpl.tx is unexported, so this free
+			// function is the only way into the template zone from here.
 			positions = TplCollectionOf[string, nestedPosition](account.Tpl)
 			nested := account.Rows(positions.Collection)
 			for row := range nested.All() {
@@ -296,14 +276,11 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 			}
 		}
 		tx.Insert(accounts, "brokerage", "Brokerage")
-		// `At` KEEPS THE RECORD TYPE, so this is the record insert. An
-		// untyped handle here would take a bare value and the row's two
-		// fields would be unreachable.
+		// `At` KEEPS THE RECORD TYPE: an untyped handle here would take a bare
+		// value and the row's two fields would be unreachable.
 		positions.At("brokerage").Insert(tx, "aapl", nestedPosition{"AAPL", "10"})
 	})
 
-	// The collection was born with the RECORD schema: two fields, not the
-	// one string a scalar collection carries.
 	births := recordsOfKind(recs, txCreateCollection)
 	if len(births) != 2 {
 		t.Fatalf("the probe queued %d create_collection records, want 2 (the "+
@@ -318,8 +295,6 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 			"typechecks and leaves every row one string wide", variants, fields)
 	}
 
-	// And it was born INSIDE the parent's template scope: after the
-	// create_for that opened it, before the template_end that closed it.
 	fors := recordsOfKind(recs, txCreateFor)
 	ends := recordsOfKind(recs, txTemplateEnd)
 	if len(fors) != 2 || len(ends) != 2 {
@@ -333,7 +308,6 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 			births[1], fors[0], ends[1])
 	}
 
-	// The typed narrowing addresses the COPY, on the wire.
 	inserts := recordsOfKind(recs, txCollectionInsert)
 	if len(inserts) != 2 {
 		t.Fatalf("the probe queued %d collection_insert records, want 2", len(inserts))
@@ -343,8 +317,7 @@ func TestANestedRecordCollectionIsDeclaredInTheTemplateAndAddressedTyped(t *test
 			"that drops the key writes the parent's table in silence", pathLen)
 	}
 
-	// And in the model, which is the half the wire cannot show: the copy's
-	// entry is a nestedPosition, and the collection's own table is empty.
+	// The model is the half the wire cannot show.
 	app2 := NewApp()
 	var copyEntries, ownEntries []RecordEntry[string, nestedPosition]
 	app2.Build(func(tx *Tx) {

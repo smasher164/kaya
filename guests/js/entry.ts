@@ -1,9 +1,4 @@
-// The entry scene: the first widget with owned state, exercising the
-// uncontrolled contract end to end. The field owns its text and reports
-// each edit as a text-changed occurrence; the app folds those into
-// `draft` and never reads back from the widget.
-//
-// Build the library first (cargo build), then:
+// The field owns its text and the app never reads back from the widget.
 //     KAYA_SELFTEST=entry node guests/js/entry.ts
 
 import * as kaya from "kaya-gui";
@@ -13,8 +8,6 @@ const app = new kaya.App();
 let draft = "";
 
 function onChange(text: string): void {
-  // The fold: widget-owned state arrives as occurrences; the app's
-  // copy is this variable, not a widget read.
   draft = text;
 }
 
@@ -26,9 +19,7 @@ function onAdd(): void {
   // The binding mints the key (docs/fresh-key-plan.md).
   todos.insertFresh(draft);
   status.set(`added ${draft}, ${todos.size} total`);
-  // Finish the form, atomically with the insert. The field answers with
-  // text_changed("") through its normal edit path, so onChange empties
-  // the draft.
+  // Atomic with the insert; the field's text_changed("") empties draft.
   field.clear();
   field.focus();
 }

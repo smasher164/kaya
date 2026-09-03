@@ -10,22 +10,17 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The table/scroll bench, one platform per run. A measuring instrument,
-# not a gate — check-gates' census does not see a `bench-` name, and that
-# is deliberate: a benchmark has no pass/fail to sweep.
+# The table/scroll bench, one platform per run. A measuring INSTRUMENT,
+# not a gate: check-gates' census does not see a `bench-` name, because a
+# benchmark has no pass/fail to sweep.
 #
 # Usage: tools/bench-tables.sh <platform> [--dry-run] [--rows N,N,N]
 #                              [--repeats K] [--chunk C] [--out PATH]
 #        platform: guest | macos | linux | windows | android | ios
 #
-# What each number means, what the 2026-08-24 baselines were, and the
-# recipe for the four platforms this script does not yet drive itself:
-#   docs/measurements/README.md
-#
-# The caveats that decide whether a number is worth anything — a
-# quiescent tree, no KAYA_FAST, host contention, the human in the GUI
-# session — are in that README under CAVEATS, with pointers to where
-# each was measured.
+# What each number means, the 2026-08-24 baselines, the recipes for the
+# four platforms this does not drive itself, and the CAVEATS that decide
+# whether a number is worth anything: docs/measurements/README.md.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -81,14 +76,10 @@ case "$PLATFORM" in
 esac
 
 # ---- refuse to measure next to a matrix -----------------------------
-#
-# Every lane saturates this machine, and the choke reports say what that
-# does to a number: macOS Part B carried "+/- 50% run-to-run" with the
-# other four lanes up, and Linux's 5000-6000 band went wide enough that
-# 2250 once came in slower than 2500. There is no lockfile or pidfile to
-# consult (validate-all's lane list is an in-process bash array and its
-# LANES_DIR is an mktemp that dies with it), so the two causes are read
-# two different ways and answered in two different sentences.
+# A saturated machine makes a number worthless: macOS Part B carried
+# "+/- 50% run-to-run" beside four lanes, and Linux's 5000-6000 band went
+# wide enough that 2250 came in slower than 2500. There is no lockfile to
+# consult, so the two causes are read two ways and answered in two.
 
 # The converted runners run as python bodies (the .sh beside each is an
 # exec shim), so pgrep must look for the .py names.
@@ -210,16 +201,10 @@ probe_ios() {
 probe_status=$?
 
 # ---- the four rigs this script does not drive itself ----------------
-#
-# Their 2026-08-24 recipes are recorded step by step in the README. They
-# are NOT transcribed into never-run orchestration here on purpose: code
-# that no run exercises rots silently, and the repo's own rule is that a
-# branch nobody has watched is a guess (CLAUDE.md invariant 3). Automating
-# them is a ledger entry, not a comment.
-#
-# The probe above still ran, and this says which of the two things is
-# true rather than making the reader guess: a rig that is not automated
-# and a device that is not up are different problems.
+# Their recipes are in the README, NOT transcribed into never-run
+# orchestration here: code no run exercises rots silently (invariant 3).
+# The sentences below discriminate — a rig that is not automated and a
+# device that is not up are different problems.
 case "$PLATFORM" in
     linux | windows | android | ios)
         if [ "$probe_status" -eq 0 ]; then

@@ -1,27 +1,10 @@
-(* The save conformance scene, OCaml port — the round trip an editor
-   actually walks (docs/save-plan.md D5): open, edit, save back, save
-   AS, reopen both.
-
-   EVERY ASSERTION IS A READ-BACK OFF THE DISK, through the HANDLE kaya
-   gave the guest and never through [local_path], which is empty on both
-   phones. A write that returns success and lands nowhere is the failure
-   "save" has, and only reopening can see it. The work runs off the app
-   thread because [open_picked] blocks.
-
-   NO EXTENSIONS ON ANY NAME AND NO FILTER ON EITHER REQUEST: with
-   allowed content types set NSSavePanel appends the first of them, and
-   a hidden-extension Finder preference would change what the assertion
-   reads (docs/deferred.md; bindings/ocaml/kaya_app.ml's [save_file]).
-
-   Canonical semantics in guests/rust/save.rs; the byte-frozen contract
-   in tools/scenes/save.steps. *)
+(* The save scene, OCaml port — guests/rust/save.rs, tools/scenes/save.steps. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* Agreed with the interpreter by CONSTRUCTION rather than by protocol:
-   both are the same process, [Filename.get_temp_dir_name] honours TMPDIR
-   exactly as the harness's $TMP does, and the pid keeps legs apart. *)
+(* The pid keeps legs apart, and [Filename.get_temp_dir_name] honours TMPDIR
+   exactly as the harness's $TMP does. *)
 let save_dir =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "kaya-save-%d" (Unix.getpid ()))
@@ -31,9 +14,8 @@ let write_file path contents =
   output_string oc contents;
   close_out oc
 
-(* Read to EOF WITHOUT asking the descriptor how long it is:
-   [in_channel_length] needs a seekable file and a picked handle need not
-   be one — Android's provider streams. *)
+(* Read to EOF WITHOUT asking the descriptor its length: a picked handle
+   need not be seekable — Android's provider streams. *)
 let read_all ic =
   let buf = Buffer.create 64 in
   let chunk = Bytes.create 4096 in
@@ -51,14 +33,12 @@ let read_back (file : picked_file) =
     let fd, _seekable = Kaya_runtime.open_picked file.handle file_mode_read in
     let ic = Unix.in_channel_of_descr fd in
     let text = read_all ic in
-    (* [close_in] closes the underlying descriptor; never [Unix.close]
-       it as well. *)
+    (* [close_in] closes the underlying descriptor; never [Unix.close] too. *)
     close_in ic;
     text
   with e -> "open failed: " ^ Printexc.to_string e
 
-(* [file_mode_write] truncates, on a picked file and a save destination
-   alike; the destination only adds the create. *)
+(* [file_mode_write] truncates; a save destination only adds the create. *)
 let write_back (file : picked_file) bytes =
   match Kaya_runtime.open_picked file.handle file_mode_write with
   | exception e ->
@@ -66,24 +46,20 @@ let write_back (file : picked_file) bytes =
   | fd, _seekable ->
       let oc = Unix.out_channel_of_descr fd in
       output_string oc bytes;
-      (* Closed BEFORE the reopen, so what comes back is the file's and
-         not this channel's buffer. *)
+      (* Closed BEFORE the reopen, so the bytes are the file's. *)
       close_out oc;
       read_back file
 
 let () =
-  (* THE DECOY MATTERS: with one file in the directory a dialog
-     completes with it when nothing is selected, so [file_choose draft]
-     would pass on a backend that never selected anything. "decoy" sorts
-     first, so such a backend gets the wrong file and fails. *)
+  (* THE DECOY MUST SORT FIRST: with one file in the directory a dialog
+     completes with it when nothing is selected (docs/traps.md). *)
   (try Unix.mkdir save_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   write_file (Filename.concat save_dir "draft") "first draft";
   write_file (Filename.concat save_dir "decoy") "decoy";
 
   let app = Kaya_app.create () in
 
-  (* Held as handles, never as paths: the phones hand back no
-     re-openable name at all. *)
+  (* Handles, never paths: the phones hand back no re-openable name. *)
   let source : picked_file option ref = ref None in
   let destination : picked_file option ref = ref None in
 
@@ -121,9 +97,9 @@ let () =
         ignore (pick_file ~on_result:opened ())
       in
       let save_back () =
-        (* A missing handle is an open that never landed — its OWN
-           sentence, never an exception: a crashed guest masks the real
-           failure (docs/deferred.md, save-jvm WATCH). *)
+        (* A missing handle gets its OWN sentence, never an exception: a
+           crashed guest masks the real failure (docs/deferred.md, save-jvm
+           WATCH). *)
         match !source with
         | None -> write status (Str "nothing open to save")
         | Some file ->
@@ -133,7 +109,6 @@ let () =
         ignore (save_file ~on_result:saved "copy")
       in
       let reopen () =
-        (* The missing-handle guard, same reason as save_back's. *)
         match (!source, !destination) with
         | Some first, Some second ->
             work (fun () ->

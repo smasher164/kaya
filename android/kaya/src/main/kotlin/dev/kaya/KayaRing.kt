@@ -3,11 +3,8 @@ package dev.kaya
 import android.app.Activity
 
 /**
- * The direct-access tier of the occurrence ring, for JVM consumers with
- * real atomics. Call [attach] from onCreate ON THE UI THREAD. Exclusive
- * with [Kaya.attach] — one core per process. SINGLE CONSUMER; do not
- * mix with the function floor.
- *
+ * The direct-access tier of the occurrence ring. [attach] from onCreate
+ * ON THE UI THREAD; exclusive with [Kaya.attach], SINGLE CONSUMER.
  * Raw addresses rather than direct ByteBuffers: ART truncates a direct
  * buffer's address to 32 bits in the byte-buffer-view VarHandle path
  * (docs/traps.md).
@@ -16,26 +13,11 @@ object KayaRing {
     @JvmStatic external fun attach(activity: Activity)
 
     /**
-     * START THE JVM GUEST, once per process. THE LIBRARY OWNS THE APP
-     * THREAD on every Android tier — the Rust guest's is spawned by
-     * `crates/kaya/src/android.rs`, the Go guest's by
-     * `bindings/go/android.go`, and this is the JVM's (ruled
-     * 2026-08-27, docs/deferred.md's mount entry). A shell that spawned
-     * its own would re-run the guest's whole entry on every relaunch,
-     * which is the crash that ruling closed.
-     *
-     * THE SHELL'S FOUR LINES, IN ORDER, none of them optional:
-     *
-     * ```
-     * System.loadLibrary("kaya")
-     * KayaRing.attach(this)        // the core and the ring natives
-     * KayaCompose.mount(this)      // the interpreter and its pump
-     * KayaRing.startGuest(scene)   // the app thread; once per process
-     * ```
-     *
-     * A LATER onCreate IS A NO-OP HERE, which is what makes recreation
-     * invisible to a guest: `scene` is not run again, and the surviving
-     * one keeps serving the re-attached surface.
+     * START THE JVM GUEST, once per process (docs/deferred.md's mount
+     * entry) — a later onCreate is a NO-OP, which makes recreation
+     * invisible to a guest. THE SHELL'S FOUR LINES, IN ORDER:
+     * `System.loadLibrary("kaya")`, `KayaRing.attach(this)`,
+     * `KayaCompose.mount(this)`, `KayaRing.startGuest(scene)`.
      */
     @JvmStatic
     fun startGuest(scene: Runnable) {
@@ -60,10 +42,10 @@ object KayaRing {
     @JvmStatic external fun specHash(): Long
 
     /**
-     * The host capability word — kaya_capabilities's JNI spelling. A
-     * `Long` because JNI has no unsigned types. BOTH JVMs carry it,
-     * because the ANSWER differs between them: this one says no to
-     * auxiliary windows and the desktops say yes.
+     * The host capability word — kaya_capabilities's JNI spelling; a
+     * `Long` because JNI has no unsigned types. BOTH JVMs carry it
+     * because the ANSWER differs: this one says no to auxiliary windows
+     * and the desktops say yes.
      */
     @JvmStatic external fun capabilities(): Long
 
@@ -74,19 +56,16 @@ object KayaRing {
 
     /**
      * Redeem an occurrence blob for its bytes, and release it — called
-     * by the generated decoder, never by a guest. Unlike the apply
-     * channel's batch-local index, nothing else retires this handle, so
-     * the decoder releases it and no handle reaches an app.
+     * by the generated decoder, never by a guest. Nothing else retires
+     * this handle.
      */
     @JvmStatic external fun occurrenceBlob(handle: Long): ByteArray
 
     /**
-     * Open an asset by name — a relative path under the asset root,
-     * spelled with `/`, as UTF-8 bytes. 0 is the MISS, and the caller
-     * raises with the sentence [assetMissSentence] hands it.
-     *
-     * BYTES AND NOT A STRING: JNI's string calls speak MODIFIED UTF-8,
-     * so a name outside ASCII would reach the resolver altered.
+     * Open an asset by name — a `/`-spelled relative path under the
+     * asset root; 0 is the MISS, and the caller raises with
+     * [assetMissSentence]'s sentence. BYTES AND NOT A STRING: JNI's
+     * string calls speak MODIFIED UTF-8.
      */
     @JvmStatic external fun assetOpen(name: ByteArray): Long
 
@@ -104,26 +83,19 @@ object KayaRing {
     @JvmStatic external fun assetRelease(handle: Long)
 
     /**
-     * The core's sentence for why [assetOpen] answered 0, carried
-     * across as bytes; empty means the name resolves.
-     *
-     * NAMED FOR THE CARRYING, and deliberately NOT `assetWhyNot`:
-     * tools/check-diagnostics.py reads any *WhyNot by that name alone.
-     * The function that earned the name is `asset_why_not` in
-     * crates/kaya/src/assets.rs (docs/deferred.md).
+     * The core's sentence for why [assetOpen] answered 0; empty means
+     * the name resolves. Deliberately NOT `assetWhyNot`:
+     * tools/check-diagnostics.py reads any *WhyNot by that name alone,
+     * and the diagnostic is `asset_why_not` in crates/kaya/src/assets.rs.
      */
     @JvmStatic external fun assetMissSentence(name: ByteArray): ByteArray
 
     /**
      * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
-     * with `seekable[0]` set to 1 when it supports random access.
-     *
-     * NATIVE BECAUSE JAVA HAS NO OTHER WAY — no public API wraps a
-     * descriptor, and reflecting into FileDescriptor's private field
-     * throws on a modern JDK.
-     *
-     * BLOCKS, possibly for a long time — a provider may download the
-     * file before it answers — so call it from a thread you chose.
+     * with `seekable[0]` set to 1 for random access. Native because no
+     * public API wraps a descriptor. BLOCKS, possibly for a long time —
+     * a provider may download the file — so call it from a thread you
+     * chose.
      */
     @JvmStatic external fun openPicked(
         handle: Long,

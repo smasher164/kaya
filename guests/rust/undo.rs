@@ -1,12 +1,5 @@
-//! The undo scene: two tiers, one Edit menu, one ledger that orders
-//! them. The canonical annotated port; the reasoning is
-//! docs/undo-plan.md D1-D6 and the byte-frozen contract is
-//! tools/scenes/undo.steps.
-//!
-//! Two constraints this file is shaped by: `clear` inside an undoable
-//! group is REFUSED at apply (D4), so the add below is two
-//! transactions; and a restored typing episode arrives only as the
-//! delta's texts run (D5), never as a text_changed echo.
+//! The undo conformance scene (tools/scenes/undo.steps): `clear` inside a
+//! group is REFUSED at apply, so the add is two transactions.
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Todo {
@@ -16,23 +9,18 @@ struct Todo {
 #[derive(Clone)]
 enum Msg {
     Draft(String),
-    /// A note typed into a ROW's field: the copy's key path and the
-    /// text.
+    /// A note typed into a ROW's field: the copy's key path and the text.
     Note(kaya::Path, String),
     Add,
     Remove,
     Star,
     Focus,
-    /// The label of the step that came back, and the whole texts run of
-    /// the delta — each entry names the field it restores, so the run
-    /// cannot be reduced to one string.
+    /// The step's label, and the whole texts run: each entry names a field.
     Undone(String, Vec<kaya::UndoText>),
     Redone(String, Vec<kaya::UndoText>),
 }
 
-/// What the history label says a step was. kaya invents no name for a
-/// typing episode (docs/undo-plan.md D8), so the empty label is the
-/// app's to spell.
+/// kaya invents no name for a typing episode: the label is empty.
 fn what(label: &str) -> &str {
     if label.is_empty() {
         "typing"
@@ -41,10 +29,8 @@ fn what(label: &str) -> &str {
     }
 }
 
-/// The app's collection mirror, rendered: every key it holds, in the
-/// order it holds them. The only part of an undo a count cannot see —
-/// a restore under a fresh name, or at the wrong position, leaves every
-/// total in this file correct (D5).
+/// THE ONLY PART OF AN UNDO A COUNT CANNOT SEE: a restore under a fresh
+/// name, or at the wrong position, leaves every total here correct.
 fn key_list(tx: &kaya::Tx<'_>, todos: &kaya::Collection<Todo>) -> String {
     let keys: Vec<String> = tx
         .items(todos)
@@ -58,15 +44,12 @@ fn key_list(tx: &kaya::Tx<'_>, todos: &kaya::Collection<Todo>) -> String {
     }
 }
 
-/// The row a stamped copy's occurrence names: for a top-level For the
-/// key path is one key.
+/// The row a stamped copy's occurrence names.
 fn row_key(path: &[kaya::Value]) -> i64 {
     <i64 as kaya::KayaField>::from_value(&path[0])
 }
 
-/// The app's copy of what is typed in the ROWS, rendered: every note it
-/// holds, by key. The rows' fields are uncontrolled like the draft, so
-/// nothing reads this back off a widget.
+/// What is typed in the ROWS, by key: nothing reads it off a widget.
 fn note_list(notes: &std::collections::BTreeMap<i64, String>) -> String {
     if notes.is_empty() {
         return "no notes".to_string();
@@ -75,9 +58,8 @@ fn note_list(notes: &std::collections::BTreeMap<i64, String>) -> String {
     format!("notes {}", rendered.join(","))
 }
 
-/// One texts run, folded into the app's two mirrors of widget-owned
-/// text. The empty path is the draft; a path names a row. An empty note
-/// is no note: a restore to "" must REMOVE the key.
+/// The empty path is the draft, a path names a row, and AN EMPTY NOTE IS
+/// NO NOTE: a restore to "" must REMOVE the key.
 fn fold_texts(
     draft: &mut String,
     notes: &mut std::collections::BTreeMap<i64, String>,
@@ -121,8 +103,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(add, Msg::Add);
                 let star = tx.button("star").id(); // button#1
                 msgs.on_click(star, Msg::Star);
-                // The scene's way back to the field: `star` does not
-                // move the cursor, so the script asks for focus itself.
+                // The scene's way back to the field: `star` moves no focus.
                 let refocus = tx.button("focus").id(); // button#2
                 msgs.on_click(refocus, Msg::Focus);
                 let remove = tx.button("remove").id(); // button#3
@@ -130,8 +111,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 for mut row in todos.rows(tx) {
                     row.row(|t| {
                         t.label(Todo::title());
-                        // Unbound: `entry_bound(src)` is the constructor
-                        // that seeds a copy from its own row.
+                        // Unbound: `entry_bound(src)` seeds from its row.
                         let note = t.entry();
                         msgs.on_change_node(note, Msg::Note);
                     });
@@ -139,16 +119,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 field
             })
             .into_parts();
-        // The scene types with real keystrokes, so something has to be
-        // holding focus when it does.
+        // The scene types with real keystrokes: something must hold focus.
         tx.focus(field);
         tx.mount(root);
         (status, history, keys, notes, field, todos)
     });
 
-    // Per window, and PERSISTENT: these do not retire with one answer.
-    // The binding reconciles its collection mirror from the payload
-    // BEFORE the handler runs, so `tx.len` below sees restored state.
+    // PERSISTENT: these do not retire with one answer, and the mirror is
+    // reconciled before the handler runs.
     msgs.on_undone(kaya::DEFAULT_WINDOW, |label, delta| {
         Msg::Undone(label, delta.texts.clone())
     });
@@ -156,15 +134,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         Msg::Redone(label, delta.texts.clone())
     });
 
-    // Two mirrors of widget-owned text: the draft, and one note per
-    // row. The payload's path is what tells them apart.
+    // Two mirrors of widget-owned text; the path tells them apart.
     let mut draft = String::new();
     let mut row_notes: std::collections::BTreeMap<i64, String> = std::collections::BTreeMap::new();
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Draft(text) => draft = text,
-            // Folded by the same rule `fold_texts` uses for a restore,
-            // so "what a note is" has one spelling and two arrival paths.
+            // The same rule a restore takes: one spelling, two paths.
             Msg::Note(path, text) => {
                 let key = row_key(&path);
                 if text.is_empty() {
@@ -177,8 +153,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Add => {
                 if draft.is_empty() {
-                    // Not a step: it names no group, so the forward
-                    // history survives it.
+                    // Not a step: the forward history survives it.
                     ctx.apply(|tx| {
                         let total = tx.len(&todos);
                         tx.write(status, format!("nothing to add, {total} total"));
@@ -187,8 +162,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 let step = format!("add {draft}");
                 ctx.apply(|tx| {
-                    // Names the step; everything in this batch is what
-                    // it did.
+                    // Names the step; this batch is what it did.
                     tx.undoable(step);
                     tx.insert_fresh(&todos, Todo { title: draft.clone() });
                     let total = tx.len(&todos);
@@ -197,12 +171,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.write(keys, list);
                     tx.focus(field);
                 });
-                // Its OWN transaction: the clear is not part of the
-                // step, and `clear` inside a group is refused anyway.
+                // Its OWN transaction: `clear` inside a group is refused
+                // at apply.
                 ctx.apply(|tx| tx.clear(field));
             }
-            // The step whose inverse is an identity: the core captured
-            // the entry and its position, so this app remembers neither.
+            // The core captured entry and position; this app holds neither.
             Msg::Remove => ctx.apply(|tx| {
                 let first = tx.items(&todos).first().cloned();
                 match first {
@@ -220,7 +193,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                 }
             }),
-            // A group at its smallest: one signal write.
             Msg::Star => ctx.apply(|tx| {
                 tx.undoable("star");
                 tx.write(status, "starred");
@@ -232,10 +204,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| {
                     let total = tx.len(&todos);
                     tx.write(history, format!("undid {}, {total} total", what(&label)));
-                    // ONE transaction with the history label above: the
-                    // script reads that label first, so these two must
-                    // already hold the app's answer and not the value
-                    // the core restored on its way past.
+                    // One transaction with the label above: the script reads
+                    // that first.
                     let keylist = key_list(tx, &todos);
                     tx.write(keys, keylist);
                     tx.write(notes, list);

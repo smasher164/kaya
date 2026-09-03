@@ -1,11 +1,5 @@
-//! The layout scene: the native-default observation vehicle, stressing
-//! the axes where the backends' defaults diverge. The recording
-//! (KAYA_RECORD) is what it is for.
-//!
-//! IT ASSERTS NO GEOMETRY, and must not start: it has TWO columns, and
-//! a container target indexes by creation order, which legitimately
-//! differs per language, so no column here can be named safely
-//! (tools/check-steps.py). grow.rs asserts the contract instead.
+//! The native-default observation vehicle (KAYA_RECORD is what it is for).
+//! IT ASSERTS NO GEOMETRY: it has TWO columns, and targets are ordinal.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
@@ -19,34 +13,28 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let root = tx.column(|tx| {
             tx.label(probe); // label#0
 
-            // Main-axis free space: three unequal children with leftover
-            // room — how does each backend distribute it (pack leading,
-            // center, spread evenly)?
+            // Main-axis free space: who gets the leftover room?
             tx.row(|tx| {
                 tx.button("A");
                 tx.button("longer");
                 tx.label(tail); // label#1
             });
 
-            // Cross-axis alignment: three different intrinsic heights —
-            // where do the short ones sit against the tall one?
+            // Cross-axis alignment: where do the short ones sit?
             tx.row(|tx| {
                 tx.checkbox("check");
                 tx.label(mixed); // label#2
                 tx.slider(0.0, 1.0, 0.5).grow(1.0);
             });
 
-            // Proportional grow: TWO growers of unequal weight, because
-            // a single grower only shows that leftover space is absorbed
-            // — which an ordinal priority also does. Sliders because
-            // they have an intrinsic width to be overridden.
+            // TWO growers of unequal weight: one alone only shows that
+            // leftover space is absorbed.
             tx.row(|tx| {
                 tx.slider(0.0, 1.0, 0.25).grow(1.0);
                 tx.slider(0.0, 1.0, 0.75).grow(3.0);
             });
 
-            // Nesting: the SECOND column, which is why nothing here can
-            // be named ordinally.
+            // The SECOND column: why nothing here can be named ordinally.
             tx.column(|tx| {
                 tx.label(nested); // label#3
                 tx.row(|tx| {
@@ -59,7 +47,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.mount(root);
     });
 
-    // The keep-alive idiom: blocks until the harness sends Shutdown.
+    // Blocks until the harness sends Shutdown.
     while msgs.next(&ctx).is_some() {}
 }
 

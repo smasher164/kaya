@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Runs inside the container (see tools/validate-linux.py): builds kaya
-# against the container's GTK and runs the validations under both
-# display protocols — X11 (Xvfb) and Wayland (headless sway). The repo
-# is mounted at /work; Linux artifacts go to target-linux so they never
+# Runs INSIDE the linux container (tools/validate-linux.py builds the
+# image and runs this), under both display protocols. The repo is
+# mounted at /work; Linux artifacts go to target-linux so they never
 # collide with the host's target directory.
 set -uo pipefail
 
-# INSIDE THE CONTAINER ONLY. Run on the host this used to die on a bare
-# `cd: /work: No such file or directory`, and this is the one lane whose
-# entry point is not the script that does the work.
 if [ ! -d /work ]; then
     echo "$0: this runs INSIDE the linux container, where the repo is" \
         "mounted at /work. From the host use: nix develop -c" \
@@ -18,42 +14,32 @@ fi
 cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
 # harness-extract.sh refuses to run outside the dev shell and the
-# container is not one, so hand it the fingerprint it checks for.
-# Without this every leg passed and then produced no stills at all.
+# container is not one; without the fingerprint every leg passes and
+# produces no stills at all.
 KAYA_DEV_SHELL="$(cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 export KAYA_DEV_SHELL
-# The one Python import mechanism: the kaya package resolves from here.
 export PYTHONPATH=/work/bindings/python
-# The JS guests import kaya-gui through guests/js/node_modules/kaya-gui,
-# a relative symlink to bindings/js that `npm install --offline` writes
+# guests/js/node_modules/kaya-gui is a relative symlink to bindings/js
 # (docs/js-plan.md §1); the mount usually carries it from the host's
 # js-typecheck run, and a fresh clone gets it here.
 (cd guests/js && npm install --offline --no-audit --no-fund --no-package-lock --silent)
 # Dune resolves external libraries through OCAMLPATH, which only opam
-# env provides — the image's bare PATH export is enough for ocamlfind
+# env provides; the image's bare PATH export is enough for ocamlfind
 # but not for dune.
 eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
 SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive"
-# Depth-slice scenes: built and run for rust only until the language
-# sweep lands their guests. `windowed` is rust BY DESIGN, not by depth
-# (docs/virtualization-plan.md §6.3): it is the compiled windowing scene
-# every lane can run, where ledger and varied are python and stop at the
-# desktops.
-# `canvas` is rust-only for the same reason `windowed` is: it is the
-# compiled conformance scene every lane runs, and the drawing it declares
-# is in viewbox units, so one guest's op stream is every platform's
-# (docs/canvas-plan.md §3.2). `sizepolicy` is rust-only because it is a
-# depth slice: the seven other bindings have no `fixed`/`on_draw`/`on_tick`
-# spelling yet (docs/deferred.md's size-policy entry).
+# Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
+# DESIGN rather than by depth — the compiled conformance scenes every
+# lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
+# §3.2); `sizepolicy` waits on the other bindings' `fixed`/`on_draw`/
+# `on_tick` spelling (docs/deferred.md's size-policy entry).
 DEPTH_SCENES="windowed canvas sizepolicy"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
-# Phase timing: greppable lines say where the container's wall time
-# went.
 KAYA_T0=$SECONDS
 timing() {
     echo "TIMING $1 $((SECONDS - KAYA_T0))s"
@@ -62,8 +48,7 @@ timing() {
 
 # The guest builds pool: dotnet and javac never link libkaya, so they
 # start BEFORE the cargo build; everything that links (dune, cabal, go's
-# cgo, the C floor) pools after it. Each job logs to its own file; a
-# failure prints its log and dies.
+# cgo, the C floor) pools after it.
 BUILDS_DIR="$(mktemp -d)"
 build_names=()
 build_pids=()
@@ -99,137 +84,77 @@ build_java() {
 }
     # dotnet writes obj/bin next to the csproj; build in a scratch copy so
     # the host's in-tree dotnet artifacts (different RID) are untouched.
-    # Copied BEFORE the early build starts (the pooled build raced this
-    # copy once and built nothing).
+    # Copied BEFORE the early build starts — the pooled build races it.
 mkdir -p /tmp/cs
 cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp/cs/
 run_build csharp build_csharp
 run_build java build_java
 
-# Debuginfo off, AND the link parallelism bounded: at 18 examples the
-# container's parallel example links crossed its memory ceiling and the
-# kernel OOM-killed ld ("signal 9" mid-link, 2026-07-22). aarch64 BFD
-# ld's footprint is dominated by debuginfo and nothing here asserts on
-# symbols; bounding jobs takes the peak out of the link, which is where
-# the kernel was choosing a victim. It recurred once after the
-# debuginfo fix alone, when libadwaita added two rlibs per link.
+# Debuginfo off, AND the link parallelism bounded (docs/traps.md:
+# "Container linker OOM scales with the example count").
 CARGO_PROFILE_DEV_DEBUG=0 cargo build -j6 --locked --features harness --lib \
     "${BUILD_EXAMPLES[@]}" || exit 1
-# The library every non-Rust guest here dlopens must be the one this
-# build produced, not a survivor of a build that failed.
 tools/build-id.py --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
 timing core-build
 
-# The Rust backends resolve a scene NAME to tools/scenes/<name>.steps.
-# The repo is mounted at /work here, so point at it explicitly rather
-# than relying on the compile-time default.
+# The repo is mounted at /work, not at the compile-time default.
 export KAYA_SCENES_DIR=/work/tools/scenes
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
 
-# THE ACCESSIBILITY BUS IS PER-LEG, NOT LANE-WIDE. Exporting
-# GTK_A11Y=atspi here changed the GTK backend for EVERY leg and timed
-# out 11 of them at 180s (python/go/csharp/ocaml; rust and c survived)
-# — measured 2026-07-25. The a11y legs below launch the bus INSIDE each
-# leg through tools/linux/a11y-leg.sh, which tears it down with the leg;
-# tools/linux/atspi_probe.py walks the tree by hand.
+# THE ACCESSIBILITY BUS IS PER-LEG, NOT LANE-WIDE: exported lane-wide it
+# timed out 11 legs at 180s (python/go/csharp/ocaml; rust and c survived)
+# — measured 2026-07-25, and docs/traps.md ("On linux, GTK and the
+# harness find the session bus by DIFFERENT means") delegates the four
+# languages to this line. The a11y legs below launch the bus INSIDE each
+# leg through tools/linux/a11y-leg.sh, which tears it down with the leg.
 
-# HEADLESS SWAY FOR THE WAYLAND LEG, and not Weston, for two measured
-# reasons (docs/clipboard-plan.md §0e, docs/traps.md).
+# HEADLESS SWAY, not Weston, and FLOATING IS NOT OPTIONAL: docs/traps.md,
+# "Headless Weston has no seat, so it has no clipboard"
+# (docs/clipboard-plan.md §0e).
 #
-# 1. HEADLESS WESTON HAS NO wl_seat, and a data device is obtained FROM
-#    a seat — so that compositor has no clipboard at all, for any
-#    client. No flag fixes it. Nothing before the clipboard noticed,
-#    because kaya's harness clicks by driving the toolkit rather than
-#    injecting input.
-# 2. WLROOTS COMPOSITORS SPEAK data-control, which lets a privileged
-#    client read the selection with NO SURFACE AND NO FOCUS. Without it
-#    wl-clipboard works by creating a surface and TAKING FOCUS from
-#    whatever leg is running. Passive reads are what let the clipboard
-#    legs stay in the parallel pool.
-#
-# FLOATING IS NOT OPTIONAL: sway tiles by default, which forces every
-# window to the output size — measured, a window asking for 640x480 got
-# 1276x693 — and that would break every expect_window_size leg.
-#
-# AND THE RULE IS `app_id=".*"` FOR A REASON, which this comment used to
-# get wrong in one direction and then in another. It first claimed kaya's
-# windows carry `application_id("dev.kaya.Milestone2")` — the GApplication
-# id — and that the rule matches because of it; the correction said the
-# class follows `g_get_prgname()`, the LAUNCHER BINARY's name. BOTH ARE
-# TRUE, of different legs, and the discriminator is a session bus.
+# THE RULE IS `app_id=".*"` BECAUSE THE CLASS HAS TWO SOURCES, and this
+# block is where docs/deferred.md's identity entry keeps the measurement.
 # MEASURED 2026-08-18 in this image, same binary and same protocol,
-# differing only in whether one was running:
+# differing only in whether a session bus was running:
 #
 #   x11, every leg           WM_CLASS = the launcher binary's name
 #   wayland, no session bus  app_id   = the launcher binary's name
 #   wayland, a11y-leg.sh     app_id   = "dev.kaya.Milestone2"
 #
 # because on Wayland a GtkApplication window's `app_id` comes from the
-# GApplication ID, and that startup path runs only when the application
-# registers on a session bus. `a11y-leg.sh` launches one, so the identity,
-# styling, typeface and toolbar legs take that arm and every other leg
-# does not. AUXILIARY windows are plain `gtk4::Window`s with no
-# application and carry the program name on both arms.
-#
-# So this lane's legs advertise `python3`, `dotnet`, `java`, `milestone2`,
-# `kaya-go` — and, on the wayland legs that hold a bus, one shared
-# `dev.kaya.Milestone2`. A rule naming any one id would match a fraction
-# of them; `app_id=".*"` is what makes every leg float.
-#
-# NONE OF THOSE IS THE APP'S OWN NAME, which is the point of the identity
-# arm below: an app that declares an identity now moves the class of the
-# windows that already exist (crates/kaya/src/gtk.rs, `reclass_toplevels`)
-# rather than only of the ones created afterwards, so a `.desktop` entry
-# can match its PRIMARY window. Before that, a kaya app on Wayland
-# advertised kaya's own milestone-2 id to the whole desktop.
-#
+# GApplication ID, and that startup path runs only over a session bus,
+# which `a11y-leg.sh` launches. AUXILIARY windows are plain
+# `gtk4::Window`s and carry the program name on both arms. So a rule
+# naming any one id would match a fraction of this lane's legs.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 cat >/tmp/sway.conf <<'SWAY'
 for_window [app_id=".*"] floating enable
 output * resolution 1600x1000
 SWAY
-# 1600x1000 ON BOTH PROTOCOLS (the Xvfb screen below matches): the
-# panes scene resizes to 1400, and a stage smaller than the resize
-# leaves the window at whatever the compositor allowed — the breakpoint
-# then legitimately shows fewer panes and the leg reads as a backend
-# bug rather than a small screen.
-#
-# THE TEXT SCALE IS PINNED at 1.0 (docs/multicolumn-plan.md D4):
-# libadwaita's sp unit scales with the text-scaling factor, so the
-# 860sp/500sp rungs are 860px/500px only while nothing scales text.
-# The container has no settings daemon, so the default IS 1.0; the
-# unsets keep an override from sneaking in through docker -e.
+# 1600x1000 ON BOTH PROTOCOLS (the Xvfb screen below matches) and THE
+# TEXT SCALE PINNED at 1.0: a stage narrower than a scene's resize, or a
+# scaled sp unit, moves a breakpoint and the leg reads as a backend bug.
+# check-steps' linux_stage_lint holds both (docs/multicolumn-plan.md D4).
 unset GDK_DPI_SCALE GDK_SCALE
 
 # Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for serial):
 # every leg claims a SESSION of its own from a booted-once pool — an
-# Xvfb on x11, a headless sway on wayland. Verdicts print in submission
-# order at drain; a FAIL prints its log.
+# Xvfb on x11, a headless sway on wayland.
 JOBS="${KAYA_JOBS:-8}"
 
-# THE WAYLAND SESSION POOL, one headless sway per pool slot, booted once
-# (2026-09-02; the x11 pool's shape, below). Until then every wayland
-# leg shared ONE compositor, and the sharing was a rule with teeth: one
-# clipboard for the pool, so the clipboard legs ran alone between
-# drains; one seat for the pool, so a virtual keyboard held for the
-# session made keyboard focus EXCLUSIVE and broke three unrelated legs'
-# expect_focused (measured 2026-08-03), which kept the undo, ranges and
-# editor legs alone as well. A session per leg dissolves both — one
-# window per seat, one clipboard per leg — at ~55ms of sway boot per
-# slot (docs/clipboard-plan.md §5b, "researched escapes"). And it is
-# what a POINTER needs: a drag is a grab on one seat's pointer, so real
-# input pools only when no two legs share a seat (docs/dnd-plan.md §2,
-# probe 4).
+# THE WAYLAND SESSION POOL, one headless sway per pool slot: one window
+# per seat and one clipboard per leg, which is what lets the clipboard,
+# undo, ranges and editor legs pool and what a real pointer needs
+# (docs/clipboard-plan.md §5b "researched escapes", docs/dnd-plan.md §2).
 #
-# A slot's runtime dir IS its record — the wayland socket's name, sway's
-# IPC socket and the pid live in it — because run_one reads them from
-# the pool's subshells. THE SEAT STAYS DEVICELESS: nothing holds a
-# keyboard or a pointer on it, and each injection (wtype's F24 tap, the
-# `type` verb, tools/linux/wlpointer) adds a transient device for
-# exactly the events it delivers.
+# A slot's runtime dir IS its record — socket name, IPC socket, pid —
+# because run_one reads them from the pool's subshells. THE SEAT STAYS
+# DEVICELESS: nothing holds a keyboard or a pointer on it, and each
+# injection (wtype's F24 tap, the `type` verb, tools/linux/wlpointer)
+# adds a transient device for exactly the events it delivers.
 wayland_session_boot() { # slot
     local dir="/tmp/xdg-wl-$1" old waited=0 candidate socket="" ipc=""
     # A reboot waits the old compositor out first: its exit unlinks its
@@ -250,12 +175,11 @@ wayland_session_boot() { # slot
     echo $! >"$dir/sway.pid"
     # NOT a job (x11_display_boot's reason, below).
     disown
-    # The socket name is sway's to choose, unlike Weston's --socket, so
-    # it is discovered after start rather than declared; -S and not -e,
-    # since the lock file beside each socket matches the same glob.
-    # swaymsg finds the IPC socket through SWAYSOCK, which only sway's
-    # own children inherit: it sits beside the wayland socket as
-    # sway-ipc.<uid>.<pid>.sock.
+    # The socket name is sway's to choose, so it is discovered after
+    # start; -S and not -e, since the lock file beside each socket
+    # matches the same glob. The IPC socket sits beside the wayland one
+    # as sway-ipc.<uid>.<pid>.sock and is reached through SWAYSOCK,
+    # which only sway's own children inherit.
     waited=0
     while [ -z "$socket" ] || [ -z "$ipc" ]; do
         for candidate in "$dir"/wayland-[0-9]; do
@@ -284,10 +208,8 @@ for kaya_slot in $(seq 0 $((JOBS - 1))); do
     WAYLAND_POOL+=("$kaya_slot")
 done
 
-# THE SEAT IS THE REQUIREMENT, not the compositor's name, so the lane
-# checks for the seat: a compositor without one has no clipboard at all
-# and nothing else here would notice. Anyone who swaps this compositor
-# again meets this line instead of a mystery.
+# THE SEAT IS THE REQUIREMENT, not the compositor's name: a compositor
+# without one has no clipboard at all and nothing else here would notice.
 if ! SWAYSOCK="$(cat /tmp/xdg-wl-0/ipc)" swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
     echo "run-suites: the wayland compositor advertises NO SEAT." >&2
     echo "  A data device is obtained from a seat, so this session has no" >&2
@@ -312,12 +234,7 @@ LEGS_DIR="$(mktemp -d)"
 leg_names=()
 leg_pids=()
 
-# The flight recorder: one journal outside the build tree for every leg,
-# and a capture bundle for every FAIL. One failure is enough evidence — a
-# leg that fails once and passes on the rerun leaves nothing behind
-# otherwise, which is what the two ios legs did all through 2026-08-29.
-# tools/lib/flightrec.sh holds the rules; a runner that cannot open the
-# journal prints the miss once and still runs every leg.
+# The flight recorder (tools/lib/flightrec.sh holds the rules).
 # /work IS the root here: this runner runs INSIDE the container and has
 # no $ROOT (it `cd /work` at the top, under `set -u`).
 FLIGHTREC_ROOT=/work
@@ -334,19 +251,16 @@ trap 'flightrec_flush; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
 # xvfb-run per leg re-paid ~half a second of server boot on every one of
 # ~280 x11 legs). One leg per display at a time — the claim lock in
 # run_one — so nothing in flight shares a screen, a pointer or an input
-# focus, which is the isolation xvfb-run bought. The a11y session stays
-# per-leg (its private XDG_RUNTIME_DIR isolates the at-spi socket, and
-# discovery rides the leg's own session bus — the proven wayland path,
-# not the root-window property). Pids live in FILES because run_one
-# executes in the pool's subshells. Not booted under KAYA_RECORD: a
-# film wants a display of its own, so recording keeps xvfb-run.
+# focus. The a11y session stays per-leg. Pids live in FILES because
+# run_one executes in the pool's subshells. Not booted under
+# KAYA_RECORD: a film wants a display of its own, so recording keeps
+# xvfb-run.
 x11_display_boot() { # display-number
     Xvfb ":$1" -screen 0 1600x1000x24 &>"/tmp/xvfb-$1.log" &
     echo $! >"$LEGS_DIR/.x11-pid-$1"
     # NOT a job: run()'s throttle counts running jobs, and eight
     # forever-running servers in the job table deadlocked it on the
-    # first leg (2026-08-20) — the drain comment's bare-wait trap,
-    # through `jobs -rp` instead of `wait`.
+    # first leg (2026-08-20).
     disown
     local waited=0
     until [ -S "/tmp/.X11-unix/X$1" ]; do
@@ -367,11 +281,6 @@ if [ -z "${KAYA_RECORD:-}" ]; then
     done
 fi
 
-# ONE LEG, REPEATEDLY, is the only practical way to characterise a rare
-# flake, or to prove one fixed: a leg failing 1 in 20 needs about sixty
-# WHOLE-LANE runs to show up three times, at three minutes each, and
-# the leg itself takes three SECONDS.
-#
 # KAYA_ONLY is a prefix, so `KAYA_ONLY=menus-java` takes both protocols
 # and `KAYA_ONLY=menus-java-wayland` takes one. Empty means every leg.
 kaya_wanted() { # name proto
@@ -396,15 +305,12 @@ run() {
             echo "$name ($proto): FAIL ($((SECONDS - t0))s)"
             status=1
         fi
-        # SERIAL LEGS JOURNAL TOO — this path prints to the terminal and
-        # keeps no log file, so a bundle has nothing to carry, but the
-        # record of what ran and how long it took is the half that makes
-        # an intermittent leg legible at all.
+        # SERIAL LEGS JOURNAL TOO: this path keeps no log file, so a
+        # bundle has nothing to carry, but the record still rides.
         flightrec_leg linux "$name-$proto" "$serial_verdict" "$((SECONDS - t0))" "" ""
         return
     fi
     (
-        # Per-leg wall time rides the verdict (uniform across runners).
         local t0=$SECONDS
         if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
             echo PASS >"$LEGS_DIR/$name-$proto.verdict"
@@ -420,9 +326,9 @@ run() {
     done
 }
 
-# Recording mode (KAYA_RECORD=1): every leg — both protocols — runs
-# inside its own Xvfb and is filmed there by record-leg.sh. 24-bit
-# screens either way; x11grab cannot encode the 8-bit default.
+# Recording mode (KAYA_RECORD=1): every leg runs inside its own Xvfb and
+# is filmed there by record-leg.sh. 24-bit screens either way; x11grab
+# cannot encode the 8-bit default.
 run_one() {
     local proto="$1" name="$2"
     shift 2
@@ -445,13 +351,6 @@ run_one() {
     fi
     case "$proto" in
         x11)
-            # A display from the POOL, claimed for the whole leg, bounded
-            # to one leg per display so nothing in flight ever shares a
-            # screen, a pointer or an input focus (the PointerRoot trap
-            # lives one file over). Booting a fresh Xvfb per leg cost every
-            # x11 leg ~half a second of pure startup (2026-08-20);
-            # recording mode keeps xvfb-run, since a film wants a
-            # display of its own.
             local kaya_display
             while :; do
                 for kaya_display in "${X11_POOL[@]}"; do
@@ -476,10 +375,6 @@ run_one() {
             return "$kaya_rc"
             ;;
         wayland)
-            # A session from the POOL, claimed for the whole leg, the
-            # x11 arm's shape: one seat and one clipboard per leg (the
-            # pool's comment above). A failed leg's session is rebooted
-            # under the claim, as an Xvfb is.
             local kaya_slot
             while :; do
                 for kaya_slot in "${WAYLAND_POOL[@]}"; do
@@ -517,26 +412,18 @@ drain() {
         echo "== $name =="
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
-            # A leg that produced NOTHING is a different failure from one
-            # that failed an assertion, and the bare verdict cannot tell
-            # them apart: an empty log means the guest died or hung BEFORE
-            # the harness printed its first line. Measured 2026-07-25:
-            # eleven legs reported `FAIL (180s)` with empty logs after
-            # GTK_A11Y=atspi went lane-wide, and the silence is what made
-            # it look like a scene problem instead of a startup problem.
+            # An empty log means the guest died or hung BEFORE the
+            # harness printed its first line — a different failure from
+            # a failed assertion, and the bare verdict cannot tell them
+            # apart (the lane-wide GTK_A11Y=atspi legs, 2026-07-25).
             if [ ! -s "$LEGS_DIR/$name.log" ]; then
                 echo "$name: note — NO OUTPUT AT ALL. The guest never reached the harness:" \
                     "it hung or died during startup (library load, display, or a blocking" \
                     "connect), so look before the scene, not inside it."
             fi
-            # The confusing failure class: verdict printed OK but the leg
-            # still failed. TWO causes share it and the note may not pick
-            # one (invariant 3 — this note said "exit-path bug?" while the
-            # real cause was a wrapper clause, twice): the process exited
-            # nonzero (the Stage::finish class, bitten on GTK and WinUI),
-            # or a WRAPPER around the guest failed after the verdict — the
-            # identity class witness prints its refusal above when it is
-            # the one.
+            # Verdict OK and the leg still failed: TWO causes share it
+            # and the note may not pick one (invariant 3) — a nonzero
+            # exit path, or a WRAPPER failing after the verdict.
             if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
                 echo "$name: note — verdict was OK but the leg exited nonzero: the guest's exit path, or a wrapper clause failing after the verdict — its sentence, if any, is above"
             fi
@@ -548,17 +435,15 @@ drain() {
         if [ "$verdict" != PASS ]; then
             bundle="$(flightrec_bundle linux "$name")"
             if [ -n "$bundle" ]; then
-                # THE LEG'S OWN LOG, which is the whole of what this lane
-                # knows about a failure, plus the display pool's state —
-                # an X11 leg that failed because its Xvfb died looks
-                # exactly like one that failed an assertion, and only the
-                # server log tells them apart.
+                # The display pool's state rides too: an X11 leg that
+                # failed because its Xvfb died looks exactly like one
+                # that failed an assertion, and only the server log
+                # tells them apart.
                 flightrec_section "$bundle" leg-log "" \
                     cat "$LEGS_DIR/$name.log"
                 flightrec_section "$bundle" xvfb "" \
                     sh -c 'cat /tmp/xvfb-*.log 2>/dev/null'
-                # The Rust harness's verb trace, written on a failure
-                # alone (crates/kaya/src/vtrace.rs; run_one names it).
+                # crates/kaya/src/vtrace.rs; run_one names the file.
                 flightrec_adopt "$bundle" verb-trace "$LEGS_DIR/$name.vtrace"
                 flightrec_bundle_report "$bundle"
             fi
@@ -573,9 +458,8 @@ drain() {
 build_c() { make -C guests/c TARGET_DIR="$CARGO_TARGET_DIR/debug" OUT=/tmp/c-guests; }
 run_build c build_c
 
-# The wayland pointer injector (tools/linux/wlpointer/wlpointer.c),
-# scanner glue and all: C against the image's libwayland, built here
-# because the image is built before the tree is mounted.
+# The wayland pointer injector: built here because the image is built
+# before the tree is mounted.
 build_wlpointer() {
     mkdir -p /tmp/wlpointer && cd /tmp/wlpointer \
         && wayland-scanner client-header \
@@ -590,24 +474,21 @@ build_wlpointer() {
 }
 run_build wlpointer build_wlpointer
 
-# The OCaml guests: one dune build for the binding library and every
-# scene. Its own build dir: _build is shared with the host through the
-# repo mount and dune keys targets on source hashes, not platform, so
-# without this the container is handed mac binaries as "fresh".
+# Its own build dir: _build is shared with the host through the repo
+# mount and dune keys targets on source hashes, not platform, so without
+# this the container is handed mac binaries as "fresh".
 build_ocaml() {
-    # A failed incremental build self-heals with one forced rebuild: dune's
-    # incremental view through the virtiofs mount can produce "Unbound
-    # module Dune__exe" (2026-07-22).
+    # dune's incremental view through the virtiofs mount can produce
+    # "Unbound module Dune__exe" (2026-07-22); a forced rebuild heals it.
     if ! dune build --build-dir=_build-linux; then
         echo "dune incremental build failed; forcing a full rebuild" >&2
         dune build --force --build-dir=_build-linux || return 1
     fi
-    # Freshness assert, BY CONTENT AND NOT BY MTIME: dune keys targets on
-    # source HASHES, so a source rewritten with identical bytes — which
-    # every gen-bindings.py run does — produces no new artifact and no new
-    # mtime. An mtime rule reported "stale" forever and failed the lane on
-    # a run where every leg passed (measured 2026-07-31). A stamp of the
-    # sources' CONTENT tracks what dune tracks.
+    # Freshness BY CONTENT AND NOT BY MTIME: dune keys targets on source
+    # HASHES, so a rewrite with identical bytes produces no new artifact
+    # and no new mtime, and an mtime rule reported "stale" forever
+    # (measured 2026-07-31; docs/traps.md, "A freshness check by mtime,
+    # against a build system that hashes").
     local stamp_file=_build-linux/.kaya-ocaml-sources stamp had=""
     stamp=$(cat bindings/ocaml/*.ml guests/ocaml/*.ml \
         | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')
@@ -620,7 +501,6 @@ build_ocaml() {
 }
 run_build ocaml build_ocaml
 
-# The Haskell guests: one cabal build; list-bin locates the outputs.
 # The rpath travels via ghc-options — Linux resolves libkaya only by
 # rpath or LD_LIBRARY_PATH.
 build_haskell() {
@@ -633,28 +513,22 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 build_go() {
-    # ONE BINARY FOR EVERY SCENE: guests/go/cmd is the guest tree's only
-    # main package, it imports every scene library, and it picks one from
-    # KAYA_SELFTEST. A scene with no Go body has no import and no table key
-    # in guests/go/cmd/scenes.go, so this line neither sweeps nor skips.
+    # ONE BINARY FOR EVERY SCENE: guests/go/cmd imports every scene
+    # library and picks one from KAYA_SELFTEST (guests/go/cmd/scenes.go).
     mkdir -p /tmp/go-guests
     go build -o /tmp/go-guests/kaya-go dev.kaya/guests/go/cmd || return 1
 }
 run_build go build_go
 
-# ... and the pool drains here: csharp/java started before the cargo
-# build (no libkaya link), the rest right after it.
+# The pool drains here: csharp/java started before the cargo build (no
+# libkaya link), the rest right after it.
 drain_builds
 timing guest-builds
 
-# THE POINTER ROUTES, PROVEN BEFORE THE FIRST LEG: a real drag through
-# each protocol's injector onto a GTK drop target (tools/linux/dragprobe.py
-# says what it proves and what it prints when it cannot). Every lane run
-# pays the ~3s, because nothing a scene asserts today drives a pointer,
-# and a route nobody exercises is the sway-IPC lesson waiting to repeat
-# (docs/traps.md). On wayland it runs on slot 0's own session; on x11 on
-# the pool's first display, or the skip is PRINTED under KAYA_RECORD,
-# which boots no x11 pool.
+# THE POINTER ROUTES, PROVEN BEFORE THE FIRST LEG: nothing a scene
+# asserts today drives a pointer, so a route nobody exercises would rot
+# unseen. tools/linux/dragprobe.py says what it proves. Under
+# KAYA_RECORD there is no x11 pool and the skip is PRINTED.
 pointer_proof() {
     if ! XDG_RUNTIME_DIR=/tmp/xdg-wl-0 WAYLAND_DISPLAY="$(cat /tmp/xdg-wl-0/socket)" \
         SWAYSOCK="$(cat /tmp/xdg-wl-0/ipc)" GTK_A11Y=none GDK_BACKEND=wayland \
@@ -673,15 +547,11 @@ if ! pointer_proof; then
     exit 1
 fi
 
-# THE IDENTITY LEGS' ASSET, VERIFIED RATHER THAN ASSUMED, and LOUD
-# BEFORE ANY LEG RUNS: without the mark an identity guest dies inside
-# its build closure on seven legs at once, and the reader has to work
-# back from seven stack traces to one absent asset.
-#
-# THE PATH IS READ FROM THE DECLARATION, never retyped — the identity is
-# written down once in guests/assets/identity.toml
-# (docs/app-identity-plan.md ruling 4), and tools/check-app-identity.py
-# fails a tools/ script that names the mark without reading it.
+# THE IDENTITY LEGS' ASSET, VERIFIED BEFORE ANY LEG RUNS: without the
+# mark an identity guest dies inside its build closure on seven legs at
+# once. THE PATH IS READ FROM THE DECLARATION, never retyped —
+# tools/check-app-identity.py fails a tools/ script that names the mark
+# without reading it (docs/app-identity-plan.md ruling 4).
 identity_icon="$(python3 -c 'import tomllib; print(tomllib.load(open("guests/assets/identity.toml","rb"))["icon"])' 2>&1)"
 identity_rc=$?
 if [ "$identity_rc" -ne 0 ]; then
@@ -708,7 +578,7 @@ for proto in x11 wayland; do
     run "$proto" haskell "$(hs_bin milestone2)"
     run "$proto" java env KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The entry scene: the inner env overrides run()'s KAYA_SELFTEST=1.
+    # The inner env overrides run()'s KAYA_SELFTEST=1.
     run "$proto" entry-rust env KAYA_SELFTEST=entry "$CARGO_TARGET_DIR/debug/examples/entry"
     run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
     run "$proto" entry-python env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
@@ -774,8 +644,8 @@ for proto in x11 wayland; do
     run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
     run "$proto" feed-java env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The grow scene, every sugar-tier language. The C floor stays out on
-    # purpose — its scenes document the explicit wire (see the ledger).
+    # The C floor stays out of the sugar-tier scenes on purpose — its
+    # guests document the explicit wire (see the ledger).
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
     run "$proto" grow-python env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
         python3 guests/python/grow.py
@@ -800,8 +670,8 @@ for proto in x11 wayland; do
     run "$proto" align-haskell env KAYA_SELFTEST=align "$(hs_bin align)"
     run "$proto" align-java env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The window scene: the advisory 640x400 is honored on X11; a Wayland
-    # compositor keeps the last word, which is the request semantics.
+    # The advisory 640x400 is honored on X11; a Wayland compositor keeps
+    # the last word, which is the request semantics.
     run "$proto" window-rust env KAYA_SELFTEST=window "$CARGO_TARGET_DIR/debug/examples/window"
     run "$proto" window-python env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         python3 guests/python/window.py
@@ -814,7 +684,6 @@ for proto in x11 wayland; do
     run "$proto" window-haskell env KAYA_SELFTEST=window "$(hs_bin window)"
     run "$proto" window-java env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The panels scene: the auxiliary-window grammar (rust depth).
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
     run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         python3 guests/python/panels.py
@@ -827,18 +696,9 @@ for proto in x11 wayland; do
     run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
     run "$proto" panels-java env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The dirty scene (docs/dirty-plan.md). GTK4 has no window-level edited
-    # affordance at any layer, so kaya draws the living GNOME convention — a
-    # bullet LABEL beside the header-bar title — with the window's title
-    # string untouched.
-    #
-    # THROUGH a11y-leg.sh, and that is the lowering's own consequence: the
-    # marker is a widget kaya drew, so the only honest read of it is an
-    # assistive client's.
-    #
-    # Every guest this lane carries. The scene stays in DEPTH_SCENES all
-    # the same — that is a TREE-WIDE tier, and graduating it is one move
-    # made across every runner at once.
+    # The dirty scene (docs/dirty-plan.md). THROUGH a11y-leg.sh: the
+    # marker is a LABEL kaya drew beside the header-bar title, so the
+    # only honest read of it is an assistive client's.
     run "$proto" dirty-rust env KAYA_SELFTEST=dirty \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/dirty"
     run "$proto" dirty-python env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
@@ -855,15 +715,12 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin dirty)"
     run "$proto" dirty-java env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The C floor's dirty guest, which does not wait on the sugar sweep:
-    # the floor takes no sugar at all.
     run "$proto" dirty-c env KAYA_SELFTEST=dirty \
         tools/linux/a11y-leg.sh /tmp/c-guests/dirty
 
-    # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3). On this
-    # backend the read is ordinal-by-role (GTK publishes no settable AX
-    # identifier), which is why the scene asserts entries and no
-    # containers.
+    # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3). The
+    # read is ordinal-by-role — GTK publishes no settable AX identifier
+    # — which is why the scene asserts entries and no containers.
     run "$proto" a11yrows-rust env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/a11yrows"
     run "$proto" a11yrows-python env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
@@ -882,10 +739,9 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" a11yrows-c env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh /tmp/c-guests/a11yrows
-    # THE STYLING SCENE (docs/styling-plan.md slice 1). On this backend the
-    # brand is libadwaita's accent override from the core's derived words,
-    # and `heading` is the .heading label class published as the AT-SPI
-    # heading role — which is what expect_ax freezes, hence a11y-leg.sh.
+    # THE STYLING SCENE (docs/styling-plan.md slice 1). `heading` is the
+    # .heading label class published as the AT-SPI heading role, which is
+    # what expect_ax freezes — hence a11y-leg.sh.
     run "$proto" styling-rust env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/styling"
     run "$proto" styling-python env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
@@ -904,18 +760,13 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" styling-c env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh /tmp/c-guests/styling
-    # THE TYPEFACE SCENE (docs/styling-plan.md slice 2b): the brand
-    # typeface swaps the FAMILY and nothing else. WHAT IT EXISTS TO CATCH IS
-    # THE SILENT FALLBACK — Pango substitutes for a family it does not
-    # have, so only `expect_typeface` tells a typo, a stale lowering and a
-    # working swap apart: it reads the family the TEXT SYSTEM resolved,
-    # never the request echoed back. tools/scenes/typeface.steps states it
-    # in full, including why the font is VENDORED. Through a11y-leg.sh for
-    # the closing expect_ax.
+    # THE TYPEFACE SCENE (docs/styling-plan.md slice 2b;
+    # tools/scenes/typeface.steps states it in full). Through a11y-leg.sh
+    # for the closing expect_ax.
     #
-    # NO KAYA_FONT_FILE ON THESE LEGS, measured rather than assumed: the
-    # guests default to the repo-relative path and /work IS the repo. That
-    # variable is for a runner whose guest cannot see the repo — a phone.
+    # NO KAYA_FONT_FILE ON THESE LEGS: the guests default to the
+    # repo-relative path and /work IS the repo. That variable is for a
+    # runner whose guest cannot see the repo — a phone.
     run "$proto" typeface-rust env KAYA_SELFTEST=typeface \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/typeface"
     run "$proto" typeface-python env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
@@ -932,10 +783,9 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin typeface)"
     run "$proto" typeface-java env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # AND NO C LEG, unlike styling's roster one block up: the floor has no
-    # typeface guest, so there is no binary to run. check-steps' C-floor
-    # sweep reads the BINARY PATH out of this file, COMMENTS INCLUDED, so
-    # the path is not written here even to say it is absent.
+    # AND NO C LEG: the floor has no typeface guest. check-steps'
+    # C-floor sweep reads the BINARY PATH out of this file, COMMENTS
+    # INCLUDED, so the path is not written here even to say it is absent.
     run "$proto" assets-rust env KAYA_SELFTEST=assets \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/assets"
     run "$proto" assets-python env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
@@ -952,23 +802,12 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin assets)"
     run "$proto" assets-java env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # AND THE C FLOOR: guests/c/assets.c writes kaya_asset_open,
-    # kaya_asset_blob and kaya_asset_why_not longhand, and this is one of
-    # the two lanes that run it.
     run "$proto" assets-c env KAYA_SELFTEST=assets /tmp/c-guests/assets
-    # THE TOOLBAR SCENE (docs/chrome-plan.md C2). On this backend the
-    # buttons are packed into the window's AdwHeaderBar bound to the same
-    # win.kmi-<id> actions the menu rows use, so the scene's round trip is
-    # one source of truth rather than two copies.
-    #
-    # THROUGH a11y-leg.sh, for a sharper reason than styling's: GTK
-    # publishes no getter for accessible properties, so
+    # THE TOOLBAR SCENE (docs/chrome-plan.md C2). THROUGH a11y-leg.sh:
     # `expect_toolbar_item` addresses a button by the name the AT-SPI BUS
-    # answers with — and an icon-only GtkButton with no explicit accessible
-    # label publishes `name=''` (measured), which a tooltip would paper
-    # over and no in-process read could see.
-    #
-    # Same roster as typeface: no C leg, no guests/c/toolbar.c.
+    # answers with, and an icon-only GtkButton with no explicit
+    # accessible label publishes `name=''` (docs/chrome/toolbar-gtk.md).
+    # Same roster as typeface: no C leg.
     run "$proto" toolbar-rust env KAYA_SELFTEST=toolbar \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/toolbar"
     run "$proto" toolbar-python env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
@@ -985,42 +824,19 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin toolbar)"
     run "$proto" toolbar-java env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # THE IDENTITY SCENE (docs/app-identity-plan.md). The read is of the X
-    # SERVER'S OWN COPY — `xprop -id <xid> _NET_WM_ICON`, decoded to the
-    # four quadrant centres — because there is no read-back for an icon
-    # list and kaya's model would pass with no lowering at all.
+    # THE IDENTITY SCENE (docs/app-identity-plan.md). The read is of the
+    # X SERVER'S OWN COPY, because there is no read-back for an icon list
+    # and kaya's model would pass with no lowering at all.
     #
-    # THROUGH a11y-leg.sh for toolbar's reason: the scene promotes one
-    # command and asserts `expect_toolbar_item "Save"`. Same roster as
-    # typeface and toolbar — no C leg, no guests/c/identity.c.
+    # THE ICON IS X11-ONLY HERE (ruling 5). MEASURED 2026-08-18: GTK
+    # 4.18.6's wayland backend drops the icon-list property and sway
+    # 1.10.1 advertises no xdg_toplevel_icon_manager_v1, so the wayland
+    # ring runs a WITNESS requiring the leg to fail on the icon steps AND
+    # ONLY on them — RED the day GTK reaches 4.20.
     #
-    # ================= AND THE TWO RINGS ARE NOT THE SAME =============
-    # THE ICON IS X11-ONLY ON THIS LANE (docs/app-identity-plan.md ruling
-    # 5). MEASURED in this image 2026-08-18: GTK is 4.18.6, whose wayland
-    # backend drops the icon-list property, and `wayland-info` lists no
-    # xdg_toplevel_icon_manager_v1 on sway 1.10.1.
-    #
-    # So the wayland ring runs a WITNESS rather than the scene
-    # (tools/linux/identity-wayland-witness.sh), which requires the leg to
-    # fail on the icon steps AND ONLY on them. It goes RED the day the
-    # image's GTK reaches 4.20 and the compositor speaks the protocol,
-    # which is the day to move this leg onto the scene proper. ONE witness
-    # and not seven: what it measures is a GTK-and-compositor fact no
-    # binding can change.
-    #
-    # ============ AND THE CLASS IS ASSERTED ON BOTH RINGS ==============
-    # A window's CLASS — `WM_CLASS` on X11, `app_id` on wayland — is what
-    # ties a running window to its `.desktop` entry. No harness verb reads
-    # it and the scene files are shared verbatim, so it is asserted HERE,
-    # outside the leg: tools/linux/identity-class-leg.py wraps every
-    # identity leg on both rings and requires every MAPPED toplevel to
-    # carry the declared name.
-    #
-    # THE TWO PROTOCOLS ARE THE SAME ON THIS RING, unlike the icon, and
-    # that is measured: X11 takes `XSetClassHint` on the realized surface
-    # and wayland takes `xdg_toplevel.set_app_id` after map, which xdg-shell
-    # explicitly permits. The wayland leg asserts the class through sway's
-    # OWN TREE while still witnessing the icon gap.
+    # THE CLASS IS ASSERTED ON BOTH RINGS, outside the leg, since no
+    # harness verb reads `WM_CLASS`/`app_id`
+    # (tools/linux/identity-class-leg.py).
     case "$proto" in
         x11)
             run "$proto" identity-rust env KAYA_SELFTEST=identity \
@@ -1049,19 +865,17 @@ for proto in x11 wayland; do
                 tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
             ;;
         wayland)
-        # The class reader is OUTERMOST, and the nesting is load-bearing: the
-        # witness converts the icon gap into a PASS, so a class failure inside
-        # it would be swallowed by the clause expecting this leg to fail.
+        # The class reader is OUTERMOST, and the nesting matters: the
+        # witness converts the icon gap into a PASS, so a class failure
+        # inside it would be swallowed.
             run "$proto" identity-witness-rust env KAYA_SELFTEST=identity \
                 tools/linux/identity-class-leg.py \
                 tools/linux/identity-wayland-witness.sh \
                 tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/identity"
             ;;
     esac
-    # The confirm scene, and the stall diagnostic
-    # (crates/kaya/src/stall.rs) — the one scene that deliberately blocks
-    # the app thread, in EVERY language, because the misuse it guards is
-    # available in every one of them.
+    # The stall diagnostic (crates/kaya/src/stall.rs) — the one scene
+    # that deliberately blocks the app thread, in EVERY language.
     run "$proto" stall-rust env KAYA_SELFTEST=stall "$CARGO_TARGET_DIR/debug/examples/stall"
     run "$proto" stall-python env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
         python3 guests/python/stall.py
@@ -1087,20 +901,18 @@ for proto in x11 wayland; do
     run "$proto" confirm-java env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
-    # The background scene. DEPTH TIER — rust only until the sweep. Its
-    # worker parks until a click releases it, so a binding that ran
-    # background work ON the app thread cannot deliver its own release and
-    # this leg TIMES OUT rather than failing an assertion: the deadlock IS
-    # the gate (docs/background-work-plan.md §5). Through a11y-leg.sh for
-    # the closing expect_ax.
+    # The background scene: its worker parks until a click releases it,
+    # so a binding that ran background work ON the app thread cannot
+    # deliver its own release and this leg TIMES OUT rather than failing
+    # an assertion — the deadlock IS the gate
+    # (docs/background-work-plan.md §5).
     run "$proto" background-rust env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
 
     # The filedialog scene: GNOME's own picker, driven for real. Through
     # a11y-leg.sh because EVERY read here is an AT-SPI read — the chooser
-    # publishes no accessible ids, so the directory is the path bar's
-    # pressed toggle and the rows are the list's table rows
-    # (docs/traps.md).
+    # publishes no accessible ids (docs/traps.md, "What GTK's file
+    # chooser publishes, and what it does not").
     run "$proto" filedialog-rust env KAYA_SELFTEST=filedialog \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/filedialog"
     run "$proto" filedialog-python env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
@@ -1119,12 +931,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # The save scene (docs/save-plan.md D5). Through a11y-leg.sh: GTK's
     # save panel publishes no accessible ids at all, so EVERY observation
-    # here is a bus read — the directory is the path bar's pressed toggle
-    # and the typed name is the `EditableText` field's contents.
-    #
-    # IN THE POOL, not alone between drains: it types through the
-    # accessibility bus, which is per-leg, and touches no session-wide
-    # state. Its files live under $TMPDIR/kaya-save-<pid>.
+    # here is a bus read. IN THE POOL: it types through the per-leg
+    # accessibility bus and touches no session-wide state.
     run "$proto" save-rust env KAYA_SELFTEST=save \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/save"
     # The C floor's save guest, which does not wait on the sugar sweep.
@@ -1145,14 +953,10 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin background)"
     run "$proto" background-java env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The C floor, where queue-plus-wake is WRITTEN OUT rather than hidden
-    # in a binding — and the only tier that spells each queued item's
-    # DESTINATION, since it queues data where the others queue closures.
     run "$proto" background-c env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh /tmp/c-guests/background
-    # The split scene, all eight languages. Every leg goes through
-    # a11y-leg.sh: the scene asserts the REAL accessibility tree, and on
-    # GTK that read is AT-SPI.
+    # Through a11y-leg.sh: the scene asserts the REAL accessibility tree,
+    # and on GTK that read is AT-SPI.
     run "$proto" split-rust env KAYA_SELFTEST=split \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" split-python env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
@@ -1169,13 +973,9 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin split)"
     run "$proto" split-java env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The listdetail scene: THE SAME GUESTS, asserting the bare invariant
-    # at whatever width this lane's window manager hands them — a scene
-    # selects a SCRIPT, never an app. Through a11y-leg.sh: its one
-    # real-tree assertion is an AT-SPI read.
-    # The panes scene: the THREE-pane ceiling on the nested split views
-    # (docs/multicolumn-plan.md), all seven of this lane's languages.
-    # Through a11y-leg.sh: the scene reads the real AT-SPI tree.
+    # listdetail runs the SPLIT guests: a scene selects a SCRIPT, never
+    # an app. panes is the THREE-pane ceiling on the nested split views
+    # (docs/multicolumn-plan.md). Both through a11y-leg.sh.
     run "$proto" panes-rust env KAYA_SELFTEST=panes \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/panes"
     run "$proto" panes-python env KAYA_SELFTEST=panes KAYA_LIB="$LIB" \
@@ -1219,10 +1019,7 @@ for proto in x11 wayland; do
     run "$proto" nav-haskell env KAYA_SELFTEST=nav "$(hs_bin nav)"
     run "$proto" nav-java env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The table scene: column headers + click-to-sort on the For
-    # vocabulary (docs/tables-plan.md), every language this lane runs.
-    # The C floor stays out with the other sugar-tier scenes — its
-    # guests document the explicit wire (see the ledger).
+    # The table scene (docs/tables-plan.md).
     run "$proto" table-rust env KAYA_SELFTEST=table "$CARGO_TARGET_DIR/debug/examples/table"
     run "$proto" table-python env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         python3 guests/python/table.py
@@ -1236,14 +1033,11 @@ for proto in x11 wayland; do
     run "$proto" table-java env KAYA_SELFTEST=table KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     # ROW WINDOWING'S CONFORMANCE SCENE (docs/virtualization-plan.md
-    # §6.3): 400 uniform rows behind a band this tier narrows, scrolled
-    # by row identity. RUST ALONE, and compiled, because it is the one
-    # windowing scene the mobile lanes can run too.
+    # §6.3). RUST ALONE, and compiled: it is the one windowing scene the
+    # mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
-    # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2): GTK's axis is
-    # its own orientable and its width report rides the window's notify,
-    # so this backend carries both halves. All eight languages.
+    # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2).
     run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
         "$CARGO_TARGET_DIR/debug/examples/adaptive"
     run "$proto" adaptive-python env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
@@ -1259,15 +1053,10 @@ for proto in x11 wayland; do
     run "$proto" adaptive-java env KAYA_SELFTEST=adaptive KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE CANVAS SCENE (docs/canvas-plan.md): the core rasterizes and
-    # this backend blits a GdkMemoryTexture. The hash is the SAME frozen
-    # string every other lane asserts — the raster comes out of this
-    # container's own libkaya — so a leg that disagrees here is a finding
-    # about the blit, never about the drawing.
-    #
-    # THROUGH a11y-leg.sh because the scene ends on `expect_ax`, like the
-    # other thirteen ax-asserting scenes: check-steps' ax_bus() holds that
-    # rule now (docs/traps.md — the reader is zbus and finds a bus only in
-    # DBUS_SESSION_BUS_ADDRESS, which no plain leg exports).
+    # this backend blits a GdkMemoryTexture, so a leg that disagrees with
+    # the shared frozen hash is a finding about the BLIT, never about the
+    # drawing. THROUGH a11y-leg.sh for its closing `expect_ax`;
+    # check-steps' ax_bus() holds that rule.
     run "$proto" canvas-rust env KAYA_SELFTEST=canvas \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
     # The same script under the other appearance, per-process rather than
@@ -1276,14 +1065,8 @@ for proto in x11 wayland; do
     # (docs/canvas-plan.md phase 4).
     run "$proto" canvasdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=canvas \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/canvas"
-    # THE SIZE-POLICY SCENE (docs/canvas-plan.md §3.2.1): what a canvas
-    # does with a track that is not its viewbox. This backend reports the
-    # track off its own frame clock and blits 1:1, so `expect_raster` can
-    # tell a re-rastered canvas from a stretched one — the one canvas
-    # observable a policy moves.
-    #
-    # NO a11y-leg.sh: this scene asserts no ax verb (its own closing
-    # comment says why), so it needs no session bus.
+    # THE SIZE-POLICY SCENE (docs/canvas-plan.md §3.2.1). NO a11y-leg.sh:
+    # this scene asserts no ax verb, so it needs no session bus.
     run "$proto" sizepolicy-rust env KAYA_SELFTEST=sizepolicy \
         "$CARGO_TARGET_DIR/debug/examples/sizepolicy"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
@@ -1298,9 +1081,9 @@ for proto in x11 wayland; do
     run "$proto" scroll-haskell env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
     run "$proto" scroll-java env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The a11y scene, read off the AT-SPI bus as a real assistive client
-    # reads it — the only honest route on GTK, which has no getter for
-    # accessible properties. The bus is per-leg (a11y-leg.sh).
+    # Read off the AT-SPI bus as a real assistive client reads it — the
+    # only honest route on GTK, which has no getter for accessible
+    # properties.
     run "$proto" a11y-rust env KAYA_SELFTEST=a11y \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/a11y"
     run "$proto" a11y-c env KAYA_SELFTEST=a11y \
@@ -1391,7 +1174,6 @@ for proto in x11 wayland; do
     run "$proto" sections-haskell env KAYA_SELFTEST=sections "$(hs_bin sections)"
     run "$proto" sections-java env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The menus scene: all eight languages plus the C floor.
     run "$proto" menus-rust env KAYA_SELFTEST=menus "$CARGO_TARGET_DIR/debug/examples/menus"
     run "$proto" menus-c env KAYA_SELFTEST=menus /tmp/c-guests/menus
     run "$proto" menus-python env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
@@ -1405,7 +1187,6 @@ for proto in x11 wayland; do
     run "$proto" menus-haskell env KAYA_SELFTEST=menus "$(hs_bin menus)"
     run "$proto" menus-java env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The commands scene, the DEPTH slice (rust only until the sweep).
     run "$proto" commands-rust env KAYA_SELFTEST=commands \
         "$CARGO_TARGET_DIR/debug/examples/commands"
     run "$proto" commands-c env KAYA_SELFTEST=commands /tmp/c-guests/commands
@@ -1421,8 +1202,6 @@ for proto in x11 wayland; do
     run "$proto" commands-haskell env KAYA_SELFTEST=commands "$(hs_bin commands)"
     run "$proto" commands-java env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The layout scene: the cross-backend observation vehicle the
-    # recordings are compared from, so it is a recorded leg here too.
     run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
     run "$proto" layout-python env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         python3 guests/python/layout.py
@@ -1436,13 +1215,8 @@ for proto in x11 wayland; do
     run "$proto" layout-java env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     # The clipboard scene. Through a11y-leg.sh for its closing expect_ax.
-    # POOLED SINCE 2026-09-02 on both protocols: a leg owns its session
-    # — an Xvfb from the x11 pool, a headless sway from the wayland pool
-    # — so each has a clipboard and a seat of its own, and the mutual
-    # exclusion the one shared compositor forced (nine legs alone between
-    # drains, the serial primer's F24 tap needing the pool EMPTY to land
-    # on the right window) went with it (docs/clipboard-plan.md §5b,
-    # "researched escapes", taken; the wayland pool's comment above).
+    # POOLED on both protocols: a leg owns its session, so each has a
+    # clipboard and a seat of its own (docs/clipboard-plan.md §5b).
     run "$proto" clipboard-rust env KAYA_SELFTEST=clipboard \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/clipboard"
     run "$proto" clipboard-python env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
@@ -1459,18 +1233,15 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin clipboard)"
     run "$proto" clipboard-java env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # The undo scene (docs/undo-plan.md §3), a DEPTH slice. POOLED for
-    # the same reason: the `type` verb's real key events ride a transient
-    # virtual keyboard on the leg's OWN seat, where its window is the
-    # only one. The exclusivity that held this leg alone (measured
-    # 2026-08-03, a session-held keyboard on the shared compositor) needs
-    # a neighbour to disturb, and a per-leg session has none.
+    # The undo scene (docs/undo-plan.md §3). POOLED for the same reason:
+    # the `type` verb's real key events ride a transient virtual keyboard
+    # on the leg's OWN seat, where its window is the only one — the
+    # exclusivity that held this leg alone (measured 2026-08-03) needs a
+    # neighbour to disturb (docs/clipboard-plan.md §5b).
     run "$proto" undo-rust env KAYA_SELFTEST=undo \
         "$CARGO_TARGET_DIR/debug/examples/undo"
     # The text-ranges scene. Through a11y-leg.sh: all three reads go to
-    # the accessibility bus. Pooled, the undo rule. Stays in DEPTH_SCENES
-    # even though every guest exists — graduating is one move across
-    # every runner at once.
+    # the accessibility bus.
     run "$proto" ranges-rust env KAYA_SELFTEST=ranges \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/ranges"
     run "$proto" ranges-c env KAYA_SELFTEST=ranges \
@@ -1489,37 +1260,23 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin ranges)"
     run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
-    # THE TEXT EDITOR (docs/editor-plan.md), the only script here that
-    # drives an APP rather than a feature. GO ALONE by the plan's choice,
-    # so there is no rust example and `editor` is in neither SCENES nor
-    # DEPTH_SCENES (both derive a `cargo build --example`).
-    #
-    # THROUGH a11y-leg.sh: almost every read this script makes is an
-    # AT-SPI read here. Pooled: `type` lands on its own seat, the undo
-    # rule.
+    # THE TEXT EDITOR (docs/editor-plan.md). GO ALONE by the plan's
+    # choice, so there is no rust example and `editor` is in neither
+    # SCENES nor DEPTH_SCENES (both derive a `cargo build --example`).
+    # Through a11y-leg.sh: almost every read it makes is an AT-SPI read.
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
-    # The pool drains here for the portfolio's sake, below.
     drain
-    # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by
-    # design, the editor's arrangement one language over; pooled — no
-    # OS chrome, no injected keys. The script arrives by scene name
-    # through KAYA_SCENES_DIR like every pooled leg's. ALONE BETWEEN
-    # DRAINS since the transactions view joined it: 15,000 windowed rows
-    # are its own load (docs/virtualization-plan.md §6.2).
-    #
-    # THROUGH a11y-leg.sh since the chart joined it (docs/canvas-plan.md
-    # §10): a drawing is an IMAGE with an authored name, so the chart's
-    # numbers are asserted with expect_ax, and GTK publishes its tree on
-    # a session bus this leg has to own (the traps entry on the a11y
-    # session bus). check-steps refuses this leg without it.
+    # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by design.
+    # ALONE BETWEEN DRAINS — 15,000 windowed rows are its own load
+    # (docs/virtualization-plan.md §6.2). Through a11y-leg.sh for the
+    # chart's expect_ax reads; check-steps refuses this leg without it.
     run "$proto" portfolio-python env KAYA_SELFTEST=portfolio KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/portfolio.py
     drain
     # ROW WINDOWING'S VARIABLE-HEIGHT SCENE (docs/virtualization-plan.md
-    # §5): the portfolio's uniform 15k rows drive the EXACT path, this
-    # one drives the CORRECTED path on purpose. Python alone, so it stays
-    # off the mobile lanes.
+    # §5): the portfolio's uniform rows drive the EXACT path, this one
+    # the CORRECTED path. Python alone, so it stays off the mobile lanes.
     run "$proto" varied-python env KAYA_SELFTEST=varied KAYA_LIB="$LIB" \
         python3 guests/python/varied.py
     drain
@@ -1539,7 +1296,7 @@ xvfb-run -a bash -c "
 " 2>/dev/null || true
 
 flightrec_flush
-# The one-line verdict: suites accumulate failures rather than abort,
-# so a truncated log must still end with the answer.
+# Suites accumulate failures rather than abort, so a truncated log must
+# still end with the answer.
 if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi
 exit "$status"

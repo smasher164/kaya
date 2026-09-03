@@ -1,14 +1,8 @@
 package kaya
 
-// The brand typeface's guards (docs/styling-plan.md Slice 2b).
-//
-// NOTHING HERE READS THE TYPEFACE BACK THROUGH THE API THAT WROTE IT:
-// every platform's font API renders SOMETHING for a family it does not
-// have, so an echo is the one answer always available and never
-// meaningful. Two surfaces answer instead — the WIRE BYTES decoded out
-// of the queued record, and THE APPLY STREAM out of the batch a real
-// pump produced. Whether the platform actually swapped is
-// expect_typeface's question on a real lane (tools/scenes/typeface.steps).
+// docs/styling-plan.md Slice 2b. Nothing here reads the typeface back through
+// the API that wrote it — every platform's font API renders SOMETHING for a
+// family it lacks; the swap is expect_typeface's (tools/scenes/typeface.steps).
 
 import (
 	"context"
@@ -27,10 +21,9 @@ import (
 
 // ---- one decoder, both channels ----------------------------------
 //
-// The tx record and the apply record carry the SAME body, written by one
-// function (crates/kaya/src/wire.rs's write_typeface). They differ in
-// one word: the tx side's second u32 is reserved, the apply side's
-// carries WHICH platform the core was compiled for.
+// The tx and apply records carry the SAME body (crates/kaya/src/wire.rs's
+// write_typeface) and differ in one word: the tx side's second u32 is
+// reserved, the apply side's carries which platform the core was built for.
 
 type wireValue struct {
 	tag uint32
@@ -51,8 +44,8 @@ type typefaceBody struct {
 	font   wireValue
 }
 
-// reader walks one record's bytes. Offsets are relative to the RECORD,
-// which is what the 8-byte padding inside values is relative to as well.
+// Offsets are relative to the RECORD, which is what the 8-byte padding
+// inside values is relative to as well.
 type reader struct {
 	b  []byte
 	at int
@@ -83,8 +76,6 @@ func (r *reader) value() wireValue {
 	return v
 }
 
-// decodeTypeface reads one whole record — header included — as a
-// typeface body.
 func decodeTypeface(rec []byte) typefaceBody {
 	r := &reader{b: rec, at: 8} // past {u32 size, u16 kind, u16 pad}
 	body := typefaceBody{mask: r.u32(), second: r.u32()}
@@ -93,8 +84,7 @@ func decodeTypeface(rec []byte) typefaceBody {
 		panic(fmt.Sprintf("kaya test: family rode as tag %d, not a string", family.tag))
 	}
 	body.family = family.str
-	// The pairs are FLAT, tag then family, counted as VALUES — an odd
-	// count is a mangled record, not a half-written row.
+	// The pairs are FLAT, tag then family, counted as VALUES.
 	flat := int(r.u32())
 	r.u32() // reserved
 	if flat%2 != 0 {
@@ -121,8 +111,8 @@ func (b typefaceBody) rowString() string {
 
 // ---- the wire-byte half ------------------------------------------
 
-// typefaceRecord submits nothing: it reads the record the binding
-// QUEUED, which is what would leave this process.
+// typefaceRecord submits nothing: it reads the record the binding QUEUED,
+// which is what would leave this process.
 func typefaceRecord(t *testing.T, build func(tx *Tx)) []byte {
 	t.Helper()
 	app := NewApp()
@@ -144,9 +134,9 @@ func typefaceRecord(t *testing.T, build func(tx *Tx)) []byte {
 	return found
 }
 
-// A real font would prove less: the core never parses these bytes, so
-// what this can prove is that the CHANNEL carries every one of them.
-// Whether a real font registers is each backend's own probe.
+// The core never parses these bytes, so all this can prove is that the
+// CHANNEL carries every one of them; whether a real font registers is each
+// backend's own probe.
 var typefaceFontBytes = func() []byte {
 	b := make([]byte, 1024)
 	for i := range b {
@@ -155,8 +145,8 @@ var typefaceFontBytes = func() []byte {
 	return b
 }()
 
-// One call is one record, whatever it is given: a record per override
-// would die on the root's set-once wall, on a branded app's first frame.
+// A record per override would die on the root's set-once wall, on a branded
+// app's first frame.
 func TestBrandTypefacePacksOneRecord(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -169,8 +159,8 @@ func TestBrandTypefacePacksOneRecord(t *testing.T) {
 		{"one platform row", func(tx *Tx) {
 			tx.BrandTypeface("Georgia", PlatformFamily(PlatformLinux, "DejaVu Serif"))
 		}, 0, "[3=DejaVu Serif]", false},
-		// Author order is wire order, and it is observable: a lowering
-		// takes the FIRST row it matches.
+		// Author order is wire order, and observable: a lowering takes the
+		// FIRST row it matches.
 		{"two platform rows", func(tx *Tx) {
 			tx.BrandTypeface("Georgia",
 				PlatformFamily(PlatformWindows, "Segoe UI"),
@@ -196,9 +186,9 @@ func TestBrandTypefacePacksOneRecord(t *testing.T) {
 			if got := body.rowString(); got != c.rows {
 				t.Errorf("platform rows shipped as %s, want %s", got, c.rows)
 			}
-			// The slot is ALWAYS written, so the field count never
-			// varies: an absent font rides as an empty string and the
-			// mask alone says which it is.
+			// The slot is ALWAYS written, so the field count never varies:
+			// an absent font rides as an empty string and the mask alone says
+			// which it is.
 			if c.blob {
 				if body.font.tag != ValueBlob || body.font.i64 == 0 {
 					t.Errorf("font slot shipped as tag %d handle %d, want a live blob handle", body.font.tag, body.font.i64)
@@ -208,9 +198,6 @@ func TestBrandTypefacePacksOneRecord(t *testing.T) {
 			}
 		})
 	}
-	// The family rides where it says it does — checked apart from the
-	// table, so a decoder reading the wrong field cannot agree by
-	// reading nothing.
 	if body := decodeTypeface(typefaceRecord(t, func(tx *Tx) {
 		tx.BrandTypeface("Georgia", PlatformFamily(PlatformIos, "Palatino"))
 	})); body.family != "Georgia" {
@@ -218,8 +205,7 @@ func TestBrandTypefacePacksOneRecord(t *testing.T) {
 	}
 }
 
-// Two fonts in one call is the one thing the wire cannot say: there is
-// a single blob slot, so last-wins would drop one with no error.
+// There is a single blob slot, so last-wins would drop one with no error.
 func TestBrandTypefaceRefusesTwoFonts(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -238,8 +224,7 @@ func TestBrandTypefaceRefusesTwoFonts(t *testing.T) {
 
 // ---- the real-root half ------------------------------------------
 
-// The tag this host's core stamps into the apply record, derived from
-// Go's own idea of the platform rather than from the record being
+// Derived from Go's own idea of the platform, never from the record being
 // checked. Zero means "not a platform this test runs on".
 var hostPlatform = map[string]int64{
 	"darwin":  PlatformMac,
@@ -247,8 +232,7 @@ var hostPlatform = map[string]int64{
 	"windows": PlatformWindows,
 }[runtime.GOOS]
 
-// typefaceTrap builds one scene through the ordinary Go sugar and pumps
-// it through the root. It returns only when the root ALLOWED the scene.
+// typefaceTrap returns only when the root ALLOWED the scene.
 func typefaceTrap(trap string) {
 	app := NewApp()
 	mount := func(tx *Tx) { tx.Mount(tx.Column(func() { tx.LabelText("typeface") })) }
@@ -259,7 +243,6 @@ func typefaceTrap(trap string) {
 			mount(tx)
 		})
 	case "full":
-		// Every part of the grammar at once.
 		app.Build(func(tx *Tx) {
 			tx.BrandTypeface("Georgia",
 				PlatformFamily(PlatformLinux, "DejaVu Serif"),
@@ -286,9 +269,9 @@ func typefaceTrap(trap string) {
 			mount(tx)
 		})
 	case "unknown-platform":
-		// Go spells the vocabulary as int constants, so a caller can hand
-		// it a number that is not in it; the root refuses. The zero
-		// TypefaceOverride lands here too, so Go must not drop one.
+		// Go spells the vocabulary as int constants, so a caller can hand it a
+		// number that is not in it. The zero TypefaceOverride lands here too,
+		// so Go must not drop one.
 		app.Build(func(tx *Tx) {
 			tx.BrandTypeface("Georgia", PlatformFamily(9, "Nonesuch"))
 			mount(tx)
@@ -322,9 +305,8 @@ func typefaceTrap(trap string) {
 	os.Exit(0)
 }
 
-// reportTypefaceApply says what a BACKEND would receive, in measured
-// terms only: the font's bytes are fetched back out of the core's blob
-// table rather than assumed to be the slice this process sent.
+// The font's bytes are fetched back out of the core's blob table rather than
+// assumed to be the slice this process sent.
 func reportTypefaceApply(batch []byte) {
 	var (
 		body    typefaceBody
@@ -377,9 +359,8 @@ func runTypefaceTrap(t *testing.T, trap string) (string, error) {
 }
 
 // Each case runs in a re-exec because a root refusal ends the process, not a
-// Go panic. The ALIVE cases carry as much weight as the dead ones, and
-// `full` more than either: it is the only place that reads the request
-// as a LOWERING will get it.
+// Go panic. `full` is the only case that reads the request as a LOWERING
+// will get it.
 func TestTheRootIsTheTypefaceWall(t *testing.T) {
 	if trap, set := LookupEnv("KAYA_TYPEFACE_TRAP"); set && trap != "" {
 		typefaceTrap(trap)
