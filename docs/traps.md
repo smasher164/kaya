@@ -7917,3 +7917,40 @@ lookup that found the driver did not. Every harness-side read goes through
 those registries inside kayaRunScript, kayaTableHorizontal or
 kayaTableTrailing. A race of this shape reproduces by hand at about 0 in 6,
 so a green rerun is not evidence: the fix is structural or it is nothing.
+
+## JavaScriptCore hands back a typed array's BUFFER BASE where N-API hands back the offset-adjusted pointer (measured 2026-09-02)
+
+`JSObjectGetTypedArrayBytesPtr` returns the start of the underlying
+ArrayBuffer; `napi_get_typedarray_info` returns a pointer already advanced
+by the view's `byteOffset`. The JS binding's wire packer (bindings/js/kaya/wire.ts)
+uses `subarray` and constructs offset `DataView`s in four places, so a
+transliteration of crates/kaya/src/node.rs onto JavaScriptCore compiles,
+runs, and submits the wrong bytes for every subarray, with no error
+anywhere. Any bridge from a JavaScriptCore context must add
+`JSObjectGetTypedArrayByteOffset` itself. Probe and numbers:
+docs/probes/js-mobile-2026-09-02.md §1.2b.
+
+## The iOS Simulator is exempt from the iOS JIT restriction, so a simulator lane can only ever print the JIT'd column (measured 2026-09-02)
+
+WebKit's `HAVE_IOS_JIT_RESTRICTIONS` is `PLATFORM(IOS_FAMILY) &&
+!PLATFORM(IOS_FAMILY_SIMULATOR) && !PLATFORM(MACCATALYST)`: a third-party
+app on a device runs JavaScriptCore without its JIT (no
+`com.apple.developer.cs.allow-jit`), while the same app on the simulator
+runs it with the JIT. On kaya's heaviest batch the difference measured
+4.6x. kaya's iOS lane is a simulator pool, so any JavaScript timing it
+prints is the device's best case by that factor; a JS-on-iOS decision taken
+from simulator numbers is taken from the wrong column.
+docs/probes/js-jit-aot-2026-09-02.md §1.5.
+
+## A macOS process embedding JavaScriptCore is JIT-less unless it is signed with `com.apple.security.cs.allow-jit` (measured 2026-09-02)
+
+One unchanged binary: 353 ms without the entitlement, 24 ms with it, on the
+wire-packing benchmark — 14.7x from the signature alone. This is why a
+`JSC_useJIT=false` probe on the mac had shown no difference: there was no
+JIT to turn off. Two consequences: the iOS in-app JavaScript configuration
+is measurable on the mac, in-process, against the real framework, with no
+device; and any mac process that embeds JavaScriptCore silently lives in one
+of two worlds depending on how it was signed, with nothing to say which —
+`JSGlobalContextRef` exposes no "is the JIT on" query — so the honest
+assertion is a timing canary, never a flag read.
+docs/probes/js-jit-aot-2026-09-02.md §1.8.

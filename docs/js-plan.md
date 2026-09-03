@@ -227,7 +227,17 @@ without a JS guest is red by construction.
 
 Portfolio and varied stay Python-only apps (hand-queued, not sweep
 scenes); editor stays Go. The iOS and Android lanes carry no JS legs —
-node does not run on the phones (ruled desktop-first). The Linux lane
+node does not run on the phones (ruled desktop-first), AND THEY NEVER
+WILL BY RULING (2026-09-03): iOS lets no third-party app JIT JavaScript
+(the entitlement is Apple's own; a WKWebView JITs out of process and
+cannot call libkaya; ahead-of-time compilation ships in nothing yet), and
+the maintainer only carries a language to a platform where it runs
+natively in a straightforward way — so the JS binding is a desktop
+binding, and the video editor is written in a language that runs on all
+five lanes. The record: docs/probes/js-mobile-2026-09-02.md (the
+JavaScriptCore bridge that would have been), docs/probes/js-jit-aot-2026-09-02.md
+(the JIT and AOT facts with the wire-packing benchmark), and the three
+docs/traps.md entries they left. The Linux lane
 carries a js leg beside every python leg (node pinned into the docker
 image by sha256). THE WINDOWS LANE TOO, since 2026-09-01: node 24.19.0
 provisioned on the VM by version and by bytes through

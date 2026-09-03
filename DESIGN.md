@@ -695,7 +695,11 @@ rules so far:
   patch, dialogs answer promises when no handler is given, and
   kaya.fmt`...` is a derived string over any signals — spellings, not
   semantics, each measured against what Node 24 runs with no build
-  step (decorators do not).
+  step (decorators do not). It is a DESKTOP binding by ruling
+  (2026-09-03): iOS lets no third-party app JIT JavaScript, and kaya
+  carries a language to a platform only where it runs natively in a
+  straightforward way — docs/js-plan.md §5 records the ruling and the
+  research behind it.
 - A canonical method vocabulary for derived signals: `eq`, `ne`, `lt`,
   `fmt`, and so on, method-shaped in every language (`count.eq(0)`,
   `count.Eq(0)`). Documentation leads with the methods so that tutorials

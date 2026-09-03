@@ -10321,3 +10321,21 @@ it for every leg through SIMCTL_CHILD_, and a failed leg's
 `panic` section. Unit-tested in fault.rs (sentence and location read
 back). The WATCH stays for the sighting itself: the next occurrence
 arrives with its sentence, and that is what closes it.
+
+## PERF — THE JS WIRE ENCODER ALLOCATES TWICE PER SCALAR, and that is 15.6x on the table (measured 2026-09-02)
+KEY: wire.ts encoder, cursor buffer, two allocations per scalar, portfolio batch 11.30 ms, 15.6x
+
+Found by the JIT/AOT research (docs/probes/js-jit-aot-2026-09-02.md §0,
+the wire-packing benchmark under docs/probes/js-jit-probes/), while
+answering a question the ruling then closed: bindings/js/kaya/wire.ts packs
+each scalar through two allocations, and on the portfolio's 15,003-record
+batch node with a full JIT takes 11.30 ms where kaya's Python binding — a
+bytecode interpreter — takes 6.03 ms. Holding the engine fixed, a single
+growable cursor buffer with byte-identical output (600,128 bytes, the
+probe's `cursorbench.js`) is 15.6x faster; holding the encoder fixed, a
+JIT is worth 4.6x. The phones are out by ruling (docs/js-plan.md §5), so
+this is desktop work: the three lanes that ship the JS legs today gain the
+whole factor, every guest's handler gets cheaper, and nothing about the
+binding's surface moves. Close it by rewriting the encoder against the
+probe's output bytes as the oracle, with bindings/js/kaya_app_checks.ts's
+byte-equality negatives held, and record the new batch time here.

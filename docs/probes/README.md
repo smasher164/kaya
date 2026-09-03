@@ -21,3 +21,27 @@ next recovery live in docs/traps.md ("Transcript replay").
 a uiautomator XML dump pulled off an emulator (never written by a
 session, so no transcript holds it); the file that stands in its place
 records the measurement the dump existed to make.
+
+## Added 2026-09-02/03, straight from the session that produced them
+
+Three research families landed while their scratch directories were still
+alive, so these are the originals rather than replays:
+
+- `video-playback-2026-09-02.md` and its five companions (`-apple-winui`,
+  `-android-gtk`, `-decoders`, `-editor`, `-framepath`): the video-editor
+  milestone's research — platform players versus owned rendering, the
+  decoder routes and their licences, the frame path, what an editor's
+  preview needs, thumbnails and waveforms; ten rulings at the end.
+- `js-mobile-2026-09-02.md` with `-android-engines`,
+  `-multi-engine-precedents`, `-ts-without-node` and `js-mobile-probes/`
+  (eight C probes against JavaScriptCore, re-runnable with
+  `cc -o p p.c -framework JavaScriptCore`): what porting the JS binding to
+  JavaScriptCore and to an Android engine would take.
+- `js-jit-aot-2026-09-02.md` with `-android`, `-survey` and
+  `js-jit-probes/`: whether "no interpreted JS" is achievable on either
+  phone — it is not on iOS, by Apple's entitlement — with the wire-packing
+  benchmark that showed the encoder, not the engine, is the cost. The
+  ruling that followed (2026-09-03): the JS binding stays a desktop
+  binding; docs/js-plan.md §5.
+- `dnd-2026-09-02-apple.md`, `-android-toolkits.md`, `-gtk-winui.md`: the
+  drag-and-drop platform surveys behind docs/dnd-plan.md.
