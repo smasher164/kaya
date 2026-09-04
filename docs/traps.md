@@ -8545,7 +8545,7 @@ the same box twice in a row, instead of injecting blind. The tiling itself
 is left as it is — it is the recorder's, and no pooled leg reads a
 coordinate.
 
-## A REAL cross-process drag cannot be driven on macOS: the pointer moves, the button is down, and `beginDraggingSession` still never composes a session (measured 2026-09-03)
+## A cross-process drag was called undrivable on macOS because the measurement predated its own fix: `beginDraggingSession` never composed a session over an EMPTY pasteboard item, and the corrected writer was never re-measured (measured 2026-09-03, corrected the same evening)
 
 docs/probes/dnd-witness-mac-2026-09-03.md, with tools/mac/dragwitness. Every
 premise a synthetic drag needs is TRUE on this host and the drag still does
@@ -8576,6 +8576,18 @@ What a foreign process CAN witness is the PAYLOAD: a drag's pasteboard is a
 named system pasteboard, so `run.py --board` composes kaya's grammar in one
 process and reads all three representations back in another, the
 MIME-shaped custom id included. The gesture itself needs a human.
+
+
+CORRECTED THE SAME EVENING at the maintainer's ask: after the writer
+carried one type, `run.py --pair` landed nine real cross-process drags
+in ten runs, and kaya's own source composed and ended a session under
+the same posted gesture (docs/probes/dnd-witness-mac-2026-09-03.md, the
+addendum). What the first measurement saw was the empty item's zero-item
+session, never AppKit refusing synthesized input. The rule: A FIX
+INVALIDATES THE MEASUREMENTS TAKEN BEFORE IT — re-run the one the verdict
+rested on before the verdict leaves the room. The automated mac legs are
+still unwired for AIM, not mechanics (tools/mac/dragwitness-leg.py says
+so); the hand run is `tools/mac/dragwitness/run.py --hand`.
 
 ## An empty `NSPasteboardItem` is ZERO pasteboard items, and `beginDraggingSession` throws on it (measured 2026-09-03)
 

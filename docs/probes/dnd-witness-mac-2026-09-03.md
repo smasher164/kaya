@@ -183,6 +183,32 @@ none of them taken:
   both of kaya's arms run, with the window server's tracking loop the one
   thing still absent. It needs no gesture.
 
+## MEASURED AGAIN, the same evening — the verdict above was drawn too early
+
+The maintainer asked for the reasoning and a re-measurement. `run.py
+--pair`, run TEN times after Measurement 4's fix (the writer carrying one
+type), landed NINE: `session began`, `drag ended copy`, and the catch
+process reading `entered local false`, `text kaya-foreign-text`, `custom
+dev.kaya/note 8 bytes`, `file witness.txt` — a real cross-process drag,
+composed by AppKit from posted CGEvents, in a foreign window. The one
+miss read `drag ended none` with the session begun. Measurement 3 was
+taken with the EMPTY writer in place: the session never composed because
+there were zero pasteboard items, and the fix that followed was never
+re-measured against the gesture it had been blamed on. THE RULE THIS
+LEAVES: A FIX INVALIDATES THE MEASUREMENTS TAKEN BEFORE IT; re-run the
+one that motivated the verdict.
+
+Against kaya itself (tools/mac/dragwitness-leg.py, the same shape as the
+linux legs): kaya's own `KayaDragDropView` took the posted press and
+first drag, called `beginDraggingSession`, and its `endedAt` fired — the
+source composes and completes under a synthesized gesture too. What did
+not land was the AIM on the maintainer's desktop: the witness window
+placed beside kaya's was not where the pointer released (the maintainer
+watched the drag end in the terminal), so the automated legs stay
+unwired until they aim on an unattended desktop, and the mac half of §5
+step 7 is `run.py --hand`: kaya and the witness on this desktop, a person
+at the mouse, both directions' bytes verified by the tool.
+
 ## Files
 
 - `tools/mac/dragwitness/witness.swift`, `tools/mac/dragwitness/run.py`

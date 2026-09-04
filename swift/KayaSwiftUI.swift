@@ -1296,9 +1296,28 @@ struct KayaDragPayload {
     /// arms called in AppKit's order, the source told the outcome. nil when
     /// it ran (a refusal included — the source reads `none`), else the
     /// sentence naming what stopped it. Main thread.
+    /// A view's frame on the screen in CGEvent's coordinates (origin top
+    /// left of the main screen): the geometry instrument the mac witness
+    /// legs read to aim a real pointer (tools/mac/dragwitness-leg.py).
+    func kayaScreenFrameCG(_ v: NSView) -> String {
+        guard let window = v.window else { return "(none)" }
+        let screen = window.convertToScreen(v.convert(v.bounds, to: nil))
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        return "(\(Int(screen.origin.x)), \(Int(height - screen.origin.y - screen.height)), \(Int(screen.width)), \(Int(screen.height)))"
+    }
+
     func kayaDriveDrag(source: KayaNode, destination: KayaNode, reorder: Bool?) -> String? {
         guard let view = kayaDragSurfaces[destination.id] else {
             return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
+        }
+        if let window = view.window {
+            let frame = window.frame
+            let height = NSScreen.screens.first?.frame.height ?? 0
+            let sourceFrame = kayaDragSurfaces[source.id].map(kayaScreenFrameCG) ?? "(none)"
+            kayaDiag(
+                "dragdrive: source \(sourceFrame) destination \(kayaScreenFrameCG(view)) window "
+                    + "(\(Int(frame.origin.x)), \(Int(height - frame.origin.y - frame.height)), \(Int(frame.width)), \(Int(frame.height))) "
+                    + "screen (\(Int(NSScreen.screens.first?.frame.width ?? 0)), \(Int(height)))")
         }
         let payload: KayaDragPayload
         let ops: UInt32

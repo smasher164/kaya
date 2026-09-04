@@ -12,13 +12,18 @@
         a witness `catch` and a witness `throw`, two SEPARATE PROCESSES
         neither of which is kaya, and a real cross-process drag between
         them driven by posted CGEvents (docs/dnd-plan.md §5 step 7).
+        MEASURED 2026-09-03 (evening): it lands — 9 of 10 runs read all
+        three representations with `entered local false`.
+    tools/mac/dragwitness/run.py --hand     THE HAND RUN: kaya's dnd guest
+        and the witness windows come up on this desktop, the terminal says
+        what to drag where, a person drags, and BOTH sides' bytes are
+        verified here — kaya's harness verdict and the witness's report.
+        This is the mac half of §5 step 7 until the automated legs
+        (tools/mac/dragwitness-leg.py) aim reliably on a shared desktop.
 
-The binary is target/mac-dragwitness/kaya-drag-witness. NO LANE RUNS THIS
-YET, and the reason is `--pair`'s own answer: a real cross-process drag
-cannot be driven on this host, so §5 step 7's two mac legs have no driver
-(docs/probes/dnd-witness-mac-2026-09-03.md).
-THE POINTER IS DESKTOP-GLOBAL: nothing else may be driving it when
-`--pair` runs.
+The binary is target/mac-dragwitness/kaya-drag-witness. THE POINTER IS
+DESKTOP-GLOBAL: nothing else may be driving it when `--pair` runs, and
+`--hand` wants a person at the mouse.
 """
 import pathlib
 import sys
@@ -134,6 +139,95 @@ def board():
     print("dragwitness: the foreign process read all three representations")
 
 
+HAND_TEXT = "kaya-foreign-text"
+HAND_FILE = "witness.txt"
+HAND_BYTES = "witness bytes"
+HAND_WAIT_MS = 60000
+
+
+def hand():
+    """kaya + the witness on this desktop; a PERSON drags; this verifies.
+    Three drags, each given HAND_WAIT_MS: the witness's blue square onto
+    kaya's `text target`, a fresh blue square onto `files target`, then
+    kaya's `hello` into the witness's catch window."""
+    import os
+    sys.path.insert(0, str(ROOT / "tools/lib/lanes"))
+    import mac as lane
+    guest = ROOT / lane.RUST_GUESTS / "dnd"
+    if not guest.is_file():
+        print(f"dragwitness: {guest} is not staged — run `tools/run-leg.py dnd rust --build` first",
+              file=sys.stderr)
+        sys.exit(2)
+    scratch = OUT / "hand"
+    scratch.mkdir(parents=True, exist_ok=True)
+    offered = scratch / HAND_FILE
+    offered.write_text(HAND_BYTES, encoding="utf-8")
+    scene = "\n".join([
+        'expect label#4 "no drop yet"',
+        f"settle {HAND_WAIT_MS}",
+        f'expect label#4 "text target got text {HAND_TEXT} (copy)"',
+        f"settle {HAND_WAIT_MS}",
+        f'expect label#4 "files target got {HAND_FILE} {HAND_BYTES} (copy)"',
+        f"settle {HAND_WAIT_MS}",
+        'expect label#5 "drag ended copy"',
+        "",
+    ])
+    env = dict(os.environ)
+    env.update(lane.leg_env(ROOT, "dnd", "rust", ""))
+    env["KAYA_SELFTEST"] = "dnd"
+    env["KAYA_SELFTEST_SCRIPT"] = scene
+    kaya = subprocess.Popen(lane.leg_argv("dnd", "rust", lambda _n: ""), cwd=ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8")
+    time.sleep(1.5)
+    wait_s = HAND_WAIT_MS // 1000
+    steps = [
+        ("throw", f"1. Drag the BLUE SQUARE in the 'kaya drag witness' window onto kaya's "
+                  f"'text target' label ({wait_s}s).", "drag ended copy"),
+        ("throw", f"2. A fresh witness window: drag its BLUE SQUARE onto kaya's 'files target' "
+                  f"label ({wait_s}s).", "drag ended copy"),
+        ("catch", f"3. Drag kaya's 'hello' label INTO the 'kaya drag witness' window ({wait_s}s).",
+                  "text hello"),
+    ]
+    reports = []
+    ok = True
+    try:
+        for mode, say, need in steps:
+            report = scratch / f"{mode}-{len(reports)}.txt"
+            report.unlink(missing_ok=True)
+            args = [str(BINARY), mode, "--at", "40,80,300,200", "--report", str(report),
+                    "--hold", str(wait_s + 20)]
+            if mode == "throw":
+                args += ["--file", str(offered)]
+            w = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"\n>>> {say}", flush=True)
+            try:
+                w.wait(timeout=wait_s + 25)
+            except subprocess.TimeoutExpired:
+                w.terminate()
+            got = report.read_text(encoding="utf-8") if report.is_file() else ""
+            reports.append(got)
+            landed = need in got
+            ok = ok and landed
+            print(f"    witness: {'landed — ' if landed else 'DID NOT SEE IT — '}"
+                  + " / ".join(line for line in got.splitlines() if line) , flush=True)
+    finally:
+        try:
+            kaya_out, _ = kaya.communicate(timeout=wait_s + 30)
+        except subprocess.TimeoutExpired:
+            kaya.kill()
+            kaya_out, _ = kaya.communicate()
+    verdict = [line for line in kaya_out.splitlines() if "KAYA_SELFTEST:" in line]
+    print("\nkaya's own verdict:", verdict[-1] if verdict else "<none>", flush=True)
+    if ok and verdict and "KAYA_SELFTEST: OK" in verdict[-1]:
+        print("dragwitness --hand: BOTH DIRECTIONS VERIFIED — the witness read kaya's text and "
+              "custom id, kaya read the witness's text and file through the picked table")
+    else:
+        print("dragwitness --hand: NOT VERIFIED — see the witness lines and kaya's verdict above",
+              file=sys.stderr)
+        sys.exit(1)
+
+
 def selftest():
     """THE WATCHED NEGATIVE for the shipped-crash class (docs/traps.md): an
     empty NSPasteboardItem is ZERO pasteboard items and AppKit throws the
@@ -165,6 +259,8 @@ def main():
     build()
     if "--pair" in args:
         pair()
+    elif "--hand" in args:
+        hand()
     elif "--board" in args:
         board()
     elif "--selftest" in args:
