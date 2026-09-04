@@ -15,6 +15,9 @@ common shared
 
 library
   import: shared
+  -- `time` for the picker types: KayaApp's Date/Time field instances are
+  -- Day and TimeOfDay (docs/datetime-plan.md D2).
+  build-depends: time
   exposed-modules: KayaApp, KayaRuntime, KayaWire
   hs-source-dirs: ../../bindings/haskell
   c-sources: ../../bindings/haskell/kaya_hs_stubs.c
@@ -234,6 +237,11 @@ executable adaptive
   import: shared
   main-is: adaptive.hs
   build-depends: kaya-guests
+
+executable pickers
+  import: shared
+  main-is: pickers.hs
+  build-depends: kaya-guests, time
 
 executable encodebench
   import: shared

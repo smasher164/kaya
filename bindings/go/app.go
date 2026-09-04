@@ -15,7 +15,7 @@ import (
 
 // Scalar is the signal-value constraint: the wire's value types.
 type Scalar interface {
-	~string | ~bool | ~int64 | ~float64 | ~[]byte
+	~string | ~bool | ~int64 | ~float64 | ~[]byte | Date | Time
 }
 
 // Signal carries its value type: writes are checked at compile time,
@@ -124,6 +124,10 @@ type App struct {
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
 	nodeValues     map[uint64]func(*Tx, []any, float64)
+	widgetDates    map[uint64]func(*Tx, Date)
+	nodeDates      map[uint64]func(*Tx, []any, Date)
+	widgetTimes    map[uint64]func(*Tx, Time)
+	nodeTimes      map[uint64]func(*Tx, []any, Time)
 	// Window lifecycle: one handler each, receiving the window id.
 	closeRequested map[uint64]func(*Tx)
 	windowClosed   map[uint64]func(*Tx)
@@ -224,6 +228,10 @@ func NewApp() *App {
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeValues:     make(map[uint64]func(*Tx, []any, float64)),
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
+		widgetDates:    make(map[uint64]func(*Tx, Date)),
+		nodeDates:      make(map[uint64]func(*Tx, []any, Date)),
+		widgetTimes:    make(map[uint64]func(*Tx, Time)),
+		nodeTimes:      make(map[uint64]func(*Tx, []any, Time)),
 		menuActivated:     make(map[uint64]func(*Tx)),
 		menuActivatedNode: make(map[uint64]func(*Tx, []any)),
 		menuToggled:       make(map[uint64]func(*Tx, bool)),
@@ -1124,6 +1132,74 @@ func (tx *Tx) Progress(value float64) Widget {
 // mode (the fraction is ignored while it is on).
 func (w Widget) Indeterminate() Widget {
 	w.tx.emit(TxSetIndeterminate(w.id, true))
+	return w
+}
+
+// DatePicker creates a date picker holding date: the compact field that
+// opens the platform's calendar (docs/datetime-plan.md). Committed picks
+// reach App.OnDate; MinDate/MaxDate chain the inclusive range and a pick
+// past a bound lands on the bound.
+func (tx *Tx) DatePicker(date Date, onDate func(*Tx, Date)) Widget {
+	date.check()
+	w := tx.Widget(KindDatePicker)
+	tx.emit(TxSetDate(w.id, date.Year, date.Month, date.Day))
+	if onDate != nil {
+		tx.app.OnDate(w, onDate)
+	}
+	return w
+}
+
+// DatePickerBound creates a date picker whose value binds a Date signal
+// — the programmatic write path. Property writes never echo.
+func (tx *Tx) DatePickerBound(date Signal[Date], onDate func(*Tx, Date)) Widget {
+	w := tx.Widget(KindDatePicker)
+	tx.emit(TxBindDate(w.id, date.id))
+	if onDate != nil {
+		tx.app.OnDate(w, onDate)
+	}
+	return w
+}
+
+// TimePicker creates a time picker holding t: hours and minutes, the
+// compact field that opens the platform's clock. MinuteStep chains the
+// granularity.
+func (tx *Tx) TimePicker(t Time, onTime func(*Tx, Time)) Widget {
+	t.check()
+	w := tx.Widget(KindTimePicker)
+	tx.emit(TxSetTime(w.id, t.Hour, t.Minute))
+	if onTime != nil {
+		tx.app.OnTime(w, onTime)
+	}
+	return w
+}
+
+// TimePickerBound creates a time picker whose value binds a Time signal.
+func (tx *Tx) TimePickerBound(t Signal[Time], onTime func(*Tx, Time)) Widget {
+	w := tx.Widget(KindTimePicker)
+	tx.emit(TxBindTime(w.id, t.id))
+	if onTime != nil {
+		tx.app.OnTime(w, onTime)
+	}
+	return w
+}
+
+// MinDate sets a date picker's inclusive lower bound.
+func (w Widget) MinDate(date Date) Widget {
+	date.check()
+	w.tx.emit(TxSetMinDate(w.id, date.Year, date.Month, date.Day))
+	return w
+}
+
+// MaxDate sets a date picker's inclusive upper bound.
+func (w Widget) MaxDate(date Date) Widget {
+	date.check()
+	w.tx.emit(TxSetMaxDate(w.id, date.Year, date.Month, date.Day))
+	return w
+}
+
+// MinuteStep sets a time picker's minute granularity: 1, 5, 10, 15 or 30.
+func (w Widget) MinuteStep(minutes int) Widget {
+	w.tx.emit(TxSetMinuteStep(w.id, float64(minutes)))
 	return w
 }
 
@@ -3693,6 +3769,44 @@ func (t *Tpl) CheckboxBound[S interface {
 	return n
 }
 
+// DatePicker creates a date picker at a constant date in the blueprint;
+// DatePickerBound reads the row's own Date field. Picks register against
+// the node (App.OnDateNode).
+func (t *Tpl) DatePicker(date Date) Node {
+	date.check()
+	n := t.Widget(KindDatePicker)
+	t.tx.emit(TxSetDate(n.id, date.Year, date.Month, date.Day))
+	return n
+}
+
+// DatePickerBound creates a date picker whose value comes from a varying
+// source.
+func (t *Tpl) DatePickerBound[S interface {
+	Signal[Date] | Field[Date]
+}](src S) Node {
+	n := t.Widget(KindDatePicker)
+	t.applyDate(n, src)
+	return n
+}
+
+// TimePicker creates a time picker at a constant time in the blueprint.
+func (t *Tpl) TimePicker(v Time) Node {
+	v.check()
+	n := t.Widget(KindTimePicker)
+	t.tx.emit(TxSetTime(n.id, v.Hour, v.Minute))
+	return n
+}
+
+// TimePickerBound creates a time picker whose value comes from a varying
+// source.
+func (t *Tpl) TimePickerBound[S interface {
+	Signal[Time] | Field[Time]
+}](src S) Node {
+	n := t.Widget(KindTimePicker)
+	t.applyTime(n, src)
+	return n
+}
+
 // Progress creates a progress bar at a constant fraction in the
 // blueprint: display-only, like Label and Image. value is the
 // determinate fraction (0..=1, domain-checked at the root);
@@ -3914,6 +4028,28 @@ func (t *Tpl) applyChecked[S interface {
 		t.tx.emit(TxBindChecked(n.id, v.id))
 	case Field[bool]:
 		t.BindCheckedField(n, 0, v)
+	}
+}
+
+func (t *Tpl) applyDate[S interface {
+	Signal[Date] | Field[Date]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[Date]:
+		t.tx.emit(TxBindDate(n.id, v.id))
+	case Field[Date]:
+		t.BindDateField(n, 0, v)
+	}
+}
+
+func (t *Tpl) applyTime[S interface {
+	Signal[Time] | Field[Time]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[Time]:
+		t.tx.emit(TxBindTime(n.id, v.id))
+	case Field[Time]:
+		t.BindTimeField(n, 0, v)
 	}
 }
 
@@ -4224,6 +4360,29 @@ func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
 	a.nodeValues[n.id] = fn
 }
 
+// OnDate registers a handler for a live date picker's COMMITTED picks
+// (docs/datetime-plan.md D7): the control owns its value and reports each
+// pick here; a programmatic write never echoes.
+func (a *App) OnDate(w Widget, fn func(*Tx, Date)) {
+	a.widgetDates[w.id] = fn
+}
+
+// OnDateNode registers a pick handler for a template date picker; the
+// handler also receives the stamped copy's keys, outermost first.
+func (a *App) OnDateNode(n Node, fn func(*Tx, []any, Date)) {
+	a.nodeDates[n.id] = fn
+}
+
+// OnTime registers a handler for a live time picker's committed picks.
+func (a *App) OnTime(w Widget, fn func(*Tx, Time)) {
+	a.widgetTimes[w.id] = fn
+}
+
+// OnTimeNode registers a pick handler for a template time picker.
+func (a *App) OnTimeNode(n Node, fn func(*Tx, []any, Time)) {
+	a.nodeTimes[n.id] = fn
+}
+
 // OnToggle registers a handler for a live checkbox's toggles: the box
 // owns its checked bit and reports each flip here.
 func (a *App) OnToggle(w Widget, fn func(*Tx, bool)) {
@@ -4318,6 +4477,7 @@ func (a *App) Serve() {
 		text, _ := payload.(string)
 		checked, _ := payload.(bool)
 		value, _ := payload.(float64)
+		packed, _ := payload.(int64)
 		column, _ := payload.(uint32)
 		choice, _ := payload.(uint32)
 		files, _ := payload.([]PickedFile)
@@ -4365,6 +4525,22 @@ func (a *App) Serve() {
 		case kind == occValueChanged:
 			if fn := a.nodeValues[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, value) })
+			}
+		case kind == occDateChanged && len(keys) == 0:
+			if fn := a.widgetDates[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, dateOf(packed)) })
+			}
+		case kind == occDateChanged:
+			if fn := a.nodeDates[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, dateOf(packed)) })
+			}
+		case kind == occTimeChanged && len(keys) == 0:
+			if fn := a.widgetTimes[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, timeOf(packed)) })
+			}
+		case kind == occTimeChanged:
+			if fn := a.nodeTimes[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, timeOf(packed)) })
 			}
 		case kind == occSortRequested && len(keys) == 0:
 			if fn := a.sortHandlers[id]; fn != nil {

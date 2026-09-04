@@ -643,6 +643,10 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeValues = new();
+    readonly Dictionary<ulong, Action<Tx, DateOnly>> widgetDates = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, DateOnly>> nodeDates = new();
+    readonly Dictionary<ulong, Action<Tx, TimeOnly>> widgetTimes = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, TimeOnly>> nodeTimes = new();
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -930,6 +934,22 @@ sealed class KayaApp
     public void OnValueChanged(Node n, Action<Tx, List<object>, double> handler) =>
         nodeValues[n.Id] = handler;
 
+    /// A live date picker's COMMITTED picks (docs/datetime-plan.md D7):
+    /// the control owns its value and a programmatic write never echoes.
+    public void OnDate(Widget w, Action<Tx, DateOnly> handler) => widgetDates[w.Id] = handler;
+
+    /// A template date picker's picks; the handler also receives the
+    /// stamped copy's keys, outermost first.
+    public void OnDate(Node n, Action<Tx, List<object>, DateOnly> handler) =>
+        nodeDates[n.Id] = handler;
+
+    /// A live time picker's committed picks.
+    public void OnTime(Widget w, Action<Tx, TimeOnly> handler) => widgetTimes[w.Id] = handler;
+
+    /// A template time picker's picks, keys first.
+    public void OnTime(Node n, Action<Tx, List<object>, TimeOnly> handler) =>
+        nodeTimes[n.Id] = handler;
+
     /// The open transaction, reached ambiently by the chained canvas
     /// declarations (Widget.Fixed, OnDraw, OnTick) — Signal.Derive's route
     /// and for the same reason: the handle is an id alone.
@@ -1132,6 +1152,26 @@ sealed class KayaApp
             {
                 if (nodeValues.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
+            }
+            else if (kind == KayaWire.OccKindDateChanged && keys.Count == 0)
+            {
+                if (widgetDates.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, KayaRecords.DateOf(payload)));
+            }
+            else if (kind == KayaWire.OccKindDateChanged)
+            {
+                if (nodeDates.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, KayaRecords.DateOf(payload)));
+            }
+            else if (kind == KayaWire.OccKindTimeChanged && keys.Count == 0)
+            {
+                if (widgetTimes.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, KayaRecords.TimeOf(payload)));
+            }
+            else if (kind == KayaWire.OccKindTimeChanged)
+            {
+                if (nodeTimes.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, KayaRecords.TimeOf(payload)));
             }
             else if (kind == KayaWire.OccKindCloseRequested)
             {
@@ -1534,7 +1574,7 @@ sealed class Tx
     public Signal Signal(object initial)
     {
         var s = App.NextSignal();
-        Records.Add(KayaWire.TxCreateSignal(s.Id, initial));
+        Records.Add(KayaWire.TxCreateSignal(s.Id, KayaRecords.ScalarWire(initial)));
         TouchSignal(s.Id);
         App.SignalMirrors[s.Id] = initial;
         return s;
@@ -1543,7 +1583,7 @@ sealed class Tx
     public void Write(Signal s, object value)
     {
         TouchSignal(s.Id);
-        Records.Add(KayaWire.TxWriteSignal(s.Id, value));
+        Records.Add(KayaWire.TxWriteSignal(s.Id, KayaRecords.ScalarWire(value)));
         App.SignalMirrors[s.Id] = value;
         // The dependents recompute now, batched into this transaction.
         if (App.SignalDeps.TryGetValue(s.Id, out var deps))
@@ -1909,6 +1949,41 @@ sealed class Tx
         if (text != null) SetText(w, text);
         if (isChecked is bool c) SetChecked(w, c);
         if (onToggle != null) App.OnToggle(w, onToggle);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A date picker over civil dates — the compact field that opens the
+    /// platform's calendar (docs/datetime-plan.md). UNCONTROLLED: the
+    /// control owns its value and reports each COMMITTED pick to onDate.
+    /// `bind` takes a Signal for the value instead of a constant;
+    /// `min`/`max` are the inclusive range and a pick past a bound lands
+    /// on the bound.
+    public Widget DatePicker(DateOnly value = default, DateOnly? min = null,
+        DateOnly? max = null, Action<Tx, DateOnly> onDate = null, double? grow = null,
+        Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindDatePicker);
+        if (min is DateOnly lo) Records.Add(KayaWire.TxSetMinDate(w.Id, lo.Year, lo.Month, lo.Day));
+        if (max is DateOnly hi) Records.Add(KayaWire.TxSetMaxDate(w.Id, hi.Year, hi.Month, hi.Day));
+        if (bind is Signal s) Records.Add(KayaWire.TxBindDate(w.Id, s.Id));
+        else Records.Add(KayaWire.TxSetDate(w.Id, value.Year, value.Month, value.Day));
+        if (onDate != null) App.OnDate(w, onDate);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A time picker over civil times: hours and minutes, no seconds.
+    /// `step` is the minute granularity (1, 5, 10, 15 or 30) and a pick
+    /// snaps to it.
+    public Widget TimePicker(TimeOnly value = default, int? step = null,
+        Action<Tx, TimeOnly> onTime = null, double? grow = null, Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindTimePicker);
+        if (step is int m) Records.Add(KayaWire.TxSetMinuteStep(w.Id, m));
+        if (bind is Signal s) Records.Add(KayaWire.TxBindTime(w.Id, s.Id));
+        else Records.Add(KayaWire.TxSetTime(w.Id, value.Hour, value.Minute));
+        if (onTime != null) App.OnTime(w, onTime);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -3107,6 +3182,17 @@ sealed class Tpl
     /// and the root compares a bound field's declared type against the
     /// prop's exactly, so a Field&lt;long&gt; is rejected at declaration
     /// however integral the index is.
+    /// Binds a date picker's value to one field of the element;
+    /// Field&lt;DateOnly&gt; only, which is what keeps a picker off the long
+    /// field it shares a wire tag with (docs/datetime-plan.md D10).
+    public void BindDateField(Node n, uint level, Field<DateOnly> f) =>
+        tx.Records.Add(KayaWire.TxBindDateElement(n.Id, level, f.Index));
+
+    /// Binds a time picker's value to one field of the element;
+    /// Field&lt;TimeOnly&gt; only.
+    public void BindTimeField(Node n, uint level, Field<TimeOnly> f) =>
+        tx.Records.Add(KayaWire.TxBindTimeElement(n.Id, level, f.Index));
+
     public void BindValueField(Node n, uint level, Field<double> f) =>
         tx.Records.Add(KayaWire.TxBindValueElement(n.Id, level, f.Index));
 
@@ -3318,6 +3404,59 @@ sealed class Tpl
         var n = Widget(KayaWire.KindCheckbox);
         BindCheckedField(n, 0, f);
         if (onToggle != null) tx.App.OnToggle(n, onToggle);
+        return n;
+    }
+
+    /// A date picker in the blueprint whose VALUE comes from any
+    /// addressable source — a constant per copy, a signal, or the row's
+    /// own DateOnly field. Picks carry the stamped copy's keys first.
+    public Node DatePicker(DateOnly value, Action<Tx, List<object>, DateOnly> onDate = null)
+    {
+        var n = Widget(KayaWire.KindDatePicker);
+        tx.Records.Add(KayaWire.TxSetDate(n.Id, value.Year, value.Month, value.Day));
+        if (onDate != null) tx.App.OnDate(n, onDate);
+        return n;
+    }
+
+    public Node DatePicker(Signal value, Action<Tx, List<object>, DateOnly> onDate = null)
+    {
+        var n = Widget(KayaWire.KindDatePicker);
+        tx.Records.Add(KayaWire.TxBindDate(n.Id, value.Id));
+        if (onDate != null) tx.App.OnDate(n, onDate);
+        return n;
+    }
+
+    public Node DatePicker(Field<DateOnly> f, Action<Tx, List<object>, DateOnly> onDate = null)
+    {
+        var n = Widget(KayaWire.KindDatePicker);
+        BindDateField(n, 0, f);
+        if (onDate != null) tx.App.OnDate(n, onDate);
+        return n;
+    }
+
+    /// A time picker in the blueprint: the date picker's three sources,
+    /// hours and minutes.
+    public Node TimePicker(TimeOnly value, Action<Tx, List<object>, TimeOnly> onTime = null)
+    {
+        var n = Widget(KayaWire.KindTimePicker);
+        tx.Records.Add(KayaWire.TxSetTime(n.Id, value.Hour, value.Minute));
+        if (onTime != null) tx.App.OnTime(n, onTime);
+        return n;
+    }
+
+    public Node TimePicker(Signal value, Action<Tx, List<object>, TimeOnly> onTime = null)
+    {
+        var n = Widget(KayaWire.KindTimePicker);
+        tx.Records.Add(KayaWire.TxBindTime(n.Id, value.Id));
+        if (onTime != null) tx.App.OnTime(n, onTime);
+        return n;
+    }
+
+    public Node TimePicker(Field<TimeOnly> f, Action<Tx, List<object>, TimeOnly> onTime = null)
+    {
+        var n = Widget(KayaWire.KindTimePicker);
+        BindTimeField(n, 0, f);
+        if (onTime != null) tx.App.OnTime(n, onTime);
         return n;
     }
 

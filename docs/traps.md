@@ -8774,3 +8774,202 @@ question "did my interpreter change break a neighbouring leg". The answer is
 tools/run-leg.py, one leg at a time, and the commit message says which legs
 ran; the whole lane runs when the breadth slice turns the sweep green.
 
+## A round-trip test of a SYMMETRIC conversion measures nothing (measured 2026-09-04)
+
+The Compose pickers' arm converts a packed day to `DatePickerState`'s
+UTC-midnight millis and back (docs/datetime-plan.md P2), and the obvious
+guard — `read(write(day)) == day`, run under several forced device zones
+— was written, run, and PASSED WITH THE BUG INSTALLED: substituting
+`ZoneId.systemDefault()` for `ZoneOffset.UTC` at BOTH sites left gradle
+exiting 0 in every zone, because a conversion and its inverse agree with
+each other whatever zone they share. What the platform fixes is the
+CONVENTION, not the symmetry. Each half is pinned to a LITERAL now —
+2026-09-04 is `1788480000000` — and then a device-zone READ fails in a
+negative-offset zone (America/Los_Angeles) and a device-zone WRITE in a
+positive one (Pacific/Kiritimati); the same perturbation is watched
+failing, naming the zone and the drift. NO LANE CAN STAND IN FOR IT:
+`set_date` drives the commit path directly, so no scene ever opens the
+dialog, and `expect_picker` reads a value the arm spells arithmetically
+— the pickers leg is byte-identical on both those zones. The wall is
+android/kaya/src/test/kotlin/dev/kaya/KayaPickerUtcTest.kt, on the host
+JVM through tools/check-compose.py. The rule generalizes: when a guard
+tests `f` and `f`-inverse together, ask what it would say if BOTH moved
+the same way.
+
+## compose-ui 1.7.5 has no picker Role, and the Material date field publishes an EditText (measured 2026-09-04)
+
+`expect_ax`'s closed role set gained `datetime` when NSDatePicker was
+measured publishing `AXDateTimeArea` for both kinds. Compose has no such
+fact to normalize: `androidx.compose.ui.semantics.Role` at the pinned
+compose-bom 2024.10.01 (compose-ui 1.7.5) has exactly SEVEN members —
+Button, Checkbox, Switch, RadioButton, Tab, Image, DropdownList, read
+out of `Role$Companion` in the BOM's own `ui-release.aar` — and D6's
+Material idiom is a read-only text field, which the accessibility
+delegate classes as `android.widget.EditText`, the same class every
+`entry` publishes. So KayaCompose.kt's picker arm PUBLISHES the fact
+into the semantics tree (`KayaPickerKind`, a `SemanticsPropertyKey` set
+in the field's own `semantics {}` block) and `kayaAxRole` reads it back
+off the merged node the harness found by test tag.
+AND IT MUST GO ON BOTH READ ROUTES. `kayaAx` answers from the
+AccessibilityNodeInfo provider, and from a semantics-only FALLBACK when
+the provider stays silent past its leash. That fallback's arms are
+ordered, and `EditableText != null -> "field"` sits above the general
+reader — while a picker's MERGED node does carry the Material field's
+`EditableText`. Published on the provider route alone, the same widget
+would read `datetime/Due` there and `field/Due` here, and no leg can
+show it because the provider answered on every run.
+
+## A compact UIDatePicker publishes NO accessibility traits at all, so only its class classifies it (measured 2026-09-04)
+
+kaya's iOS role reader is a trait bitmask read with the element's class as
+a tiebreak — a Toggle is `button|toggleButton`, a heading label is
+`header|staticText`. A `UIDatePicker` in `.compact` style is none of those
+shapes: it is itself the accessibility element the authored identifier
+resolves to, it publishes ZERO traits and ZERO child elements
+(`class=UIDatePicker traits=0 elements=0`), in both the `.date` and `.time`
+mode, so the reader's `unknown` fell out of the end of a ladder with
+nothing to weigh. The arm is keyed on the CLASS and weighed BEFORE
+`.adjustable`, because the WHEEL style of the same class does publish that
+trait and would read as a slider. On UIKit a trait-first reader needs a
+class fallback for any control that publishes an empty bitmask, and the
+diagnostic that prints class AND traits AND element count is what made
+this one round trip to identify.
+
+## windows-bindgen's filter takes METADATA names, not projected ones: `Windows.Foundation.DateTimeOffset` is "type not found" (measured 2026-09-04)
+
+Every WinUI date slot is spelled `DateTimeOffset` in Microsoft's docs and in
+the C# projection, and docs/datetime-plan.md's first touch list named
+`Windows.Foundation.DateTimeOffset` as the filter row. windows-bindgen
+resolves filters against the WINMD, where the struct is
+`Windows.Foundation.DateTime` (one i64, `UniversalTime`); the projected
+spelling panics with "type not found", and nothing says the metadata holds
+it under another name. THE SILENT HALF: `DateTime` had never been filtered,
+so every date-typed member of every already-filtered type was a `usize`
+vtable PAD — `PropertyValue::CreateDateTime: usize` beside a real
+`CreateTimeSpan` two lines below (`TimeSpan` happens to be spelled alike in
+both worlds). The one row unlocked 48 methods and removed none. The sibling
+of the "filters do not pull referenced types transitively" entry: a pad
+where a method should be is the filter's gap, and the name to add is the
+winmd's.
+
+## UIA publishes `Button` for a CalendarDatePicker and `Group` for a TimePicker, and `GetLocalizedControlType` cannot tell them apart (measured 2026-09-04)
+
+UIA's `AutomationControlType` has no member for a date or time chooser:
+WinUI's CalendarDatePicker publishes `Button` and its TimePicker `Group`,
+both types the closed set already maps, so the pickers scene read
+`button/Due` and `group/At` on the first VM run. `GetLocalizedControlType`
+is dead for the purpose — the TimePicker's is the bare word "group". The
+one honest, unlocalized discriminator measured on the guest through the
+peer is `GetClassName` ("CalendarDatePicker" / "TimePicker"), which the
+heading role's `GetHeadingLevel` already reads one property over; `ax_role`
+weighs the class beside the heading level, ahead of the type ladder, pinned
+by a test that is the heading test's twin (each pair differs in the class
+alone, and WinUI's own `DatePicker` class — never hosted — still reads
+`button`). Also measured there: `CalendarDatePicker.SetDate` neither throws
+nor coerces a value past `MinDate`/`MaxDate`, and `MinuteIncrement` does
+not snap a driven `SelectedTime`, so the arm's own clamp and snap in the
+commit path are what put the control on the bound, as on AppKit.
+
+## GTK 4 cannot publish a date-shaped accessible role, and drops ROLE_DESCRIPTION on the bus (measured 2026-09-04)
+
+AT-SPI2 has `ATSPI_ROLE_DATE_EDITOR`; GTK cannot reach it from any
+application. Every role GTK publishes comes out of one switch,
+`gtk_accessible_role_to_atspi_role()` in gtk/a11y/gtkatspiutils.c (read on
+gtk-4-18, the lane's container), and that role appears nowhere in it; there
+is no `GTK_ACCESSIBLE_ROLE_DATE_EDITOR`, `_DATE_PICKER` or `_CALENDAR`, and
+`GTK_ACCESSIBLE_ROLE_TIME` is ARIA's formatted TIMESTAMP, mapping to
+`ATSPI_ROLE_TEXT`. So the composed date field (GtkMenuButton + GtkPopover +
+GtkCalendar) and the spin pair declare `Group` — a plain GtkBox is
+`GENERIC`, whose PANEL gets an EMPTY name, so without the promotion the
+authored `a11y_label` never reaches the bus — and read back `grouping`.
+The next idea, `GTK_ACCESSIBLE_PROPERTY_ROLE_DESCRIPTION` read back as the
+AT-SPI `roledescription` attribute (what Orca would speak), was built and
+measured: `get_attributes()` answered `{'toolkit': 'GTK'}` and
+`get_localized_role_name()` `grouping` on the very nodes whose names came
+through, and gtkatspicontext.c never mentions ROLE_DESCRIPTION —
+`GetAttributes` publishes exactly toolkit/level/placeholder-text/
+colindextext/rowindextext/keyshortcuts, and the property-change handler
+lets it fall through with no event. The write was REMOVED rather than left:
+a call that looks like it announces the field and reaches nobody is a false
+signal. `DESCRIPTION` IS forwarded and was rejected on purpose: it is
+`a11y_hint`'s declared slot in every binding, and `expect_ax_hint` would
+answer "date picker" for a picker with no hint. The rule that stands is the
+closed set's name for what this platform CAN say: gtk.rs's
+`composed_picker_role()` names a node `datetime` only when it IS one of the
+composed roots this backend built, by object identity and never by the
+target's kind (a label target cannot read it), consulted before the role
+match, and the watched negative — every root answering `datetime` —
+convicted eleven a11y roles at once. The day GTK forwards ROLE_DESCRIPTION,
+the two lines to add are the write and an attribute read beside the role
+read.
+
+## A qualified type is invisible to the Go record generator's field reader, and the field vanishes from the schema silently (measured 2026-09-04)
+
+cmd/kaya-gen's `wireTypeName` matched only `*ast.Ident` (`string`, `bool`,
+`int64`, `float64`) and `*ast.ArrayType` (`[]byte`). A record field declared
+`Due kaya.Date` is an `*ast.SelectorExpr` and fell through to "guest-only",
+the same answer the generator gives a field an app deliberately keeps off
+the wire. Nothing said anything: the generated row surface had one token
+fewer, the runtime schema (bindings/go/records.go's reflection walk) one
+tag MORE, and every exact-index token after the missing field pointed at
+the wrong column. The generator reads SYNTAX and the runtime reads
+reflect.Type, so the two type vocabularies must be extended together;
+neither can see the other's gap.
+
+## Three more record-generator traps from the first typed date field (measured 2026-09-04)
+
+C#: guests/csharp/kaya-guests.csproj sets `ImplicitUsings=disable` and
+every generated `*Kaya.cs` begins at the type declaration with no using
+block, so a field declared `DateOnly Due` read back verbatim emits a
+`Field<DateOnly>` that does not resolve — the generator QUALIFIES
+(`System.DateOnly`) where it reads the parameter list. Java:
+`KayaRecords.fieldOf` resolves `Todo::done` by building a prototype record
+and a probe copy per field with a SENTINEL in that slot, so a new
+`KayaFieldType` needs `defaultValue` and `sentinelValue` arms too, or the
+first selector resolution over a record carrying the new type throws "no
+sentinel for java.time.LocalDate" at run time, from a path the generated
+exact-index tokens never take. Swift: `KayaDate` and `KayaTime` are one
+runtime type (`DateComponents`, D2's spelling), so `Mirror` sees one type
+for both and only the DECLARED spelling can say which way a packed I64
+lifts back — kaya-swift-gen keys its wire table on the type NAME and
+carries a per-type `lift`; discriminating on the packed magnitude would be
+a heuristic in a decoder.
+
+## A kind's name was read VERBATIM by two censuses in six of nine languages, right until the first two-word kind (measured 2026-09-04)
+
+tools/check-sugar-surface.py's `check_kind` derived Go's and C#'s
+constructor name by upper-casing the first letter alone (`Date_picker`) and
+used the kind as written for Java, Swift, Haskell and JS (`date_picker`),
+while tools/tpl-surfaces.py's zone readers lower-case what they find, so a
+real `DatePicker` read back `datepicker` and matched nothing. Both were
+right for fifteen one-word kinds and wrong for the first multi-word one,
+and the fake-kind negative both gates carry could not see it — a one-word
+fake fires 9/9 under any casing. The derivation is per language now
+(snake / Pascal / camel), watched with a MULTI-WORD fake beside the
+one-word one, and printed on every run.
+
+## A frame wait that gives up silently aims the next drag at the PREVIOUS arrangement (measured 2026-09-04, three matrices)
+
+The Compose `drag` verb waits two frames before reading the drag surfaces'
+boxes, because `onGloballyPositioned` publishes a box in a frame's layout
+phase and a drag issued in the same millisecond as a model read aims at the
+arrangement BEFORE it (the GTK twin is `await_frames(2)`). Each of those
+waits used to be `done.await(1, SECONDS)` with the result ignored. Under a
+five-lane matrix — host load past 100, the emulators starved — one android
+dnd leg failed on three consecutive matrices, a different family each time
+(compose, go, jvm), and passed standalone every time. The recorded android
+drag classes both show a MISSING start; these had their `KAYA_DRAG_STARTED`
+and their ack, and the drag ended `none`. Instrumenting the target
+(`KAYA_DRAG_EVENT: entered/drop/ended`, with the platform's own coordinates,
+printed by the runner beside the injections on a failed verdict) decoded it
+on the next sighting in one run: `drag label#0 to label@item[x]` was injected
+to (65,120) while the pointer `entered node=7 at=56,88` and the source
+`ended … op=0 entered=1` — the previous step had lengthened label#4, the
+column re-laid out, the rows moved down, and the verb had read the boxes
+after two waits that each timed out in 1s without a frame. The wait is for
+the FRAME now (10s), and a frame that never comes is printed as a sentence.
+Two lessons already on this file, restated by a third instance: a wait with
+a timeout whose expiry is not an event is a wait that lies under load; and
+an intermittent leg is a premise nobody pinned — instrument the chokepoint
+on the second sighting, never rerun to green.
+

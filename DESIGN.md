@@ -2512,7 +2512,18 @@ a real-tree observable on every platform), `datetime` (joined
 2026-09-04 with the pickers: a date or time chooser, whichever
 components it shows — macOS publishes one AXDateTimeArea role for
 both, so one normalized name is what every platform can agree on;
-docs/datetime-plan.md P4), `unknown` — which
+docs/datetime-plan.md P4. What each platform PUBLISHES for it, measured
+the same day: macOS the role itself; iOS a `UIDatePicker` with NO
+traits, so its class classifies it; WinUI `Button` for a
+CalendarDatePicker and `Group` for a TimePicker, so the automation
+peer's own class name is the discriminator, as the heading role's
+level is; Compose an EditText with no picker `Role` in compose-ui
+1.7.5, so the node carries kaya's picker semantics property; and GTK
+4.18 a `grouping` that no property can qualify — it drops
+ROLE_DESCRIPTION on the bus — so the AT-SPI reader names the composed
+root kaya built, by object identity and never by the target's kind.
+The last two are the closed set's name for what the platform CAN say,
+the way AXScrollArea reads as `group`), `unknown` — which
 NORMALIZES the platforms' own vocabularies so one shared scene reads the
 same everywhere. Two rules keep it honest:
 
@@ -3379,7 +3390,7 @@ The first-admissions queue, post-v1 and in rough order: Grid (forms will
 demand cross-row alignment), TextArea, Canvas (~~with the surface-handle
 transport~~ — ratified 2026-08-26 on a core-owned raster buffer instead,
 docs/canvas-plan.md), Tabs, RadioGroup, ProgressBar, ContextMenu, file dialogs,
-Separator, Splitter, Table, Tree, and date/time pickers. Tooltips return as
+Separator, Splitter, Table, Tree~~, and date/time pickers~~ (landed 2026-09-04). Tooltips return as
 a plain property. (Half this queue was pulled forward and landed in v1
 during the 2026-07-22 widget run: Grid, TextArea, Tabs — as sections,
 a presentation context rather than a widget — RadioGroup as radio,
@@ -3387,7 +3398,7 @@ ProgressBar, plus Select and Spacer which never sat in the queue.
 ContextMenu has since joined the MenuBar milestone as its second
 anchor rather than a separate widget admission, and the menu/context
 command vocabulary landed 2026-07-24 with standard commands behind it.
-Still ahead: Canvas, Separator, Splitter, Tree, and date/time pickers.
+Still ahead: Canvas, Separator, Splitter, Tree~~, and date/time pickers~~ (the pickers landed 2026-09-04, docs/datetime-plan.md).
 (File dialogs left this queue: they are a presentation context, not a
 widget, and are ratified in "File dialogs" above. The framing here used
 to say "the alert grammar with a PATH instead of a button" — the

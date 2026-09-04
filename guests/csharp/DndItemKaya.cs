@@ -106,6 +106,30 @@ sealed class DndItemRow
         System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
         t.Checkbox(f, onToggle);
 
+    public Node DatePicker(System.DateOnly value,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        t.DatePicker(value, onDate);
+
+    public Node DatePicker(Signal value,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        t.DatePicker(value, onDate);
+
+    public Node DatePicker(Field<System.DateOnly> f,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.DateOnly> onDate = null) =>
+        t.DatePicker(f, onDate);
+
+    public Node TimePicker(System.TimeOnly value,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        t.TimePicker(value, onTime);
+
+    public Node TimePicker(Signal value,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        t.TimePicker(value, onTime);
+
+    public Node TimePicker(Field<System.TimeOnly> f,
+        System.Action<Tx, System.Collections.Generic.List<object>, System.TimeOnly> onTime = null) =>
+        t.TimePicker(f, onTime);
+
     public Node Entry(
         System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
         t.Entry(onChange);

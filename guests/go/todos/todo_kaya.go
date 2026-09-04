@@ -61,6 +61,14 @@ func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, int64, boo
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+func (r todoRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.Tx, int64, kaya.Date)) kaya.Node {
+	return r.c.DatePicker(r.t, f, onDate)
+}
+
+func (r todoRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, int64, kaya.Time)) kaya.Node {
+	return r.c.TimePicker(r.t, f, onTime)
+}
+
 // The template props: the const flavors write through the recorder,
 // the sourced ones through the typed collection, as the constructors
 // above do.

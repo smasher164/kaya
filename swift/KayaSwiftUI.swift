@@ -5411,6 +5411,12 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         // is iOS 17; below that the switch is only its class.
         if #available(iOS 17.0, *), traits.contains(.toggleButton) { return "checkbox" }
         if element is UISwitch { return "checkbox" }
+        // A compact UIDatePicker is the accessibility element itself and
+        // publishes NO traits at all (traits 0, elements 0, measured
+        // 2026-09-04), so the CLASS is the only signal there is; it is
+        // weighed here because the wheel style publishes `.adjustable`
+        // (docs/datetime-plan.md P4).
+        if element is UIDatePicker { return "datetime" }
         if traits.contains(.adjustable) { return "slider" }
         if traits.contains(.image) { return "image" }
         // A ProgressView publishes `updatesFrequently` and nothing else

@@ -35,12 +35,18 @@ enum Decl {
 /// KayaRecords.swift's kayaSchema maps Data properties in, so a skipped
 /// Data field HERE shifts every later exact-index token off the runtime
 /// schema. Data is record-only: sums die loudly below.
-let wire: [String: (valueCase: String, zero: String)] = [
-    "String": ("str", "\"\""),
-    "Bool": ("bool", "false"),
-    "Int64": ("i64", "0"),
-    "Double": ("f64", "0"),
-    "Data": ("blob", "Data()"),
+let wire: [String: (valueCase: String, zero: String, lift: String)] = [
+    "String": ("str", "\"\"", ""),
+    "Bool": ("bool", "false", ""),
+    "Int64": ("i64", "0", ""),
+    "Double": ("f64", "0", ""),
+    "Data": ("blob", "Data()", ""),
+    // The picker types (docs/datetime-plan.md D10). Both are
+    // DateComponents at run time, so the DECLARED SPELLING is what tells
+    // a Date field from a Time one, and the lift turns the packed I64
+    // back into the components.
+    "KayaDate": ("i64", "KayaDate(year: 1970, month: 1, day: 1)", "kayaDate(packed:)"),
+    "KayaTime": ("i64", "KayaTime(hour: 0, minute: 0)", "kayaTime(packed:)"),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {
@@ -282,7 +288,11 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     } else {
         unpackLines(fields, indent: "        ",
                     onFail: "kaya: \(name) fields out of order").forEach { line($0) }
-        let args = fields.map { "\($0.label): \($0.label)" }
+        let args = fields.map { f -> String in
+            let lift = wire[f.type]!.lift
+            if lift.isEmpty { return "\(f.label): \(f.label)" }
+            return "\(f.label): \(lift.dropLast(1)) \(f.label))"
+        }
         line("        self.init(\(args.joined(separator: ", ")))")
     }
     line("    }")
@@ -321,6 +331,20 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil")
     line("    ) -> KayaNodeHandle {")
     line("        t.checkbox(f, onToggle: onToggle)")
+    line("    }")
+    line("")
+    line("    func datePicker(")
+    line("        _ f: KayaField<KayaDate>,")
+    line("        onDate: ((KayaAppTx, [KayaValue], KayaDate) -> Void)? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.datePicker(f, onDate: onDate)")
+    line("    }")
+    line("")
+    line("    func timePicker(")
+    line("        _ f: KayaField<KayaTime>,")
+    line("        onTime: ((KayaAppTx, [KayaValue], KayaTime) -> Void)? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.timePicker(f, onTime: onTime)")
     line("    }")
     line("")
     line("    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")

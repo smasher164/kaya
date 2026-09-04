@@ -74,6 +74,20 @@ final class ItemKaya {
                 KayaRecords.Collection.ToggleHandler<String> onToggle) {
             return c.checkbox(tpl(), f, onToggle);
         }
+
+        /** A date picker on this field with its pick handler
+         * co-located, the key typed as this collection's own. */
+        KayaApp.Node datePicker(KayaRecords.Field<java.time.LocalDate> f,
+                KayaRecords.Collection.DateHandler<String> onDate) {
+            return c.datePicker(tpl(), f, onDate);
+        }
+
+        /** A time picker on this field with its pick handler
+         * co-located. */
+        KayaApp.Node timePicker(KayaRecords.Field<java.time.LocalTime> f,
+                KayaRecords.Collection.TimeHandler<String> onTime) {
+            return c.timePicker(tpl(), f, onTime);
+        }
     }
 
     private ItemKaya() {}

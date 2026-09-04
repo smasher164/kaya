@@ -50,6 +50,13 @@ object KayaPresent {
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
+    /** The picker's COMMITTED value (docs/datetime-plan.md D7), packed
+     * decimal — YYYYMMDD for a date, HHMM for a time. A value that is
+     * not one panics at the backend, never in the app.
+     * kaya_emit_date_changed / kaya_emit_time_changed's JNI spellings. */
+    @JvmStatic external fun emitDateChanged(tag: ByteArray, packed: Long)
+    @JvmStatic external fun emitTimeChanged(tag: ByteArray, packed: Long)
+
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;
      * [column] the 0-based index. A REQUEST — the guest sorts

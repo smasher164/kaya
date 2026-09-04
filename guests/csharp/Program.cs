@@ -33,6 +33,7 @@ static class Program
             case "stall": StallScene.Run(); break;
             case "split": SplitScene.Run(); break;
             case "panes": PanesScene.Run(); break;
+            case "pickers": PickersScene.Run(); break;
             case "listdetail": SplitScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;
             case "progress": ProgressScene.Run(); break;

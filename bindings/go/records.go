@@ -42,7 +42,81 @@ type recordInfo struct {
 	indexes []int // struct field index per wire field, wire order
 }
 
+// Date is a civil calendar date: year (proleptic Gregorian), month 1–12,
+// day 1–31, with no zone and no instant — time.Time would drag one in
+// (docs/datetime-plan.md D2). A date picker's value and a Date record
+// field (D10); an I64 in packed decimal on the wire.
+type Date struct {
+	Year  int
+	Month int
+	Day   int
+}
+
+// Time is a civil time of day: hour 0–23, minute 0–59. No seconds (D3).
+type Time struct {
+	Hour   int
+	Minute int
+}
+
+func (d Date) String() string { return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day) }
+
+func (t Time) String() string { return fmt.Sprintf("%02d:%02d", t.Hour, t.Minute) }
+
+// packed is the wire value, and the wall a plain struct cannot be given
+// by its type: an impossible date is refused BY NAME here rather than at
+// apply.
+func (d Date) packed() int64 {
+	if d.Month < 1 || d.Month > 12 {
+		panic(fmt.Sprintf("kaya: %d is not a month (1..12) — %v is not a date", d.Month, d))
+	}
+	if d.Day < 1 || d.Day > daysInMonth(d.Year, d.Month) {
+		panic(fmt.Sprintf("kaya: %04d-%02d has no day %d — %v is not a date", d.Year, d.Month, d.Day, d))
+	}
+	return PackDate(d.Year, d.Month, d.Day)
+}
+
+func (t Time) packed() int64 {
+	if t.Hour < 0 || t.Hour > 23 {
+		panic(fmt.Sprintf("kaya: %d is not an hour (0..23) — %v is not a time", t.Hour, t))
+	}
+	if t.Minute < 0 || t.Minute > 59 {
+		panic(fmt.Sprintf("kaya: %d is not a minute (0..59) — %v is not a time", t.Minute, t))
+	}
+	return PackTime(t.Hour, t.Minute)
+}
+
+func daysInMonth(year, month int) int {
+	if month == 2 && year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+		return 29
+	}
+	return [...]int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}[month-1]
+}
+
+// check refuses an impossible date by name. The generated setter takes
+// the COMPONENTS, so nothing else here needs the packed number.
+func (d Date) check() { _ = d.packed() }
+
+func (t Time) check() { _ = t.packed() }
+
+func dateOf(packed int64) Date {
+	y, m, d := UnpackDate(packed)
+	return Date{Year: y, Month: m, Day: d}
+}
+
+func timeOf(packed int64) Time {
+	h, m := UnpackTime(packed)
+	return Time{Hour: h, Minute: m}
+}
+
+var dateType = reflect.TypeFor[Date]()
+var timeType = reflect.TypeFor[Time]()
+
 func wireTag(t reflect.Type) (uint32, bool) {
+	// The two picker types ride the I64 tag in packed decimal; every
+	// other struct field is guest-only.
+	if t == dateType || t == timeType {
+		return ValueI64, true
+	}
 	switch t.Kind() {
 	case reflect.Bool:
 		return ValueBool, true
@@ -76,6 +150,12 @@ func blobWire(v any) BlobHandle {
 // scalarWire is the signal-value encode step: byte slices become
 // registered blob handles, every other scalar rides as is.
 func scalarWire(v any) any {
+	switch d := v.(type) {
+	case Date:
+		return d.packed()
+	case Time:
+		return d.packed()
+	}
 	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
 		return blobWire(v)
 	}
@@ -187,6 +267,21 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 			panic(fmt.Sprintf("kaya: an undone entry of %v has no value for %s",
 				t, t.Field(idx).Name))
 		}
+		if field.Type() == dateType || field.Type() == timeType {
+			// A packed I64 comes back as the picker type it was written
+			// from, never as the integer it travelled as.
+			packed, ok := fields[wire].(int64)
+			if !ok {
+				panic(fmt.Sprintf("kaya: an undone entry of %v carries %T for %s, which is %v",
+					t, fields[wire], t.Field(idx).Name, field.Type()))
+			}
+			if field.Type() == dateType {
+				field.Set(reflect.ValueOf(dateOf(packed)))
+			} else {
+				field.Set(reflect.ValueOf(timeOf(packed)))
+			}
+			continue
+		}
 		if v.Type() != field.Type() {
 			if !v.CanConvert(field.Type()) {
 				panic(fmt.Sprintf(
@@ -229,6 +324,12 @@ func (info *recordInfo) values(value any) []any {
 func (info *recordInfo) encode(field uint32, v any) any {
 	if info.schema[field] == ValueBlob {
 		return blobWire(v)
+	}
+	switch d := v.(type) {
+	case Date:
+		return d.packed()
+	case Time:
+		return d.packed()
 	}
 	return v
 }
@@ -399,6 +500,19 @@ func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
 	t.tx.emit(TxBindSourceElement(n.id, level, f.index))
 }
 
+// BindDateField binds a date picker's value to one field of the element;
+// Field[Date] only, which is what keeps a picker off an int64 field that
+// shares its wire tag (docs/datetime-plan.md D10).
+func (t *Tpl) BindDateField(n Node, level uint32, f Field[Date]) {
+	t.tx.emit(TxBindDateElement(n.id, level, f.index))
+}
+
+// BindTimeField binds a time picker's value to one field of the element;
+// Field[Time] only.
+func (t *Tpl) BindTimeField(n Node, level uint32, f Field[Time]) {
+	t.tx.emit(TxBindTimeElement(n.id, level, f.index))
+}
+
 // ARM ORDER IS FIXED AND THE CONSTANT ARM IS THE DEFAULT, in all four
 // lowerings below: the constraint approximates (~string, not string), so
 // a guest's named type is admitted by the signature and matches no `case
@@ -448,6 +562,38 @@ func (t *Tpl) applyRecordValue[T any, S interface {
 		t.BindValueField(n, 0, v)
 	default:
 		t.tx.emit(TxSetValue(n.id, reflect.ValueOf(v).Float()))
+	}
+}
+
+func (t *Tpl) applyRecordDate[T any, S interface {
+	Date | Signal[Date] | func(*T) *Date | Field[Date]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[Date]:
+		t.tx.emit(TxBindDate(n.id, v.id))
+	case func(*T) *Date:
+		t.BindDateField(n, 0, FieldBy(v))
+	case Field[Date]:
+		t.BindDateField(n, 0, v)
+	case Date:
+		v.check()
+		t.tx.emit(TxSetDate(n.id, v.Year, v.Month, v.Day))
+	}
+}
+
+func (t *Tpl) applyRecordTime[T any, S interface {
+	Time | Signal[Time] | func(*T) *Time | Field[Time]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[Time]:
+		t.tx.emit(TxBindTime(n.id, v.id))
+	case func(*T) *Time:
+		t.BindTimeField(n, 0, FieldBy(v))
+	case Field[Time]:
+		t.BindTimeField(n, 0, v)
+	case Time:
+		v.check()
+		t.tx.emit(TxSetTime(n.id, v.Hour, v.Minute))
 	}
 }
 
@@ -667,6 +813,38 @@ func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, 
 	t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
 		onChange(tx, keys[0].(K), v)
 	})
+}
+
+// DatePicker creates a date picker whose VALUE comes from any
+// addressable source — a constant per copy, a signal, or the row's own
+// Date field — with its pick handler (nil for none). The range describes
+// the prototype and is chained on the live zone only.
+func (c RecordCollection[K, T]) DatePicker[S interface {
+	Date | Signal[Date] | func(*T) *Date | Field[Date]
+}](t *Tpl, src S, onDate func(*Tx, K, Date)) Node {
+	n := t.Widget(KindDatePicker)
+	t.applyRecordDate[T](n, src)
+	if onDate != nil {
+		t.tx.app.OnDateNode(n, func(tx *Tx, keys []any, d Date) {
+			onDate(tx, keys[0].(K), d)
+		})
+	}
+	return n
+}
+
+// TimePicker creates a time picker whose value comes from any
+// addressable source, with its pick handler (nil for none).
+func (c RecordCollection[K, T]) TimePicker[S interface {
+	Time | Signal[Time] | func(*T) *Time | Field[Time]
+}](t *Tpl, src S, onTime func(*Tx, K, Time)) Node {
+	n := t.Widget(KindTimePicker)
+	t.applyRecordTime[T](n, src)
+	if onTime != nil {
+		t.tx.app.OnTimeNode(n, func(tx *Tx, keys []any, v Time) {
+			onTime(tx, keys[0].(K), v)
+		})
+	}
+	return n
 }
 
 // Image creates an image bound to any addressable source. Constant

@@ -299,6 +299,17 @@ def drive(proto, direction, witness, witness_said, kaya, kaya_said):
         return (origin[0] + rect[0] + rect[2] // 2,
                 origin[1] + rect[1] + rect[3] // 2)
 
+    # THE HARNESS MUST BE PAST THE INSTRUMENT'S OWN EXPECT before the real
+    # pointer moves: the instrument drag is a refusal that leaves label#5
+    # at "drag ended none", and a foreign drag that lands while that expect
+    # is still polling flips the label to "copy" first (measured under a
+    # contended matrix 2026-09-04: `reads "drag ended copy", wanted "drag
+    # ended none"`). The harness announces each step as it begins, so the
+    # announcement of the scene's LAST step is the proof the one before it
+    # passed.
+    last = '"drag ended copy"' if direction == "out" else '"files target got'
+    kaya_said.wait_for(last, READY_DEADLINE_S,
+                       "kaya's harness never reached the foreign step")
     if direction == "out":
         start, end = kaya_source, centre(rects["target"])
     else:

@@ -30,6 +30,7 @@ import (
 	"dev.kaya/guests/go/nav"
 	"dev.kaya/guests/go/panels"
 	"dev.kaya/guests/go/panes"
+	"dev.kaya/guests/go/pickers"
 	"dev.kaya/guests/go/progress"
 	"dev.kaya/guests/go/radio"
 	"dev.kaya/guests/go/ranges"
@@ -84,6 +85,7 @@ var scenes = map[string]func() *kaya.App{
 	"nav":        nav.App,
 	"panels":     panels.App,
 	"panes":      panes.App,
+	"pickers":    pickers.App,
 	"progress":   progress.App,
 	"radio":      radio.App,
 	"ranges":     ranges.App,

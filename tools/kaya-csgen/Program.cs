@@ -52,7 +52,7 @@ static class Program
                         .OrderBy(r => r.SpanStart)
                         .Select(r => (name: r.Identifier.Text,
                             fields: (r.ParameterList?.Parameters ?? default)
-                                .Select(p => (name: p.Identifier.Text, type: p.Type?.ToString()))
+                                .Select(p => (name: p.Identifier.Text, type: Qualify(p.Type?.ToString())))
                                 .Where(f => Wire.Contains(f.type))
                                 .ToList()))
                         .ToList();
@@ -71,7 +71,7 @@ static class Program
                     // The wire fields: primary-constructor parameters
                     // of wire type, in declaration order.
                     var fields = (marked.ParameterList?.Parameters ?? default)
-                        .Select(p => (name: p.Identifier.Text, type: p.Type?.ToString()))
+                        .Select(p => (name: p.Identifier.Text, type: Qualify(p.Type?.ToString())))
                         .Where(f => Wire.Contains(f.type))
                         .ToList();
                     if (fields.Count == 0)
@@ -97,7 +97,17 @@ static class Program
     // skipped one HERE shifts every later exact-index token off the
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
-        new() { "string", "bool", "long", "double", "byte[]" };
+        new() { "string", "bool", "long", "double", "byte[]",
+            "System.DateOnly", "System.TimeOnly" };
+
+    // The generated files carry no usings (the guests' csproj disables
+    // implicit ones), so the two picker types are spelled fully.
+    static string Qualify(string t) => t switch
+    {
+        "DateOnly" => "System.DateOnly",
+        "TimeOnly" => "System.TimeOnly",
+        _ => t,
+    };
 
     static bool IsKayaGen(RecordDeclarationSyntax r) =>
         r.AttributeLists.SelectMany(l => l.Attributes)
@@ -274,6 +284,8 @@ static class Program
         var onText = $"System.Action<Tx, {keys}, string>";
         var onToggle = $"System.Action<Tx, {keys}, bool>";
         var onValue = $"System.Action<Tx, {keys}, double>";
+        var onDate = $"System.Action<Tx, {keys}, System.DateOnly>";
+        var onTime = $"System.Action<Tx, {keys}, System.TimeOnly>";
         var onSelect = $"System.Action<Tx, {keys}, int>";
 
         // One forwarder, wrapped the way the hand-written Tpl wraps: a
@@ -340,6 +352,12 @@ static class Program
         Fwd("Image", ["Field<byte[]> f"], "f");
         Fwd("Canvas", ["Viewbox vb", "System.Action<Draw> body"], "vb, body");
         Fwd("Checkbox", ["Field<bool> f", $"{onToggle} onToggle = null"], "f, onToggle");
+        Fwd("DatePicker", ["System.DateOnly value", $"{onDate} onDate = null"], "value, onDate");
+        Fwd("DatePicker", ["Signal value", $"{onDate} onDate = null"], "value, onDate");
+        Fwd("DatePicker", ["Field<System.DateOnly> f", $"{onDate} onDate = null"], "f, onDate");
+        Fwd("TimePicker", ["System.TimeOnly value", $"{onTime} onTime = null"], "value, onTime");
+        Fwd("TimePicker", ["Signal value", $"{onTime} onTime = null"], "value, onTime");
+        Fwd("TimePicker", ["Field<System.TimeOnly> f", $"{onTime} onTime = null"], "f, onTime");
         Fwd("Entry", [$"{onText} onChange = null"], "onChange");
         Fwd("Entry", ["string text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Entry", ["Signal text", $"{onText} onChange = null"], "text, onChange");

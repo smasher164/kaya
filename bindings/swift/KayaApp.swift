@@ -1439,6 +1439,10 @@ final class KayaApp {
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     private var nodeValues: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
+    private var widgetDates: [UInt64: (KayaAppTx, KayaDate) throws -> Void] = [:]
+    private var nodeDates: [UInt64: (KayaAppTx, [KayaValue], KayaDate) throws -> Void] = [:]
+    private var widgetTimes: [UInt64: (KayaAppTx, KayaTime) throws -> Void] = [:]
+    private var nodeTimes: [UInt64: (KayaAppTx, [KayaValue], KayaTime) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
     private var closeRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
@@ -1840,6 +1844,33 @@ final class KayaApp {
         nodeToggles[n.id] = handler
     }
 
+    /// Register a pick handler for a live date picker: the control owns
+    /// its value and reports each COMMITTED pick here; a programmatic
+    /// write never echoes (docs/datetime-plan.md D7).
+    func onDate(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaDate) throws -> Void) {
+        widgetDates[w.id] = handler
+    }
+
+    /// Register a pick handler for a template date picker; it also
+    /// receives the stamped copy's keys, outermost first.
+    func onDate(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], KayaDate) throws -> Void
+    ) {
+        nodeDates[n.id] = handler
+    }
+
+    /// Register a pick handler for a live time picker.
+    func onTime(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaTime) throws -> Void) {
+        widgetTimes[w.id] = handler
+    }
+
+    /// Register a pick handler for a template time picker, keys first.
+    func onTime(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], KayaTime) throws -> Void
+    ) {
+        nodeTimes[n.id] = handler
+    }
+
     /// Run `body` as a transaction on the app thread, soon. THE ONE
     /// method safe to call from another thread.
     func post(_ body: @escaping (KayaAppTx) throws -> Void) {
@@ -2036,12 +2067,16 @@ final class KayaApp {
             var checked = false
             var value = 0.0
             var choice: UInt32 = 0
+            var packed: Int64 = 0
             switch payload {
             case .str(let s): text = s
             case .bool(let b): checked = b
             case .f64(let x): value = x
-            // The alert parser boxes the u32 choice as .i64.
-            case .i64(let n): choice = UInt32(truncatingIfNeeded: n)
+            // The alert parser boxes the u32 choice as .i64; a picker's
+            // committed value rides the same tag, unnarrowed.
+            case .i64(let n):
+                choice = UInt32(truncatingIfNeeded: n)
+                packed = n
             default: break
             }
             switch (kind, keys.isEmpty) {
@@ -2106,6 +2141,26 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), false):
                 if let handler = nodeValues[id] {
                     dispatch { try build { tx in try handler(tx, keys, value) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DATE_CHANGED), true):
+                if let handler = widgetDates[id] {
+                    dispatch { try build { tx in try handler(tx, kayaDate(packed: packed)) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DATE_CHANGED), false):
+                if let handler = nodeDates[id] {
+                    dispatch {
+                        try build { tx in try handler(tx, keys, kayaDate(packed: packed)) }
+                    }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TIME_CHANGED), true):
+                if let handler = widgetTimes[id] {
+                    dispatch { try build { tx in try handler(tx, kayaTime(packed: packed)) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TIME_CHANGED), false):
+                if let handler = nodeTimes[id] {
+                    dispatch {
+                        try build { tx in try handler(tx, keys, kayaTime(packed: packed)) }
+                    }
                 }
             case (UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED), _):
                 if let handler = closeRequested[id] {
@@ -2869,6 +2924,56 @@ final class KayaAppTx {
         if let text { setText(w, text) }
         if let checked { setChecked(w, checked) }
         if let onToggle { app.onToggle(w, onToggle) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A date picker over civil dates — the compact field that opens the
+    /// platform's calendar (docs/datetime-plan.md). UNCONTROLLED: the
+    /// control owns its value and reports each COMMITTED pick to onDate.
+    /// `min`/`max` are the inclusive range and a pick past a bound lands
+    /// on the bound.
+    func datePicker(
+        _ value: KayaDate? = nil, min: KayaDate? = nil, max: KayaDate? = nil,
+        bind: KayaSignal? = nil,
+        onDate: ((KayaAppTx, KayaDate) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_DATE_PICKER))
+        if let min {
+            _ = kayaPackedDate("min_date", min)
+            tx.setMinDate(w.id, min.year!, min.month!, min.day!)
+        }
+        if let max {
+            _ = kayaPackedDate("max_date", max)
+            tx.setMaxDate(w.id, max.year!, max.month!, max.day!)
+        }
+        if let bind { tx.bindDate(w.id, bind.id) }
+        if let value {
+            _ = kayaPackedDate("a date picker's value", value)
+            tx.setDate(w.id, value.year!, value.month!, value.day!)
+        }
+        if let onDate { app.onDate(w, onDate) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A time picker over civil times: hours and minutes, no seconds.
+    /// `step` is the minute granularity (1, 5, 10, 15 or 30) and a pick
+    /// snaps to it.
+    func timePicker(
+        _ value: KayaTime? = nil, step: Int? = nil, bind: KayaSignal? = nil,
+        onTime: ((KayaAppTx, KayaTime) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_TIME_PICKER))
+        if let step { tx.setMinuteStep(w.id, Double(step)) }
+        if let bind { tx.bindTime(w.id, bind.id) }
+        if let value {
+            _ = kayaPackedTime("a time picker's value", value)
+            tx.setTime(w.id, value.hour!, value.minute!)
+        }
+        if let onTime { app.onTime(w, onTime) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -3965,6 +4070,17 @@ final class KayaTpl {
         tx.tx.bindCheckedElement(n.id, level: level, field: f.index)
     }
 
+    /// Bind a date picker's value to one field of the element;
+    /// KayaField<KayaDate> only (docs/datetime-plan.md D10).
+    func bindDateField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaDate>) {
+        tx.tx.bindDateElement(n.id, level: level, field: f.index)
+    }
+
+    /// Bind a time picker's value to one field of the element.
+    func bindTimeField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTime>) {
+        tx.tx.bindTimeElement(n.id, level: level, field: f.index)
+    }
+
     /// Bind an image's source to one field of the element;
     /// KayaField<Data> only — the token pins the type at compile time.
     func bindSourceField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Data>) {
@@ -4066,6 +4182,75 @@ final class KayaTpl {
         let n = widget(UInt32(KAYA_KIND_CHECKBOX))
         bindCheckedField(n, f)
         if let onToggle { tx.app.onToggle(n, onToggle) }
+        return n
+    }
+
+    /// A date picker in the blueprint bound to the row's own Date field
+    /// (docs/datetime-plan.md D10); picks carry the copy's keys first.
+    func datePicker(
+        _ f: KayaField<KayaDate>,
+        onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_DATE_PICKER))
+        bindDateField(n, f)
+        if let onDate { tx.app.onDate(n, onDate) }
+        return n
+    }
+
+    /// A date picker at a constant date, the same in every stamped copy.
+    func datePicker(
+        _ value: KayaDate,
+        onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_DATE_PICKER))
+        _ = kayaPackedDate("a date picker's value", value)
+        tx.tx.setDate(n.id, value.year!, value.month!, value.day!)
+        if let onDate { tx.app.onDate(n, onDate) }
+        return n
+    }
+
+    /// A date picker whose value binds a signal.
+    func datePicker(
+        _ s: KayaSignal,
+        onDate: ((KayaAppTx, [KayaValue], KayaDate) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_DATE_PICKER))
+        tx.tx.bindDate(n.id, s.id)
+        if let onDate { tx.app.onDate(n, onDate) }
+        return n
+    }
+
+    /// A time picker bound to the row's own Time field.
+    func timePicker(
+        _ f: KayaField<KayaTime>,
+        onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_TIME_PICKER))
+        bindTimeField(n, f)
+        if let onTime { tx.app.onTime(n, onTime) }
+        return n
+    }
+
+    /// A time picker at a constant time.
+    func timePicker(
+        _ value: KayaTime,
+        onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_TIME_PICKER))
+        _ = kayaPackedTime("a time picker's value", value)
+        tx.tx.setTime(n.id, value.hour!, value.minute!)
+        if let onTime { tx.app.onTime(n, onTime) }
+        return n
+    }
+
+    /// A time picker whose value binds a signal.
+    func timePicker(
+        _ s: KayaSignal,
+        onTime: ((KayaAppTx, [KayaValue], KayaTime) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_TIME_PICKER))
+        tx.tx.bindTime(n.id, s.id)
+        if let onTime { tx.app.onTime(n, onTime) }
         return n
     }
 

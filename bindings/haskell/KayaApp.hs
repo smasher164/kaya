@@ -180,6 +180,16 @@ module KayaApp
     captionText,
     captionBound,
     checkboxOn,
+    datePickerOn,
+    datePickerBoundOn,
+    timePickerOn,
+    timePickerBoundOn,
+    packDay,
+    packTimeOfDay,
+    dayOfPacked,
+    timeOfDayOfPacked,
+    dateValue,
+    timeValue,
     sliderOn,
     sliderBoundOn,
     selectOn,
@@ -213,6 +223,8 @@ module KayaApp
     TplStrSource,
     bindTextSource,
     TplBoolSource (..),
+    TplDateSource (..),
+    TplTimeSource (..),
     TplNumberSource (..),
     TplImageSource (..),
     TplAttr (..),
@@ -221,6 +233,10 @@ module KayaApp
     heading,
     caption,
     checkbox,
+    datePicker,
+    timePicker,
+    bindDateField,
+    bindTimeField,
     image,
     rowOf,
     columnOf,
@@ -324,6 +340,8 @@ import GHC.TypeLits (ErrorMessage (..), KnownSymbol, TypeError, symbolVal)
 import qualified Data.Map.Strict as Map
 import qualified Data.List as List
 import Data.Proxy (Proxy (..))
+import Data.Time.Calendar (Day, fromGregorian, toGregorian)
+import Data.Time.LocalTime (TimeOfDay (..))
 import Data.Word (Word32, Word64)
 import GHC.Generics
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
@@ -574,6 +592,10 @@ data Pending
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
+  | PDate !Word64 (Day -> IO ())
+  | PTime !Word64 (TimeOfDay -> IO ())
+  | PDateNode !Word64 ([W.Value] -> Day -> IO ())
+  | PTimeNode !Word64 ([W.Value] -> TimeOfDay -> IO ())
   | PMenuActivated !Word64 (IO ())
   | PMenuActivatedNode !Word64 ([W.Value] -> IO ())
   | PMenuToggled !Word64 (Bool -> IO ())
@@ -2120,6 +2142,13 @@ data Attr (c :: WClass) where
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
   A11yHint :: LiveStrSource s => s -> Attr 'LeafW
+  -- | A date picker's inclusive lower bound (docs/datetime-plan.md D4);
+  -- a pick past it lands on the bound.
+  MinDate :: Day -> Attr 'LeafW
+  -- | A date picker's inclusive upper bound.
+  MaxDate :: Day -> Attr 'LeafW
+  -- | A time picker's minute granularity: 1, 5, 10, 15 or 30 (D3).
+  MinuteStep :: Int -> Attr 'LeafW
   -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
   -- never appearance.
   Role :: Role -> Attr 'LeafW
@@ -2142,6 +2171,14 @@ applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
 applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
+applyAttr (MinDate d) (Widget n) =
+  let (y, m, dd) = toGregorian d
+   in emitB (W.txSetMinDate n (fromIntegral y) m dd)
+applyAttr (MaxDate d) (Widget n) =
+  let (y, m, dd) = toGregorian d
+   in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
+applyAttr (MinuteStep minutes) (Widget n) =
+  emitB (W.txSetMinuteStep n (fromIntegral minutes))
 applyAttr (Role r) w = setRole w r
 applyAttr (Accepts kinds) w = setAccepts w kinds
 applyAttr (Draggable clip ops) w = setDragSource w clip ops
@@ -2315,6 +2352,44 @@ checkboxOn text handler = leafish $ do
   w@(Widget n) <- widget W.kindCheckbox
   setText w text
   pendB (PToggle n handler)
+  return w
+
+-- | A date picker over civil dates holding @day@, with its pick handler
+-- co-located (docs/datetime-plan.md): the compact field that opens the
+-- platform's calendar. UNCONTROLLED — the control owns its value and
+-- reports each COMMITTED pick. 'MinDate' and 'MaxDate' are the range.
+datePickerOn :: (LeafArgs r) => Day -> (Day -> IO ()) -> r
+datePickerOn day handler = leafish $ do
+  w@(Widget n) <- widget W.kindDatePicker
+  let (y, m, d) = toGregorian day
+  emitB (W.txSetDate n (fromIntegral y) m d)
+  pendB (PDate n handler)
+  return w
+
+-- | A date picker whose VALUE follows a signal — the programmatic write
+-- path; property writes never echo.
+datePickerBoundOn :: (LeafArgs r) => Signal -> (Day -> IO ()) -> r
+datePickerBoundOn (Signal s) handler = leafish $ do
+  w@(Widget n) <- widget W.kindDatePicker
+  emitB (W.txBindDate n s)
+  pendB (PDate n handler)
+  return w
+
+-- | A time picker over civil times: hours and minutes, no seconds.
+-- 'MinuteStep' is the granularity and a pick snaps to it.
+timePickerOn :: (LeafArgs r) => TimeOfDay -> (TimeOfDay -> IO ()) -> r
+timePickerOn t handler = leafish $ do
+  w@(Widget n) <- widget W.kindTimePicker
+  emitB (W.txSetTime n (todHour t) (todMin t))
+  pendB (PTime n handler)
+  return w
+
+-- | A time picker whose value follows a signal.
+timePickerBoundOn :: (LeafArgs r) => Signal -> (TimeOfDay -> IO ()) -> r
+timePickerBoundOn (Signal s) handler = leafish $ do
+  w@(Widget n) <- widget W.kindTimePicker
+  emitB (W.txBindTime n s)
+  pendB (PTime n handler)
   return w
 
 -- | A progress bar: display-only, like label and image — the
@@ -2683,6 +2758,36 @@ instance TplBoolSource Signal where
 instance TplBoolSource (KField Bool) where
   bindCheckedSource n fd = bindCheckedField n 0 fd
 
+-- | What a template date picker's value can bind to: a constant, a
+-- signal, or the row's own Date field (docs/datetime-plan.md D10). The
+-- 'KField' instance is 'KField Day' and not 'KField Int64', which is
+-- what keeps a picker off the integer field it shares a tag with.
+class TplDateSource s where
+  bindDateSource :: Node -> s -> Tpl ()
+
+instance TplDateSource Day where
+  bindDateSource (Node n) day =
+    let (y, m, d) = toGregorian day in emitT (W.txSetDate n (fromIntegral y) m d)
+
+instance TplDateSource Signal where
+  bindDateSource (Node n) (Signal s) = emitT (W.txBindDate n s)
+
+instance TplDateSource (KField Day) where
+  bindDateSource n fd = bindDateField n 0 fd
+
+-- | The time picker's three sources.
+class TplTimeSource s where
+  bindTimeSource :: Node -> s -> Tpl ()
+
+instance TplTimeSource TimeOfDay where
+  bindTimeSource (Node n) t = emitT (W.txSetTime n (todHour t) (todMin t))
+
+instance TplTimeSource Signal where
+  bindTimeSource (Node n) (Signal s) = emitT (W.txBindTime n s)
+
+instance TplTimeSource (KField TimeOfDay) where
+  bindTimeSource n fd = bindTimeField n 0 fd
+
 -- | What a template image's source can bind to: constant bytes (the
 -- registration runs at the transaction boundary, inside the template
 -- scope's records), a Blob signal, or an element's Blob field.
@@ -2830,6 +2935,23 @@ checkbox src handler = do
 
 -- | A template image; decode failure renders the placeholder, never a
 -- crash, on every backend.
+-- | A stamped date picker over an addressable source, with its pick
+-- handler co-located; the handler receives the copy's keys first.
+datePicker :: TplDateSource s => s -> ([W.Value] -> Day -> IO ()) -> Tpl Node
+datePicker src handler = do
+  n@(Node i) <- widget W.kindDatePicker
+  bindDateSource n src
+  pendT (PDateNode i handler)
+  return n
+
+-- | A stamped time picker; the date picker's contract, hours and minutes.
+timePicker :: TplTimeSource s => s -> ([W.Value] -> TimeOfDay -> IO ()) -> Tpl Node
+timePicker src handler = do
+  n@(Node i) <- widget W.kindTimePicker
+  bindTimeSource n src
+  pendT (PTimeNode i handler)
+  return n
+
 image :: TplImageSource s => s -> Tpl Node
 image src = do
   n <- widget W.kindImage
@@ -3172,6 +3294,18 @@ instance KayaFieldType Double where
   toFieldValue = W.VF64
   fromFieldValue v = case v of W.VF64 x -> x; _ -> error "kaya: field is not an F64"
 
+-- | A Date record field (docs/datetime-plan.md D10): the schema slot is
+-- I64 in packed decimal and the app holds a 'Day' everywhere.
+instance KayaFieldType Day where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . packDay
+  fromFieldValue v = case v of W.VI64 n -> dayOfPacked n; _ -> error "kaya: field is not a Date"
+
+instance KayaFieldType TimeOfDay where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . packTimeOfDay
+  fromFieldValue v = case v of W.VI64 n -> timeOfDayOfPacked n; _ -> error "kaya: field is not a Time"
+
 -- | Encoded image bytes are a wire type: the schema slot is Blob, and
 -- every encode registers the bytes with the core right then — handles
 -- are single-submit, so insert, update and update_field all re-register.
@@ -3240,6 +3374,31 @@ class KayaRecord a where
   fromValues :: [W.Value] -> a
   default fromValues :: (Generic a, GRecord (Rep a)) => [W.Value] -> a
   fromValues = to . fst . gFrom
+
+-- | A civil date as the wire's I64, in packed decimal
+-- (docs/datetime-plan.md D2).
+packDay :: Day -> Int64
+packDay d = let (y, m, dd) = toGregorian d in W.packDate (fromIntegral y) m dd
+
+-- | A civil time as the wire's I64; seconds are not a picker value (D3).
+packTimeOfDay :: TimeOfDay -> Int64
+packTimeOfDay t = W.packTime (todHour t) (todMin t)
+
+dayOfPacked :: Int64 -> Day
+dayOfPacked packed =
+  let (y, m, d) = W.unpackDate packed in fromGregorian (fromIntegral y) m d
+
+timeOfDayOfPacked :: Int64 -> TimeOfDay
+timeOfDayOfPacked packed =
+  let (h, m) = W.unpackTime packed in TimeOfDay h m 0
+
+-- | A date as a signal's value.
+dateValue :: Day -> W.Value
+dateValue = W.VI64 . packDay
+
+-- | A time as a signal's value.
+timeValue :: TimeOfDay -> W.Value
+timeValue = W.VI64 . packTimeOfDay
 
 -- | A typed projection: one field of a record type, by wire position.
 newtype KField v = KField Word32
@@ -3355,6 +3514,15 @@ derive (RecordCollection (Collection n _)) compute = Build $ \s ->
 bindTextField :: Node -> Word32 -> KField String -> Tpl ()
 bindTextField (Node n) level (KField i) = emitT (W.txBindTextElement n level i)
 
+-- | Bind a date picker's value to one field of the element; KField Day
+-- only (docs/datetime-plan.md D10).
+bindDateField :: Node -> Word32 -> KField Day -> Tpl ()
+bindDateField (Node n) level (KField i) = emitT (W.txBindDateElement n level i)
+
+-- | Bind a time picker's value to one field of the element.
+bindTimeField :: Node -> Word32 -> KField TimeOfDay -> Tpl ()
+bindTimeField (Node n) level (KField i) = emitT (W.txBindTimeElement n level i)
+
 -- | Bind a checkbox's state to one field of the element; KField Bool
 -- only.
 bindCheckedField :: Node -> Word32 -> KField Bool -> Tpl ()
@@ -3398,6 +3566,11 @@ data App = App
     -- Occurrence::InstanceValueChanged matches nothing and is dropped
     -- with no error anywhere.
     appNodeValues :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
+    -- The pickers' committed values (docs/datetime-plan.md D7).
+    appWidgetDates :: IORef (Map.Map Word64 (Day -> IO ())),
+    appNodeDates :: IORef (Map.Map Word64 ([W.Value] -> Day -> IO ())),
+    appWidgetTimes :: IORef (Map.Map Word64 (TimeOfDay -> IO ())),
+    appNodeTimes :: IORef (Map.Map Word64 ([W.Value] -> TimeOfDay -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),
@@ -3521,6 +3694,10 @@ register app pending = case pending of
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
+  PDate n handler -> modifyIORef' (appWidgetDates app) (Map.insert n handler)
+  PTime n handler -> modifyIORef' (appWidgetTimes app) (Map.insert n handler)
+  PDateNode n handler -> modifyIORef' (appNodeDates app) (Map.insert n handler)
+  PTimeNode n handler -> modifyIORef' (appNodeTimes app) (Map.insert n handler)
   PMenuActivated n handler -> modifyIORef' (appMenuActivated app) (Map.insert n handler)
   PMenuActivatedNode n handler -> modifyIORef' (appMenuActivatedNode app) (Map.insert n handler)
   PMenuToggled n handler -> modifyIORef' (appMenuToggled app) (Map.insert n handler)
@@ -3714,6 +3891,10 @@ newApp =
     <*> newIORef Map.empty -- appNodeToggles
     <*> newIORef Map.empty -- appWidgetValues
     <*> newIORef Map.empty -- appNodeValues
+    <*> newIORef Map.empty -- appWidgetDates
+    <*> newIORef Map.empty -- appNodeDates
+    <*> newIORef Map.empty -- appWidgetTimes
+    <*> newIORef Map.empty -- appNodeTimes
     <*> newIORef Map.empty -- appCloseRequested
     <*> newIORef Map.empty -- appWindowClosed
     <*> newIORef Map.empty -- appEntryPopped
@@ -3852,6 +4033,26 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (appNodeValues app)
               dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindDateChanged -> do
+          let packed = case payload of Just (W.VI64 n) -> n; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetDates app)
+              dispatch (mapM_ ($ dayOfPacked packed) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appNodeDates app)
+              dispatch (mapM_ (\h -> h keys (dayOfPacked packed)) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindTimeChanged -> do
+          let packed = case payload of Just (W.VI64 n) -> n; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetTimes app)
+              dispatch (mapM_ ($ timeOfDayOfPacked packed) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appNodeTimes app)
+              dispatch (mapM_ (\h -> h keys (timeOfDayOfPacked packed)) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindCloseRequested -> do
           handlers <- readIORef (appCloseRequested app)

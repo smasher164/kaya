@@ -26,7 +26,8 @@ use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandl
 // caption buttons where they were (microsoft-ui-xaml#9863).
 use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
 use bindings::Microsoft::UI::Xaml::Controls::{
-    AppBarButton, Button, CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
+    AppBarButton, Button, CalendarDatePicker, CalendarDatePickerDateChangedEventArgs,
+    CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
     ComboBoxItem, CommandBar,
     ContentDialog,
     ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
@@ -39,6 +40,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     SymbolIcon,
     Slider, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
     TextCompositionStartedEventArgs, TextControlPasteEventHandler,
+    TimePicker, TimePickerSelectedValueChangedEventArgs,
     TitleBar,
     ToggleMenuFlyoutItem, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
@@ -120,6 +122,10 @@ enum NativeWidget {
     /// `WriteableBitmap` the core's pixels are written straight into
     /// (docs/canvas-plan.md §8).
     Canvas(Image),
+    /// The compact date field (docs/datetime-plan.md D6, §0's WinUI row):
+    /// CalendarDatePicker and not DatePicker, whose bounds are years only.
+    DatePicker(CalendarDatePicker),
+    TimePicker(TimePicker),
 }
 
 impl NativeWidget {
@@ -141,6 +147,8 @@ impl NativeWidget {
             NativeWidget::Grid2D(grid) => grid.cast(),
             NativeWidget::Textarea(field) => field.cast(),
             NativeWidget::Canvas(image) => image.cast(),
+            NativeWidget::DatePicker(picker) => picker.cast(),
+            NativeWidget::TimePicker(picker) => picker.cast(),
         }
     }
 
@@ -368,6 +376,15 @@ struct CoreState {
     entry_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     entry_tags: HashMap<u64, Vec<u8>>,
     sliders: Vec<Slider>,
+    /// The pickers, with their widget ids beside them (the keyed reads go
+    /// through `registry_ids`) and one `PickerCell` per widget — the shape
+    /// a picker's own change handler reads, since it may not reach CORE
+    /// (docs/datetime-plan.md).
+    date_pickers: Vec<CalendarDatePicker>,
+    date_picker_ids: Vec<u64>,
+    time_pickers: Vec<TimePicker>,
+    time_picker_ids: Vec<u64>,
+    picker_cells: HashMap<u64, std::sync::Arc<PickerCell>>,
     images: Vec<Image>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id and `kind#index` is the only address
@@ -10956,11 +10973,61 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image(image)
                 }
-                // The picker arms are the breadth slice's (docs/datetime-plan.md
-                // §5 step 6): a picker declared against this backend fails HERE,
-                // by name, never as a widget that quietly is not there.
-                WidgetKind::DatePicker | WidgetKind::TimePicker => {
-                    crate::depth_stub("pickers")
+                WidgetKind::DatePicker => {
+                    // DateChanged fires for a programmatic write too, so the
+                    // USER/programmatic split rides apply_quiet; the range and
+                    // the mirror ride the cell (`winui_date_committed`).
+                    let picker = CalendarDatePicker::new()?;
+                    let cell = std::sync::Arc::new(PickerCell::default());
+                    core.picker_cells.insert(id.0, cell.clone());
+                    let tag = tag.expect("datepickers carry a tag");
+                    let sink = core.occurrences.clone();
+                    let quiet = core.apply_quiet.clone();
+                    let handler = TypedEventHandler::<
+                        CalendarDatePicker,
+                        CalendarDatePickerDateChangedEventArgs,
+                    >::new(move |sender, _| {
+                        if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        if let Some(sender) = sender.as_ref() {
+                            winui_date_committed(sender, &cell, &quiet, &sink, &tag)?;
+                        }
+                        Ok(())
+                    });
+                    picker.DateChanged(&handler)?;
+                    core.date_pickers.push(picker.clone());
+                    core.date_picker_ids.push(id.0);
+                    NativeWidget::DatePicker(picker)
+                }
+                WidgetKind::TimePicker => {
+                    // SelectedTime, not Time: the nullable slot is the one
+                    // SelectedTimeChanged reports, and D5 means the arm never
+                    // writes null into it. MinuteIncrement is the flyout's
+                    // granularity alone, so the step is snapped in the commit
+                    // path (D3) exactly as AppKit's is.
+                    let picker = TimePicker::new()?;
+                    let cell = std::sync::Arc::new(PickerCell::default());
+                    core.picker_cells.insert(id.0, cell.clone());
+                    let tag = tag.expect("timepickers carry a tag");
+                    let sink = core.occurrences.clone();
+                    let quiet = core.apply_quiet.clone();
+                    let handler = TypedEventHandler::<
+                        TimePicker,
+                        TimePickerSelectedValueChangedEventArgs,
+                    >::new(move |sender, _| {
+                        if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            return Ok(());
+                        }
+                        if let Some(sender) = sender.as_ref() {
+                            winui_time_committed(sender, &cell, &quiet, &sink, &tag)?;
+                        }
+                        Ok(())
+                    });
+                    picker.SelectedTimeChanged(&handler)?;
+                    core.time_pickers.push(picker.clone());
+                    core.time_picker_ids.push(id.0);
+                    NativeWidget::TimePicker(picker)
                 }
                 WidgetKind::Canvas => {
                     // The raw-pixel sibling of the arm above, filled by the
@@ -11041,6 +11108,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Textarea(field) => {
                         windows_core::Interface::cast(field).expect("textarea is a UIElement")
+                    }
+                    NativeWidget::DatePicker(picker) => {
+                        windows_core::Interface::cast(picker).expect("date picker is a UIElement")
+                    }
+                    NativeWidget::TimePicker(picker) => {
+                        windows_core::Interface::cast(picker).expect("time picker is a UIElement")
                     }
                     NativeWidget::Canvas(image) => {
                         windows_core::Interface::cast(image).expect("canvas is a UIElement")
@@ -11941,6 +12014,68 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
                     slider.SetMaximum(v)?;
                 }
+                // THE PICKERS' FIVE PROPS (docs/datetime-plan.md §3). Each
+                // interactive write is quiet — DateChanged and
+                // SelectedTimeChanged cannot tell a user's pick from a
+                // property write — and the value slots move the cell's
+                // mirror with the control, so the next commit compares
+                // against what the app was last told.
+                (NativeWidget::DatePicker(picker), Prop::Date, Value::I64(packed)) => {
+                    if let Some(cell) = core.picker_cells.get(&id.0) {
+                        PickerCell::set(&cell.held, packed);
+                    }
+                    let boxed: IReference<bindings::Windows::Foundation::DateTime> =
+                        PropertyValue::CreateDateTime(winui_date_of_packed(packed)?)?.cast()?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = picker.SetDate(&boxed);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::DatePicker(picker), Prop::MinDate, Value::I64(packed)) => {
+                    if let Some(cell) = core.picker_cells.get(&id.0) {
+                        PickerCell::set(&cell.min, packed);
+                    }
+                    let date = winui_date_of_packed(packed)?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = picker.SetMinDate(date);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::DatePicker(picker), Prop::MaxDate, Value::I64(packed)) => {
+                    if let Some(cell) = core.picker_cells.get(&id.0) {
+                        PickerCell::set(&cell.max, packed);
+                    }
+                    let date = winui_date_of_packed(packed)?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = picker.SetMaxDate(date);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::TimePicker(picker), Prop::Time, Value::I64(packed)) => {
+                    if let Some(cell) = core.picker_cells.get(&id.0) {
+                        PickerCell::set(&cell.held, packed);
+                    }
+                    let boxed: IReference<bindings::Windows::Foundation::TimeSpan> =
+                        PropertyValue::CreateTimeSpan(winui_span_of_packed(packed))?.cast()?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = picker.SetSelectedTime(&boxed);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::TimePicker(picker), Prop::MinuteStep, Value::F64(step)) => {
+                    if let Some(cell) = core.picker_cells.get(&id.0) {
+                        PickerCell::set(&cell.step, step as i64);
+                    }
+                    picker.SetMinuteIncrement(step as i32)?;
+                }
                 (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
                     // Encoded bytes in, native decode. SetSource is the
                     // synchronously-callable path on the UI thread; the
@@ -12118,6 +12253,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Grid2D(grid) => children.Append(grid)?,
                 NativeWidget::Textarea(field) => children.Append(field)?,
                 NativeWidget::Canvas(image) => children.Append(image)?,
+                NativeWidget::DatePicker(picker) => children.Append(picker)?,
+                NativeWidget::TimePicker(picker) => children.Append(picker)?,
             }
             core.parents.insert(child, panel);
             // A new child means a new track and a shifted set of indices —
@@ -13552,6 +13689,11 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             entry_swallow: HashMap::new(),
             entry_tags: HashMap::new(),
             sliders: Vec::new(),
+            date_pickers: Vec::new(),
+            date_picker_ids: Vec::new(),
+            time_pickers: Vec::new(),
+            time_picker_ids: Vec::new(),
+            picker_cells: HashMap::new(),
             images: Vec::new(),
             canvases: Vec::new(),
             canvas_ids: Vec::new(),
@@ -14092,9 +14234,8 @@ fn target_element(
         K::Checkbox => nth!(core.checkboxes),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
-        K::DatePicker | K::TimePicker => {
-            crate::depth_stub("pickers")
-        }
+        K::DatePicker => nth!(core.date_pickers),
+        K::TimePicker => nth!(core.time_pickers),
         K::Label => nth!(core.labels),
         K::Slider => nth!(core.sliders),
         K::Row => nth!(core.rows),
@@ -14168,7 +14309,8 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
-        K::DatePicker | K::TimePicker => Vec::new(),
+        K::DatePicker => core.date_picker_ids.clone(),
+        K::TimePicker => core.time_picker_ids.clone(),
     }
 }
 
@@ -14523,15 +14665,19 @@ impl crate::harness::Stage for WinUiStage {
                 },
             };
             let kind = peer.GetAutomationControlType()?;
-            // THE HEADING ROLE IS A PROPERTY READ, NOT A TYPE READ: a heading
-            // is not a control TYPE in UIA — a TextBlock carrying HeadingLevel
-            // still reports `Text` — so `ax_role`'s ladder could never see it.
-            // `?` rather than a swallowed default, so a failed property read
-            // surfaces as `<accessibility read failed>`. The read asks the
-            // PEER and never leaves this process: an out-of-process UIA client
-            // is barred at the Cargo.toml.
+            // TWO PROPERTY READS BESIDE THE TYPE READ, because UIA's
+            // control-type enum has a member for neither a heading nor a
+            // picker: a TextBlock carrying HeadingLevel still reports `Text`,
+            // and the two picker peers report Button and Group. `ax_role`'s
+            // type ladder could never see either, so both are read here and
+            // consulted ahead of it. `?` rather than a swallowed default, so a
+            // failed property read surfaces as `<accessibility read failed>`.
+            // The reads ask the PEER and never leave this process: an
+            // out-of-process UIA client is barred at the Cargo.toml.
+            let class = peer.GetClassName()?.to_string();
             let role = ax_role(
                 peer.GetHeadingLevel()? != AutomationHeadingLevel::None,
+                &class,
                 kind,
             );
             if role == UNMAPPED_ROLE {
@@ -15180,17 +15326,32 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
-    // The picker arms are the breadth slice's (docs/datetime-plan.md §5
-    // step 6); until they land a driven picker fails HERE, by name, never
-    // vacuously.
+    // THROUGH the control (docs/datetime-plan.md D8): the property write
+    // raises the control's own changed event, so the clamp, the snap and the
+    // occurrence all run the path a user's pick takes. Never quiet.
     fn set_date(&self, t: crate::harness::Target, date: crate::Date) {
-        crate::depth_stub("pickers")
+        let packed = date.packed();
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.date_pickers.len());
+            let boxed: IReference<bindings::Windows::Foundation::DateTime> =
+                PropertyValue::CreateDateTime(winui_date_of_packed(packed)?)?.cast()?;
+            core.date_pickers[i].SetDate(&boxed)?;
+            Ok(())
+        });
     }
     fn set_time(&self, t: crate::harness::Target, time: crate::Time) {
-        crate::depth_stub("pickers")
+        let packed = time.packed();
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.time_pickers.len());
+            let boxed: IReference<bindings::Windows::Foundation::TimeSpan> =
+                PropertyValue::CreateTimeSpan(winui_span_of_packed(packed))?.cast()?;
+            core.time_pickers[i].SetSelectedTime(&boxed)?;
+            Ok(())
+        });
     }
     fn picker_value(&self, t: crate::harness::Target) -> String {
-        crate::depth_stub("pickers")
+        Self::on_ui_read(move |core| Ok(winui_picker_reading(core, t)))
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_ui(move |core| {
@@ -16001,7 +16162,8 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
                 K::Canvas => find(&core.canvases, &id),
-                K::DatePicker | K::TimePicker => None,
+                K::DatePicker => find(&core.date_pickers, &id),
+                K::TimePicker => find(&core.time_pickers, &id),
             })
         })
         .ok()
@@ -17713,20 +17875,36 @@ fn find_template_button(
 #[cfg(feature = "harness")]
 const UNMAPPED_ROLE: &str = "unknown";
 
-/// THE ROLE HALF OF THE `ax` VERB, as a pure function of the two things UIA
-/// answered with. `heading` comes FIRST, which is the whole reason this is a
-/// function rather than an inline ladder: UIA has no heading control type,
-/// so a heading TextBlock reports `Text` and a type-first ladder would
-/// answer `label` for every heading kaya declares. The compiler cannot see
-/// that ordering, so `mod tests` below does.
+/// THE ROLE HALF OF THE `ax` VERB, as a pure function of the three things
+/// UIA answered with. TWO NON-TYPE PROPERTIES OUTRANK THE TYPE LADDER, and
+/// that ordering is the whole reason this is a function rather than an
+/// inline ladder — the compiler cannot see it, so `mod tests` below does.
+/// UIA's control-type enum has no member for a heading and none for a date
+/// or a time, so in both cases the type a peer reports is one an existing
+/// kaya role already owns and a type-first ladder could never reach the
+/// right word.
 #[cfg(feature = "harness")]
-fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
+fn ax_role(heading: bool, class: &str, kind: AutomationControlType) -> &'static str {
     if heading {
         // Spelled the way every other backend spells it,
         // `heading/<the label's text>` — ONE word for all nine levels,
         // because a shared scene cannot freeze a per-platform level ladder
         // (docs/styling-plan.md D4).
         "heading"
+    } else if class == "CalendarDatePicker" || class == "TimePicker" {
+        // THE PICKERS, BY THE PEER'S OWN CLASS NAME (ruled 2026-09-04;
+        // docs/datetime-plan.md P4). Measured on the guest: CalendarDatePicker
+        // publishes AutomationControlType::Button — the collapsed control IS a
+        // field that opens a flyout — and TimePicker publishes Group, its
+        // three looping selectors. Both are correct UIA and both are types
+        // `button` and `group` already own. ClassName is what discriminates
+        // and it is a platform fact, not kaya's model: UIA publishes it as
+        // UIA_ClassNamePropertyId, every assistive client can read it, and it
+        // is NOT localized — GetLocalizedControlType is measured dead here,
+        // since the TimePicker's is the bare word "group" and both would move
+        // with the display language. iOS classifies its compact UIDatePicker
+        // the same way, for the same reason.
+        "datetime"
     } else if kind == AutomationControlType::Button {
         "button"
     } else if kind == AutomationControlType::CheckBox {
@@ -17757,6 +17935,278 @@ fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
         "group"
     } else {
         UNMAPPED_ROLE
+    }
+}
+
+// ---- the pickers (docs/datetime-plan.md) ------------------------------------
+// The wire packs a date as YYYYMMDD and a time as HHMM (D2). WinUI holds a
+// date as `Windows.Foundation.DateTime` — 100ns ticks since 1601 UTC, the
+// FILETIME epoch — and renders it in the LOCAL zone, so the civil round trip
+// goes through the platform's own zone conversion; the instant is placed at
+// local NOON so no zone's midnight can move the day. A time is a `TimeSpan`
+// since midnight, which carries no zone at all.
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct WinSystemTime {
+    year: u16,
+    month: u16,
+    day_of_week: u16,
+    day: u16,
+    hour: u16,
+    minute: u16,
+    second: u16,
+    milliseconds: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct WinFileTime {
+    low: u32,
+    high: u32,
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SystemTimeToFileTime(system: *const WinSystemTime, file: *mut WinFileTime) -> i32;
+    fn FileTimeToSystemTime(file: *const WinFileTime, system: *mut WinSystemTime) -> i32;
+    fn TzSpecificLocalTimeToSystemTime(
+        zone: *const c_void,
+        local: *const WinSystemTime,
+        universal: *mut WinSystemTime,
+    ) -> i32;
+    fn SystemTimeToTzSpecificLocalTime(
+        zone: *const c_void,
+        universal: *const WinSystemTime,
+        local: *mut WinSystemTime,
+    ) -> i32;
+}
+
+fn winui_ticks_of_local(local: &WinSystemTime) -> Option<i64> {
+    let mut universal = WinSystemTime::default();
+    let mut file = WinFileTime::default();
+    unsafe {
+        if TzSpecificLocalTimeToSystemTime(std::ptr::null(), local, &mut universal) == 0 {
+            return None;
+        }
+        if SystemTimeToFileTime(&universal, &mut file) == 0 {
+            return None;
+        }
+    }
+    Some((i64::from(file.high) << 32) | i64::from(file.low))
+}
+
+fn winui_local_of_ticks(ticks: i64) -> Option<WinSystemTime> {
+    let file = WinFileTime {
+        low: ticks as u32,
+        high: (ticks >> 32) as u32,
+    };
+    let mut universal = WinSystemTime::default();
+    let mut local = WinSystemTime::default();
+    unsafe {
+        if FileTimeToSystemTime(&file, &mut universal) == 0 {
+            return None;
+        }
+        if SystemTimeToTzSpecificLocalTime(std::ptr::null(), &universal, &mut local) == 0 {
+            return None;
+        }
+    }
+    Some(local)
+}
+
+/// A conversion the platform refused NAMES ITSELF: the core validated the
+/// date before it reached this backend, so a refusal here is a real fault and
+/// the apply path's report is where it belongs — never a skipped write.
+fn winui_zone_error(what: &str, packed: i64) -> windows_core::Error {
+    windows_core::Error::new(
+        windows_core::HRESULT(-1),
+        format!("kaya: the local time zone would not {what} {packed}"),
+    )
+}
+
+fn winui_date_of_packed(
+    packed: i64,
+) -> windows_core::Result<bindings::Windows::Foundation::DateTime> {
+    let local = WinSystemTime {
+        year: (packed / 10_000) as u16,
+        month: ((packed / 100) % 100) as u16,
+        day: (packed % 100) as u16,
+        hour: 12,
+        ..Default::default()
+    };
+    winui_ticks_of_local(&local)
+        .map(|ticks| bindings::Windows::Foundation::DateTime { UniversalTime: ticks })
+        .ok_or_else(|| winui_zone_error("place", packed))
+}
+
+fn winui_packed_of_date(
+    date: bindings::Windows::Foundation::DateTime,
+) -> windows_core::Result<i64> {
+    let local = winui_local_of_ticks(date.UniversalTime)
+        .ok_or_else(|| winui_zone_error("read back", date.UniversalTime))?;
+    Ok(i64::from(local.year) * 10_000 + i64::from(local.month) * 100 + i64::from(local.day))
+}
+
+fn winui_span_of_packed(packed: i64) -> bindings::Windows::Foundation::TimeSpan {
+    bindings::Windows::Foundation::TimeSpan {
+        Duration: ((packed / 100) * 3600 + (packed % 100) * 60) * 10_000_000,
+    }
+}
+
+fn winui_packed_of_span(span: bindings::Windows::Foundation::TimeSpan) -> i64 {
+    let minutes = span.Duration / 10_000_000 / 60;
+    ((minutes / 60) % 24) * 100 + minutes % 60
+}
+
+/// One picker's declared shape, shared with its own change handler. The
+/// handler runs on the UI thread INSIDE the apply borrow (a property write
+/// raises the event synchronously), so it may not reach `CoreState` at all —
+/// `CORE.with_borrow_mut` panics on a live borrow and a panic crossing a
+/// dispatcher callback aborts.
+#[derive(Default)]
+struct PickerCell {
+    /// The packed value the app last heard or was told — the mirror the echo
+    /// doctrine needs: a pick landing on it emits nothing (D7).
+    held: std::sync::atomic::AtomicI64,
+    /// 0 is unset, for all three.
+    min: std::sync::atomic::AtomicI64,
+    max: std::sync::atomic::AtomicI64,
+    step: std::sync::atomic::AtomicI64,
+}
+
+impl PickerCell {
+    fn get(slot: &std::sync::atomic::AtomicI64) -> i64 {
+        slot.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set(slot: &std::sync::atomic::AtomicI64, value: i64) {
+        slot.store(value, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// D4's clamp-to-bound, the rule every backend follows.
+    fn clamp_date(&self, packed: i64) -> i64 {
+        let (min, max) = (Self::get(&self.min), Self::get(&self.max));
+        if min != 0 && packed < min {
+            min
+        } else if max != 0 && packed > max {
+            max
+        } else {
+            packed
+        }
+    }
+
+    /// D3's minute step, snapped to the NEAREST multiple and carried past the
+    /// hour, exactly as the SwiftUI arm snaps it.
+    fn snap_time(&self, packed: i64) -> i64 {
+        let step = Self::get(&self.step).max(1);
+        if step <= 1 {
+            return packed;
+        }
+        let mut hour = packed / 100;
+        let mut minute = (packed % 100 + step / 2) / step * step;
+        if minute >= 60 {
+            minute = 0;
+            hour = (hour + 1) % 24;
+        }
+        hour * 100 + minute
+    }
+}
+
+/// THE ONE COMMIT PATH for a date, user or driven (D7, D8): clamp to the
+/// range, mirror what the app now holds, write the clamp back onto the
+/// control QUIETLY, and emit only when the value moved. The mirror is stored
+/// before the write-back, so the re-raise that write-back provokes finds
+/// nothing left to do.
+fn winui_date_committed(
+    picker: &CalendarDatePicker,
+    cell: &PickerCell,
+    quiet: &std::sync::atomic::AtomicBool,
+    sink: &OccSink,
+    tag: &[u8],
+) -> windows_core::Result<()> {
+    let Ok(raw) = picker.Date().and_then(|held| held.Value()) else {
+        return Ok(());
+    };
+    let packed = winui_packed_of_date(raw)?;
+    let clamped = cell.clamp_date(packed);
+    let moved = clamped != PickerCell::get(&cell.held);
+    PickerCell::set(&cell.held, clamped);
+    if clamped != packed {
+        let boxed: IReference<bindings::Windows::Foundation::DateTime> =
+            PropertyValue::CreateDateTime(winui_date_of_packed(clamped)?)?.cast()?;
+        quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = picker.SetDate(&boxed);
+        quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+    }
+    if moved {
+        sink.send_date_tag(tag, clamped);
+    }
+    Ok(())
+}
+
+/// The time's twin: snap to the minute step instead of clamping to a range.
+fn winui_time_committed(
+    picker: &TimePicker,
+    cell: &PickerCell,
+    quiet: &std::sync::atomic::AtomicBool,
+    sink: &OccSink,
+    tag: &[u8],
+) -> windows_core::Result<()> {
+    let Ok(raw) = picker.SelectedTime().and_then(|held| held.Value()) else {
+        return Ok(());
+    };
+    let packed = winui_packed_of_span(raw);
+    let snapped = cell.snap_time(packed);
+    let moved = snapped != PickerCell::get(&cell.held);
+    PickerCell::set(&cell.held, snapped);
+    if snapped != packed {
+        let boxed: IReference<bindings::Windows::Foundation::TimeSpan> =
+            PropertyValue::CreateTimeSpan(winui_span_of_packed(snapped))?.cast()?;
+        quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = picker.SetSelectedTime(&boxed);
+        quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+    }
+    if moved {
+        sink.send_time_tag(tag, snapped);
+    }
+    Ok(())
+}
+
+/// A picker's value straight off the CONTROL, in the fixed digits every
+/// scene reads (D8). Never kaya's mirror, which would make the scene agree
+/// with itself.
+#[cfg(feature = "harness")]
+fn winui_picker_reading(core: &CoreState, t: crate::harness::Target) -> String {
+    let unset = "<no value>".to_owned();
+    if matches!(t.kind, crate::harness::TargetKind::TimePicker) {
+        let Some(i) = crate::harness::try_resolve(t.index, core.time_pickers.len()) else {
+            return "<no such target>".to_owned();
+        };
+        let Ok(span) = core.time_pickers[i]
+            .SelectedTime()
+            .and_then(|held| held.Value())
+        else {
+            return unset;
+        };
+        let packed = winui_packed_of_span(span);
+        return format!("{:02}:{:02}", packed / 100, packed % 100);
+    }
+    let Some(i) = crate::harness::try_resolve(t.index, core.date_pickers.len()) else {
+        return "<no such target>".to_owned();
+    };
+    let Ok(date) = core.date_pickers[i].Date().and_then(|held| held.Value()) else {
+        return unset;
+    };
+    match winui_packed_of_date(date) {
+        Ok(packed) => format!(
+            "{:04}-{:02}-{:02}",
+            packed / 10_000,
+            (packed / 100) % 100,
+            packed % 100
+        ),
+        Err(e) => format!("<unreadable: {e}>"),
     }
 }
 
@@ -18492,10 +18942,37 @@ mod tests {
     #[test]
     #[cfg(feature = "harness")]
     fn a_heading_outranks_the_control_type_its_peer_reports() {
-        assert_eq!(ax_role(true, AutomationControlType::Text), "heading");
+        assert_eq!(ax_role(true, "TextBlock", AutomationControlType::Text), "heading");
         // The same element with the role absent. The two calls differ in
         // the property alone, which is the entire claim.
-        assert_eq!(ax_role(false, AutomationControlType::Text), "label");
+        assert_eq!(ax_role(false, "TextBlock", AutomationControlType::Text), "label");
+    }
+
+    /// THE PICKERS' ORDERING, THE HEADING'S TWIN AND PINNED FOR ITS REASON
+    /// (ruled 2026-09-04; docs/datetime-plan.md P4). Measured on the guest:
+    /// CalendarDatePicker's peer answers `Button` and TimePicker's answers
+    /// `Group`, so the CLASS NAME must be consulted ahead of the type ladder
+    /// or tools/scenes/pickers.steps reads `button/Due` and `group/At` where
+    /// it froze `datetime/Due` and `datetime/At`. Each pair differs in the
+    /// class alone, which is the entire claim.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_picker_class_outranks_the_control_type_its_peer_reports() {
+        assert_eq!(
+            ax_role(false, "CalendarDatePicker", AutomationControlType::Button),
+            "datetime"
+        );
+        assert_eq!(ax_role(false, "Button", AutomationControlType::Button), "button");
+        assert_eq!(
+            ax_role(false, "TimePicker", AutomationControlType::Group),
+            "datetime"
+        );
+        assert_eq!(ax_role(false, "Grid", AutomationControlType::Group), "group");
+        // NOT the compact-date control WinUI also ships: kaya's arm hosts
+        // CalendarDatePicker because `DatePicker` bounds by YEAR alone
+        // (docs/datetime-plan.md §0), so that class name is nothing this
+        // backend can produce and must not be answered for.
+        assert_eq!(ax_role(false, "DatePicker", AutomationControlType::Button), "button");
     }
 
     /// THE REST OF THE LADDER, PINNED BECAUSE THE HEADING BRANCH WAS INSERTED
@@ -18520,16 +18997,18 @@ mod tests {
             (AutomationControlType::Pane, "group"),
             (AutomationControlType::List, "group"),
         ] {
-            assert_eq!(ax_role(false, kind), want, "{kind:?} answered the wrong role");
+            // An ordinary class, so the two branches above stand aside and
+            // the type ladder answers.
+            assert_eq!(ax_role(false, "Grid", kind), want, "{kind:?} answered the wrong role");
             // And the heading property outranks every one of them — stated
             // across the whole table, because "consult the property first" is
             // a claim about the ladder and not about one arm of it.
-            assert_eq!(ax_role(true, kind), "heading", "{kind:?} swallowed the heading");
+            assert_eq!(ax_role(true, "Grid", kind), "heading", "{kind:?} swallowed the heading");
         }
         // A type kaya has no word for reports as such, so the trace in
         // `ax` fires and names it. Window is one the framework really
         // does publish.
-        assert_eq!(ax_role(false, AutomationControlType::Window), UNMAPPED_ROLE);
+        assert_eq!(ax_role(false, "Grid", AutomationControlType::Window), UNMAPPED_ROLE);
     }
 
     /// The vendored font the typeface scene ships, compiled in so these

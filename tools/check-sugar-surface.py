@@ -95,28 +95,38 @@ def check(lang, rel, kind, pattern, findings=None):
             findings.append(msg)
 
 
+def kind_case(kind):
+    """A kind's name in each language's own convention. THE KINDS ARE NOT
+    ALL ONE WORD since date_picker and time_picker (2026-09-04): a
+    snake-cased kind is `DatePicker` in Go and C#, `datePicker` in Java,
+    Swift, Haskell and JS, and stays `date_picker` in Rust, Python and
+    OCaml. Reading the kind verbatim everywhere wanted `Date_picker`."""
+    words = kind.split("_")
+    pascal = "".join(w[:1].upper() + w[1:] for w in words)
+    return kind, pascal, pascal[:1].lower() + pascal[1:]
+
+
 def check_kind(kind, findings=None):
-    pascal = kind[:1].upper() + kind[1:]
+    snake, pascal, camel = kind_case(kind)
     check("rust", "crates/kaya/src/app.rs", kind,
-          f"pub fn {kind}[a-z_]*(<[^>]*>)?\\(", findings)
+          f"pub fn {snake}[a-z_]*(<[^>]*>)?\\(", findings)
     check("python", "bindings/python/kaya/__init__.py", kind,
-          f"^def {kind}[a-z_]*\\(", findings)
+          f"^def {snake}[a-z_]*\\(", findings)
     check("go", "bindings/go/app.go", kind,
           f"func \\(tx \\*Tx\\) {pascal}[A-Za-z]*\\(", findings)
     check("csharp", "bindings/csharp/KayaApp.cs", kind,
           f"public Widget {pascal}[A-Za-z]*\\(", findings)
     check("java", "bindings/java/dev/kaya/KayaApp.java", kind,
-          f"public Widget {kind}[A-Za-z]*\\(", findings)
+          f"public Widget {camel}[A-Za-z]*\\(", findings)
     check("swift", "bindings/swift/KayaApp.swift", kind,
-          f"func {kind}[A-Za-z]*\\(", findings)
+          f"func {camel}[A-Za-z]*\\(", findings)
     # Leading whitespace allowed: row/column are Declare-class methods.
     check("haskell", "bindings/haskell/KayaApp.hs", kind,
-          f"^[[:space:]]*{kind}[A-Za-z]* ::", findings)
+          f"^[[:space:]]*{camel}[A-Za-z]* ::", findings)
     check("ocaml", "bindings/ocaml/kaya_app.ml", kind,
-          f"^let {kind}[a-z_]* ", findings)
-    # Every kind is one lowercase word, so JS's camelCase IS the kind.
+          f"^let {snake}[a-z_]* ", findings)
     check("js", "bindings/js/kaya/index.ts", kind,
-          f"^export function {kind}[A-Za-z]*\\(", findings)
+          f"^export function {camel}[A-Za-z]*\\(", findings)
 
 
 # --- THE TEXT-RANGE SURFACE, in all nine --------------------------
@@ -1275,6 +1285,28 @@ fake_failures = sum(1 for m in fake
 if fake_failures != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
                   f"({fake_failures}/9 patterns fired for a fake kind)")
+
+# AND A MULTI-WORD FAKE, because the one above cannot see the DERIVATION:
+# every language reads a one-word kind verbatim, so `kayafakewidget` fires
+# in all nine whether the pascal/camel arms are right or wrong. The
+# derivation itself is watched in BOTH directions — this half refuses a
+# multi-word kind nothing has, and the census below is the other half: a
+# multi-word kind every binding HAS must be reported by none, which is
+# what a wrong casing (`Date_picker`, `date_picker` in Java) breaks.
+fake = []
+check_kind("kaya_fake_picker", findings=fake)
+multiword_fake = sum(1 for m in fake if "no live-zone constructor" in m)
+if multiword_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({multiword_fake}/9 patterns fired for a multi-word "
+                  f"kind that exists nowhere)")
+print("check-sugar-surface: kind-name derivation watched: "
+      f"one-word fake {fake_failures}/9, multi-word fake "
+      f"{multiword_fake}/9, and "
+      + ", ".join(f"{lang}={name}" for lang, name in
+                  zip(("rust/python/ocaml", "go/csharp",
+                       "java/swift/haskell/js"),
+                      kind_case("date_picker"))))
 
 for kind in kinds:
     check_kind(kind)
@@ -2830,7 +2862,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 3")
+        if n == 1 else src, n, "typed-row reader found only 4")
     return "\n".join(lines)
 
 

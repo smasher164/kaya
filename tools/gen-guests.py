@@ -124,7 +124,8 @@ def generate(tmp):
                        "guests/swift/reorder.swift",
                        "guests/swift/dnd.swift",
                        "guests/swift/undo.swift",
-                       "guests/swift/table.swift"],
+                       "guests/swift/table.swift",
+                       "guests/swift/pickers.swift"],
                       env=env, check=False).returncode != 0:
         return 1
     return 0

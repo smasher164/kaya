@@ -26,7 +26,7 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
-    "typeface", "toolbar", "identity", "assets", "adaptive", "dnd",
+    "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers",
 ]
 
 # Depth-slice scenes: a rust example + steps exist, the language
@@ -89,6 +89,13 @@ ORDER = [
      "textarea_rust", "textarea_python", "textarea_js", "textarea_go", "textarea_csharp", "textarea_java",
      "sections_rust", "sections_python", "sections_js", "sections_go", "sections_csharp", "sections_java",
      "layout_rust", "layout_python", "layout_js", "layout_go", "layout_csharp", "layout_java",
+     # The pickers pool like the gallery: set_date and set_time drive the
+     # CONTROL's own property, no real mouse and no OS-global chrome. RUST
+     # ALONE while the eight bindings' sugar is the parallel worktree
+     # (docs/datetime-plan.md §5 step 6) — hence the DEPTH_SCENES row, which
+     # ships the exe and no .py or .ts; the other five legs join this line
+     # with their guests.
+     "pickers_rust", "pickers_python", "pickers_js", "pickers_go", "pickers_csharp", "pickers_java",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from

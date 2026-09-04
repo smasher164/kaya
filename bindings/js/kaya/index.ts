@@ -23,7 +23,16 @@ if (!runtime.IS_APP_THREAD) {
  * to ±(2^53 − 1) (crates/kaya/src/spec.rs, MAX_SAFE_INTEGER). */
 export const Int: unique symbol = Symbol("kaya.Int");
 export type IntToken = typeof Int;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken;
+/** A civil date — the value a date picker carries and a `CivilDate` field
+ * holds; an I64 in packed decimal on the wire (docs/datetime-plan.md D2). */
+export type CivilDate = { readonly year: number; readonly month: number; readonly day: number };
+/** A civil time: hour and minute, no seconds (D3). */
+export type CivilTime = { readonly hour: number; readonly minute: number };
+export const CivilDate: unique symbol = Symbol("kaya.CivilDate");
+export const CivilTime: unique symbol = Symbol("kaya.CivilTime");
+export type CivilDateToken = typeof CivilDate;
+export type CivilTimeToken = typeof CivilTime;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken;
 export type Schema = { readonly [name: string]: Token };
 type FieldOf<T> = T extends StringConstructor
   ? string
@@ -35,7 +44,11 @@ type FieldOf<T> = T extends StringConstructor
         ? Uint8Array
         : T extends IntToken
           ? number
-          : never;
+          : T extends CivilDateToken
+            ? CivilDate
+            : T extends CivilTimeToken
+              ? CivilTime
+              : never;
 /** A record's fields as a plain object — what `insert` takes and the
  * mirror holds. */
 export type Fields<S extends Schema> = { -readonly [K in keyof S]: FieldOf<S[K]> };
@@ -59,9 +72,59 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime) return wire.VALUE_I64;
   throw new TypeError(
-    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int or Uint8Array per field`,
+    `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime or Uint8Array per field`,
   );
+}
+
+/** A civil date's components, refused BY NAME when they are not one — a
+ * plain object cannot type this the way DateOnly or LocalDate does, so
+ * the packing site is the wall (docs/datetime-plan.md D2). */
+export function dateParts(what: string, v: unknown): [number, number, number] {
+  const d = v as CivilDate;
+  if (typeof v !== "object" || v === null || typeof d.year !== "number" || typeof d.month !== "number" || typeof d.day !== "number") {
+    throw new TypeError(`kaya: ${what} is a civil date {year, month, day}, not ${runtime.describe(v)}`);
+  }
+  const { year, month, day } = d;
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    throw new TypeError(`kaya: ${what} takes whole year, month and day, not ${year}-${month}-${day}`);
+  }
+  if (month < 1 || month > 12) throw new TypeError(`kaya: ${what} has month ${month}, which is not a month (1..12)`);
+  if (day < 1 || day > daysInMonth(year, month)) {
+    throw new TypeError(`kaya: ${what} has day ${day}, which ${year}-${String(month).padStart(2, "0")} does not have`);
+  }
+  return [year, month, day];
+}
+
+function daysInMonth(year: number, month: number): number {
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+}
+
+/** A civil time's hour and minute, refused by name when they are not one. */
+export function timeParts(what: string, v: unknown): [number, number] {
+  const t = v as CivilTime;
+  if (typeof v !== "object" || v === null || typeof t.hour !== "number" || typeof t.minute !== "number") {
+    throw new TypeError(`kaya: ${what} is a civil time {hour, minute}, not ${runtime.describe(v)}`);
+  }
+  const { hour, minute } = t;
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+    throw new TypeError(`kaya: ${what} takes a whole hour and minute, not ${hour}:${minute}`);
+  }
+  if (hour < 0 || hour > 23) throw new TypeError(`kaya: ${what} has hour ${hour}, which is not an hour (0..23)`);
+  if (minute < 0 || minute > 59) throw new TypeError(`kaya: ${what} has minute ${minute}, which is not a minute (0..59)`);
+  return [hour, minute];
+}
+
+function civilDate(packed: number): CivilDate {
+  const [year, month, day] = wire.unpack_date(packed);
+  return { year, month, day };
+}
+
+function civilTime(packed: number): CivilTime {
+  const [hour, minute] = wire.unpack_time(packed);
+  return { hour, minute };
 }
 
 /** Declare a record type: the schema IS the type, and the result both
@@ -235,7 +298,9 @@ function keyPath(path: readonly unknown[]): wire.WireValue[] {
  * I64, and every integer derivation is computed here (docs/js-plan.md §4). */
 function signalValue(what: string, v: unknown): wire.WireValue {
   if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") return v;
-  throw new TypeError(`kaya: ${what} takes a string, a number or a boolean, not ${runtime.describe(v)}`);
+  if (typeof v === "object" && v !== null && "year" in v) return new wire.I64(wire.pack_date(...dateParts(what, v)));
+  if (typeof v === "object" && v !== null && "hour" in v) return new wire.I64(wire.pack_time(...timeParts(what, v)));
+  throw new TypeError(`kaya: ${what} takes a string, a number, a boolean, a civil date or a civil time, not ${runtime.describe(v)}`);
 }
 
 /** A co-located handler. The parameters are open because the arity
@@ -784,11 +849,15 @@ export class Element {
 export class FieldRef {
   /** @internal */ readonly _element: Element | CaseElement;
   /** @internal */ readonly _index: number;
+  /** @internal The schema token: a CivilDate field and an Int one share
+   * the I64 tag, so nothing below this can tell them apart. */
+  readonly _token: Token | null;
 
   /** @internal */
-  constructor(element: Element | CaseElement, index: number) {
+  constructor(element: Element | CaseElement, index: number, token: Token | null = null) {
     this._element = element;
     this._index = index;
+    this._token = token;
   }
 
   /** @internal */
@@ -806,7 +875,7 @@ function rowTracer(forIndex: number, coll: Collection<unknown, unknown>, spec: V
       enumerable: true,
       get: () => {
         guardTracerEscape();
-        return new FieldRef(element, index);
+        return new FieldRef(element, index, spec.tokens[index] ?? null);
       },
     });
   }
@@ -876,13 +945,17 @@ class Variant {
   readonly fields: Map<string, number> | null;
   readonly names: string[];
   readonly schema: number[];
+  readonly tokens: Token[];
   readonly encoders: ((v: unknown, name: string) => wire.WireValue)[];
+  readonly decoders: ((v: wire.Decoded) => unknown)[];
 
   constructor(ctor: RecordType | null) {
     this.ctor = ctor;
     this.names = [];
     this.schema = [];
+    this.tokens = [];
     this.encoders = [];
+    this.decoders = [];
     if (ctor === null) {
       this.fields = null;
       this.schema.push(wire.VALUE_STR);
@@ -890,6 +963,7 @@ class Variant {
         if (typeof v !== "string") throw new TypeError(`kaya: a scalar collection holds strings, not ${runtime.describe(v)} (${name})`);
         return v;
       });
+      this.decoders.push((v) => v);
       return;
     }
     this.fields = new Map();
@@ -898,15 +972,25 @@ class Variant {
       this.fields.set(name, this.schema.length);
       this.names.push(name);
       this.schema.push(tag);
-      this.encoders.push(fieldEncoder(tag, ctor.name));
+      this.tokens.push(token);
+      this.encoders.push(fieldEncoder(token, tag, ctor.name));
+      this.decoders.push(fieldDecoder(token));
     }
   }
 }
 
-function fieldEncoder(tag: number, type: string): (v: unknown, name: string) => wire.WireValue {
+function fieldDecoder(token: Token): (v: wire.Decoded) => unknown {
+  if (token === CivilDate) return (v) => civilDate(v as number);
+  if (token === CivilTime) return (v) => civilTime(v as number);
+  return (v) => v;
+}
+
+function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, name: string) => wire.WireValue {
   const refuse = (v: unknown, name: string, want: string): never => {
     throw new TypeError(`kaya: ${type}.${name} is a ${want} field and got ${runtime.describe(v)}`);
   };
+  if (token === CivilDate) return (v, name) => new wire.I64(wire.pack_date(...dateParts(`${type}.${name}`, v)));
+  if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
   switch (tag) {
     case wire.VALUE_STR:
       return (v, name) => (typeof v === "string" ? v : refuse(v, name, "string"));
@@ -1299,7 +1383,7 @@ export class Collection<E, R> extends BoundCollection<E, R> {
     if (spec.ctor === null) return fields[0] as E;
     const target = (current instanceof spec.ctor ? current : Object.create(spec.ctor.prototype)) as Record<string, unknown>;
     spec.names.forEach((name, i) => {
-      target[name] = fields[i];
+      target[name] = spec.decoders[i]!(fields[i]!);
     });
     return target as E;
   }
@@ -2469,7 +2553,7 @@ export function capabilities(): Capabilities {
 
 /** Declare a signal: a render pipe with no read. A number is an F64 on
  * the wire (docs/js-plan.md §4). */
-export function signal<T extends string | number | boolean>(initial: T): Signal<Widen<T>> {
+export function signal<T extends string | number | boolean | CivilDate | CivilTime>(initial: T): Signal<Widen<T>> {
   const handle = new Signal<Widen<T>>(app()._next("signal"), initial as Widen<T>);
   app()._signals.set(handle.id, handle as Signal<unknown>);
   records().push(wire.tx_create_signal(handle.id, signalValue("a signal", initial)));
@@ -2863,6 +2947,59 @@ export function slider(opts: SliderOptions = {}): Widget {
     else records().push(wire.tx_set_value(handle.id, Number(opts.value)));
   }
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_VALUE_CHANGED, opts.onChange);
+  setGrow(handle, opts);
+  return handle;
+}
+
+export type DatePickerOptions = GrowOption & { value?: CivilDate | Signal<CivilDate> | FieldRef; min?: CivilDate; max?: CivilDate; onChange?: Handler };
+
+function pickerField(what: string, ref: FieldRef, want: Token, wanted: string): void {
+  if (ref._token !== want) throw new TypeError(`kaya: ${what} binds a ${wanted} field`);
+}
+
+/** A date picker over civil dates — the compact field that opens the
+ * platform's calendar (docs/datetime-plan.md). UNCONTROLLED: the control
+ * owns its value and reports each COMMITTED pick to onChange, template
+ * copies getting the row first. `min`/`max` are the inclusive range; a
+ * pick past a bound lands on the bound. */
+export function datePicker(opts: DatePickerOptions = {}): Widget {
+  const handle = widget(wire.KIND_DATE_PICKER);
+  if (opts.min !== undefined) records().push(wire.tx_set_min_date(handle.id, ...dateParts("min_date", opts.min)));
+  if (opts.max !== undefined) records().push(wire.tx_set_max_date(handle.id, ...dateParts("max_date", opts.max)));
+  if (opts.value !== undefined) {
+    if (opts.value instanceof Signal) records().push(wire.tx_bind_date(handle.id, opts.value.id));
+    else if (opts.value instanceof FieldRef) {
+      pickerField("a date picker", opts.value, CivilDate, "kaya.CivilDate");
+      records().push(wire.tx_bind_date_element(handle.id, opts.value._level(), opts.value._index));
+    } else records().push(wire.tx_set_date(handle.id, ...dateParts("a date picker's value", opts.value)));
+  }
+  const onChange = opts.onChange;
+  if (onChange !== undefined) {
+    app()._register(handle, wire.OCC_DATE_CHANGED, (...args: unknown[]) => onChange(...args.slice(0, -1), civilDate(args[args.length - 1] as number)));
+  }
+  setGrow(handle, opts);
+  return handle;
+}
+
+export type TimePickerOptions = GrowOption & { value?: CivilTime | Signal<CivilTime> | FieldRef; step?: number; onChange?: Handler };
+
+/** A time picker over civil times — hours and minutes, no seconds.
+ * `step` is the minute granularity (1, 5, 10, 15 or 30) and a pick snaps
+ * to it. */
+export function timePicker(opts: TimePickerOptions = {}): Widget {
+  const handle = widget(wire.KIND_TIME_PICKER);
+  if (opts.step !== undefined) records().push(wire.tx_set_minute_step(handle.id, Number(opts.step)));
+  if (opts.value !== undefined) {
+    if (opts.value instanceof Signal) records().push(wire.tx_bind_time(handle.id, opts.value.id));
+    else if (opts.value instanceof FieldRef) {
+      pickerField("a time picker", opts.value, CivilTime, "kaya.CivilTime");
+      records().push(wire.tx_bind_time_element(handle.id, opts.value._level(), opts.value._index));
+    } else records().push(wire.tx_set_time(handle.id, ...timeParts("a time picker's value", opts.value)));
+  }
+  const onChange = opts.onChange;
+  if (onChange !== undefined) {
+    app()._register(handle, wire.OCC_TIME_CHANGED, (...args: unknown[]) => onChange(...args.slice(0, -1), civilTime(args[args.length - 1] as number)));
+  }
   setGrow(handle, opts);
   return handle;
 }

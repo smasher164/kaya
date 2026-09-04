@@ -31,6 +31,9 @@ import (
 var wireTypes = map[string]bool{
 	"string": true, "bool": true, "int64": true, "float64": true,
 	"[]byte": true,
+	// The picker types (docs/datetime-plan.md D10): a Date field is an
+	// I64 on the wire and a kaya.Date everywhere the record is touched.
+	"kaya.Date": true, "kaya.Time": true,
 }
 
 // wireTypeName names a field's declared type in the wire vocabulary: a
@@ -43,6 +46,11 @@ func wireTypeName(e ast.Expr) (string, bool) {
 	case *ast.ArrayType:
 		if id, ok := t.Elt.(*ast.Ident); ok && t.Len == nil && id.Name == "byte" {
 			return "[]byte", wireTypes["[]byte"]
+		}
+	case *ast.SelectorExpr:
+		if pkg, ok := t.X.(*ast.Ident); ok {
+			name := pkg.Name + "." + t.Sel.Name
+			return name, wireTypes[name]
 		}
 	}
 	return "", false
@@ -369,6 +377,14 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, %s, bool)) kaya.Node {", lowerFirst(name), key)
 	w("\treturn r.c.Checkbox(r.t, f, onToggle)")
+	w("}")
+	w("")
+	w("func (r %sRow) DatePicker(f kaya.Field[kaya.Date], onDate func(*kaya.Tx, %s, kaya.Date)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.DatePicker(r.t, f, onDate)")
+	w("}")
+	w("")
+	w("func (r %sRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, %s, kaya.Time)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.TimePicker(r.t, f, onTime)")
 	w("}")
 	w("")
 	// THE PROPS, on the same surface as the constructors that hand out

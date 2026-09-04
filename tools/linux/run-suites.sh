@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -1108,6 +1108,26 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/dnd"
     run "$proto" dndwitness-in python3 tools/linux/dragwitness-leg.py "$proto" in \
         "$CARGO_TARGET_DIR/debug/examples/dnd"
+    # THE PICKERS SCENE (docs/datetime-plan.md). GTK ships no date and no
+    # time control, so this backend composes both (§0) and the scene reads
+    # the CONTROL back with expect_picker (D8). THROUGH a11y-leg.sh for its
+    # two closing `expect_ax` lines; check-steps' ax_bus() holds that rule.
+    run "$proto" pickers-rust env KAYA_SELFTEST=pickers \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/pickers"
+    run "$proto" pickers-python env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/pickers.py
+    run "$proto" pickers-js env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/pickers.ts
+    run "$proto" pickers-go env KAYA_SELFTEST=pickers \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" pickers-csharp env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" pickers-ocaml env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/pickers.exe
+    run "$proto" pickers-haskell env KAYA_SELFTEST=pickers \
+        tools/linux/a11y-leg.sh "$(hs_bin pickers)"
+    run "$proto" pickers-java env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

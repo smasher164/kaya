@@ -33,6 +33,10 @@ sealed class RecordInfo
         : t == typeof(long) ? KayaWire.ValueI64
         : t == typeof(double) ? KayaWire.ValueF64
         : t == typeof(byte[]) ? KayaWire.ValueBlob
+        // The picker types ride the I64 tag in packed decimal
+        // (docs/datetime-plan.md D10).
+        : t == typeof(DateOnly) ? KayaWire.ValueI64
+        : t == typeof(TimeOnly) ? KayaWire.ValueI64
         : (uint?)null;
 
     // One reflection walk per record type, ever: FieldOf runs per event
@@ -91,6 +95,7 @@ sealed class RecordInfo
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name;
+        if (value is DateOnly or TimeOnly) return KayaRecords.ScalarWire(value);
         if (Schema[wireIndex] == KayaWire.ValueBlob)
         {
             if (value is not byte[] bytes)
@@ -122,7 +127,16 @@ sealed class RecordInfo
                     ? Activator.CreateInstance(parameters[i].ParameterType)
                     : null);
         for (int wire = 0; wire < WireToCtor.Length && wire < fields.Count; wire++)
-            args[WireToCtor[wire]] = fields[wire];
+        {
+            // A packed I64 comes back as the picker type it was written
+            // from, never as the integer it travelled as.
+            var want = parameters[WireToCtor[wire]].ParameterType;
+            args[WireToCtor[wire]] = want == typeof(DateOnly)
+                ? KayaRecords.DateOf(fields[wire])
+                : want == typeof(TimeOnly)
+                    ? KayaRecords.TimeOf(fields[wire])
+                    : fields[wire];
+        }
         return Ctor.Invoke(args);
     }
 
@@ -225,6 +239,16 @@ sealed class RecordCollection<T>
         Action<Tx, List<object>, bool> onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
 
+    /// A date picker bound to the DateOnly field the selector names.
+    public Node DatePicker(Tpl t, Expression<Func<T, DateOnly>> selector,
+        Action<Tx, List<object>, DateOnly> onDate = null) =>
+        t.DatePicker(KayaRecords.FieldOf(selector), onDate);
+
+    /// A time picker bound to the TimeOnly field the selector names.
+    public Node TimePicker(Tpl t, Expression<Func<T, TimeOnly>> selector,
+        Action<Tx, List<object>, TimeOnly> onTime = null) =>
+        t.TimePicker(KayaRecords.FieldOf(selector), onTime);
+
     /// An image bound to the byte[] field the selector names.
     public Node Image(Tpl t, Expression<Func<T, byte[]>> selector) =>
         t.Image(KayaRecords.FieldOf(selector));
@@ -290,6 +314,27 @@ static class KayaRecords
     /// a hand-minted index is unchecked, so hand-written code uses
     /// FieldOf.
     public static Field<V> FieldAt<V>(uint index) => new Field<V>(index);
+
+    /// A scalar's wire value: a civil date or time packs, everything else
+    /// travels as itself.
+    internal static object ScalarWire(object v) => v switch
+    {
+        DateOnly d => (long)KayaWire.PackDate(d.Year, d.Month, d.Day),
+        TimeOnly t => (long)KayaWire.PackTime(t.Hour, t.Minute),
+        _ => v,
+    };
+
+    internal static DateOnly DateOf(object packed)
+    {
+        var (year, month, day) = KayaWire.UnpackDate(packed is long l ? l : 0L);
+        return new DateOnly(year, month, day);
+    }
+
+    internal static TimeOnly TimeOf(object packed)
+    {
+        var (hour, minute) = KayaWire.UnpackTime(packed is long l ? l : 0L);
+        return new TimeOnly(hour, minute);
+    }
 
     public static Field<V> FieldOf<T, V>(Expression<Func<T, V>> selector)
     {

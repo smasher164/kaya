@@ -3156,20 +3156,30 @@ mod tests {
                     continue;
                 }
                 seen += 1;
-                // The sentences are English, so the noun is plural:
-                // match the leading noun against each kind's spellings
-                // rather than making the backends write "entrys".
-                let noun = sentence.split_whitespace().next().unwrap_or("");
+                // The sentences are English, so the noun is plural AND a
+                // two-word kind is two words: match the sentence's opening
+                // noun against each kind's spellings rather than making a
+                // backend write "entrys" or "datepickers".
                 let named = WidgetKind::ALL.iter().find(|k| {
-                    let base = format!("{k:?}").to_lowercase();
-                    let plural_y = base
-                        .strip_suffix('y')
-                        .map(|stem| format!("{stem}ies"))
-                        .unwrap_or_default();
-                    noun == base
-                        || noun == format!("{base}s")
-                        || noun == format!("{base}es")
-                        || (!plural_y.is_empty() && noun == plural_y)
+                    let camel = format!("{k:?}");
+                    let base = camel.to_lowercase();
+                    let mut spaced = String::new();
+                    for (i, ch) in camel.chars().enumerate() {
+                        if ch.is_uppercase() && i > 0 {
+                            spaced.push(' ');
+                        }
+                        spaced.push(ch.to_ascii_lowercase());
+                    }
+                    [&base, &spaced].iter().any(|stem| {
+                        let plural_y = stem
+                            .strip_suffix('y')
+                            .map(|head| format!("{head}ies "))
+                            .unwrap_or_default();
+                        sentence.starts_with(&format!("{stem} "))
+                            || sentence.starts_with(&format!("{stem}s "))
+                            || sentence.starts_with(&format!("{stem}es "))
+                            || (!plural_y.is_empty() && sentence.starts_with(&plural_y))
+                    })
                 });
                 let kind = named.unwrap_or_else(|| {
                     panic!(

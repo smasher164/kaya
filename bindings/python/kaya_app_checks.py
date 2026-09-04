@@ -2,6 +2,7 @@
 The core is never entered: records queue and the process exits."""
 
 import dataclasses
+import datetime
 import struct
 import sys
 import time
@@ -2545,5 +2546,104 @@ with app_dnd.window():
         check("and its landing handler lands in the widget table",
               (kaya.wire.OCC_DROPPED, container)
               in app_dnd._widget_handlers)
+
+# --- THE PICKERS (docs/datetime-plan.md) ------------------------------
+# WHERE THE REFUSAL LIVES DIFFERS BY BINDING: `datetime.date` refuses
+# month 13 and February 30 itself, so kaya's own wall is the TYPE — a
+# value that is not a date, an INSTANT (a `datetime.datetime` IS a
+# `datetime.date` by subclassing and would silently lose its time), and a
+# template picker over a field of another type.
+app_pickers = kaya.App()
+
+
+@dataclass
+class PickerTask:
+    title: str
+    due: datetime.date
+    at: datetime.time
+
+
+def _refuses(call):
+    try:
+        call()
+        return False
+    except ValueError:
+        return True
+
+
+check("month 13 is not a date in this binding's own type",
+      _refuses(lambda: datetime.date(2026, 13, 1)))
+check("February 30 is not a date in this binding's own type",
+      _refuses(lambda: datetime.date(2026, 2, 30)))
+check("hour 24 is not a time in this binding's own type",
+      _refuses(lambda: datetime.time(24, 0)))
+
+picker_coll = None
+with app_pickers.build():
+    with kaya.column():
+        for what, call, want in (
+            ("a date picker's value that is not a date",
+             lambda: kaya.date_picker(value=20261301), "datetime.date"),
+            ("a date picker's value that is an INSTANT",
+             lambda: kaya.date_picker(
+                 value=datetime.datetime(2026, 9, 4, 14, 30)),
+             "never an instant"),
+            ("a date picker's bound that is not a date",
+             lambda: kaya.date_picker(value=datetime.date(2026, 9, 4),
+                                      min=20260101), "min_date"),
+            ("a time picker's value that is not a time",
+             lambda: kaya.time_picker(value=1430), "datetime.time"),
+        ):
+            before_p = len(kaya._tx)
+            try:
+                call()
+                ok = False
+            except TypeError as exc:
+                ok = want in str(exc)
+            _rewind(before_p)
+            check(f"{what} is refused by name", ok)
+
+    picker_coll = kaya.collection(PickerTask)
+    spec = picker_coll._variants[0]
+    check("a Date field and a Time field take the I64 slot",
+          spec.schema == [kaya.wire.VALUE_STR, kaya.wire.VALUE_I64,
+                          kaya.wire.VALUE_I64])
+    check("and the schema packs them through the generated helper",
+          spec.encoders[1](datetime.date(2026, 11, 20)) == 20261120
+          and spec.encoders[2](datetime.time(9, 5)) == 905)
+    check("a Date field decodes back to a date, never the integer",
+          spec.decoders[1](20261120) == datetime.date(2026, 11, 20)
+          and spec.decoders[2](905) == datetime.time(9, 5))
+
+with app_pickers.build():
+    with kaya.column():
+        with kaya.for_each(picker_coll) as picker_el:
+            before_p = len(kaya._tx)
+            try:
+                kaya.date_picker(value=picker_el.title)
+                ok = False
+            except TypeError as exc:
+                ok = "binds a date field" in str(exc)
+            _rewind(before_p)
+            check("a template date picker over a str field is refused by "
+                  "name", ok)
+            before_p = len(kaya._tx)
+            try:
+                kaya.time_picker(value=picker_el.due)
+                ok = False
+            except TypeError as exc:
+                ok = "binds a time field" in str(exc)
+            _rewind(before_p)
+            check("a template time picker over a date field is refused by "
+                  "name", ok)
+            kaya.date_picker(value=picker_el.due)
+
+with app_pickers.build():
+    picker_coll.insert("a", PickerTask(title="a",
+                                       due=datetime.date(2026, 10, 1),
+                                       at=datetime.time(8, 30)))
+check("the model holds the record's own date and time",
+      picker_coll.items()[0][1].due == datetime.date(2026, 10, 1)
+      and picker_coll.items()[0][1].at == datetime.time(8, 30))
 
 sys.exit(1 if failures else 0)

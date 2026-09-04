@@ -3,6 +3,7 @@ tier-1 sugar (DESIGN.md, "the shape of an app").
 """
 
 import dataclasses
+import datetime
 import io
 import operator
 import sys
@@ -14,10 +15,12 @@ from . import runtime
 from . import wire
 
 # The wire-representable field types; any other field type is guest-only.
-# bool before int — bool IS an int in Python.
+# bool before int — bool IS an int in Python. A date and a time ride the
+# I64 tag in packed decimal (docs/datetime-plan.md D2/D10).
 _WIRE_TYPES = [(bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
                (float, wire.VALUE_F64), (str, wire.VALUE_STR),
-               (bytes, wire.VALUE_BLOB)]
+               (bytes, wire.VALUE_BLOB), (datetime.date, wire.VALUE_I64),
+               (datetime.time, wire.VALUE_I64)]
 
 
 def _wire_tag(py_type):
@@ -31,6 +34,73 @@ def _encode_blob_field(value):
     """A blob field's wire value; handles are single-submit, so every
     mutation carrying a blob field re-registers."""
     return wire.BlobHandle(runtime.register_blob(value))
+
+
+def _date_parts(what, value):
+    """A civil date's components. `datetime.datetime` is refused though it
+    IS a `datetime.date`: a picker holds no instant, and dropping the time
+    silently is the zone-conversion bug genre (docs/datetime-plan.md §0)."""
+    if isinstance(value, datetime.datetime) or not isinstance(value, datetime.date):
+        raise TypeError(
+            f"kaya: {what} is a datetime.date (year, month, day), not "
+            f"{type(value).__name__} — a picker carries civil components, "
+            "never an instant"
+        )
+    return value.year, value.month, value.day
+
+
+def _time_parts(what, value):
+    """A civil time's hour and minute; seconds are not a picker value (D3)."""
+    if not isinstance(value, datetime.time):
+        raise TypeError(
+            f"kaya: {what} is a datetime.time (hour, minute), not "
+            f"{type(value).__name__}"
+        )
+    return value.hour, value.minute
+
+
+def _encode_date_field(value):
+    return wire.pack_date(*_date_parts("a Date field", value))
+
+
+def _encode_time_field(value):
+    return wire.pack_time(*_time_parts("a Time field", value))
+
+
+def _decode_date_field(packed):
+    return datetime.date(*wire.unpack_date(packed))
+
+
+def _decode_time_field(packed):
+    return datetime.time(*wire.unpack_time(packed))
+
+
+def _identity(value):
+    return value
+
+
+# Per-FIELD-TYPE codecs: the tag alone cannot tell a Date field from an
+# int one (both are I64 on the wire).
+_FIELD_ENCODERS = {bytes: _encode_blob_field, datetime.date: _encode_date_field,
+                   datetime.time: _encode_time_field}
+_FIELD_DECODERS = {datetime.date: _decode_date_field,
+                   datetime.time: _decode_time_field}
+
+
+def _wire_scalar(value):
+    """A signal's value on the wire: a date or a time packs, everything
+    else travels as itself."""
+    if isinstance(value, datetime.datetime):
+        raise TypeError(
+            "kaya: a signal carries a civil date or time, not a "
+            "datetime.datetime — a picker holds no instant "
+            "(docs/datetime-plan.md §0)"
+        )
+    if isinstance(value, datetime.date):
+        return wire.pack_date(value.year, value.month, value.day)
+    if isinstance(value, datetime.time):
+        return wire.pack_time(value.hour, value.minute)
+    return value
 
 
 def _text_value(what, text):
@@ -206,7 +276,7 @@ class Signal:
     def set(self, value):
         old = self._mirror
         _journal_once(self, lambda: setattr(self, "_mirror", old))
-        _records().append(wire.tx_write_signal(self.id, value))
+        _records().append(wire.tx_write_signal(self.id, _wire_scalar(value)))
         self._mirror = value
         for derived in self._dependents:
             derived._recompute()
@@ -703,10 +773,12 @@ class Element:
         if name.startswith("_"):
             raise AttributeError(name)
         _guard_tracer_escape()
-        fields = object.__getattribute__(self, "_coll")._fields
+        coll = object.__getattribute__(self, "_coll")
+        fields = coll._fields
         if fields is None or name not in fields:
             raise AttributeError(name)
-        return FieldRef(self, fields[name])
+        index = fields[name]
+        return FieldRef(self, index, coll._variants[0].types[index])
 
 
 class _Cases:
@@ -762,18 +834,23 @@ class _CaseElement:
         _guard_tracer_escape()
         coll = object.__getattribute__(self, "_coll")
         variant = object.__getattribute__(self, "_variant")
-        fields = coll._variants[variant].fields
+        spec = coll._variants[variant]
+        fields = spec.fields
         if fields is None or name not in fields:
             raise AttributeError(name)
-        return FieldRef(self, fields[name])
+        index = fields[name]
+        return FieldRef(self, index, spec.types[index])
 
 
 class FieldRef:
-    """One field of an element: index plus level, ready to bind."""
+    """One field of an element: index plus level, ready to bind. `_type` is
+    the schema's python type, which is what tells a Date field from the
+    int it shares a wire tag with."""
 
-    def __init__(self, element, index):
+    def __init__(self, element, index, py_type=None):
         self._element = element
         self._index = index
+        self._type = py_type
 
     def _level(self):
         return self._element._level()
@@ -1058,25 +1135,29 @@ class _Variant:
         if cls is None:
             self.fields = None
             self.schema = [wire.VALUE_STR]
+            self.types = None
             self.getters = None
             self.encoders = None
+            self.decoders = None
             return
         self.fields = {}
         self.schema = []
+        self.types = []
         self.getters = []
-        # Blob fields register their bytes at encode time; the rest are
-        # identity.
+        # Blob fields register their bytes at encode time, dates and times
+        # pack (docs/datetime-plan.md D10); the rest are identity.
         self.encoders = []
+        self.decoders = []
         for f in dataclasses.fields(cls):
             tag = _wire_tag(f.type)
             if tag is None:
                 continue
             self.fields[f.name] = len(self.schema)
             self.schema.append(tag)
+            self.types.append(f.type)
             self.getters.append(operator.attrgetter(f.name))
-            self.encoders.append(
-                _encode_blob_field if tag == wire.VALUE_BLOB else (lambda v: v)
-            )
+            self.encoders.append(_FIELD_ENCODERS.get(f.type, _identity))
+            self.decoders.append(_FIELD_DECODERS.get(f.type, _identity))
         if not self.schema:
             raise TypeError(f"kaya: {cls.__name__} has no wire-typed fields")
 
@@ -1200,11 +1281,12 @@ class Collection(_BoundCollection):
         if spec.cls is None:
             return fields[0]
         names = list(spec.fields)  # schema order == wire order
+        restored = [d(v) for d, v in zip(spec.decoders, fields)]
         if isinstance(current, spec.cls):
-            for name, value in zip(names, fields):
+            for name, value in zip(names, restored):
                 setattr(current, name, value)
             return current
-        return spec.cls(**dict(zip(names, fields)))
+        return spec.cls(**dict(zip(names, restored)))
 
     def _variant_for(self, value):
         """The constructor a model value holds."""
@@ -2583,7 +2665,7 @@ def signal(initial):
     # By id, for the undo path: a restored value arrives as a signal id
     # and has to reach the binding's own cache (App._absorb_undo).
     _app._signals[handle.id] = handle
-    _records().append(wire.tx_create_signal(handle.id, initial))
+    _records().append(wire.tx_create_signal(handle.id, _wire_scalar(initial)))
     return handle
 
 
@@ -3044,6 +3126,79 @@ def slider(value=None, min=None, max=None, on_change=None, grow=None):
             _records().append(wire.tx_set_value(handle.id, value))
     if on_change is not None:
         _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
+    _set_grow(handle, grow)
+    return handle
+
+
+def _picker_field(what, value, want):
+    """A picker's template source, held to the field TYPE — a Date field
+    and an int one share the I64 tag, so nothing below this can tell them
+    apart (docs/datetime-plan.md D10)."""
+    if value._type is not want:
+        raise TypeError(
+            f"kaya: {what} binds a {want.__name__} field, not "
+            f"{getattr(value._type, '__name__', value._type)}"
+        )
+
+
+def date_picker(value=None, min=None, max=None, on_change=None, grow=None):
+    """A date picker over civil dates — `datetime.date`, never an instant
+    (docs/datetime-plan.md). UNCONTROLLED: the control owns its value and
+    reports each COMMITTED pick to `on_change`, template copies getting the
+    stamped keys first. `min`/`max` are the inclusive range; a pick past a
+    bound lands on the bound."""
+    handle = _widget(wire.KIND_DATE_PICKER)
+    if min is not None:
+        _records().append(
+            wire.tx_set_min_date(handle.id, *_date_parts("min_date", min)))
+    if max is not None:
+        _records().append(
+            wire.tx_set_max_date(handle.id, *_date_parts("max_date", max)))
+    if value is not None:
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_date(handle.id, value.id))
+        elif isinstance(value, FieldRef):
+            _picker_field("a date picker", value, datetime.date)
+            _records().append(
+                wire.tx_bind_date_element(handle.id, value._level(),
+                                          value._index)
+            )
+        else:
+            _records().append(
+                wire.tx_set_date(handle.id,
+                                 *_date_parts("a date picker's value", value)))
+    if on_change is not None:
+        _app._register(
+            handle, wire.OCC_DATE_CHANGED,
+            lambda *args: on_change(*args[:-1], _decode_date_field(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
+def time_picker(value=None, step=None, on_change=None, grow=None):
+    """A time picker over civil times — `datetime.time`, hours and minutes
+    (seconds are not a picker value). `step` is the minute granularity: 1,
+    5, 10, 15 or 30, and a pick snaps to it."""
+    handle = _widget(wire.KIND_TIME_PICKER)
+    if step is not None:
+        _records().append(wire.tx_set_minute_step(handle.id, float(step)))
+    if value is not None:
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_time(handle.id, value.id))
+        elif isinstance(value, FieldRef):
+            _picker_field("a time picker", value, datetime.time)
+            _records().append(
+                wire.tx_bind_time_element(handle.id, value._level(),
+                                          value._index)
+            )
+        else:
+            _records().append(
+                wire.tx_set_time(handle.id,
+                                 *_time_parts("a time picker's value", value)))
+    if on_change is not None:
+        _app._register(
+            handle, wire.OCC_TIME_CHANGED,
+            lambda *args: on_change(*args[:-1], _decode_time_field(args[-1])))
     _set_grow(handle, grow)
     return handle
 

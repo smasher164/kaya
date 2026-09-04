@@ -578,6 +578,48 @@ if (isMainThread) {
   })());
   check("and its landing handler lands in the widget table", (app as unknown as { _widgetHandlers: Map<string, unknown> })._widgetHandlers.has(`${wire.OCC_DROPPED}:${dndFor}`));
 
+  // ------------------------------------------------- the pickers (D2/D10)
+  // A PLAIN OBJECT CANNOT BE GIVEN VALIDITY BY A TYPE, so the packing site
+  // is the wall: `dateParts`/`timeParts` are the only route onto the wire
+  // (a constructor argument, a signal write, a record field) and each
+  // refusal names the component (docs/datetime-plan.md D2).
+  const PickerTask = kaya.record({ title: String, due: kaya.CivilDate, at: kaya.CivilTime, seq: kaya.Int }, "PickerTask");
+  let pickers!: K.Collection<K.Fields<typeof PickerTask.schema>, K.Row<typeof PickerTask.schema>>;
+  app.build(() => {
+    check("a date picker's month 13 is refused by name", throws(() => kaya.datePicker({ value: { year: 2026, month: 13, day: 1 } }), /month 13, which is not a month/));
+    check("February 30 is refused by name", throws(() => kaya.datePicker({ value: { year: 2026, month: 2, day: 30 } }), /day 30, which 2026-02 does not have/));
+    check("February 29 stands in a leap year", !throws(() => kaya.datePicker({ value: { year: 2024, month: 2, day: 29 } }), /./));
+    check("and falls in a century that is not one", throws(() => kaya.datePicker({ value: { year: 1900, month: 2, day: 29 } }), /day 29, which 1900-02 does not have/));
+    check("a date picker's value that is not a civil date is refused by name", throws(() => kaya.datePicker({ value: 20260904 as unknown as K.CivilDate }), /is a civil date \{year, month, day\}/));
+    check("a date picker's bound that is not a date is refused by name", throws(() => kaya.datePicker({ value: { year: 2026, month: 9, day: 4 }, min: { year: 2026, month: 0, day: 1 } }), /min_date has month 0/));
+    check("a time picker's hour 24 is refused by name", throws(() => kaya.timePicker({ value: { hour: 24, minute: 0 } }), /hour 24, which is not an hour/));
+    check("a time picker's minute 60 is refused by name", throws(() => kaya.timePicker({ value: { hour: 10, minute: 60 } }), /minute 60, which is not a minute/));
+    pickers = kaya.collection(PickerTask);
+  });
+  check("a Date field and a Time field take the I64 slot", (() => {
+    const spec = (pickers as unknown as { _variants: { schema: number[] }[] })._variants[0]!;
+    return JSON.stringify(spec.schema) === JSON.stringify([wire.VALUE_STR, wire.VALUE_I64, wire.VALUE_I64, wire.VALUE_I64]);
+  })());
+  app.build(() => {
+    pickers.insert("a", PickerTask({ title: "a", due: { year: 2026, month: 11, day: 20 }, at: { hour: 9, minute: 5 }, seq: 3 }));
+    check("a record's date field is refused by name when it is not one", throws(() => pickers.insert("b", PickerTask({ title: "b", due: { year: 2026, month: 2, day: 30 }, at: { hour: 0, minute: 0 }, seq: 0 })), /PickerTask.due has day 30/));
+  });
+  check("the model holds the record's own civil date and time", (() => {
+    const row = pickers.get("a")!;
+    return row.due.year === 2026 && row.due.month === 11 && row.due.day === 20 && row.at.hour === 9 && row.at.minute === 5;
+  })());
+  // THE TEMPLATE ZONE: an Int field and a CivilDate field share the I64
+  // tag, so only the SCHEMA TOKEN can tell them apart.
+  app.window(() => {
+    kaya.column(() => {
+      for (const row of pickers.rows()) {
+        check("a template date picker over an Int field is refused by name", throws(() => kaya.datePicker({ value: row.seq }), /binds a kaya.CivilDate field/));
+        check("a template time picker over a date field is refused by name", throws(() => kaya.timePicker({ value: row.due }), /binds a kaya.CivilTime field/));
+        kaya.datePicker({ value: row.due });
+      }
+    });
+  });
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

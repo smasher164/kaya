@@ -169,6 +169,24 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Slider".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs".to_string(),
+        // THE PICKERS (docs/datetime-plan.md §0's WinUI row, P3).
+        // CalendarDatePicker, NOT DatePicker: the three-spinner control
+        // bounds by MinYear/MaxYear alone and D4's range is a DATE at each
+        // end. Both event args carry the committed value; both events ride
+        // the already-filtered TypedEventHandler.
+        "Microsoft.UI.Xaml.Controls.CalendarDatePicker".to_string(),
+        "Microsoft.UI.Xaml.Controls.CalendarDatePickerDateChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TimePicker".to_string(),
+        "Microsoft.UI.Xaml.Controls.TimePickerSelectedValueChangedEventArgs".to_string(),
+        // The date each of those slots holds. `DateTimeOffset` is the
+        // PROJECTED name; the metadata's struct is `Windows.Foundation
+        // .DateTime` and the filter takes metadata names, so the projected
+        // one is "type not found". Without this entry every date-typed
+        // member is a vtable pad — measured: with `Windows.Foundation
+        // .TimeSpan` filtered and this absent, `PropertyValue::
+        // CreateDateTime` was emitted as `CreateDateTime: usize` while
+        // `CreateTimeSpan` beside it was a real method.
+        "Windows.Foundation.DateTime".to_string(),
         // The image widget: Image displays a BitmapImage source fed
         // from an in-memory stream (encoded bytes arrive as blobs;
         // there is no file to point a Uri at).

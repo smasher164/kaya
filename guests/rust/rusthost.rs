@@ -114,6 +114,9 @@ mod adaptive;
 #[path = "dnd.rs"]
 mod dnd;
 
+#[path = "pickers.rs"]
+mod pickers;
+
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
 #[cfg(target_os = "android")]
@@ -162,6 +165,7 @@ fn app(ctx: kaya::AppCtx) {
         // Narrower than the breakpoint and never resized: first-report arm.
         Ok("adaptive") => adaptive::app(ctx),
         Ok("dnd") => dnd::app(ctx),
+        Ok("pickers") => pickers::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.
         Ok("typeface") => typeface::app(ctx),

@@ -1,6 +1,8 @@
 package dev.kaya;
 
 import java.lang.reflect.Constructor;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.RecordComponent;
@@ -21,6 +23,11 @@ public final class KayaRecords {
 
         Field(int index) {
             this.index = index;
+        }
+
+        /** The wire position, for the template-zone binders. */
+        public int index() {
+            return index;
         }
 
         /**
@@ -51,6 +58,9 @@ public final class KayaRecords {
             if (t == long.class || t == Long.class) return KayaWire.VALUE_I64;
             if (t == double.class || t == Double.class) return KayaWire.VALUE_F64;
             if (t == byte[].class) return KayaWire.VALUE_BLOB;
+            // The picker types ride the I64 tag in packed decimal
+            // (docs/datetime-plan.md D10).
+            if (t == LocalDate.class || t == LocalTime.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -152,6 +162,9 @@ public final class KayaRecords {
          * carrying a blob field re-registers.
          */
         Object encodeField(int wireIndex, Object value) {
+            if (value instanceof LocalDate || value instanceof LocalTime) {
+                return scalarWire(value);
+            }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
                 if (!(value instanceof byte[])) {
                     throw new IllegalArgumentException("kaya: "
@@ -182,7 +195,17 @@ public final class KayaRecords {
             }
             int n = Math.min(wireToComponent.length, fields.size());
             for (int wire = 0; wire < n; wire++) {
-                args[wireToComponent[wire]] = fields.get(wire);
+                int at = wireToComponent[wire];
+                Class<?> want = parameters[at].getType();
+                // A packed I64 comes back as the picker type it was
+                // written from, never as the long it travelled as.
+                if (want == LocalDate.class) {
+                    args[at] = dateOf(fields.get(wire));
+                } else if (want == LocalTime.class) {
+                    args[at] = timeOf(fields.get(wire));
+                } else {
+                    args[at] = fields.get(wire);
+                }
             }
             try {
                 return ctor.newInstance(args);
@@ -347,6 +370,52 @@ public final class KayaRecords {
         public KayaApp.Node image(KayaApp.Tpl t,
                 java.util.function.Function<T, byte[]> selector) {
             return t.image(this.<byte[]>resolve(selector));
+        }
+
+        /** A template date picker's typed pick handler: the stamped
+         * copy's key (this collection's K), then the committed date. */
+        public interface DateHandler<K> {
+            void accept(KayaApp.Tx tx, K key, LocalDate date);
+        }
+
+        /** A template time picker's typed pick handler. */
+        public interface TimeHandler<K> {
+            void accept(KayaApp.Tx tx, K key, LocalTime time);
+        }
+
+        /** A date picker bound to the field the selector reads. */
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node datePicker(KayaApp.Tpl t,
+                java.util.function.Function<T, LocalDate> selector, DateHandler<K> onDate) {
+            return datePicker(t, this.<LocalDate>resolve(selector), onDate);
+        }
+
+        /** A time picker bound to the field the selector reads. */
+        public KayaApp.Node timePicker(KayaApp.Tpl t,
+                java.util.function.Function<T, LocalTime> selector, TimeHandler<K> onTime) {
+            return timePicker(t, this.<LocalTime>resolve(selector), onTime);
+        }
+
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node datePicker(KayaApp.Tpl t, Field<LocalDate> f,
+                DateHandler<K> onDate) {
+            KayaApp.Node n = t.datePicker(f);
+            if (onDate != null) {
+                t.onDateNode(n, (tx, keys, date) ->
+                        onDate.accept(tx, (K) keys.get(0), date));
+            }
+            return n;
+        }
+
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node timePicker(KayaApp.Tpl t, Field<LocalTime> f,
+                TimeHandler<K> onTime) {
+            KayaApp.Node n = t.timePicker(f);
+            if (onTime != null) {
+                t.onTimeNode(n, (tx, keys, time) ->
+                        onTime.accept(tx, (K) keys.get(0), time));
+            }
+            return n;
         }
 
         /** The token routes, for the generated row surface: exact-index
@@ -553,6 +622,32 @@ public final class KayaRecords {
     // fresh array per probe would read as a change in every field.
     private static final byte[] DEFAULT_BLOB = new byte[0];
     private static final byte[] SENTINEL_BLOB = {0x5e};
+    private static final LocalDate DEFAULT_DATE = LocalDate.of(1970, 1, 1);
+    private static final LocalDate SENTINEL_DATE = LocalDate.of(2345, 6, 7);
+    private static final LocalTime DEFAULT_TIME = LocalTime.of(0, 0);
+    private static final LocalTime SENTINEL_TIME = LocalTime.of(23, 45);
+
+    /** A scalar's wire value: a civil date or time packs, everything
+     * else travels as itself (docs/datetime-plan.md D2). */
+    static Object scalarWire(Object v) {
+        if (v instanceof LocalDate d) {
+            return KayaWire.packDate(d.getYear(), d.getMonthValue(), d.getDayOfMonth());
+        }
+        if (v instanceof LocalTime t) {
+            return KayaWire.packTime(t.getHour(), t.getMinute());
+        }
+        return v;
+    }
+
+    static LocalDate dateOf(Object packed) {
+        KayaWire.CivilDate d = KayaWire.unpackDate(packed instanceof Long l ? l : 0L);
+        return LocalDate.of(d.year(), d.month(), d.day());
+    }
+
+    static LocalTime timeOf(Object packed) {
+        KayaWire.CivilTime t = KayaWire.unpackTime(packed instanceof Long l ? l : 0L);
+        return LocalTime.of(t.hour(), t.minute());
+    }
 
     private static Object defaultValue(Class<?> t) {
         if (t == String.class) return "";
@@ -560,6 +655,8 @@ public final class KayaRecords {
         if (t == long.class || t == Long.class) return 0L;
         if (t == double.class || t == Double.class) return 0.0;
         if (t == byte[].class) return DEFAULT_BLOB;
+        if (t == LocalDate.class) return DEFAULT_DATE;
+        if (t == LocalTime.class) return DEFAULT_TIME;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -570,6 +667,8 @@ public final class KayaRecords {
         if (t == long.class || t == Long.class) return 0x5eedL;
         if (t == double.class || t == Double.class) return 1.0;
         if (t == byte[].class) return SENTINEL_BLOB;
+        if (t == LocalDate.class) return SENTINEL_DATE;
+        if (t == LocalTime.class) return SENTINEL_TIME;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 

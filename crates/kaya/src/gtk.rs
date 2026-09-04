@@ -1136,6 +1136,228 @@ mod flex {
     }
 }
 
+// --- The pickers (docs/datetime-plan.md §0, D3, D4, D6, D7) ------------
+// GTK 4.12 and libadwaita 1.4 ship neither a date nor a time control, and
+// composition is the platform idiom rather than a fallback: a date is a
+// GtkMenuButton over a GtkPopover holding a GtkCalendar, a time is a pair
+// of GtkSpinButtons. The wire packs a date as YYYYMMDD and a time as HHMM
+// (D2), and every read below asks the CONTROL rather than this state.
+
+/// A date field's committed value and its inclusive bounds, packed; 0 is
+/// unset. `GtkCalendar` cannot disable a day, so the bounds are policed
+/// in the commit path (D4's clamp).
+#[derive(Clone, Copy, Default)]
+struct DateState {
+    held: i64,
+    min: i64,
+    max: i64,
+}
+
+/// A time field's committed value and its minute granularity (D3).
+#[derive(Clone, Copy)]
+struct TimeState {
+    held: i64,
+    step: i64,
+}
+
+#[derive(Clone)]
+struct GtkDateField {
+    button: gtk4::MenuButton,
+    calendar: gtk4::Calendar,
+    popover: gtk4::Popover,
+    state: Rc<std::cell::Cell<DateState>>,
+}
+
+#[derive(Clone)]
+struct GtkTimeField {
+    root: gtk4::Box,
+    hour: gtk4::SpinButton,
+    minute: gtk4::SpinButton,
+    state: Rc<std::cell::Cell<TimeState>>,
+}
+
+/// The date the CALENDAR is showing, packed — never a model copy.
+fn calendar_packed(calendar: &gtk4::Calendar) -> i64 {
+    // `year`/`month`/`day` are 4.14 getters and this build pins v4_12;
+    // `gtk_calendar_get_date` is the reading available at every version.
+    let when = calendar.date();
+    i64::from(when.year()) * 10_000 + i64::from(when.month()) * 100
+        + i64::from(when.day_of_month())
+}
+
+/// Noon, so no zone's missing midnight can move the day.
+fn packed_date_time(packed: i64) -> Option<glib::DateTime> {
+    glib::DateTime::from_local(
+        (packed / 10_000) as i32,
+        ((packed / 100) % 100) as i32,
+        (packed % 100) as i32,
+        12,
+        0,
+        0.0,
+    )
+    .ok()
+}
+
+/// The fixed-digit spellings every scene reads — the core's own Display,
+/// so there is no second copy of the format.
+fn spelled_date(packed: i64) -> String {
+    crate::Date::from_packed(packed).map_or_else(|why| format!("<{why}>"), |d| d.to_string())
+}
+
+#[cfg(feature = "harness")]
+fn spelled_time(packed: i64) -> String {
+    crate::Time::from_packed(packed).map_or_else(|why| format!("<{why}>"), |t| t.to_string())
+}
+
+/// The button's face, in the USER's locale: kaya formats no date (D9), so
+/// this is `g_date_time_format`'s `%x` and nothing of kaya's own.
+fn date_button_label(packed: i64) -> String {
+    packed_date_time(packed)
+        .and_then(|when| when.format("%x").ok())
+        .map_or_else(|| spelled_date(packed), |s| s.to_string())
+}
+
+/// Does the user's desktop show a 12-hour clock? GNOME's own answer, and
+/// the one GTK apps read (docs/datetime-plan.md P5). SCHEMA-GUARDED:
+/// `g_settings_new` on a schema that is not installed ABORTS the process,
+/// and the validation container has no GNOME session at all.
+fn locale_is_12_hour() -> bool {
+    let Some(source) = gio::SettingsSchemaSource::default() else {
+        return false;
+    };
+    let Some(schema) = source.lookup("org.gnome.desktop.interface", true) else {
+        return false;
+    };
+    if !schema.has_key("clock-format") {
+        return false;
+    }
+    gio::Settings::new("org.gnome.desktop.interface")
+        .string("clock-format")
+        .as_str()
+        == "12h"
+}
+
+/// The hour spin's FACE. The value stays 0..=23 in both clocks — the
+/// presentation is the platform's and the wire is components (D9) — so a
+/// 12-hour desk gets its own spelling with no second value shape and no
+/// third control.
+fn hour_face(hour: i32, twelve: bool) -> String {
+    if !twelve {
+        return format!("{hour:02}");
+    }
+    glib::DateTime::from_local(2000, 1, 1, hour, 0, 0.0)
+        .ok()
+        .and_then(|when| when.format("%I %p").ok())
+        .map_or_else(|| format!("{hour:02}"), |s| s.to_string())
+}
+
+/// The face read back: "01 PM" to 13. A shape that is not one of ours is
+/// GTK's own to parse.
+fn hour_from_face(text: &str, twelve: bool) -> Option<f64> {
+    if !twelve {
+        return None;
+    }
+    let (digits, suffix) = text.trim().split_once(' ')?;
+    let hour: i32 = digits.trim().parse().ok()?;
+    if !(1..=12).contains(&hour) {
+        return None;
+    }
+    let pm = glib::DateTime::from_local(2000, 1, 1, 13, 0, 0.0)
+        .ok()
+        .and_then(|when| when.format("%p").ok())?;
+    let noonwards = suffix.trim().eq_ignore_ascii_case(pm.as_str());
+    Some(f64::from(match (hour, noonwards) {
+        (12, false) => 0,
+        (12, true) => 12,
+        (h, false) => h,
+        (h, true) => h + 12,
+    }))
+}
+
+/// Move the calendar with the echo guard armed: a programmatic write is
+/// configuration and never emits (D7), and the clamp below re-enters this
+/// signal by construction.
+fn show_date(field: &GtkDateField, quiet: &Rc<std::cell::Cell<bool>>, packed: i64) {
+    let Some(when) = packed_date_time(packed) else {
+        return;
+    };
+    let was = quiet.replace(true);
+    field.calendar.select_day(&when);
+    quiet.set(was);
+}
+
+fn show_time(field: &GtkTimeField, quiet: &Rc<std::cell::Cell<bool>>, packed: i64) {
+    let was = quiet.replace(true);
+    field.hour.set_value((packed / 100) as f64);
+    field.minute.set_value((packed % 100) as f64);
+    quiet.set(was);
+}
+
+/// THE ONE COMMIT PATH for a date, a user's pick and a driven one alike
+/// (D7, D8): CLAMP to the declared range — `GtkCalendar` cannot disable a
+/// day, so a pick outside moves the calendar onto the bound and commits
+/// the bound (D4, amended 2026-09-04) — mirror, emit. A pick landing on
+/// the value already held emits nothing.
+fn date_committed(
+    field: &GtkDateField,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+    picked: i64,
+) {
+    let mut state = field.state.get();
+    let mut packed = picked;
+    if state.min != 0 && packed < state.min {
+        packed = state.min;
+    }
+    if state.max != 0 && packed > state.max {
+        packed = state.max;
+    }
+    if packed != picked {
+        show_date(field, quiet, packed);
+    }
+    field.popover.popdown();
+    if packed == state.held {
+        return;
+    }
+    state.held = packed;
+    field.state.set(state);
+    field.button.set_label(&date_button_label(packed));
+    sink.send_date_tag(tag, packed);
+}
+
+/// The time's commit, over BOTH spins: snap the minute to the declared
+/// step (D3), mirror, emit.
+fn time_committed(
+    field: &GtkTimeField,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+) {
+    let mut state = field.state.get();
+    let raw = field.hour.value() as i64 * 100 + field.minute.value() as i64;
+    let step = state.step.max(1);
+    let mut packed = raw;
+    if step > 1 {
+        let mut hour = raw / 100;
+        let mut minute = (raw % 100 + step / 2) / step * step;
+        if minute >= 60 {
+            minute = 0;
+            hour = (hour + 1) % 24;
+        }
+        packed = hour * 100 + minute;
+    }
+    if packed != raw {
+        show_time(field, quiet, packed);
+    }
+    if packed == state.held {
+        return;
+    }
+    state.held = packed;
+    field.state.set(state);
+    sink.send_time_tag(tag, packed);
+}
+
 enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
@@ -1158,6 +1380,11 @@ enum NativeWidget {
     /// raw-pixel sibling of `Image`'s encoded decode
     /// (docs/canvas-plan.md §8).
     Canvas(KayaCanvas),
+    /// The two COMPOSED kinds (docs/datetime-plan.md §0): GTK ships no
+    /// date and no time control, so the field is built out of primitives
+    /// the way GNOME's own apps build theirs.
+    DatePicker(GtkDateField),
+    TimePicker(GtkTimeField),
 }
 
 impl NativeWidget {
@@ -1180,6 +1407,8 @@ impl NativeWidget {
             NativeWidget::Grid(w) => w.clone().upcast(),
             NativeWidget::Textarea(scroller, _) => scroller.clone().upcast(),
             NativeWidget::Canvas(w) => w.clone().upcast(),
+            NativeWidget::DatePicker(f) => f.button.clone().upcast(),
+            NativeWidget::TimePicker(f) => f.root.clone().upcast(),
         }
     }
 
@@ -1664,7 +1893,18 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
         K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
         K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
-        K::DatePicker | K::TimePicker => Vec::new(),
+        // The COMPOSED ROOT, which is also what NativeWidget::widget answers
+        // — the keyed arm below pairs the two by object identity.
+        K::DatePicker => core
+            .date_pickers
+            .iter()
+            .map(|f| f.button.clone().upcast())
+            .collect(),
+        K::TimePicker => core
+            .time_pickers
+            .iter()
+            .map(|f| f.root.clone().upcast())
+            .collect(),
     }
 }
 
@@ -2351,6 +2591,11 @@ struct CoreState {
     widget_tags: HashMap<u64, Vec<u8>>,
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
+    /// The composed pickers, in creation order like every other registry;
+    /// each entry carries the parts `set_date`/`set_time` drive and
+    /// `expect_picker` reads (docs/datetime-plan.md D8).
+    date_pickers: Vec<GtkDateField>,
+    time_pickers: Vec<GtkTimeField>,
     images: Vec<gtk4::Picture>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id, and `kind#index` is the only address
@@ -5266,9 +5511,14 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Entry | K::Textarea => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
-        K::DatePicker | K::TimePicker => {
-            crate::depth_stub("pickers")
-        }
+        K::DatePicker => core.date_pickers[resolve(t.index, core.date_pickers.len())]
+            .button
+            .clone()
+            .upcast(),
+        K::TimePicker => core.time_pickers[resolve(t.index, core.time_pickers.len())]
+            .root
+            .clone()
+            .upcast(),
     };
     core.widgets
         .iter()
@@ -7340,11 +7590,101 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
-                // The picker arms are the breadth slice's (docs/datetime-plan.md
-                // §5 step 6): a picker declared against this backend fails HERE,
-                // by name, never as a widget that quietly is not there.
-                WidgetKind::DatePicker | WidgetKind::TimePicker => {
-                    crate::depth_stub("pickers")
+                WidgetKind::DatePicker => {
+                    // The compact field, composed (docs/datetime-plan.md §0,
+                    // D6): a GtkMenuButton whose face is the held date in the
+                    // user's locale, over a popover holding the calendar whose
+                    // `day-selected` IS the commit.
+                    let calendar = gtk4::Calendar::new();
+                    let popover = gtk4::Popover::new();
+                    popover.set_child(Some(&calendar));
+                    let button = gtk4::MenuButton::new();
+                    button.set_popover(Some(&popover));
+                    // THE COMPOSED ROOT IS THE ACCESSIBLE NODE. GTK made a
+                    // plain container's role GENERIC in 4.12, which swallows an
+                    // authored name; Group is the honest role a composed field
+                    // can publish, since GTK 4.18 reaches no date-shaped one
+                    // and forwards ROLE_DESCRIPTION nowhere (both measured,
+                    // docs/traps.md). `composed_picker_role` below is what
+                    // names the kind.
+                    button.set_accessible_role(gtk4::AccessibleRole::Group);
+                    let field = GtkDateField {
+                        button: button.clone(),
+                        calendar: calendar.clone(),
+                        popover,
+                        state: Rc::new(std::cell::Cell::new(DateState::default())),
+                    };
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("date pickers carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let committed = field.clone();
+                    calendar.connect_day_selected(move |cal| {
+                        if quiet.get() {
+                            return;
+                        }
+                        date_committed(&committed, &quiet, &sink, &tag, calendar_packed(cal));
+                    });
+                    core.date_pickers.push(field.clone());
+                    NativeWidget::DatePicker(field)
+                }
+                WidgetKind::TimePicker => {
+                    // Hour and minute spins, GNOME's own composition. The
+                    // value is 0..=23 on both clocks; the FACE is the
+                    // locale's (D9) and the step rides the increments (D3).
+                    let twelve = locale_is_12_hour();
+                    let hour = gtk4::SpinButton::with_range(0.0, 23.0, 1.0);
+                    let minute = gtk4::SpinButton::with_range(0.0, 59.0, 1.0);
+                    for spin in [&hour, &minute] {
+                        spin.set_wrap(true);
+                        spin.set_digits(0);
+                    }
+                    minute.set_numeric(true);
+                    // The 12-hour face carries letters, so the hour alone
+                    // stops refusing them.
+                    hour.set_numeric(!twelve);
+                    hour.connect_output(move |spin| {
+                        spin.set_text(&hour_face(spin.value() as i32, twelve));
+                        glib::Propagation::Stop
+                    });
+                    hour.connect_input(move |spin| {
+                        hour_from_face(&spin.text(), twelve).map(Ok::<f64, ()>)
+                    });
+                    minute.connect_output(|spin| {
+                        spin.set_text(&format!("{:02}", spin.value() as i64));
+                        glib::Propagation::Stop
+                    });
+                    let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+                    // Adwaita's own spelling for a compound field, and it
+                    // costs the accessibility tree no extra node — a
+                    // separator LABEL between the spins would be counted by
+                    // `atspi_rank` and shift every `label#N` after it.
+                    root.add_css_class("linked");
+                    root.append(&hour);
+                    root.append(&minute);
+                    root.set_accessible_role(gtk4::AccessibleRole::Group);
+                    let field = GtkTimeField {
+                        root: root.clone(),
+                        hour: hour.clone(),
+                        minute: minute.clone(),
+                        state: Rc::new(std::cell::Cell::new(TimeState { held: -1, step: 1 })),
+                    };
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("time pickers carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    for spin in [&hour, &minute] {
+                        let committed = field.clone();
+                        let quiet = quiet.clone();
+                        let sink = sink.clone();
+                        let tag = tag.clone();
+                        spin.connect_value_changed(move |_| {
+                            if quiet.get() {
+                                return;
+                            }
+                            time_committed(&committed, &quiet, &sink, &tag);
+                        });
+                    }
+                    core.time_pickers.push(field.clone());
+                    NativeWidget::TimePicker(field)
                 }
                 WidgetKind::Canvas => {
                     // The raw-pixel sibling of the arm above: a
@@ -8607,6 +8947,40 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scale.set_value(v);
                     core.apply_quiet.set(false);
                 }
+                // THE PICKERS' SLOTS (docs/datetime-plan.md D2), each a
+                // packed I64. Every one of them is a PROPERTY WRITE and so
+                // rides the echo guard: the control moves and nothing is
+                // emitted (D7).
+                (NativeWidget::DatePicker(field), Prop::Date, Value::I64(packed)) => {
+                    let mut state = field.state.get();
+                    state.held = packed;
+                    field.state.set(state);
+                    show_date(field, &core.apply_quiet, packed);
+                    field.button.set_label(&date_button_label(packed));
+                }
+                (NativeWidget::DatePicker(field), Prop::MinDate, Value::I64(packed)) => {
+                    let mut state = field.state.get();
+                    state.min = packed;
+                    field.state.set(state);
+                }
+                (NativeWidget::DatePicker(field), Prop::MaxDate, Value::I64(packed)) => {
+                    let mut state = field.state.get();
+                    state.max = packed;
+                    field.state.set(state);
+                }
+                (NativeWidget::TimePicker(field), Prop::Time, Value::I64(packed)) => {
+                    let mut state = field.state.get();
+                    state.held = packed;
+                    field.state.set(state);
+                    show_time(field, &core.apply_quiet, packed);
+                }
+                (NativeWidget::TimePicker(field), Prop::MinuteStep, Value::F64(step)) => {
+                    let step = (step as i64).max(1);
+                    let mut state = field.state.get();
+                    state.step = step;
+                    field.state.set(state);
+                    field.minute.set_increments(step as f64, step as f64);
+                }
                 (NativeWidget::Select(dropdown), Prop::Value, Value::F64(v)) => {
                     // A programmatic write is quiet (uniform
                     // semantics: only the user path emits).
@@ -9122,7 +9496,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // focus and the bool is discarded, so it takes a one-shot
                     // re-grab from its own map signal. THE CONTROL, not the
                     // layout widget — `expect_focused textarea#0` reads the view.
-                    let w = widget.control();
+                    // A composed time field has no focusable root of its own
+                    // (docs/datetime-plan.md §0): its focus is the hour spin.
+                    let w = match widget {
+                        NativeWidget::TimePicker(field) => field.hour.clone().upcast(),
+                        other => other.control(),
+                    };
                     if w.is_mapped() {
                         w.grab_focus();
                     } else {
@@ -9678,6 +10057,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 labels: Vec::new(),
                 entries: Vec::new(),
                 sliders: Vec::new(),
+                date_pickers: Vec::new(),
+                time_pickers: Vec::new(),
                 images: Vec::new(),
                 canvases: Vec::new(),
                 canvas_ids: Vec::new(),
@@ -10142,30 +10523,39 @@ impl crate::harness::Stage for GtkStage {
             // inside buttons too (`label#0` read `label/Save`, measured
             // 2026-07-25), so kaya's index resolves a WIDGET and its rank
             // among the same bus role, walked DEPTH-FIRST, is the ordinal.
-            let Some((want, index)) = Self::on_main(move |core| {
+            let Some((want, index, composed)) = Self::on_main(move |core| {
                 target_widget(core, target).and_then(|widget| {
                     let want = atspi_role_of(&widget)?;
-                    atspi_rank(&core.window, &widget).map(|rank| (want, rank))
+                    let composed = composed_picker_role(core, &widget);
+                    atspi_rank(&core.window, &widget).map(|rank| (want, rank, composed))
                 })
             }) else {
                 return "<not in the accessibility tree>".to_owned();
             };
-            let role = match want {
-                atspi::Role::Button => "button",
-                atspi::Role::CheckBox => "checkbox",
-                atspi::Role::Text => "field",
-                atspi::Role::Label => "label",
-                // The heading role, spelled the way every other backend
-                // spells it: `heading/<the label's text>`.
-                atspi::Role::Heading => "heading",
-                atspi::Role::Slider => "slider",
-                atspi::Role::Image => "image",
-                atspi::Role::ProgressBar => "progress",
-                atspi::Role::ComboBox => "combobox",
-                // The closed set normalizes a scroll pane to `group`,
-                // exactly as macOS normalizes AXScrollArea.
-                atspi::Role::Grouping | atspi::Role::ScrollPane => "group",
-                _ => "unknown",
+            // BEFORE THE ROLE MATCH, and only for a widget this backend
+            // composed: GTK publishes `grouping` for a picker because it has
+            // nothing better, and `group` is the wrong word for a control
+            // the other three platforms name for what it is. What the bus
+            // vouches for is unchanged — see composed_picker_role.
+            let role = match composed {
+                Some(named) => named,
+                None => match want {
+                    atspi::Role::Button => "button",
+                    atspi::Role::CheckBox => "checkbox",
+                    atspi::Role::Text => "field",
+                    atspi::Role::Label => "label",
+                    // The heading role, spelled the way every other backend
+                    // spells it: `heading/<the label's text>`.
+                    atspi::Role::Heading => "heading",
+                    atspi::Role::Slider => "slider",
+                    atspi::Role::Image => "image",
+                    atspi::Role::ProgressBar => "progress",
+                    atspi::Role::ComboBox => "combobox",
+                    // The closed set normalizes a scroll pane to `group`,
+                    // exactly as macOS normalizes AXScrollArea.
+                    atspi::Role::Grouping | atspi::Role::ScrollPane => "group",
+                    _ => "unknown",
+                },
             };
             return match atspi_collect(want, index, false) {
                 Some(name) => format!("{role}/{name}"),
@@ -10872,17 +11262,54 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
-    // The picker arms are the breadth slice's (docs/datetime-plan.md §5
-    // step 6); until they land a driven picker fails HERE, by name, never
-    // vacuously.
+    /// THROUGH THE CONTROL (docs/datetime-plan.md D8): the calendar's own
+    /// `day-selected` fires and the arm's commit path runs, so the clamp
+    /// and the emit take a user's route.
     fn set_date(&self, t: crate::harness::Target, date: crate::Date) {
-        crate::depth_stub("pickers")
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.date_pickers.len()) else {
+                return;
+            };
+            let Some(when) = packed_date_time(date.packed()) else {
+                return;
+            };
+            core.date_pickers[i].calendar.select_day(&when);
+        });
     }
+
     fn set_time(&self, t: crate::harness::Target, time: crate::Time) {
-        crate::depth_stub("pickers")
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.time_pickers.len()) else {
+                return;
+            };
+            let field = &core.time_pickers[i];
+            // BOTH SPINS MOVE, THEN THE CONTROL'S OWN SIGNAL FIRES ONCE —
+            // `click`'s emit_clicked shape. Two live writes would commit the
+            // new hour against the OLD minute first, and an intermediate
+            // value never reaches the app (docs/datetime-plan.md §0).
+            show_time(field, &core.apply_quiet, time.packed());
+            field.hour.emit_by_name::<()>("value-changed", &[]);
+        });
     }
+
+    /// The CONTROL's value in fixed digits, read off the calendar and the
+    /// spins — never the mirrored state beside them.
     fn picker_value(&self, t: crate::harness::Target) -> String {
-        crate::depth_stub("pickers")
+        Self::on_main(move |core| {
+            if t.kind == crate::harness::TargetKind::TimePicker {
+                let Some(i) = crate::harness::try_resolve(t.index, core.time_pickers.len()) else {
+                    return "<no such target>".to_owned();
+                };
+                let field = &core.time_pickers[i];
+                return spelled_time(
+                    field.hour.value() as i64 * 100 + field.minute.value() as i64,
+                );
+            }
+            let Some(i) = crate::harness::try_resolve(t.index, core.date_pickers.len()) else {
+                return "<no such target>".to_owned();
+            };
+            spelled_date(calendar_packed(&core.date_pickers[i].calendar))
+        })
     }
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_main(move |core| {
@@ -13241,9 +13668,10 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => nth!(core.labels),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
-        K::DatePicker | K::TimePicker => {
-            crate::depth_stub("pickers")
-        }
+        K::DatePicker => try_resolve(target.index, core.date_pickers.len())
+            .map(|i| core.date_pickers[i].button.clone().upcast()),
+        K::TimePicker => try_resolve(target.index, core.time_pickers.len())
+            .map(|i| core.time_pickers[i].root.clone().upcast()),
         K::Slider => nth!(core.sliders),
         K::Image => nth!(core.images),
         K::Progress => nth!(core.progresses),
@@ -13336,6 +13764,44 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
         return Some(atspi::Role::ComboBox);
     }
     None
+}
+
+/// The closed set's name for a widget THIS BACKEND COMPOSED AS A PICKER,
+/// or None for everything else.
+///
+/// It exists because GTK cannot say it. Every role GTK publishes comes out
+/// of one switch keyed on `GtkAccessibleRole`, that switch never returns
+/// ATSPI_ROLE_DATE_EDITOR, no GtkAccessibleRole names one, and
+/// ROLE_DESCRIPTION — the slot for "what kind of group is this", the phrase
+/// Orca speaks after the name — is accepted by
+/// `gtk_accessible_update_property` and forwarded to the bus by NOTHING:
+/// `GetAttributes` publishes toolkit, level, placeholder-text,
+/// colindextext, rowindextext and keyshortcuts, and `GetLocalizedRoleName`
+/// is derived from the role alone. Both halves measured 2026-09-04, on the
+/// bus and in gtkatspicontext.c (docs/traps.md).
+///
+/// SO THE ROLE WORD IS KAYA'S, and this is the line that says what it is
+/// worth. It is `Grouping | ScrollPane => "group"` one row down: the closed
+/// set's name for what the platform published, exactly as macOS's
+/// AXScrollArea is named `group` there. What it is NOT is kaya's model
+/// agreeing with itself — the answer is keyed on THE WIDGET THIS BACKEND
+/// BUILT, by object identity, never on the kind the scene named, so
+/// `expect_ax label#0` can never read `datetime`; and the node's existence,
+/// its ordinal and its NAME still come off the bus, so a picker whose
+/// accessible wiring broke reads "<not in the accessibility tree>" exactly
+/// as it did before.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn composed_picker_role(core: &CoreState, widget: &gtk4::Widget) -> Option<&'static str> {
+    use gtk4::prelude::Cast;
+    let is_root = core
+        .date_pickers
+        .iter()
+        .any(|f| f.button.clone().upcast::<gtk4::Widget>() == *widget)
+        || core
+            .time_pickers
+            .iter()
+            .any(|f| f.root.clone().upcast::<gtk4::Widget>() == *widget);
+    is_root.then_some("datetime")
 }
 
 /// This widget's rank among the widgets of the SAME AT-SPI role in the

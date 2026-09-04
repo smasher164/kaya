@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
             // same byte-frozen census must come out of both.
             "assets" -> Assets::app
             "dnd" -> Dnd::app
+            "pickers" -> Pickers::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

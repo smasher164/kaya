@@ -224,6 +224,9 @@ public final class KayaProcessor extends AbstractProcessor {
             // so a component skipped HERE shifts every later exact-index
             // token off the runtime schema.
             case "byte[]" -> "byte[]";
+            // The picker types (docs/datetime-plan.md D10).
+            case "java.time.LocalDate" -> "java.time.LocalDate";
+            case "java.time.LocalTime" -> "java.time.LocalTime";
             default -> null;
         };
     }
@@ -341,6 +344,20 @@ public final class KayaProcessor extends AbstractProcessor {
         w(b, "        KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,");
         w(b, "                KayaRecords.Collection.ToggleHandler<%s> onToggle) {", key);
         w(b, "            return c.checkbox(tpl(), f, onToggle);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        /** A date picker on this field with its pick handler");
+        w(b, "         * co-located, the key typed as this collection's own. */");
+        w(b, "        KayaApp.Node datePicker(KayaRecords.Field<java.time.LocalDate> f,");
+        w(b, "                KayaRecords.Collection.DateHandler<%s> onDate) {", key);
+        w(b, "            return c.datePicker(tpl(), f, onDate);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        /** A time picker on this field with its pick handler");
+        w(b, "         * co-located. */");
+        w(b, "        KayaApp.Node timePicker(KayaRecords.Field<java.time.LocalTime> f,");
+        w(b, "                KayaRecords.Collection.TimeHandler<%s> onTime) {", key);
+        w(b, "            return c.timePicker(tpl(), f, onTime);");
         w(b, "        }");
         w(b, "    }");
         w(b, "");

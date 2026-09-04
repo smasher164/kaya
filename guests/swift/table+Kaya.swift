@@ -49,6 +49,20 @@ struct TableItemRow {
         t.checkbox(f, onToggle: onToggle)
     }
 
+    func datePicker(
+        _ f: KayaField<KayaDate>,
+        onDate: ((KayaAppTx, [KayaValue], KayaDate) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.datePicker(f, onDate: onDate)
+    }
+
+    func timePicker(
+        _ f: KayaField<KayaTime>,
+        onTime: ((KayaAppTx, [KayaValue], KayaTime) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.timePicker(f, onTime: onTime)
+    }
+
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }

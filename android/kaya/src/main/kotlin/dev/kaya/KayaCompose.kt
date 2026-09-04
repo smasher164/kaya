@@ -42,6 +42,7 @@ import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 // The entry/textarea path (docs/undo-plan.md §1.4). `undoState` and its
 // five members are the ONLY experimental surface here at foundation
 // 1.7.5.
@@ -78,6 +79,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Edit
@@ -88,6 +90,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -105,10 +108,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -116,8 +124,11 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Typography
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 // Material 3 adaptive: Android's OWN list-detail container
@@ -143,6 +154,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -188,6 +200,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.heading
@@ -374,6 +387,29 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
     var maxValue by mutableStateOf(1.0)
+
+    /**
+     * THE PICKERS' SLOTS (docs/datetime-plan.md D2), packed decimal:
+     * [date], [minDate] and [maxDate] as YYYYMMDD (0 = no bound),
+     * [time] as HHMM, [minuteStep] the count Compose has no native
+     * increment for (D3, snapped in the commit path). Composition
+     * state: the field draws from them.
+     */
+    var date by mutableLongStateOf(0L)
+    var minDate by mutableLongStateOf(0L)
+    var maxDate by mutableLongStateOf(0L)
+    var time by mutableLongStateOf(0L)
+    var minuteStep by mutableIntStateOf(1)
+
+    /**
+     * WHAT THE PICKER FIELD ACTUALLY PRESENTED, in fixed digits, stamped
+     * by the composable that formatted it — `expect_picker`'s reading
+     * (docs/datetime-plan.md D8), never a model echo, the
+     * [tablePresented] rule one kind over. Empty means no picker body
+     * has rendered, which is a different answer from a wrong value.
+     * Volatile: written at composition, read by the harness thread.
+     */
+    @Volatile var pickerPresented = ""
     // The image slot: the decoded bitmap (null is the placeholder
     // class) and its size as the harness's "WxH" observation string
     // ("0x0" before a source lands or after a failed decode).
@@ -772,6 +808,8 @@ object KayaSceneModel {
     val grids = ArrayList<KayaNode>()
     val textareas = ArrayList<KayaNode>()
     val canvases = ArrayList<KayaNode>()
+    val datePickers = ArrayList<KayaNode>()
+    val timePickers = ArrayList<KayaNode>()
     /**
      * The appearance the core last rastered with — written by the ONE
      * reading the presentation report sends (KayaRoot), so
@@ -1297,6 +1335,14 @@ object KayaCompose {
      * does not fit, so every value arriving here is already legal. */
     private const val PROP_ROLE = 16
     private const val PROP_INSET = 17
+
+    // The pickers' slots (docs/datetime-plan.md D2/D3/D4): three packed
+    // decimal I64s — YYYYMMDD for a date, HHMM for a time — and a count.
+    private const val PROP_DATE = 19
+    private const val PROP_TIME = 20
+    private const val PROP_MIN_DATE = 21
+    private const val PROP_MAX_DATE = 22
+    private const val PROP_MINUTE_STEP = 23
     // The role enum's wire values (spec enum "role"). Long, because the
     // prop rides as an i64 and the render arms compare against the
     // node's own field.
@@ -1708,6 +1754,8 @@ object KayaCompose {
                         KIND_GRID -> KayaSceneModel.grids.add(node)
                         KIND_TEXTAREA -> KayaSceneModel.textareas.add(node)
                         KIND_CANVAS -> KayaSceneModel.canvases.add(node)
+                        KIND_DATE_PICKER -> KayaSceneModel.datePickers.add(node)
+                        KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -1754,6 +1802,12 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.role = readI64(b)
                         PROP_INSET ->
                             KayaSceneModel.nodes[id]!!.inset = readF64(b)
+                        PROP_DATE -> KayaSceneModel.nodes[id]!!.date = readI64(b)
+                        PROP_TIME -> KayaSceneModel.nodes[id]!!.time = readI64(b)
+                        PROP_MIN_DATE -> KayaSceneModel.nodes[id]!!.minDate = readI64(b)
+                        PROP_MAX_DATE -> KayaSceneModel.nodes[id]!!.maxDate = readI64(b)
+                        PROP_MINUTE_STEP ->
+                            KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
                         PROP_SOURCE -> {
                             // A null bitmap is the PLACEHOLDER class,
                             // never a crash — imageSize stays "0x0".
@@ -2608,16 +2662,25 @@ object KayaCompose {
      * reorder injected the rows' pre-reorder centres and dropped a row
      * onto itself (docs/traps.md). Two frames, because a posted callback
      * fires at the START of a frame and the layout follows inside it.
+     * AND THE WAIT IS FOR THE FRAME, NOT FOR A SECOND: under a five-lane
+     * matrix (host load past 100) an emulator frame can take longer than
+     * the 1s this once gave up after, silently, and the verb then aimed at
+     * the previous arrangement's boxes — the drop landed in a gap and the
+     * drag ended "none", three matrices running (docs/deferred.md's android
+     * drag WATCH, decoded by KAYA_DRAG_EVENT 2026-09-04). A frame that never
+     * comes in 10s is said out loud instead.
      */
     private fun kayaAwaitFrames(activity: ComponentActivity, frames: Int) {
-        repeat(frames) {
+        repeat(frames) { n ->
             val done = java.util.concurrent.CountDownLatch(1)
             activity.runOnUiThread {
                 android.view.Choreographer.getInstance().postFrameCallback {
                     done.countDown()
                 }
             }
-            done.await(1, java.util.concurrent.TimeUnit.SECONDS)
+            if (!done.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                Log.i("kaya", "KAYA_DRAG_EVENT: frame ${n + 1} of $frames never came in 10s")
+            }
         }
     }
 
@@ -4506,6 +4569,8 @@ object KayaCompose {
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
             "textarea" -> KayaSceneModel.textareas
+            "date_picker" -> KayaSceneModel.datePickers
+            "time_picker" -> KayaSceneModel.timePickers
             // Every kind is addressable for accessibility — that is what
             // makes a universal prop universal — so this table is the
             // core's parse_target_kind list, not the subset of kinds some
@@ -4528,8 +4593,13 @@ object KayaCompose {
         className: CharSequence?,
         childCount: Int,
         heading: Boolean,
+        published: String? = null,
     ): String {
         if (heading) return "heading"
+        // What the node PUBLISHED about itself, ahead of role and class:
+        // the pickers' `datetime` has no native source at compose-ui
+        // 1.7.5 (docs/datetime-plan.md P4, [KayaPickerKind]).
+        if (published != null) return published
         val byRole =
             when (role) {
                 Role.Button -> "button"
@@ -4620,6 +4690,7 @@ object KayaCompose {
             out.append(" [").append(node.id)
                 .append(" tag=").append(node.config.getOrNull(SemanticsProperties.TestTag))
                 .append(" role=").append(node.config.getOrNull(SemanticsProperties.Role))
+                .append(" published=").append(node.config.getOrNull(KayaPickerKind))
                 .append(" class=")
                 .append(provider?.createAccessibilityNodeInfo(node.id)?.className ?: "no-info")
                 .append(" name=").append(kayaAxName(node))
@@ -4644,6 +4715,7 @@ object KayaCompose {
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
         val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         val role = node.config.getOrNull(SemanticsProperties.Role)
+        val published = node.config.getOrNull(KayaPickerKind)
         // THE SEMANTICS-ONLY FALLBACK, computed on every read but
         // consulted only after the provider's leash expires (see the
         // expect_ax arm): the same platform-owned tree the provider
@@ -4651,8 +4723,13 @@ object KayaCompose {
         val cfg = node.config
         val fallbackRole = when {
             cfg.getOrNull(SemanticsProperties.Heading) != null -> "heading"
+            // AHEAD OF THE FIELD ARM, and the two routes cannot be
+            // allowed to disagree — docs/traps.md, "compose-ui 1.7.5 has
+            // no picker Role, and the Material date field publishes an
+            // EditText".
+            published != null -> published
             cfg.getOrNull(SemanticsProperties.EditableText) != null -> "field"
-            else -> kayaAxRole(role, null, node.children.size, false)
+            else -> kayaAxRole(role, null, node.children.size, false, published)
         }
         // A TEXT NODE THAT CARRIES A CONTENT DESCRIPTION HAS NO CLASS:
         // the provider names android.widget.TextView for a plain Text and
@@ -4662,7 +4739,7 @@ object KayaCompose {
         val className = info?.className
             ?: if (cfg.getOrNull(SemanticsProperties.Text) != null) "android.widget.TextView" else null
         return KayaAxRead(
-            kayaAxRole(role, className, node.children.size, kayaAxHeading(info)) +
+            kayaAxRole(role, className, node.children.size, kayaAxHeading(info), published) +
                 "/" + kayaAxName(node),
             infoServed = info != null,
             fallback = fallbackRole + "/" + kayaAxName(node),
@@ -5518,6 +5595,64 @@ object KayaCompose {
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                    }
+                    "set_date", "set_time" -> {
+                        // THROUGH THE COMMIT PATH a user's confirm takes
+                        // (docs/datetime-plan.md D8): the clamp and the
+                        // minute snap run, the node the field draws from
+                        // moves, and the occurrence fires — the toggle
+                        // arm's shape, one kind over.
+                        val isTime = parts[0] == "set_time"
+                        val spelled = parts[2]
+                        val packed =
+                            if (isTime) kayaParseTime(spelled) else kayaParseDate(spelled)
+                        if (packed == null) {
+                            failures.add(
+                                "${parts[0]} wants " +
+                                    (if (isTime) "HH:MM" else "YYYY-MM-DD") +
+                                    ", got $spelled"
+                            )
+                        } else {
+                            val ok = onUi(activity) {
+                                val node =
+                                    if (isTime) {
+                                        target(parts[1], "time_picker",
+                                               KayaSceneModel.timePickers)
+                                    } else {
+                                        target(parts[1], "date_picker",
+                                               KayaSceneModel.datePickers)
+                                    }
+                                node?.also { kayaPickerCommitted(it, isTime, packed) } != null
+                            }
+                            if (!ok) failures.add("no such target ${parts[1]}")
+                        }
+                    }
+                    "expect_picker" -> {
+                        // THE CONTROL'S value, in fixed digits — the one
+                        // observation for the silent cases
+                        // (docs/datetime-plan.md D8), read off the stamp
+                        // the picker body wrote and never off the model.
+                        val want = quoted(parts.drop(2))
+                        val isTime = parts[1].startsWith("time_picker")
+                        val node = onUi(activity) {
+                            if (isTime) {
+                                target(parts[1], "time_picker", KayaSceneModel.timePickers)
+                            } else {
+                                target(parts[1], "date_picker", KayaSceneModel.datePickers)
+                            }
+                        }
+                        val got = node?.pickerPresented
+                        when {
+                            node == null -> failures.add("no such target ${parts[1]}")
+                            got.isNullOrEmpty() -> failures.add(
+                                "${parts[1]} has drawn no picker field yet, so nothing " +
+                                    "has a value to read"
+                            )
+                            got == want -> observed.add(got)
+                            else -> failures.add(
+                                "${parts[1]} holds \"$got\", wanted \"$want\""
+                            )
+                        }
                     }
                     "expect_sections" -> {
                         val want = parts[1].toInt()
@@ -9095,16 +9230,26 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
             override fun onEntered(event: DragAndDropEvent) {
                 (event.toAndroidDragEvent().localState as? KayaDragSession)
                     ?.let { it.entered += 1 }
+                val e = event.toAndroidDragEvent()
+                // The android drag WATCH's instrument (docs/deferred.md): where the
+                // platform says the pointer is, per target, so a drag that ends
+                // "none" under a matrix names the target it never entered.
+                Log.i("kaya", "KAYA_DRAG_EVENT: entered node=${node.id} at=${e.x.toInt()},${e.y.toInt()}")
             }
 
-            override fun onDrop(event: DragAndDropEvent): Boolean =
-                kayaPerformDrop(node, reorderIn, event)
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                val e = event.toAndroidDragEvent()
+                val taken = kayaPerformDrop(node, reorderIn, event)
+                Log.i("kaya", "KAYA_DRAG_EVENT: drop node=${node.id} at=${e.x.toInt()},${e.y.toInt()} taken=$taken")
+                return taken
+            }
 
             override fun onEnded(event: DragAndDropEvent) {
                 val session = event.toAndroidDragEvent().localState as? KayaDragSession
                     ?: return
                 if (session.sourceId != node.id || session.ended) return
                 session.ended = true
+                Log.i("kaya", "KAYA_DRAG_EVENT: ended node=${node.id} op=${session.operation} entered=${session.entered}")
                 KayaPresent.emitDragEnded(node.identityTag, session.operation)
                 kayaDragEndings += 1
             }
@@ -9805,7 +9950,8 @@ private fun KayaRenderCore(
         // second place for the echo guard to be got wrong.
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
-        KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER -> depthStub("pickers")
+        KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER ->
+            KayaPickerField(node, a11y, boxFill)
         KayaCompose.KIND_CANVAS -> {
             // THE BLIT (docs/canvas-plan.md §8), interpreting no draw op.
             // STRICTLY 1:1, NEVER STRETCHED (§3.2.1 ruling 2), and THE
@@ -11858,9 +12004,229 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaPresent.emitAlertResult(alert, choice)
 }
 
-// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
-// docs/traps.md); the pickers' Compose arm is the breadth slice's
-// (docs/datetime-plan.md §5 step 6). Delete this helper with its last
-// call, or an unused private function fails check-detekt.
-private fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on android")
+// ---- the pickers (docs/datetime-plan.md) ------------------------------------
+// The wire packs a date as YYYYMMDD and a time as HHMM (D2). Compose's
+// DatePickerState stores its selection as UTC MIDNIGHT MILLIS, so both
+// directions go through ZoneOffset.UTC: reading it back through the
+// device's zone is the off-by-one-day genre P2 exists to keep out.
+
+/**
+ * THE PICKER'S PUBLISHED CLASSIFICATION (docs/datetime-plan.md P4;
+ * docs/traps.md, "compose-ui 1.7.5 has no picker Role, and the Material
+ * date field publishes an EditText"). Read back by [KayaCompose]'s role
+ * reader on BOTH its routes.
+ */
+val KayaPickerKind = SemanticsPropertyKey<String>("KayaPickerKind")
+
+/** The fixed-digit spellings every scene reads (harness.rs's Date and
+ * Time Display); nothing asserts what the field displays (D9). */
+internal fun kayaSpelledDate(packed: Long): String = String.format(
+    java.util.Locale.ROOT, "%04d-%02d-%02d",
+    packed / 10_000, (packed / 100) % 100, packed % 100)
+
+internal fun kayaSpelledTime(packed: Long): String = String.format(
+    java.util.Locale.ROOT, "%02d:%02d", packed / 100, packed % 100)
+
+/** `YYYY-MM-DD` to packed, refusing what is not a date (the leap rule
+ * java.time knows; a shape the digits do not fit). */
+internal fun kayaParseDate(spelled: String): Long? {
+    val parts = spelled.split("-")
+    if (parts.size != 3 || parts[0].length != 4 ||
+        parts[1].length != 2 || parts[2].length != 2
+    ) {
+        return null
+    }
+    val year = parts[0].toIntOrNull() ?: return null
+    val month = parts[1].toIntOrNull() ?: return null
+    val day = parts[2].toIntOrNull() ?: return null
+    if (month !in 1..12 || day < 1 ||
+        day > java.time.YearMonth.of(year, month).lengthOfMonth()
+    ) {
+        return null
+    }
+    return (year * 10_000 + month * 100 + day).toLong()
+}
+
+internal fun kayaParseTime(spelled: String): Long? {
+    val parts = spelled.split(":")
+    if (parts.size != 2 || parts[0].length != 2 || parts[1].length != 2) return null
+    val hour = parts[0].toIntOrNull() ?: return null
+    val minute = parts[1].toIntOrNull() ?: return null
+    if (hour !in 0..23 || minute !in 0..59) return null
+    return (hour * 100 + minute).toLong()
+}
+
+/** The state's own convention (P2): UTC midnight, never the device's.
+ * Held by KayaPickerUtcTest, which check-compose runs — docs/traps.md,
+ * "A round-trip test of a SYMMETRIC conversion measures nothing". */
+internal fun kayaUtcMillisOf(packed: Long): Long =
+    java.time.LocalDate.of(
+        (packed / 10_000).toInt(), ((packed / 100) % 100).toInt(), (packed % 100).toInt())
+        .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+internal fun kayaPackedOfUtcMillis(millis: Long): Long {
+    val date = java.time.Instant.ofEpochMilli(millis)
+        .atZone(java.time.ZoneOffset.UTC).toLocalDate()
+    return (date.year * 10_000 + date.monthValue * 100 + date.dayOfMonth).toLong()
+}
+
+/** The PLATFORM rendering the value in the user's locale and clock
+ * preference (D9): kaya spells no format. Noon, so no zone's midnight
+ * can move the day. */
+private fun kayaShownDate(context: android.content.Context, packed: Long): String {
+    val cal = java.util.Calendar.getInstance()
+    cal.set((packed / 10_000).toInt(), ((packed / 100) % 100).toInt() - 1,
+            (packed % 100).toInt(), 12, 0, 0)
+    return android.text.format.DateFormat.getDateFormat(context).format(cal.time)
+}
+
+private fun kayaShownTime(context: android.content.Context, packed: Long): String {
+    val cal = java.util.Calendar.getInstance()
+    cal.set(java.util.Calendar.HOUR_OF_DAY, (packed / 100).toInt())
+    cal.set(java.util.Calendar.MINUTE, (packed % 100).toInt())
+    return android.text.format.DateFormat.getTimeFormat(context).format(cal.time)
+}
+
+/**
+ * THE ONE COMMIT PATH, a user's confirm and a driven pick alike
+ * (docs/datetime-plan.md D7, D8): CLAMP the date to its bounds (D4, the
+ * clamp AppKit performs of its own accord), SNAP the minute to the step
+ * (D3 — Compose's TimePicker has no MinuteIncrement, so the arm
+ * emulates it), mirror the node the field draws from, emit. A pick that
+ * lands on the value already held emits nothing.
+ */
+internal fun kayaPickerCommitted(node: KayaNode, isTime: Boolean, raw: Long) {
+    if (isTime) {
+        var packed = raw
+        val step = maxOf(1, node.minuteStep)
+        if (step > 1) {
+            var hour = (raw / 100).toInt()
+            var minute = ((raw % 100).toInt() + step / 2) / step * step
+            if (minute >= 60) {
+                minute = 0
+                hour = (hour + 1) % 24
+            }
+            packed = (hour * 100 + minute).toLong()
+        }
+        if (packed == node.time) return
+        node.time = packed
+        KayaPresent.emitTimeChanged(node.tag, packed)
+    } else {
+        var packed = raw
+        if (node.minDate != 0L && packed < node.minDate) packed = node.minDate
+        if (node.maxDate != 0L && packed > node.maxDate) packed = node.maxDate
+        if (packed == node.date) return
+        node.date = packed
+        KayaPresent.emitDateChanged(node.tag, packed)
+    }
+}
+
+/**
+ * THE COMPACT FIELD (docs/datetime-plan.md D6) in the one Material
+ * idiom material3 1.3.1 has: a read-only field showing the platform's
+ * own rendering of the value, with a trailing calendar or clock icon
+ * whose tap opens `DatePickerDialog` or a dialog around `TimePicker`
+ * (`TimePickerDialog` arrives only in 1.4.0). The dialog's CONFIRM is
+ * the commit; a dismissal emits nothing.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
+    val isTime = node.kind == KayaCompose.KIND_TIME_PICKER
+    val packed = if (isTime) node.time else node.date
+    val context = LocalContext.current
+    // WHAT THIS BODY FORMATTED, stamped for expect_picker: the reading
+    // is of the field that rendered, never of a model copy nothing drew
+    // from (the tablePresented rule).
+    val spelled = if (isTime) kayaSpelledTime(packed) else kayaSpelledDate(packed)
+    SideEffect { node.pickerPresented = spelled }
+    var open by remember { mutableStateOf(false) }
+    val press = remember { MutableInteractionSource() }
+    LaunchedEffect(press) {
+        press.interactions.collect {
+            if (it is PressInteraction.Release) open = true
+        }
+    }
+    OutlinedTextField(
+        value = if (isTime) kayaShownTime(context, packed) else kayaShownDate(context, packed),
+        onValueChange = {},
+        readOnly = true,
+        singleLine = true,
+        interactionSource = press,
+        // The fill rides the FIELD, the select arm's rule. The merge
+        // makes the field and its icon ONE node, so an authored label
+        // names the control instead of leaving an unnamed box beside it
+        // (the checkbox arm's measurement).
+        modifier = boxFill.then(a11y)
+            .semantics(mergeDescendants = true) { this[KayaPickerKind] = "datetime" },
+        trailingIcon = {
+            IconButton(onClick = { open = true }) {
+                Icon(
+                    if (isTime) Icons.Filled.Schedule else Icons.Filled.DateRange,
+                    contentDescription = null,
+                )
+            }
+        },
+    )
+    if (!open) return
+    if (isTime) {
+        val timeState = rememberTimePickerState(
+            initialHour = (packed / 100).toInt(),
+            initialMinute = (packed % 100).toInt(),
+            is24Hour = android.text.format.DateFormat.is24HourFormat(context),
+        )
+        AlertDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    open = false
+                    kayaPickerCommitted(
+                        node, true, (timeState.hour * 100 + timeState.minute).toLong())
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+            text = { TimePicker(state = timeState) },
+        )
+        return
+    }
+    val minYear = if (node.minDate != 0L) {
+        (node.minDate / 10_000).toInt()
+    } else {
+        DatePickerDefaults.YearRange.first
+    }
+    val maxYear = if (node.maxDate != 0L) {
+        (node.maxDate / 10_000).toInt()
+    } else {
+        DatePickerDefaults.YearRange.last
+    }
+    val bounds = remember(node.minDate, node.maxDate, minYear, maxYear) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                val day = kayaPackedOfUtcMillis(utcTimeMillis)
+                return (node.minDate == 0L || day >= node.minDate) &&
+                    (node.maxDate == 0L || day <= node.maxDate)
+            }
+
+            override fun isSelectableYear(year: Int): Boolean = year in minYear..maxYear
+        }
+    }
+    val dateState = rememberDatePickerState(
+        initialSelectedDateMillis = kayaUtcMillisOf(packed),
+        yearRange = minYear..maxYear,
+        selectableDates = bounds,
+    )
+    DatePickerDialog(
+        onDismissRequest = { open = false },
+        confirmButton = {
+            TextButton(onClick = {
+                open = false
+                dateState.selectedDateMillis?.let {
+                    kayaPickerCommitted(node, false, kayaPackedOfUtcMillis(it))
+                }
+            }) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+    ) {
+        DatePicker(state = dateState)
+    }
+}

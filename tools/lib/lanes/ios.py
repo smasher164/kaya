@@ -29,7 +29,7 @@ SWIFT_ENTRIES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "canvas", "sizepolicy", "dnd",
+    "table", "canvas", "sizepolicy", "dnd", "pickers",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -43,7 +43,7 @@ GO_SCENES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "dnd",
+    "table", "dnd", "pickers",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -62,7 +62,7 @@ RUST_SCENES = [
     "a11y", "a11yrows", "styling", "ranges", "progress",
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
-    "dirty", "dnd",
+    "dirty", "dnd", "pickers",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -83,10 +83,7 @@ PAD_EXTRAS = {
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes).
-# The pickers' iOS legs come with the breadth slice (docs/datetime-plan.md
-# §5 step 6): the UIDatePicker arm is in the shared interpreter, and the
-# lane wires the scene once its roles are measured on the phone.
-UNWIRED_SCENES = ["pickers"]
+UNWIRED_SCENES = []
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names

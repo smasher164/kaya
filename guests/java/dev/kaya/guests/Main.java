@@ -86,6 +86,9 @@ public final class Main {
             case "panes":
                 app = Panes::app;
                 break;
+            case "pickers":
+                app = Pickers::app;
+                break;
             case "scroll":
                 app = Scroll::app;
                 break;

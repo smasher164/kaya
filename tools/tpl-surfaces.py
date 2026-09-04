@@ -236,14 +236,16 @@ def zone_haskell(_):
 # surface (invariant 5).
 ZONES = [
     # (language, reader, zone description for the message, minimum
-    #  constructors the reader must find before its verdict is believed)
-    ("rust", zone_rust, "impl Tpl (crates/kaya/src/app.rs)", 10),
-    ("go", zone_go, "func (t *Tpl) (bindings/go/app.go)", 4),
-    ("csharp", zone_csharp, "sealed class Tpl (bindings/csharp/KayaApp.cs)", 4),
-    ("java", zone_java, "class Tpl (bindings/java/dev/kaya/KayaApp.java)", 4),
-    ("swift", zone_swift, "final class KayaTpl (bindings/swift/KayaApp.swift)", 4),
-    ("ocaml", zone_ocaml, "module Tpl (bindings/ocaml/kaya_app.ml)", 4),
-    ("haskell", zone_haskell, "-> Tpl Node (bindings/haskell/KayaApp.hs)", 3),
+    #  constructors the reader must find before its verdict is believed,
+    #  how the zone SPELLS a multi-word kind: "snake" keeps the
+    #  underscore, "flat" is what lowercasing a camel/pascal name leaves)
+    ("rust", zone_rust, "impl Tpl (crates/kaya/src/app.rs)", 10, "snake"),
+    ("go", zone_go, "func (t *Tpl) (bindings/go/app.go)", 4, "flat"),
+    ("csharp", zone_csharp, "sealed class Tpl (bindings/csharp/KayaApp.cs)", 4, "flat"),
+    ("java", zone_java, "class Tpl (bindings/java/dev/kaya/KayaApp.java)", 4, "flat"),
+    ("swift", zone_swift, "final class KayaTpl (bindings/swift/KayaApp.swift)", 4, "flat"),
+    ("ocaml", zone_ocaml, "module Tpl (bindings/ocaml/kaya_app.ml)", 4, "snake"),
+    ("haskell", zone_haskell, "-> Tpl Node (bindings/haskell/KayaApp.hs)", 3, "flat"),
 ]
 
 
@@ -1720,7 +1722,7 @@ SOURCE_ZONES = [
 # for-statement guest off the tier invariant 5 excludes), the parenting
 # floor, and the generated sugar's bridge.
 NOT_FORWARDED_JAVA = {
-    "widget", "addChild", "onToggleNode",
+    "widget", "addChild", "onToggleNode", "onDateNode", "onTimeNode",
 }
 
 # C#'s façade documents its own exclusions in its generated header
@@ -1730,7 +1732,7 @@ NOT_FORWARDED_JAVA = {
 NOT_FORWARDED_CSHARP = {
     "Widget", "AddChild", "When", "ContextMenu",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
-    "BindSourceField",
+    "BindSourceField", "BindDateField", "BindTimeField",
 }
 
 
@@ -1872,10 +1874,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 4
+CSHARP_TWIN_FLOOR = 5
 
 
-JAVA_TWIN_FLOOR = 5
+JAVA_TWIN_FLOOR = 6
 
 
 def twins_java():
@@ -1942,13 +1944,20 @@ FACADES = [
 ]
 
 
-def offers(names, kind):
+def offers(names, kind, spelling):
     """Does this zone offer a constructor for `kind`?
 
     Prefix-loose as check-sugar-surface's live sweep is: `entryBound` and
     `entry_bound` are both `entry`.
+
+    AND THE KIND IS SPELLED THE ZONE'S OWN WAY. The readers below lowercase
+    what they find, which erases the word boundary a camel or pascal name
+    carries (`DatePicker` reads back `datepicker`), while the two snake
+    zones keep theirs — so a multi-word kind is compared flat in five zones
+    and snake in two (docs/datetime-plan.md §5 step 6).
     """
-    return any(n == kind or n.startswith(kind) for n in names)
+    want = kind if spelling == "snake" else kind.replace("_", "")
+    return any(n == want or n.startswith(want) for n in names)
 
 
 def main():
@@ -1977,7 +1986,7 @@ def main():
         )
         return 1
     print(f"tpl-surfaces: DEFAULT_KINDS holds the wire's {len(spec)} kinds (a one-short list watched refused)")
-    for lang, reader, where, minimum in ZONES:
+    for lang, reader, where, minimum, spelling in ZONES:
         try:
             names = reader(None)
         except OSError as e:
@@ -2008,7 +2017,7 @@ def main():
             status = 1
             continue
 
-        missing = [k for k in kinds if not offers(names, k)]
+        missing = [k for k in kinds if not offers(names, k, spelling)]
         if missing:
             print(
                 f"check-sugar-surface: {lang} has no TEMPLATE-zone constructor "

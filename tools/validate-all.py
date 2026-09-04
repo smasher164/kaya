@@ -193,8 +193,14 @@ BUDGETS = {
     "mac": 620,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
-    # contended matrix after read 459s.
-    "linux": 600,
+    # contended matrix after read 459s. 700 since 2026-09-04: the roster
+    # grew 701 -> 719 with EIGHTEEN pickers legs (nine languages on both
+    # pools), every one through tools/linux/a11y-leg.sh — the slow kind,
+    # since the scene asserts expect_ax — and the first matrix on that
+    # roster read 636s where the lane standalone the same day read 574s.
+    # 700 is 1.1x over the one contended sample; to be re-read on the next
+    # quiet matrices.
+    "linux": 700,
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
     # column and the four quiet matrices since read 498, 442, 488 and
     # 559s. 600 is 1.2x over that band's top. 950 since 2026-09-03: the
@@ -205,8 +211,13 @@ BUDGETS = {
     # 884s (suites 612) where the previous had read 564, and the lane
     # standalone the same hour read suites 444s. 950 is 1.07x over the one
     # contended sample and 1.2x over 564 + the serial arithmetic; to be
+    # re-read on the next quiet matrices. 1050 since 2026-09-04: the roster
+    # grew 247 -> 253 with the six pooled pickers legs, and the first
+    # matrix on that roster read 998s (host load 4.7 at launch, the VM's
+    # qemu the top consumer at 86%) where the lane standalone the same day
+    # read 449s. 1050 is 1.05x over the one contended sample; to be
     # re-read on the next quiet matrices.
-    "windows": 950,
+    "windows": 1050,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg

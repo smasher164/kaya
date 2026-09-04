@@ -1082,6 +1082,12 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         time.sleep(0.5)
     print(out, file=log)
+    if "KAYA_SELFTEST: FAILED" in out and served:
+        # The drag WATCH's instrument, beside the injections: every drag
+        # event the app saw, so "drag ended none" under a matrix says which
+        # target the pointer entered and where the drop landed.
+        for line in re.findall(r"^.*KAYA_DRAG_EVENT: .*$", dump, re.M):
+            print(f"{name}: {line.split('KAYA_DRAG_EVENT: ', 1)[1]}", file=log)
     # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry):
     # a green verdict does not say the relaunch happened. Both sentences
     # come out of the SAME process's harness thread, so the pair is the

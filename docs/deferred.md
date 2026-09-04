@@ -10614,7 +10614,7 @@ placement", is the neighbouring class and not this one). The verb trace
 of the sighting is in the flight recorder: run 20260903T170647Z-004640,
 bundle ios-varied-python (verb-trace.txt, 621 records).
 
-## DATE AND TIME PICKERS — the depth slice is on the mac (2026-09-04); the other three backends, iOS's legs and eight bindings' sugar are the breadth slice (docs/datetime-plan.md §5 step 6)
+## ~~DATE AND TIME PICKERS — the depth slice is on the mac (2026-09-04); the other three backends, iOS's legs and eight bindings' sugar are the breadth slice (docs/datetime-plan.md §5 step 6)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (Compose, GTK, WinUI arms; iOS legs; eight bindings' sugar in both zones; Date/Time record fields in every record surface; ten guests; five rosters), and the matrix ALL PASS on all five lanes and 53 gates, 1,631 legs (mac 409, linux 719, windows 253, ios 121, android 129), after three matrices that each reddened ONE pre-existing contended leg — the linux witness leg's ordering and the Compose drag verb's silent frame wait fixed at their cause, the wayland clipboard sighting a WATCH — with every pickers leg green in all four.
 KEY: date_picker, time_picker, PropKind::Date, PropKind::Time, date_changed, time_changed, set_date, set_time, expect_picker, min_date, max_date, minute_step, datetime role, KayaGen date field, pickers scene, docs/datetime-plan.md
 
 THE DEPTH SLICE (2026-09-04): spec kinds 16/17, PROPS 19–23 on the two new
@@ -10632,18 +10632,18 @@ one `AXDateTimeArea` role for a date and a time picker alike (the closed
 OPEN, the breadth slice — each backend refuses the scene by name until its
 arm lands, and the lanes carry no pickers legs until then:
 
-- DEPTH STUB: pickers on gtk — the composed date field (GtkMenuButton +
+- ~~DEPTH STUB: pickers on gtk~~ (FIXED 2026-09-04: the arm landed) — the composed date field (GtkMenuButton +
   GtkPopover + GtkCalendar, the button's label in the locale) and the
   hour/minute GtkSpinButton pair; the range CLAMPED in the arm since
   GtkCalendar cannot disable a day; `day-selected` and `value-changed` as
   the commits; the three Stage methods; AT-SPI role measured and mapped to
   `datetime`; linux legs on both pools through tools/linux/a11y-leg.sh.
-- DEPTH STUB: pickers on winui — CalendarDatePicker (MinDate/MaxDate) and
+- ~~DEPTH STUB: pickers on winui~~ (FIXED 2026-09-04: the arm landed) — CalendarDatePicker (MinDate/MaxDate) and
   TimePicker (MinuteIncrement) admitted to tools/winui-bindgen's filter
   with their event args and bindings.rs regenerated; SelectedDateChanged /
   SelectedTimeChanged as the commits; the Stage methods; UIA control type
   measured; windows legs.
-- DEPTH STUB: pickers on compose — the Material idiom (D6): a text field
+- ~~DEPTH STUB: pickers on compose~~ (FIXED 2026-09-04: the arm landed) — the Material idiom (D6): a text field
   with a trailing calendar/clock icon opening DatePickerDialog / a Dialog
   around TimePicker under `@OptIn(ExperimentalMaterial3Api)`; the state
   read back through UTC (P2); the minute step snapped in the arm; the
@@ -10659,3 +10659,46 @@ arm lands, and the lanes carry no pickers legs until then:
   on every lane's roster; check-sugar-surface red until then, by design.
 - DESIGN.md's first-admissions lines (3378, 3386) struck when the matrix is
   green.
+
+## WATCH — android `dnd-compose` under a matrix: the drag started and was acked, and the destination answered none (first sighting 2026-09-04)
+KEY: dnd-compose, drag ended none, KAYA_DRAG_STARTED, KAYA_ACK, matrix contention, android drag
+
+On the first matrix of the pickers breadth tree (five lanes, host load 4.7
+at launch) the android compose suite's dnd leg failed its first in-process
+drag: `drag label#0 to label#1` ran the runner channel cleanly —
+`KAYA_REQUEST: draganddrop 1 …`, `KAYA_DRAG_STARTED` 1.9s later, `KAYA_ACK`
+— and the app read `label#4 "no drop yet"` and `label#5 "drag ended none"`:
+the platform drag began and ended without landing on the destination. The
+same suite standalone the same hour: `dnd-compose: PASS (21s)`,
+`pickers-compose: PASS (2s)`, 47 legs ALL PASS. Not the two recorded android
+drag classes (a touch lost to the launch transition; a re-injection
+clobbering an in-flight drag — both show a missing START, and this one has
+its START). Three sightings in three matrices, one per family (compose,
+go, jvm), each green standalone. INSTRUMENTED after the second: the Compose
+target logs `KAYA_DRAG_EVENT: entered/drop/ended` with the platform's own
+coordinates, and the runner prints them beside the injections on a failed
+verdict. DECODED on the third: `drag label#0 to label@item[x]` was injected
+to (65,120) while the pointer `entered node=7 at=56,88` and the source
+`ended … op=0 entered=1` — the drop landed in a gap because the
+destination's box was the PREVIOUS arrangement's: the step before had
+lengthened label#4, the column re-laid out, and the verb's two-frame wait
+(`kayaAwaitFrames`) gave up SILENTLY after 1s per frame, which an emulator
+under host load past 100 can exceed. The wait is for the frame now (10s,
+and a frame that never comes is printed). The next matrix reads the remedy.
+
+## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
+KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
+
+Second matrix of the pickers breadth tree (five lanes; 5-minute load 33 at
+launch, the previous matrix having just ended). The wayland python
+clipboard leg failed every paste step — `label#0 reads "empty", wanted
+"files pasted.txt pasted bytes"`, then the text paste, the entry's text,
+its ax name and the row paste, all empty — while its x11 twin and every
+other clipboard leg passed, and the leg passes standalone. The seed path
+already polls the foreign targets until the seeded type is listed (gtk.rs
+clipboard_seed, 5s), so the premise left unpinned is the READ: on wayland a
+client reads the selection only while it has keyboard focus, and a window
+that lost focus under load reads an empty offer. One sighting; on the
+next, instrument the chokepoint — log `is_active`/focus at the moment of
+each paste and the seed poll's own outcome — before rerunning.
+

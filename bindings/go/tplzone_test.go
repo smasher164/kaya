@@ -366,6 +366,8 @@ var notForwarded = map[string]string{
 	"CheckedField": "Tpl.BindCheckedField, the floor under Checkbox",
 	"ValueField":   "Tpl.BindValueField, the floor under Slider/Select/Radio",
 	"SourceField":  "Tpl.BindSourceField, the floor under Image",
+	"DateField":    "Tpl.BindDateField, the floor under DatePicker",
+	"TimeField":    "Tpl.BindTimeField, the floor under TimePicker",
 }
 
 // props reads the prop writes a surface declares: a method whose FIRST

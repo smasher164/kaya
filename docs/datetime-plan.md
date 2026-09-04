@@ -363,7 +363,43 @@ and there is no separate "done" event to wait for; AppKit has no minute
 interval, so the step is snapped in the commit path (D3), while UIKit's
 `minuteInterval` takes it natively. The AX role is `AXDateTimeArea` for
 both kinds (subrole nil), normalized to the closed set's new `datetime`.
-P2, P3 and P5 run with the breadth slice.
+**P2, P3 and P5, measured with the breadth slice (2026-09-04):** P2 —
+Compose's `selectedDateMillis` read back through UTC gives the tapped day
+in every zone, and the scene CANNOT see it (`set_date` drives the commit
+path, so nothing opens the dialog): the wall is a host-JVM test
+check-compose runs, pinning literal epoch millis after its first draft
+passed with `ZoneId.systemDefault()` at both sites (a symmetric round
+trip measures nothing; docs/traps.md). P3 — the filter row is
+`Windows.Foundation.DateTime` (the winmd's name; the projection's
+`DateTimeOffset` is refused), `CalendarDatePicker.SetDate` neither throws
+nor coerces past the bounds and `MinuteIncrement` does not snap a driven
+value, so the arm clamps and snaps in its commit path as AppKit's does;
+UIA publishes Button/Group and the peer's class name is the role
+discriminator. P5 — the composed GTK field and spin pair; the clock
+format read from GSettings (the lane's container answers 24h, the
+12-hour spelling made to print in both directions since no lane runs
+it); GtkCalendar's header buttons emit no `day-selected`, so D7's "no
+intermediate value" is free; and GTK 4.18 can publish no date-shaped
+role and drops ROLE_DESCRIPTION on the bus, so the reader names the
+composed root kaya built, by object identity (docs/traps.md). P4 on iOS:
+a compact UIDatePicker publishes no traits, so its class classifies it.
+
+**P1 and P4, measured on the iOS simulator 2026-09-04 (the breadth
+slice):** P1 holds with nothing to reconcile — the driven `set_time
+10:07` against `minuteInterval` 15 reads `10:00` back off the control AND
+out of the app's label, so UIKit's own interval and the commit path's
+snap agree at that value and the snap is the backstop whichever of the
+two moved the date; the programmatic write behind `click button#0` moves
+both controls and emits nothing, exactly as AppKit's does; and both
+bounds clamp (2027-01-01 to 2026-12-31, 2025-12-25 to 2026-01-01) on the
+programmatic drive, which is D4's amended rule. P4 is the one thing the
+mac could not have told us: the compact `UIDatePicker` IS the
+accessibility element the authored identifier resolves to, and it
+publishes NO TRAITS AT ALL — `class=UIDatePicker traits=0 elements=0` on
+both kinds, where every other control this reader classifies carries at
+least one trait. So the iOS normalization is keyed on the CLASS, the only
+signal there is, weighed ahead of `.adjustable` because the WHEEL style
+does publish it.
 
 ## §3 — The spec, in the record grammar
 

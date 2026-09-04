@@ -3,6 +3,8 @@ package dev.kaya;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Field;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -268,6 +270,10 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     private final Map<Long, ValueHandler> nodeValues = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, LocalDate>> widgetDates = new HashMap<>();
+    private final Map<Long, DateHandler> nodeDates = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, LocalTime>> widgetTimes = new HashMap<>();
+    private final Map<Long, TimeHandler> nodeTimes = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
     final java.util.Map<Long, Consumer<Tx>> closeRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
@@ -358,6 +364,18 @@ public final class KayaApp {
      * Value as an F64. */
     public interface ValueHandler {
         void accept(Tx tx, List<Object> keys, double value);
+    }
+
+    /** A template date picker's pick handler: the stamped copy's keys,
+     * then the COMMITTED date (docs/datetime-plan.md D7). */
+    public interface DateHandler {
+        void accept(Tx tx, List<Object> keys, LocalDate date);
+    }
+
+    /** A template time picker's pick handler: the copy's keys, then the
+     * committed time. */
+    public interface TimeHandler {
+        void accept(Tx tx, List<Object> keys, LocalTime time);
     }
 
     /** A nested table's header-click handler: the stamped copy's keys,
@@ -2733,6 +2751,30 @@ public final class KayaApp {
             return t.checkbox(f);
         }
 
+        public Node datePicker(LocalDate date) {
+            return t.datePicker(date);
+        }
+
+        public Node datePicker(Signal<LocalDate> s) {
+            return t.datePicker(s);
+        }
+
+        public Node datePicker(KayaRecords.Field<LocalDate> f) {
+            return t.datePicker(f);
+        }
+
+        public Node timePicker(LocalTime time) {
+            return t.timePicker(time);
+        }
+
+        public Node timePicker(Signal<LocalTime> s) {
+            return t.timePicker(s);
+        }
+
+        public Node timePicker(KayaRecords.Field<LocalTime> f) {
+            return t.timePicker(f);
+        }
+
         public Node image(byte[] source) {
             return t.image(source);
         }
@@ -2872,6 +2914,14 @@ public final class KayaApp {
 
         /** An outer row's Boolean field as this copy's checked state
          * ({@link Tpl#bindCheckedField}). */
+        public void bindDateField(Node n, int level, KayaRecords.Field<LocalDate> f) {
+            t.bindDateField(n, level, f);
+        }
+
+        public void bindTimeField(Node n, int level, KayaRecords.Field<LocalTime> f) {
+            t.bindTimeField(n, level, f);
+        }
+
         public void bindCheckedField(Node n, int level, KayaRecords.Field<Boolean> f) {
             t.bindCheckedField(n, level, f);
         }
@@ -3431,12 +3481,12 @@ public final class KayaApp {
 
         public <V> Signal<V> signal(V initial) {
             Signal<V> s = new Signal<>(++signals);
-            emit(KayaWire.txCreateSignal(s.id, initial));
+            emit(KayaWire.txCreateSignal(s.id, KayaRecords.scalarWire(initial)));
             return s;
         }
 
         public <V> void write(Signal<V> s, V value) {
-            emit(KayaWire.txWriteSignal(s.id, value));
+            emit(KayaWire.txWriteSignal(s.id, KayaRecords.scalarWire(value)));
         }
 
         public Widget widget(int kind) {
@@ -3811,6 +3861,77 @@ public final class KayaApp {
             emit(KayaWire.txSetValue(w.id, value));
             if (onChange != null) {
                 KayaApp.this.onValueChanged(w, onChange);
+            }
+            return w;
+        }
+
+        /** A date picker holding date, with its pick handler co-located
+         * (null for none): the compact field that opens the platform's
+         * calendar (docs/datetime-plan.md). min and max are the inclusive
+         * range (null for none) and a pick past a bound lands on the
+         * bound. */
+        public Widget datePicker(LocalDate date, LocalDate min, LocalDate max,
+                BiConsumer<Tx, LocalDate> onDate) {
+            Widget w = widget(KayaWire.KIND_DATE_PICKER);
+            dateBounds(w.id, min, max);
+            emit(KayaWire.txSetDate(w.id, date.getYear(), date.getMonthValue(),
+                    date.getDayOfMonth()));
+            if (onDate != null) {
+                KayaApp.this.onDate(w, onDate);
+            }
+            return w;
+        }
+
+        /** A date picker whose value binds a signal — the programmatic
+         * write path. Property writes never echo. */
+        public Widget datePicker(Signal<LocalDate> date, LocalDate min, LocalDate max,
+                BiConsumer<Tx, LocalDate> onDate) {
+            Widget w = widget(KayaWire.KIND_DATE_PICKER);
+            dateBounds(w.id, min, max);
+            emit(KayaWire.txBindDate(w.id, date.id));
+            if (onDate != null) {
+                KayaApp.this.onDate(w, onDate);
+            }
+            return w;
+        }
+
+        private void dateBounds(long id, LocalDate min, LocalDate max) {
+            if (min != null) {
+                emit(KayaWire.txSetMinDate(id, min.getYear(), min.getMonthValue(),
+                        min.getDayOfMonth()));
+            }
+            if (max != null) {
+                emit(KayaWire.txSetMaxDate(id, max.getYear(), max.getMonthValue(),
+                        max.getDayOfMonth()));
+            }
+        }
+
+        /** A time picker holding time: hours and minutes, no seconds.
+         * minuteStep is the granularity (1, 5, 10, 15 or 30; 0 for the
+         * platform's own) and a pick snaps to it. */
+        public Widget timePicker(LocalTime time, int minuteStep,
+                BiConsumer<Tx, LocalTime> onTime) {
+            Widget w = widget(KayaWire.KIND_TIME_PICKER);
+            if (minuteStep != 0) {
+                emit(KayaWire.txSetMinuteStep(w.id, minuteStep));
+            }
+            emit(KayaWire.txSetTime(w.id, time.getHour(), time.getMinute()));
+            if (onTime != null) {
+                KayaApp.this.onTime(w, onTime);
+            }
+            return w;
+        }
+
+        /** A time picker whose value binds a signal. */
+        public Widget timePicker(Signal<LocalTime> time, int minuteStep,
+                BiConsumer<Tx, LocalTime> onTime) {
+            Widget w = widget(KayaWire.KIND_TIME_PICKER);
+            if (minuteStep != 0) {
+                emit(KayaWire.txSetMinuteStep(w.id, minuteStep));
+            }
+            emit(KayaWire.txBindTime(w.id, time.id));
+            if (onTime != null) {
+                KayaApp.this.onTime(w, onTime);
             }
             return w;
         }
@@ -5132,6 +5253,61 @@ public final class KayaApp {
             KayaApp.this.onToggle(n, handler);
         }
 
+        /** Register a pick handler on a template date picker — the
+         * bridge the typed record sugar routes through. */
+        public void onDateNode(Node n, DateHandler handler) {
+            KayaApp.this.onDate(n, handler);
+        }
+
+        /** Register a pick handler on a template time picker. */
+        public void onTimeNode(Node n, TimeHandler handler) {
+            KayaApp.this.onTime(n, handler);
+        }
+
+        /** A date picker in the blueprint at a constant date; register
+         * its handler with app.onDate, which hands it the stamped copy's
+         * keys. */
+        public Node datePicker(LocalDate date) {
+            Node n = widget(KayaWire.KIND_DATE_PICKER);
+            tx.emit(KayaWire.txSetDate(n.id, date.getYear(), date.getMonthValue(),
+                    date.getDayOfMonth()));
+            return n;
+        }
+
+        public Node datePicker(Signal<LocalDate> s) {
+            Node n = widget(KayaWire.KIND_DATE_PICKER);
+            tx.emit(KayaWire.txBindDate(n.id, s.id));
+            return n;
+        }
+
+        /** A date picker bound to one field of the element — each copy
+         * showing its own row's date (docs/datetime-plan.md D10). */
+        public Node datePicker(KayaRecords.Field<LocalDate> f) {
+            Node n = widget(KayaWire.KIND_DATE_PICKER);
+            bindDateField(n, 0, f);
+            return n;
+        }
+
+        /** A time picker in the blueprint: the date picker's three
+         * sources, hours and minutes. */
+        public Node timePicker(LocalTime time) {
+            Node n = widget(KayaWire.KIND_TIME_PICKER);
+            tx.emit(KayaWire.txSetTime(n.id, time.getHour(), time.getMinute()));
+            return n;
+        }
+
+        public Node timePicker(Signal<LocalTime> s) {
+            Node n = widget(KayaWire.KIND_TIME_PICKER);
+            tx.emit(KayaWire.txBindTime(n.id, s.id));
+            return n;
+        }
+
+        public Node timePicker(KayaRecords.Field<LocalTime> f) {
+            Node n = widget(KayaWire.KIND_TIME_PICKER);
+            bindTimeField(n, 0, f);
+            return n;
+        }
+
         /** A checkbox in the blueprint; register its handler with
          * app.onToggle, which hands it the stamped copy's keys. */
         public Node checkbox(boolean checked) {
@@ -5144,6 +5320,18 @@ public final class KayaApp {
             Node n = widget(KayaWire.KIND_CHECKBOX);
             tx.emit(KayaWire.txBindChecked(n.id, s.id));
             return n;
+        }
+
+        /** Binds a date picker's value to one field of the element;
+         * Field&lt;LocalDate&gt; only, which keeps a picker off the long
+         * field it shares a wire tag with. */
+        public void bindDateField(Node n, int level, KayaRecords.Field<LocalDate> f) {
+            tx.emit(KayaWire.txBindDateElement(n.id, level, f.index()));
+        }
+
+        /** Binds a time picker's value to one field of the element. */
+        public void bindTimeField(Node n, int level, KayaRecords.Field<LocalTime> f) {
+            tx.emit(KayaWire.txBindTimeElement(n.id, level, f.index()));
         }
 
         /** A checkbox bound to one field of the element — each copy
@@ -5679,6 +5867,31 @@ public final class KayaApp {
         nodeValues.put(n.id, handler);
     }
 
+    /**
+     * Register a pick handler for a live date picker: the control owns
+     * its value and reports each COMMITTED pick here; a programmatic
+     * write never echoes (docs/datetime-plan.md D7).
+     */
+    public void onDate(Widget w, BiConsumer<Tx, LocalDate> handler) {
+        widgetDates.put(w.id, handler);
+    }
+
+    /** Register a pick handler for a template date picker; it also
+     * receives the stamped copy's keys, outermost first. */
+    public void onDate(Node n, DateHandler handler) {
+        nodeDates.put(n.id, handler);
+    }
+
+    /** Register a pick handler for a live time picker. */
+    public void onTime(Widget w, BiConsumer<Tx, LocalTime> handler) {
+        widgetTimes.put(w.id, handler);
+    }
+
+    /** Register a pick handler for a template time picker, keys first. */
+    public void onTime(Node n, TimeHandler handler) {
+        nodeTimes.put(n.id, handler);
+    }
+
     // Unsafe absolute loads plus explicit fences, bound once as
     // MethodHandles and invoked through invokeExact. Raw addresses
     // rather than direct ByteBuffers because of the ART VarHandle
@@ -5932,6 +6145,34 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, (Double) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DATE_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, LocalDate> handler = widgetDates.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, KayaRecords.dateOf(occ.payload));
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DATE_CHANGED) {
+                DateHandler handler = nodeDates.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, KayaRecords.dateOf(occ.payload));
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TIME_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, LocalTime> handler = widgetTimes.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, KayaRecords.timeOf(occ.payload));
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TIME_CHANGED) {
+                TimeHandler handler = nodeTimes.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, KayaRecords.timeOf(occ.payload));
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_CLOSE_REQUESTED) {

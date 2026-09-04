@@ -185,6 +185,12 @@ type app = {
   node_changes : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> unit) Hashtbl.t;
   widget_values : (int64, float -> unit) Hashtbl.t;
+  (* The pickers' committed values arrive as the packed I64; the sugar
+     lifts them to [date]/[time] at registration. *)
+  widget_dates : (int64, int64 -> unit) Hashtbl.t;
+  widget_times : (int64, int64 -> unit) Hashtbl.t;
+  node_dates : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
+  node_times : (int64, Kaya_wire.value list -> int64 -> unit) Hashtbl.t;
   (* Window lifecycle: one handler each, receiving the window id. *)
   close_requested : (int64, unit -> unit) Hashtbl.t;
   entry_popped : (int64, unit -> unit) Hashtbl.t;
@@ -306,6 +312,10 @@ let create () =
     node_changes = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
+    widget_dates = Hashtbl.create 8;
+    widget_times = Hashtbl.create 8;
+    node_dates = Hashtbl.create 8;
+    node_times = Hashtbl.create 8;
     close_requested = Hashtbl.create 8;
     entry_popped = Hashtbl.create 8;
     back_requested = Hashtbl.create 8;
@@ -523,6 +533,52 @@ let undoable ?(window = 0L) label =
   if tx.undo_group <> None then
     failwith "kaya: this transaction is already an undo group — one name per step";
   tx.undo_group <- Some (window, label)
+
+(* A civil date: year (proleptic Gregorian), month 1-12, day 1-31, with
+   no zone and no instant (docs/datetime-plan.md D2). An I64 in packed
+   decimal on the wire; a date picker's value and a Date record field. *)
+type date = { year : int; month : int; day : int }
+
+(* A civil time of day: hour 0-23, minute 0-59. No seconds (D3). *)
+type time = { hour : int; minute : int }
+
+let string_of_date d = Printf.sprintf "%04d-%02d-%02d" d.year d.month d.day
+let string_of_time t = Printf.sprintf "%02d:%02d" t.hour t.minute
+
+let days_in_month year month =
+  if month = 2 && year mod 4 = 0 && (year mod 100 <> 0 || year mod 400 = 0) then 29
+  else [| 31; 28; 31; 30; 31; 30; 31; 31; 30; 31; 30; 31 |].(month - 1)
+
+(* The packing, and the wall a plain record cannot be given by its type:
+   an impossible date is refused BY NAME here rather than at apply. *)
+let pack_date d =
+  if d.month < 1 || d.month > 12 then
+    invalid_arg
+      (Printf.sprintf "kaya: %d is not a month (1..12) — that is not a date" d.month);
+  if d.day < 1 || d.day > days_in_month d.year d.month then
+    invalid_arg
+      (Printf.sprintf "kaya: %04d-%02d has no day %d" d.year d.month d.day);
+  Kaya_wire.pack_date d.year d.month d.day
+
+let pack_time t =
+  if t.hour < 0 || t.hour > 23 then
+    invalid_arg
+      (Printf.sprintf "kaya: %d is not an hour (0..23) — that is not a time" t.hour);
+  if t.minute < 0 || t.minute > 59 then
+    invalid_arg (Printf.sprintf "kaya: %d is not a minute (0..59)" t.minute);
+  Kaya_wire.pack_time t.hour t.minute
+
+let date_of_packed packed =
+  let year, month, day = Kaya_wire.unpack_date packed in
+  { year; month; day }
+
+let time_of_packed packed =
+  let hour, minute = Kaya_wire.unpack_time packed in
+  { hour; minute }
+
+(* A date or a time as a signal's value. *)
+let date_value d = Kaya_wire.I64 (pack_date d)
+let time_value t = Kaya_wire.I64 (pack_time t)
 
 let signal initial =
   let tx = the_tx () in
@@ -930,6 +986,69 @@ let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hin
   | Some handler ->
       let (Widget id) = w in
       Hashtbl.replace tx.app.widget_toggles id handler
+  | None -> ());
+  w
+
+(* A date picker over civil dates — the compact field that opens the
+   platform's calendar (docs/datetime-plan.md). UNCONTROLLED: the control
+   owns its value and reports each COMMITTED pick to [~on_change].
+   [~value] is a constant, [~bind] a signal; [~min]/[~max] are the
+   inclusive range, and a pick past a bound lands on the bound. *)
+let date_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
+    ?a11y_hint ?value ?bind ?min ?max ?on_change () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_date_picker in
+  Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  let (Widget id) = w in
+  Option.iter
+    (fun (d : date) ->
+      ignore (pack_date d);
+      emit tx (Kaya_wire.tx_set_min_date id d.year d.month d.day))
+    min;
+  Option.iter
+    (fun (d : date) ->
+      ignore (pack_date d);
+      emit tx (Kaya_wire.tx_set_max_date id d.year d.month d.day))
+    max;
+  Option.iter
+    (fun (d : date) ->
+      ignore (pack_date d);
+      emit tx (Kaya_wire.tx_set_date id d.year d.month d.day))
+    value;
+  Option.iter (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_date id s)) bind;
+  (match on_change with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_dates id (fun packed ->
+          handler (date_of_packed packed))
+  | None -> ());
+  w
+
+(* A time picker over civil times: hours and minutes, no seconds.
+   [~step] is the minute granularity (1, 5, 10, 15 or 30) and a pick
+   snaps to it. *)
+let time_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
+    ?a11y_hint ?value ?bind ?step ?on_change () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_time_picker in
+  Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  let (Widget id) = w in
+  Option.iter
+    (fun n -> emit tx (Kaya_wire.tx_set_minute_step id (float_of_int n)))
+    step;
+  Option.iter
+    (fun (t : time) ->
+      ignore (pack_time t);
+      emit tx (Kaya_wire.tx_set_time id t.hour t.minute))
+    value;
+  Option.iter (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_time id s)) bind;
+  (match on_change with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_times id (fun packed ->
+          handler (time_of_packed packed))
   | None -> ());
   w
 
@@ -1344,6 +1463,15 @@ let i64_field index : ('a, int64) field =
 
 let f64_field index : ('a, float) field =
   { fd_index = index; fd_to_value = (fun x -> Kaya_wire.F64 x) }
+
+(* A Date field: a [date] in the app, an I64 in packed decimal on the
+   wire (docs/datetime-plan.md D10). The phantom is what keeps a picker
+   off the int64 field it shares a tag with. *)
+let date_field index : ('a, date) field =
+  { fd_index = index; fd_to_value = (fun d -> Kaya_wire.I64 (pack_date d)) }
+
+let time_field index : ('a, time) field =
+  { fd_index = index; fd_to_value = (fun t -> Kaya_wire.I64 (pack_time t)) }
 
 (* A blob field's MODEL value carries the guest's own bytes (a binary
    Str), so record_items reads back exactly what was written. *)
@@ -2541,6 +2669,15 @@ module Tpl = struct
     let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
 
+    (* Bind a date picker's value to one field of the element; a
+       (_, date) field only (docs/datetime-plan.md D10). *)
+    let bind_date_field ?(level = 0) (Node id) (fd : (_, date) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_date_element ~level ~field:fd.fd_index id)
+
+    (* Bind a time picker's value to one field of the element. *)
+    let bind_time_field ?(level = 0) (Node id) (fd : (_, time) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_time_element ~level ~field:fd.fd_index id)
+
     (* Bind an image's source to one field of the element; a (_, bytes)
        field only — the phantom pins it at compile time. *)
     let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
@@ -2903,6 +3040,67 @@ module Tpl = struct
     | None -> ());
     n
 
+  (* A date picker per stamped copy: [~value] a constant, [~bind] a
+     signal, [~bind_field] the row's own (_, date) field — the "due date
+     per row" shape (docs/datetime-plan.md D10). Picks carry the copy's
+     keys first. *)
+  let date_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?value ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_date_picker in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    let (Node id) = n in
+    Option.iter
+      (fun (d : date) ->
+        ignore (pack_date d);
+        emit (the_tx ())
+          (Kaya_wire.tx_set_date id d.year d.month d.day))
+      value;
+    Option.iter
+      (fun (Signal s) -> emit (the_tx ()) (Kaya_wire.tx_bind_date id s))
+      bind;
+    Option.iter (fun fd -> Floor.bind_date_field ~level n fd) bind_field;
+    (match on_change with
+    | Some handler ->
+        Hashtbl.replace (the_tx ()).app.node_dates id (fun keys packed ->
+            handler keys (date_of_packed packed))
+    | None -> ());
+    n
+
+  (* A time picker per stamped copy — the date picker's three sources,
+     hours and minutes. *)
+  let time_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?value ?bind ?bind_field
+      ?step ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_time_picker in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    let (Node id) = n in
+    Option.iter
+      (fun m -> emit (the_tx ()) (Kaya_wire.tx_set_minute_step id (float_of_int m)))
+      step;
+    Option.iter
+      (fun (t : time) ->
+        ignore (pack_time t);
+        emit (the_tx ())
+          (Kaya_wire.tx_set_time id t.hour t.minute))
+      value;
+    Option.iter
+      (fun (Signal s) -> emit (the_tx ()) (Kaya_wire.tx_bind_time id s))
+      bind;
+    Option.iter (fun fd -> Floor.bind_time_field ~level n fd) bind_field;
+    (match on_change with
+    | Some handler ->
+        Hashtbl.replace (the_tx ()).app.node_times id (fun keys packed ->
+            handler keys (time_of_packed packed))
+    | None -> ());
+    n
+
   (* An image per stamped copy: [~source] gives every copy the same bytes,
      [~bind] a Blob signal, [~bind_field] each row's own (_, bytes)
      field — the per-row thumbnail. *)
@@ -3090,6 +3288,27 @@ let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit
 let on_value_changed_node app (Node id)
     (handler : Kaya_wire.value list -> float -> unit) =
   Hashtbl.replace app.node_values id handler
+
+(* Register a pick handler for a live date picker: the control owns its
+   value and reports each COMMITTED pick here; a programmatic write never
+   echoes (docs/datetime-plan.md D7). *)
+let on_date app (Widget id) (handler : date -> unit) =
+  Hashtbl.replace app.widget_dates id (fun packed -> handler (date_of_packed packed))
+
+(* Register a pick handler for a live time picker. *)
+let on_time app (Widget id) (handler : time -> unit) =
+  Hashtbl.replace app.widget_times id (fun packed -> handler (time_of_packed packed))
+
+(* Register a pick handler for a template date picker; it also receives
+   the stamped copy's keys, outermost first. *)
+let on_date_node app (Node id) (handler : Kaya_wire.value list -> date -> unit) =
+  Hashtbl.replace app.node_dates id (fun keys packed ->
+      handler keys (date_of_packed packed))
+
+(* Register a pick handler for a template time picker, keys first. *)
+let on_time_node app (Node id) (handler : Kaya_wire.value list -> time -> unit) =
+  Hashtbl.replace app.node_times id (fun keys packed ->
+      handler keys (time_of_packed packed))
 
 (* Run everything posted, each as its own transaction, in order. *)
 let drain_posted app =
@@ -3355,6 +3574,28 @@ let dispatch_loop app =
            | Some (Kaya_wire.F64 v), keys ->
                (match Hashtbl.find_opt app.node_values id with
                | Some handler -> dispatch app (fun () -> handler keys v)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_date_changed then
+           match (payload, keys) with
+           | Some (Kaya_wire.I64 packed), [] ->
+               (match Hashtbl.find_opt app.widget_dates id with
+               | Some handler -> dispatch app (fun () -> handler packed)
+               | None -> ())
+           | Some (Kaya_wire.I64 packed), keys ->
+               (match Hashtbl.find_opt app.node_dates id with
+               | Some handler -> dispatch app (fun () -> handler keys packed)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_time_changed then
+           match (payload, keys) with
+           | Some (Kaya_wire.I64 packed), [] ->
+               (match Hashtbl.find_opt app.widget_times id with
+               | Some handler -> dispatch app (fun () -> handler packed)
+               | None -> ())
+           | Some (Kaya_wire.I64 packed), keys ->
+               (match Hashtbl.find_opt app.node_times id with
+               | Some handler -> dispatch app (fun () -> handler keys packed)
                | None -> ())
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_close_requested then

@@ -340,6 +340,18 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "([BD)V".into(),
                 fn_ptr: present_emit_value_changed as *mut _,
             },
+            // The pickers' committed values (docs/datetime-plan.md D7),
+            // packed decimal on a jlong.
+            NativeMethod {
+                name: "emitDateChanged".into(),
+                sig: "([BJ)V".into(),
+                fn_ptr: present_emit_date_changed as *mut _,
+            },
+            NativeMethod {
+                name: "emitTimeChanged".into(),
+                sig: "([BJ)V".into(),
+                fn_ptr: present_emit_time_changed as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -1322,6 +1334,30 @@ extern "system" fn present_emit_toggled(
         .convert_byte_array(&tag)
         .expect("kaya: reading the checkbox tag failed");
     unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
+}
+
+extern "system" fn present_emit_date_changed(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    packed: jlong,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the date picker tag failed");
+    unsafe { crate::capi::kaya_emit_date_changed(bytes.as_ptr(), bytes.len(), packed) };
+}
+
+extern "system" fn present_emit_time_changed(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    packed: jlong,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the time picker tag failed");
+    unsafe { crate::capi::kaya_emit_time_changed(bytes.as_ptr(), bytes.len(), packed) };
 }
 
 extern "system" fn present_emit_sort_requested(
