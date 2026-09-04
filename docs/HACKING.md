@@ -93,7 +93,13 @@ The slider and image commits are the worked examples. The ~30 touchpoints:
    the LIVE one an app builds in its build closure and the TEMPLATE one
    inside a collection's prototype row (check-sugar-surface enforces
    both once the kind lands in the generated wire.py; the template half
-   is the python census tools/tpl-surfaces.py).
+   is the python census tools/tpl-surfaces.py). Two gate lists still
+   spell the kinds by hand and refuse until the new name joins them:
+   check-steps's TARGET_KINDS and tpl-surfaces's DEFAULT_KINDS, each
+   held equal to wire.py by its own clause (docs/traps.md, "Two kind
+   lists in the gates were hand-maintained"). A multi-word kind is
+   spelled per language by check-sugar-surface's name derivation
+   (date_picker / DatePicker / datePicker).
 8. Gallery scene: extend tools/scenes/gallery.steps + every language's
    gallery guest. Scene strings byte-identical everywhere.
 9. The full validation ladder.

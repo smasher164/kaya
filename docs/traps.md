@@ -8721,3 +8721,56 @@ newline now (`"sealed class Tpl\n"`), which is the whole header line.
 The rule: a class or function header used as a census anchor is
 terminated — by the newline, a paren, or a word boundary — because the
 next surface added to that file may legitimately start with its name.
+
+## NSDatePicker CLAMPS a value past its bound to the bound BEFORE its action fires (measured 2026-09-04)
+
+The pickers plan's first draft said an out-of-range pick "snaps back to the
+previous value and emits nothing" (docs/datetime-plan.md D4). On the first mac
+run of tools/scenes/pickers.steps, `set_date date_picker#0 2027-01-01` against a
+picker bounded 2026-01-01 ..= 2026-12-31 read back `2026-12-31` from the CONTROL
+and the app heard `date: 2026-12-31`: AppKit moved the programmatic
+`dateValue` onto `maxDate` and then sent the action, so the coordinator saw an
+in-range date it had every reason to commit. A stepper user hits the same wall
+the same way, and UIDatePicker clamps `date` against `minimumDate`/
+`maximumDate` too. The uniform rule is therefore CLAMP-TO-BOUND on every
+backend (D4 amended), the composed GTK arm clamps rather than snapping, and
+the scene asserts the bound at BOTH ends. The general lesson is the one the
+canvas and the tables already taught: write the platform's own behaviour into
+the rule after the first run, never the rule you guessed before it.
+
+## NSDatePicker publishes ONE accessibility role, `AXDateTimeArea`, for a date and a time picker alike (measured 2026-09-04)
+
+`expect_ax date_picker#0 "field/Due"` failed on the first run with
+`(role=AXDateTimeArea subrole=nil)`, and the time picker printed the identical
+role. There is no date-versus-time distinction in AppKit's role, so the closed
+`expect_ax` vocabulary gained ONE name, `datetime` ("a date or time chooser,
+whichever components it shows"), rather than two the other platforms could not
+tell apart either (harness.rs `check_ax`, the mac role map, DESIGN.md's
+closed-set line). A per-platform role that only one backend can produce is a
+name no shared scene can assert.
+
+## Two kind lists in the gates were hand-maintained while every other census derives its kinds from the generated wire (found 2026-09-04)
+
+tools/check-steps.py's `TARGET_KINDS` tuple and tools/tpl-surfaces.py's
+`DEFAULT_KINDS` were literal fifteen-kind lists. A new kind missing from the
+first lints NO scene that names it (the container-target lint, the index
+regexes); missing from the second, the template-zone census's standalone
+fallback quietly stops seeing it. Every other kind census (check-sugar-surface,
+check-universal-props, tpl-surfaces when driven by the sweep) reads
+`KIND_*` out of bindings/python/kaya/wire.py, which the generator rewrites
+from the spec. Both lists now carry a clause holding them equal to that file,
+with the one-short list watched refused on every run. The rule for the next
+hand list: if it enumerates something the spec owns, derive it or hold it
+equal; a list nobody compares is a list that is already wrong.
+
+## validate-mac exits on a red gate sweep BEFORE any leg runs, so a mid-milestone tree checks its legs one at a time (noted 2026-09-04)
+
+The lane runs tools/gates.py first and `sys.exit(1)`s on a red sweep. During a
+depth slice two gates are red BY DESIGN (check-sugar-surface until the
+constructors land in every binding, check-verbs until the Compose
+interpreter carries the verbs), so the lane's legs never start. That is the
+right refusal for a run that goes on the record, and the wrong tool for the
+question "did my interpreter change break a neighbouring leg". The answer is
+tools/run-leg.py, one leg at a time, and the commit message says which legs
+ran; the whole lane runs when the breadth slice turns the sweep green.
+
