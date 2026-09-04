@@ -21,7 +21,7 @@ time picker.** At the versions the tree pins:
 | SwiftUI iOS | `DatePicker` `.compact` (tap opens a calendar popover) | `.graphical`, `.wheel` | `.compact` (tap opens a wheel), `.wheel` |
 | Compose, material3 1.3.2 (BOM 2024.10.01) | none as a control — the Material idiom is a text field with a calendar icon that opens `DatePickerDialog` | `DatePicker` | `TimePicker` (dial) and `TimeInput` (keyboard) inside a `Dialog`; a `TimePickerDialog` composable arrives only in 1.4.0 |
 | WinUI 3 (WinUI 2.2.1 metadata, third_party/winappsdk) | `CalendarDatePicker` (flyout calendar, `MinDate`/`MaxDate`); `DatePicker` (three spinners, bounds by YEAR only) | `CalendarView` | `TimePicker` (flyout; `MinuteIncrement`, `ClockIdentifier`) |
-| GTK 4.12 + libadwaita 1.4 | **nothing** — composed: `GtkMenuButton` + `GtkPopover` holding a `GtkCalendar` | `GtkCalendar` | **nothing** — composed: two `GtkSpinButton`s (hour, minute) and an AM/PM toggle where the locale wants one |
+| GTK 4.12 + libadwaita 1.4 | **nothing** — composed: `GtkMenuButton` + `GtkPopover` holding a `GtkCalendar` | `GtkCalendar` | **nothing** — composed: `GtkMenuButton` faced with the time + `GtkPopover` holding two vertical `GtkSpinButton`s (hour, minute) and an AM/PM toggle pair where the locale wants one (amended 2026-09-04, below) |
 
 GTK 4's class index has exactly one date-shaped class, `GtkCalendar`, an
 inline month view with no minimum or maximum date. libadwaita adds none
@@ -34,6 +34,36 @@ widget backends (interpreter-internal drop-downs, 2026-07-20). The
 Windows metadata in the tree carries all four controls and their event
 args (`DatePicker`, `TimePicker`, `CalendarDatePicker`, `CalendarView`),
 none yet admitted to the bindgen filter.
+
+**The GTK time field, amended 2026-09-04.** The breadth slice shipped the
+time as two HORIZONTAL `GtkSpinButton`s in a linked box, inline — the
+cheapest composition GTK offers, which the maintainer read as verbose
+(`10 − +  00 − +`, the 12-hour letters folded into the hour's text). A
+survey of the UI definitions GNOME and elementary actually ship found
+no app with that shape: GNOME Clocks' alarm editor is two VERTICAL spins
+(`orientation: vertical`, `wrap`, two-digit output) with a `∶` label
+between and one AM/PM toggle in the 12-hour clock; GNOME Settings' Date &
+Time is a custom editor with the same stacked-chevron geometry and an
+AM/PM button; GNOME Calendar's event editor shows the formatted time in a
+text row with a flat clock button opening a popover of two vertical spins
+and an AM/PM `Adw.ToggleGroup`, and its date field is the same shape (an
+entry with a popover calendar); elementary's `Granite.TimePicker` is an
+entry showing the formatted time with a popover of hour/minute spins and
+AM/PM toggles. Two findings: inline spins are stacked, never horizontal;
+and a time FIELD in a form is a compact face that opens a popover — D6's
+own rule, and what kaya's GTK date field already did. So the time field is
+the date field's twin now: a `GtkMenuButton` faced with the held time in
+the user's clock (`%l:%M %p` or `%H:%M` off GSettings' `clock-format`),
+over a popover holding vertical hour and minute spins, a `∶` label and,
+on a 12-hour desk, a linked AM/PM `GtkToggleButton` pair (Clocks' spelling;
+`Adw.ToggleGroup` is libadwaita 1.7 and this tree pins 1.4). The hour spin
+runs 1..=12 there and 0..=23 otherwise, and the pair carries the half, so
+the wire's shape never changes with the face (D2, D9); `value-changed` on
+either spin and `toggled` on the pair are the commits; the harness still
+drives the spins and reads them back through the same Stage methods, and
+the composed root publishes the same group with `datetime` said over it.
+Typing into the face — Calendar's and Granite's entries allow it — is left
+out to match the date field, which has no entry either.
 
 **Every platform's picker is a wall-clock value with no time zone.** A
 date picker holds a civil calendar date (year, month, day); a time
@@ -70,8 +100,8 @@ closes). The occurrence kaya emits is the COMMITTED value, and each arm
 names the platform event that means "done": SwiftUI the binding's change
 once the popover closes (probe P1 settles the exact hook), Compose the
 dialog's confirm button, WinUI `SelectedDateChanged`/`SelectedTimeChanged`
-with the flyout closed, GTK `day-selected` and the spin buttons'
-`value-changed`.
+with the flyout closed, GTK `day-selected`, the spin buttons'
+`value-changed` and the AM/PM pair's `toggled`.
 
 **Display is the platform's, in the user's locale.** Day-month order, 12-
 or 24-hour clocks, the first day of the week, the calendar a user has
@@ -239,8 +269,8 @@ trailing calendar or clock icon whose tap opens `DatePickerDialog` or a
 `Dialog` around `TimePicker` (material3 1.3.2 has no `TimePickerDialog`;
 the BOM bump to 1.4.0 that adds one is a separate decision); WinUI
 `CalendarDatePicker` and `TimePicker`; GTK the composed button-and-
-popover for dates and the spin pair for times (the spin pair is inline
-by nature and already compact). An `inline` prop is the cut, with its
+popover for dates and, since the 2026-09-04 amendment in §0, the same
+button-and-popover for times. An `inline` prop is the cut, with its
 trigger: an app whose screen IS the calendar rather than a form with a
 date in it.
 

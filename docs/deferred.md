@@ -10634,7 +10634,9 @@ arm lands, and the lanes carry no pickers legs until then:
 
 - ~~DEPTH STUB: pickers on gtk~~ (FIXED 2026-09-04: the arm landed) — the composed date field (GtkMenuButton +
   GtkPopover + GtkCalendar, the button's label in the locale) and the
-  hour/minute GtkSpinButton pair; the range CLAMPED in the arm since
+  hour/minute GtkSpinButton pair (re-composed the same day as the date
+  field's twin — a faced GtkMenuButton over a popover of vertical spins
+  and an AM/PM pair, docs/datetime-plan.md §0's amendment); the range CLAMPED in the arm since
   GtkCalendar cannot disable a day; `day-selected` and `value-changed` as
   the commits; the three Stage methods; AT-SPI role measured and mapped to
   `datetime`; linux legs on both pools through tools/linux/a11y-leg.sh.

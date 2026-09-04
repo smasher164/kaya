@@ -1139,9 +1139,12 @@ mod flex {
 // --- The pickers (docs/datetime-plan.md §0, D3, D4, D6, D7) ------------
 // GTK 4.12 and libadwaita 1.4 ship neither a date nor a time control, and
 // composition is the platform idiom rather than a fallback: a date is a
-// GtkMenuButton over a GtkPopover holding a GtkCalendar, a time is a pair
-// of GtkSpinButtons. The wire packs a date as YYYYMMDD and a time as HHMM
-// (D2), and every read below asks the CONTROL rather than this state.
+// GtkMenuButton over a GtkPopover holding a GtkCalendar, a time the same
+// button over vertical hour and minute GtkSpinButtons and, on a 12-hour
+// desk, an AM/PM toggle pair — GNOME Calendar's and Clocks' own shape
+// (docs/datetime-plan.md §0, the 2026-09-04 amendment). The wire packs a
+// date as YYYYMMDD and a time as HHMM (D2), and every read below asks the
+// CONTROL rather than this state.
 
 /// A date field's committed value and its inclusive bounds, packed; 0 is
 /// unset. `GtkCalendar` cannot disable a day, so the bounds are policed
@@ -1170,9 +1173,12 @@ struct GtkDateField {
 
 #[derive(Clone)]
 struct GtkTimeField {
-    root: gtk4::Box,
+    button: gtk4::MenuButton,
     hour: gtk4::SpinButton,
     minute: gtk4::SpinButton,
+    /// The 12-hour desk's (AM, PM) pair; `None` on a 24-hour one, where
+    /// the hour spin runs 0..=23 and the face carries no letters.
+    halves: Option<(gtk4::ToggleButton, gtk4::ToggleButton)>,
     state: Rc<std::cell::Cell<TimeState>>,
 }
 
@@ -1237,41 +1243,41 @@ fn locale_is_12_hour() -> bool {
         == "12h"
 }
 
-/// The hour spin's FACE. The value stays 0..=23 in both clocks — the
-/// presentation is the platform's and the wire is components (D9) — so a
-/// 12-hour desk gets its own spelling with no second value shape and no
-/// third control.
-fn hour_face(hour: i32, twelve: bool) -> String {
-    if !twelve {
-        return format!("{hour:02}");
+/// The hour the SPINS say, 0..=23 on both clocks: a 12-hour desk's spin
+/// runs 1..=12 and the toggle pair carries the half, so the wire's shape
+/// never changes with the face (D2, D9).
+fn spun_hour(field: &GtkTimeField) -> i64 {
+    let shown = field.hour.value() as i64;
+    match &field.halves {
+        None => shown,
+        Some((_, pm)) => match (shown, pm.is_active()) {
+            (12, false) => 0,
+            (12, true) => 12,
+            (h, false) => h,
+            (h, true) => h + 12,
+        },
     }
-    glib::DateTime::from_local(2000, 1, 1, hour, 0, 0.0)
-        .ok()
-        .and_then(|when| when.format("%I %p").ok())
-        .map_or_else(|| format!("{hour:02}"), |s| s.to_string())
 }
 
-/// The face read back: "01 PM" to 13. A shape that is not one of ours is
-/// GTK's own to parse.
-fn hour_from_face(text: &str, twelve: bool) -> Option<f64> {
-    if !twelve {
-        return None;
-    }
-    let (digits, suffix) = text.trim().split_once(' ')?;
-    let hour: i32 = digits.trim().parse().ok()?;
-    if !(1..=12).contains(&hour) {
-        return None;
-    }
-    let pm = glib::DateTime::from_local(2000, 1, 1, 13, 0, 0.0)
+/// The locale's own letters for a half of the day (`%p`), kaya's only
+/// when the locale prints none.
+fn meridiem(hour: i32) -> String {
+    glib::DateTime::from_local(2000, 1, 1, hour, 0, 0.0)
         .ok()
-        .and_then(|when| when.format("%p").ok())?;
-    let noonwards = suffix.trim().eq_ignore_ascii_case(pm.as_str());
-    Some(f64::from(match (hour, noonwards) {
-        (12, false) => 0,
-        (12, true) => 12,
-        (h, false) => h,
-        (h, true) => h + 12,
-    }))
+        .and_then(|when| when.format("%p").ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| if hour < 12 { "AM" } else { "PM" }.to_owned())
+}
+
+/// The button's face in the USER's clock — the date field's `%x`, one
+/// control over: GNOME's spellings for the two clock formats (D9).
+fn time_button_label(packed: i64, twelve: bool) -> String {
+    let (hour, minute) = ((packed / 100) as i32, (packed % 100) as i32);
+    glib::DateTime::from_local(2000, 1, 1, hour, minute, 0.0)
+        .ok()
+        .and_then(|when| when.format(if twelve { "%l:%M %p" } else { "%H:%M" }).ok())
+        .map_or_else(|| format!("{hour:02}:{minute:02}"), |s| s.trim().to_owned())
 }
 
 /// Move the calendar with the echo guard armed: a programmatic write is
@@ -1286,10 +1292,22 @@ fn show_date(field: &GtkDateField, quiet: &Rc<std::cell::Cell<bool>>, packed: i6
     quiet.set(was);
 }
 
+/// The spins, the half and the face together, under the same guard: the
+/// mirror of one committed value, whichever route committed it.
 fn show_time(field: &GtkTimeField, quiet: &Rc<std::cell::Cell<bool>>, packed: i64) {
     let was = quiet.replace(true);
-    field.hour.set_value((packed / 100) as f64);
+    let hour = packed / 100;
+    match &field.halves {
+        None => field.hour.set_value(hour as f64),
+        Some((am, pm)) => {
+            field.hour.set_value(if hour % 12 == 0 { 12.0 } else { (hour % 12) as f64 });
+            // The ACTIVE one is set: a grouped toggle set inactive leaves
+            // the group with no half at all.
+            if hour >= 12 { pm } else { am }.set_active(true);
+        }
+    }
     field.minute.set_value((packed % 100) as f64);
+    field.button.set_label(&time_button_label(packed, field.halves.is_some()));
     quiet.set(was);
 }
 
@@ -1326,8 +1344,8 @@ fn date_committed(
     sink.send_date_tag(tag, packed);
 }
 
-/// The time's commit, over BOTH spins: snap the minute to the declared
-/// step (D3), mirror, emit.
+/// The time's commit, over both spins and the half: snap the minute to
+/// the declared step (D3), mirror, emit.
 fn time_committed(
     field: &GtkTimeField,
     quiet: &Rc<std::cell::Cell<bool>>,
@@ -1335,7 +1353,7 @@ fn time_committed(
     tag: &[u8],
 ) {
     let mut state = field.state.get();
-    let raw = field.hour.value() as i64 * 100 + field.minute.value() as i64;
+    let raw = spun_hour(field) * 100 + field.minute.value() as i64;
     let step = state.step.max(1);
     let mut packed = raw;
     if step > 1 {
@@ -1347,9 +1365,7 @@ fn time_committed(
         }
         packed = hour * 100 + minute;
     }
-    if packed != raw {
-        show_time(field, quiet, packed);
-    }
+    show_time(field, quiet, packed);
     if packed == state.held {
         return;
     }
@@ -1408,7 +1424,7 @@ impl NativeWidget {
             NativeWidget::Textarea(scroller, _) => scroller.clone().upcast(),
             NativeWidget::Canvas(w) => w.clone().upcast(),
             NativeWidget::DatePicker(f) => f.button.clone().upcast(),
-            NativeWidget::TimePicker(f) => f.root.clone().upcast(),
+            NativeWidget::TimePicker(f) => f.button.clone().upcast(),
         }
     }
 
@@ -1903,7 +1919,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::TimePicker => core
             .time_pickers
             .iter()
-            .map(|f| f.root.clone().upcast())
+            .map(|f| f.button.clone().upcast())
             .collect(),
     }
 }
@@ -5516,7 +5532,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .clone()
             .upcast(),
         K::TimePicker => core.time_pickers[resolve(t.index, core.time_pickers.len())]
-            .root
+            .button
             .clone()
             .upcast(),
     };
@@ -7628,44 +7644,69 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::DatePicker(field)
                 }
                 WidgetKind::TimePicker => {
-                    // Hour and minute spins, GNOME's own composition. The
-                    // value is 0..=23 on both clocks; the FACE is the
-                    // locale's (D9) and the step rides the increments (D3).
+                    // The date field's twin (docs/datetime-plan.md §0, D6): a
+                    // GtkMenuButton whose face is the held time in the user's
+                    // clock, over a popover holding vertical hour and minute
+                    // spins and, on a 12-hour desk, an AM/PM toggle pair. The
+                    // value is 0..=23 on both clocks (D9); the step rides the
+                    // minute's increments (D3).
                     let twelve = locale_is_12_hour();
-                    let hour = gtk4::SpinButton::with_range(0.0, 23.0, 1.0);
+                    let hour = if twelve {
+                        gtk4::SpinButton::with_range(1.0, 12.0, 1.0)
+                    } else {
+                        gtk4::SpinButton::with_range(0.0, 23.0, 1.0)
+                    };
                     let minute = gtk4::SpinButton::with_range(0.0, 59.0, 1.0);
                     for spin in [&hour, &minute] {
+                        use gtk4::prelude::OrientableExt;
+                        spin.set_orientation(gtk4::Orientation::Vertical);
                         spin.set_wrap(true);
+                        spin.set_numeric(true);
                         spin.set_digits(0);
+                        spin.set_width_chars(2);
+                        spin.add_css_class("title-2");
+                        spin.add_css_class("numeric");
+                        spin.connect_output(|spin| {
+                            spin.set_text(&format!("{:02}", spin.value() as i64));
+                            glib::Propagation::Stop
+                        });
                     }
-                    minute.set_numeric(true);
-                    // The 12-hour face carries letters, so the hour alone
-                    // stops refusing them.
-                    hour.set_numeric(!twelve);
-                    hour.connect_output(move |spin| {
-                        spin.set_text(&hour_face(spin.value() as i32, twelve));
-                        glib::Propagation::Stop
+                    let dial = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+                    dial.set_margin_top(6);
+                    dial.set_margin_bottom(6);
+                    dial.set_margin_start(6);
+                    dial.set_margin_end(6);
+                    dial.append(&hour);
+                    let colon = gtk4::Label::new(Some("\u{2236}"));
+                    colon.add_css_class("title-2");
+                    dial.append(&colon);
+                    dial.append(&minute);
+                    let halves = twelve.then(|| {
+                        let am = gtk4::ToggleButton::with_label(&meridiem(1));
+                        let pm = gtk4::ToggleButton::with_label(&meridiem(13));
+                        pm.set_group(Some(&am));
+                        am.set_active(true);
+                        let pair = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+                        pair.add_css_class("linked");
+                        pair.set_valign(gtk4::Align::Center);
+                        pair.append(&am);
+                        pair.append(&pm);
+                        dial.append(&pair);
+                        (am, pm)
                     });
-                    hour.connect_input(move |spin| {
-                        hour_from_face(&spin.text(), twelve).map(Ok::<f64, ()>)
-                    });
-                    minute.connect_output(|spin| {
-                        spin.set_text(&format!("{:02}", spin.value() as i64));
-                        glib::Propagation::Stop
-                    });
-                    let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-                    // Adwaita's own spelling for a compound field, and it
-                    // costs the accessibility tree no extra node — a
-                    // separator LABEL between the spins would be counted by
-                    // `atspi_rank` and shift every `label#N` after it.
-                    root.add_css_class("linked");
-                    root.append(&hour);
-                    root.append(&minute);
-                    root.set_accessible_role(gtk4::AccessibleRole::Group);
+                    let popover = gtk4::Popover::new();
+                    popover.set_child(Some(&dial));
+                    let button = gtk4::MenuButton::new();
+                    button.set_popover(Some(&popover));
+                    // The composed root is the accessible node, for the date
+                    // arm's reasons; the popover's own labels are unmapped
+                    // until it opens, so `atspi_rank` never counts them.
+                    button.set_accessible_role(gtk4::AccessibleRole::Group);
                     let field = GtkTimeField {
-                        root: root.clone(),
+                        button: button.clone(),
                         hour: hour.clone(),
                         minute: minute.clone(),
+                        halves: halves.clone(),
                         state: Rc::new(std::cell::Cell::new(TimeState { held: -1, step: 1 })),
                     };
                     let sink = core.occurrences.clone();
@@ -7677,6 +7718,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         let sink = sink.clone();
                         let tag = tag.clone();
                         spin.connect_value_changed(move |_| {
+                            if quiet.get() {
+                                return;
+                            }
+                            time_committed(&committed, &quiet, &sink, &tag);
+                        });
+                    }
+                    if let Some((_, pm)) = &halves {
+                        let committed = field.clone();
+                        let quiet = quiet.clone();
+                        let sink = sink.clone();
+                        let tag = tag.clone();
+                        pm.connect_toggled(move |_| {
                             if quiet.get() {
                                 return;
                             }
@@ -11283,10 +11336,11 @@ impl crate::harness::Stage for GtkStage {
                 return;
             };
             let field = &core.time_pickers[i];
-            // BOTH SPINS MOVE, THEN THE CONTROL'S OWN SIGNAL FIRES ONCE —
-            // `click`'s emit_clicked shape. Two live writes would commit the
-            // new hour against the OLD minute first, and an intermediate
-            // value never reaches the app (docs/datetime-plan.md §0).
+            // THE SPINS AND THE HALF MOVE, THEN THE CONTROL'S OWN SIGNAL
+            // FIRES ONCE — `click`'s emit_clicked shape. Live writes would
+            // commit the new hour against the OLD minute first, and an
+            // intermediate value never reaches the app
+            // (docs/datetime-plan.md §0).
             show_time(field, &core.apply_quiet, time.packed());
             field.hour.emit_by_name::<()>("value-changed", &[]);
         });
@@ -11301,9 +11355,7 @@ impl crate::harness::Stage for GtkStage {
                     return "<no such target>".to_owned();
                 };
                 let field = &core.time_pickers[i];
-                return spelled_time(
-                    field.hour.value() as i64 * 100 + field.minute.value() as i64,
-                );
+                return spelled_time(spun_hour(field) * 100 + field.minute.value() as i64);
             }
             let Some(i) = crate::harness::try_resolve(t.index, core.date_pickers.len()) else {
                 return "<no such target>".to_owned();
@@ -13671,7 +13723,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::DatePicker => try_resolve(target.index, core.date_pickers.len())
             .map(|i| core.date_pickers[i].button.clone().upcast()),
         K::TimePicker => try_resolve(target.index, core.time_pickers.len())
-            .map(|i| core.time_pickers[i].root.clone().upcast()),
+            .map(|i| core.time_pickers[i].button.clone().upcast()),
         K::Slider => nth!(core.sliders),
         K::Image => nth!(core.images),
         K::Progress => nth!(core.progresses),
@@ -13800,7 +13852,7 @@ fn composed_picker_role(core: &CoreState, widget: &gtk4::Widget) -> Option<&'sta
         || core
             .time_pickers
             .iter()
-            .any(|f| f.root.clone().upcast::<gtk4::Widget>() == *widget);
+            .any(|f| f.button.clone().upcast::<gtk4::Widget>() == *widget);
     is_root.then_some("datetime")
 }
 

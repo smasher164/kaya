@@ -8991,3 +8991,19 @@ is invisible to every value read, the AX read included; recording mode
 and a capture are the witnesses, and the moment to take one is the moment
 a new hosted control lands on a platform.
 
+
+## `xvfb-run -a` can wait forever for an Xvfb that is already up, when several start at once on a loaded host (measured 2026-09-04)
+
+Three `docker run … xvfb-run -a … bash -c '<guest> & …; import -window root …'`
+hand captures were launched in one breath while the gate sweep had the host.
+One finished in its usual 20s; the other two sat for 5 and 10 minutes with
+`ps` inside each container showing exactly two processes, the `xvfb-run`
+shell and its `Xvfb :99`, the wrapped command never started and no output
+file created. `/proc/1/wchan` read `rt_sigsuspend`: xvfb-run traps USR1,
+starts Xvfb and `wait`s for the server's ready signal, and when that signal
+is missed the wait has no timeout of its own. The lane is not exposed —
+its pool starts `Xvfb` directly (tools/linux/run-suites.sh,
+`x11_display_boot`), and its two remaining `xvfb-run` uses, the font
+preflight and recording mode, sit under `timeout 15` and `timeout 180`. A
+hand capture is: wrap every `xvfb-run` in `timeout`, and start them one at
+a time — run sequentially in one container, both retries finished in 20s.
