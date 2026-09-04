@@ -3576,6 +3576,18 @@ var kayaTearingDown: Set<UInt64> = []
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
                 kayaNSWindows[windowId] = window
+                // THE HAND RUN'S KNOB (tools/mac/dragwitness/run.py --hand): an
+                // accessory app's window opens behind the terminal that launched
+                // it, and a person cannot drag onto what they cannot see. The
+                // lanes never set it.
+                if ProcessInfo.processInfo.environment["KAYA_WINDOW_FRONT"] == "1" {
+                    NSApp.activate(ignoringOtherApps: true)
+                    window.level = .floating
+                    window.orderFrontRegardless()
+                    let f = window.frame
+                    let s = NSScreen.screens.first?.frame ?? .zero
+                    kayaDiag("windowfront wid=\(windowId) pid=\(getpid()) frame=\(Int(f.origin.x)),\(Int(s.height - f.origin.y - f.height)),\(Int(f.width)),\(Int(f.height)) screen=\(Int(s.width)),\(Int(s.height))")
+                }
                 // Wake anyone parked on this surface's materialization
                 // (kayaAwaitWindow): this signal IS the event.
                 for waiter in kayaWindowWaiters.removeValue(forKey: windowId) ?? [] {

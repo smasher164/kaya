@@ -8585,9 +8585,26 @@ the same posted gesture (docs/probes/dnd-witness-mac-2026-09-03.md, the
 addendum). What the first measurement saw was the empty item's zero-item
 session, never AppKit refusing synthesized input. The rule: A FIX
 INVALIDATES THE MEASUREMENTS TAKEN BEFORE IT — re-run the one the verdict
-rested on before the verdict leaves the room. The automated mac legs are
-still unwired for AIM, not mechanics (tools/mac/dragwitness-leg.py says
-so); the hand run is `tools/mac/dragwitness/run.py --hand`.
+rested on before the verdict leaves the room.
+
+AND THE AIM WAS THEN SOLVED, and a deeper limit found (measured
+2026-09-03). tools/mac/dragwitness-leg.py now DRIVES a real foreign drag
+onto kaya's live targets safely on the maintainer's own desktop: kaya runs
+with KAYA_WINDOW_FRONT=1 so its accessory window floats to the front and
+prints its pid and frame (it had opened BEHIND the terminal, and the first
+run pressed on the terminal instead — the coordinates were right and the
+window under them was not); the witness is placed in the free strip beside
+it from that frame; and the driver refuses to press or release on a window
+any other process owns (CGWindowListCopyWindowInfo, skipping the Dock's
+layer-20 screen-wide window that sits above every app window in that list),
+releasing back at the press point. WHAT STAYS THE HAND RUN'S IS KAYA'S
+RECEIPT: under synthetic input a SwiftUI destination reads the foreign drag
+pasteboard back EMPTY — `board.string(.string)` returns "" inside kaya's
+own performDragOperation where the identical call in a plain-AppKit catch
+(`run.py --pair`) returns the full text, and where a real human drag into
+kaya reads it whole. So the feasibility leg proves the gesture is driven
+onto kaya's targets and composes; `tools/mac/dragwitness/run.py --hand`
+proves kaya reads what lands.
 
 ## An empty `NSPasteboardItem` is ZERO pasteboard items, and `beginDraggingSession` throws on it (measured 2026-09-03)
 

@@ -198,16 +198,28 @@ re-measured against the gesture it had been blamed on. THE RULE THIS
 LEAVES: A FIX INVALIDATES THE MEASUREMENTS TAKEN BEFORE IT; re-run the
 one that motivated the verdict.
 
-Against kaya itself (tools/mac/dragwitness-leg.py, the same shape as the
-linux legs): kaya's own `KayaDragDropView` took the posted press and
-first drag, called `beginDraggingSession`, and its `endedAt` fired — the
-source composes and completes under a synthesized gesture too. What did
-not land was the AIM on the maintainer's desktop: the witness window
-placed beside kaya's was not where the pointer released (the maintainer
-watched the drag end in the terminal), so the automated legs stay
-unwired until they aim on an unattended desktop, and the mac half of §5
+Against kaya itself (tools/mac/dragwitness-leg.py): a foreign witness's
+`beginDraggingSession` composes and its pointer is DRIVEN onto kaya's live
+drop targets. The aim, unsolved the first evening (the release landed on
+the maintainer's terminal), is solved now: kaya floats its window under
+KAYA_WINDOW_FRONT and prints its pid and frame, the witness is placed in
+the free strip beside it, and the driver refuses to press or release on a
+window another process owns (skipping the Dock's layer-20 screen-wide
+window). So the leg runs SAFELY and unattended, and proves the gesture is
+drivable onto kaya's own targets.
+
+WHAT IT CANNOT PROVE IS KAYA'S RECEIPT. Under the synthesized gesture a
+SwiftUI destination reads the foreign drag pasteboard back EMPTY —
+`board.string(.string)` returns "" inside kaya's `performDragOperation`,
+where the same call in the plain-AppKit `--pair` catch returns the full
+text and where a real human drag into kaya reads it whole. The `endedAt`
+operation is likewise not flushed back to a foreign source under
+synthetic input (the source reads `none` while kaya performs the drop with
+copy), where `--pair` reads `copy`. So kaya's READ of a foreign drop is
+the one thing a driven gesture cannot confirm here, and the mac half of §5
 step 7 is `run.py --hand`: kaya and the witness on this desktop, a person
-at the mouse, both directions' bytes verified by the tool.
+at the mouse, kaya's harness reading the foreign text and file back
+through its picked table.
 
 ## Files
 

@@ -18,8 +18,10 @@
         and the witness windows come up on this desktop, the terminal says
         what to drag where, a person drags, and BOTH sides' bytes are
         verified here — kaya's harness verdict and the witness's report.
-        This is the mac half of §5 step 7 until the automated legs
-        (tools/mac/dragwitness-leg.py) aim reliably on a shared desktop.
+        This is the mac half of §5 step 7: it is what confirms kaya READS
+        a foreign drop's bytes, which the automated feasibility leg
+        (tools/mac/dragwitness-leg.py) cannot — kaya reads the drag
+        pasteboard empty under synthetic input (docs/traps.md).
 
 The binary is target/mac-dragwitness/kaya-drag-witness. THE POINTER IS
 DESKTOP-GLOBAL: nothing else may be driving it when `--pair` runs, and
@@ -147,10 +149,16 @@ HAND_WAIT_MS = 60000
 
 def hand():
     """kaya + the witness on this desktop; a PERSON drags; this verifies.
-    Three drags, each given HAND_WAIT_MS: the witness's blue square onto
-    kaya's `text target`, a fresh blue square onto `files target`, then
-    kaya's `hello` into the witness's catch window."""
+    kaya is launched FIRST with KAYA_WINDOW_FRONT=1, which puts its window
+    at the floating level (a witness quitting re-activates the terminal,
+    whose window then covered kaya's between steps) and prints its screen
+    frame; the witness opens in the free strip beside it. Three drags, each
+    given HAND_WAIT_MS: the witness's blue square onto kaya's `text
+    target`, a fresh blue square onto `files target`, then kaya's `hello`
+    into the witness's catch window. kaya's own lines stream here as they
+    arrive, so a window that never came up says so at once."""
     import os
+    import threading
     sys.path.insert(0, str(ROOT / "tools/lib/lanes"))
     import mac as lane
     guest = ROOT / lane.RUST_GUESTS / "dnd"
@@ -176,14 +184,58 @@ def hand():
     env.update(lane.leg_env(ROOT, "dnd", "rust", ""))
     env["KAYA_SELFTEST"] = "dnd"
     env["KAYA_SELFTEST_SCRIPT"] = scene
+    # An accessory app's window opens BEHIND the terminal; the interpreter
+    # raises it on this knob, which no lane sets.
+    env["KAYA_WINDOW_FRONT"] = "1"
     kaya = subprocess.Popen(lane.leg_argv("dnd", "rust", lambda _n: ""), cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8")
-    time.sleep(1.5)
+    kaya_lines = []
+
+    def pump():
+        for line in kaya.stdout:
+            kaya_lines.append(line.rstrip("\n"))
+            print(f"    kaya: {line.rstrip()}", flush=True)
+    threading.Thread(target=pump, daemon=True).start()
+
+    # kaya's window is up once the harness has passed its first expect.
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not any("no drop yet" in l for l in kaya_lines):
+        if kaya.poll() is not None:
+            print("dragwitness --hand: kaya's guest exited before its window came up; its lines "
+                  "are above", file=sys.stderr)
+            sys.exit(1)
+        time.sleep(0.1)
+    if not any("no drop yet" in l for l in kaya_lines):
+        print("dragwitness --hand: kaya's window did not come up within 20s; its lines are above",
+              file=sys.stderr)
+        kaya.kill()
+        sys.exit(1)
+    front = [l for l in kaya_lines if "windowfront wid=0 " in l]
+    if not front:
+        print("dragwitness --hand: kaya printed no windowfront line — the interpreter predates "
+              "KAYA_WINDOW_FRONT; rebuild with `tools/run-leg.py dnd rust --build`", file=sys.stderr)
+        kaya.kill()
+        sys.exit(1)
+    fields = dict(part.split("=") for part in front[-1].split("windowfront ")[1].split())
+    fx, fy, fw, fh = (int(v) for v in fields["frame"].split(","))
+    sw, sh = (int(v) for v in fields["screen"].split(","))
+    ww, wh = 300, 200
+    if fx >= ww + 40:
+        wx, side = fx - ww - 20, "LEFT of"
+    elif sw - (fx + fw) >= ww + 40:
+        wx, side = fx + fw + 20, "RIGHT of"
+    else:
+        wx, side = max(0, min(fx, sw - ww)), ("BELOW" if fy + fh + wh + 40 <= sh else "ABOVE")
+    wy = fy + fh // 2 - wh // 2 if side.endswith("of") else (fy + fh + 20 if side == "BELOW" else max(40, fy - wh - 20))
+    at = f"{wx},{wy},{ww},{wh}"
+    print(f"\nkaya's window is up: the one titled 'dnd' with the labels hello / text target / "
+          f"note target / files target, at {fx},{fy} size {fw}x{fh} on a {sw}x{sh} screen. "
+          f"The witness opens {side} it.", flush=True)
     wait_s = HAND_WAIT_MS // 1000
     steps = [
-        ("throw", f"1. Drag the BLUE SQUARE in the 'kaya drag witness' window onto kaya's "
-                  f"'text target' label ({wait_s}s).", "drag ended copy"),
+        ("throw", f"1. Drag the BLUE SQUARE from the 'kaya drag witness' window ({side.lower()} kaya's) "
+                  f"onto kaya's 'text target' label ({wait_s}s).", "drag ended copy"),
         ("throw", f"2. A fresh witness window: drag its BLUE SQUARE onto kaya's 'files target' "
                   f"label ({wait_s}s).", "drag ended copy"),
         ("catch", f"3. Drag kaya's 'hello' label INTO the 'kaya drag witness' window ({wait_s}s).",
@@ -195,8 +247,7 @@ def hand():
         for mode, say, need in steps:
             report = scratch / f"{mode}-{len(reports)}.txt"
             report.unlink(missing_ok=True)
-            args = [str(BINARY), mode, "--at", "40,80,300,200", "--report", str(report),
-                    "--hold", str(wait_s + 20)]
+            args = [str(BINARY), mode, "--at", at, "--report", str(report), "--hold", str(wait_s + 20)]
             if mode == "throw":
                 args += ["--file", str(offered)]
             w = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -210,14 +261,14 @@ def hand():
             landed = need in got
             ok = ok and landed
             print(f"    witness: {'landed — ' if landed else 'DID NOT SEE IT — '}"
-                  + " / ".join(line for line in got.splitlines() if line) , flush=True)
+                  + " / ".join(line for line in got.splitlines() if line), flush=True)
     finally:
         try:
-            kaya_out, _ = kaya.communicate(timeout=wait_s + 30)
+            kaya.wait(timeout=wait_s + 30)
         except subprocess.TimeoutExpired:
             kaya.kill()
-            kaya_out, _ = kaya.communicate()
-    verdict = [line for line in kaya_out.splitlines() if "KAYA_SELFTEST:" in line]
+            kaya.wait(timeout=5)
+    verdict = [line for line in kaya_lines if "KAYA_SELFTEST:" in line]
     print("\nkaya's own verdict:", verdict[-1] if verdict else "<none>", flush=True)
     if ok and verdict and "KAYA_SELFTEST: OK" in verdict[-1]:
         print("dragwitness --hand: BOTH DIRECTIONS VERIFIED — the witness read kaya's text and "

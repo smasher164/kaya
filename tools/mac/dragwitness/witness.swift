@@ -14,9 +14,14 @@
 //       MIME-shaped custom id, a file URL). Writes the operation the
 //       destination chose.
 //
-//   witness drive --press x,y --to x,y [--settle ms] [--report <path>]
+//   witness drive --press x,y --to x,y [--press-owner pid] [--to-owner pid]
+//                 [--settle ms] [--report <path>]
 //       The pointer, and nothing else: an activating click, a press, a walk
-//       past AppKit's drag threshold, a walk to the target, a release.
+//       past AppKit's drag threshold, a walk to the target, a release. THE
+//       OWNERS ARE THE WALL: the window under each point must belong to the
+//       named process, or nothing is pressed / the release goes back where
+//       the press was (exit 3) — a mis-aimed release once landed on the
+//       maintainer's terminal (docs/traps.md).
 //
 // Screen points are CGEvent's: the origin is the TOP LEFT of the main
 // display, where AppKit's is the bottom left.
@@ -110,13 +115,50 @@ func walk(_ from: CGPoint, _ to: CGPoint, steps: Int, each: UInt32 = 16000) {
     }
 }
 
+/// The frontmost on-screen window under a CGEvent point: its owner's pid and
+/// name. The list is front to back, so the first hit is what a click reaches.
+/// Layers from the Dock's (20) up are skipped: the Dock owns a transparent
+/// SCREEN-WIDE window at layer 20 that this list puts above every app window
+/// (measured 2026-09-03, docs/traps.md), and clicks fall through it.
+func ownerAt(_ p: CGPoint) -> (pid: Int, name: String)? {
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                          kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in list {
+        guard let b = w[kCGWindowBounds as String] as? [String: CGFloat],
+              let x = b["X"], let y = b["Y"], let width = b["Width"], let height = b["Height"],
+              (w[kCGWindowLayer as String] as? Int ?? 0) < 20,
+              (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+              CGRect(x: x, y: y, width: width, height: height).contains(p)
+        else { continue }
+        return ((w[kCGWindowOwnerPID as String] as? Int) ?? -1,
+                (w[kCGWindowOwnerName as String] as? String) ?? "?")
+    }
+    return nil
+}
+
+func aimRefused(_ what: String, _ p: CGPoint, wanted: Int) -> String? {
+    guard let got = ownerAt(p) else {
+        return "aim refused: no window under the \(what) point \(p); wanted pid \(wanted)"
+    }
+    if got.pid == wanted { return nil }
+    return "aim refused: the window under the \(what) point \(p) is '\(got.name)' pid \(got.pid); wanted pid \(wanted)"
+}
+
 if mode == "drive" {
     let press = numbers("press", 2)
     let to = numbers("to", 2)
     let from = CGPoint(x: press[0], y: press[1])
     let target = CGPoint(x: to[0], y: to[1])
+    let pressOwner = opts["press-owner"].flatMap { Int($0) }
+    let toOwner = opts["to-owner"].flatMap { Int($0) }
     let started = NSEvent.mouseLocation
     usleep(UInt32((opts["settle"].flatMap { Double($0) } ?? 600) * 1000))
+    if let wanted = pressOwner, let why = aimRefused("press", from, wanted: wanted) {
+        report.say(why)
+        report.write()
+        FileHandle.standardError.write(Data("witness: \(why)\n".utf8))
+        exit(3)
+    }
     // THE ACTIVATING CLICK FIRST: AppKit does not deliver an inactive
     // window's first click to the view (`acceptsFirstMouse` is false), and a
     // press that starts a drag has to reach the view. Then past the
@@ -131,12 +173,23 @@ if mode == "drive" {
     usleep(150_000)
     let past = CGPoint(x: from.x + 14, y: from.y + 14)
     walk(from, past, steps: 5)
-    walk(past, target, steps: 30)
-    // The destination is asked over and over; give its arms a few frames on
-    // the point before the release chooses.
-    for _ in 0..<8 {
+    walk(past, target, steps: 40, each: 12_000)
+    // The destination is asked over and over; a small target under a
+    // synthetic pointer needs many frames on the point before the release
+    // chooses, or the drop misses (the 9-in-10 flake; docs/traps.md).
+    for _ in 0..<20 {
         post(.leftMouseDragged, target)
-        usleep(40_000)
+        usleep(50_000)
+    }
+    if let wanted = toOwner, let why = aimRefused("release", target, wanted: wanted) {
+        walk(target, from, steps: 20)
+        post(.leftMouseUp, from)
+        usleep(400_000)
+        report.say(why + "; released back at the press point")
+        report.write()
+        FileHandle.standardError.write(Data("witness: \(why)\n".utf8))
+        CGWarpMouseCursorPosition(CGPoint(x: started.x, y: mainScreenHeight - started.y))
+        exit(3)
     }
     post(.leftMouseUp, target)
     usleep(400_000)
@@ -296,7 +349,10 @@ let window = NSWindow(
         x: rect[0], y: mainScreenHeight - rect[1] - rect[3], width: rect[2], height: rect[3]),
     styleMask: [.titled], backing: .buffered, defer: false)
 window.title = "kaya drag witness"
-window.level = .floating
+// FLOATING for the driven runs (a posted release must land on it whatever
+// else is open); NORMAL for the hand run, so kaya's own window, launched
+// after it, stays frontmost and reachable by a person.
+window.level = opts["level"] == "normal" ? .normal : .floating
 window.isReleasedWhenClosed = false
 
 let done = DispatchSemaphore(value: 0)
