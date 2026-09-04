@@ -123,7 +123,16 @@ itself.
 
 **Recommendation:** two kinds.
 
-### D2 — The value is civil components, typed at the floor: `PropKind::Date` and `PropKind::Time` (RULING)
+### D2 — The value is civil components, typed at the floor: `PropKind::Date` and `PropKind::Time` (RULED 2026-09-04: (b))
+
+Ruled 2026-09-04 after the maintainer asked what a "typed slot" is when the
+wire is an integer either way: it is the ENUM PRECEDENT — `align` rides an
+I64 and the spec's `PropKind::Enum("align")` label makes the generators emit
+`set_align(Align.Center)`; `Date` and `Time` are two more labels in that
+list, so the packing lives entirely in generated code and no guest ever
+assembles the number. The packed integer is also a correct sort key and a
+valid row key with no new core code, which three separate fields or a new
+wire type would not be.
 
 A date is three integers — year (proleptic Gregorian), month 1–12, day
 1–31 — and a time is two — hour 0–23, minute 0–59. Not epoch days, not
@@ -207,7 +216,11 @@ date yet".
 
 **Recommendation:** always-valued.
 
-### D6 — One presentation: the compact field that opens the platform's picker (RULING, a deliberate cut)
+### D6 — One presentation: the compact field that opens the platform's picker (RULED 2026-09-04, a deliberate cut)
+
+Ruled 2026-09-04 ("the compact one makes sense") over a side-by-side the
+maintainer's own mac rendered: the one-line field against the always-on
+month grid.
 
 Every platform has a compact idiom (§0's first column), and the inline
 calendar or clock is a second look with its own layout consequences (a
@@ -236,7 +249,12 @@ a property write never emits (the echo doctrine; GTK and WinUI arm
 `apply_quiet`). Handler spelling follows each binding's `on_value`:
 `on_date`/`on_time` and their `_node` twins.
 
-### D8 — The harness drives the platform control and reads it back (RULING)
+### D8 — The harness drives the platform control and reads it back (RULED 2026-09-04)
+
+Ruled by the maintainer 2026-09-04: read-back stays, "for testing purposes" — the
+scene asks the platform control in the two silent cases (a programmatic
+write, GTK's snap-back) where occurrences and labels can only measure an
+absence; "a lot better than relying on screenshots".
 
 Three verbs. `set_date <target> 2026-09-03` and `set_time <target> 14:30`
 change the value THROUGH the platform control (SwiftUI's binding,
@@ -258,7 +276,7 @@ No `format`, `is_24_hour`, `first_day_of_week` or calendar-identifier
 props. The platform renders per the user's settings; the wire is
 Gregorian components in every calendar system.
 
-### D10 — The template zone: a stamped picker binds to a row field; the field is the wire's I64 (RULING)
+### D10 — The template zone: a stamped picker binds to a row field, and records learn `Date`/`Time` field types (RULED 2026-09-04: WIDE)
 
 A For's row may carry a due date, and the picker in that row binds to it
 the way a stamped checkbox binds to a bool field (`Tpl::checkbox(src:
@@ -275,9 +293,16 @@ holding the packed value, and the question is who types it:
   and the four hand-declared schemas), so `due: kaya::Date` is a record
   field with typed accessors everywhere and I64 only on the wire.
 
-**Recommendation:** narrow for this milestone, with the ledger entry's
-KEY line naming `KayaGen date field` so the widening is one grep away
-when a record needs a date outside a picker.
+**Ruled 2026-09-04: WIDE.** The maintainer caught the inconsistency —
+D2 types the prop slot at the generator and narrow would leave the same
+value an integer in app code — and chose wide: the record machinery
+learns the same label the prop slot did. The Rust derive, the four
+generated row surfaces (Go, Java, C#, Swift through tools/gen-guests.py)
+and the four hand-declared schemas (Python, JS, OCaml, Haskell) all map a
+`Date`/`Time` field to the I64 tag on the wire and present the language's
+date type (D2's table) everywhere the record is touched; sorting a table
+by that column and keying a row by it work as integers, free. Nothing
+below the generators moves.
 
 ### D11 — Deliberate cuts, each with its trigger
 
@@ -289,8 +314,6 @@ when a record needs a date outside a picker.
   app — the other three have no such control and it is two pickers.
 - Multiple date selection: no platform has it as a control.
 - A combined date-time kind (D1): two widgets in a row.
-- Typed date fields in records (D10 wide): a record with a date outside a
-  picker.
 - The material3 1.4.0 BOM bump for `TimePickerDialog`: its own decision;
   a `Dialog` around `TimePicker` is the 1.3 idiom.
 
@@ -398,7 +421,12 @@ value-kind map), with the slider's file for every min/max shape.
    the nine emitters (typed setters with component signatures, the three
    forms `set`/`bind`/`bind_element`; occurrence payload decode to
    components). tools/gen-header.py, tools/gen-bindings.py; the C header's
-   new constants and `kaya_emit_*` declarations.
+   new constants and `kaya_emit_*` declarations. AND THE RECORD MACHINERY
+   (D10 wide): the Rust `Kaya` derive, the four generated row surfaces
+   under tools/gen-guests.py, and the hand-declared schema spellings in
+   Python, JS, OCaml and Haskell each learn `Date`/`Time` field types
+   mapped to the I64 tag, with the language's date type on the accessor,
+   the setter, the patch and the sort key.
 3. **The harness.** harness.rs: `TargetKind::DatePicker/TimePicker`,
    `Step::SetDate/SetTime/ExpectPicker`, parse arms, three no-default
    `Stage` methods (`set_date`, `set_time`, `picker_value`), MockStage,
