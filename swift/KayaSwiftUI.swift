@@ -9234,6 +9234,8 @@ func kayaPickerCommitted(_ node: KayaNode, isTime: Bool, _ picked: Date, restore
             let picker = UIDatePicker()
             picker.datePickerMode = isTime ? .time : .date
             picker.preferredDatePickerStyle = .compact
+            picker.setContentHuggingPriority(.required, for: .horizontal)
+            picker.setContentHuggingPriority(.required, for: .vertical)
             picker.addTarget(
                 context.coordinator, action: #selector(KayaPickerCoordinator.changed(_:)),
                 for: .valueChanged)
@@ -9246,6 +9248,17 @@ func kayaPickerCommitted(_ node: KayaNode, isTime: Bool, _ picked: Date, restore
             context.coordinator.node = node
             kayaPickerControls[node.id] = picker
             apply(picker)
+        }
+
+        /// THE HOST MUST ANSWER THE SIZE. A compact UIDatePicker asked for
+        /// nothing by SwiftUI's `fixedSize` drew a 60x30 pill with NO value
+        /// text — every read-back green, since the control HELD the date
+        /// (captured 2026-09-04 for the pickers page; docs/traps.md). Its
+        /// fitting size is the pill with its text.
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIDatePicker, context: Context)
+            -> CGSize?
+        {
+            uiView.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         }
 
         static func dismantleUIView(_ picker: UIDatePicker, coordinator: KayaPickerCoordinator) {

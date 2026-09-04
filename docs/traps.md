@@ -8973,3 +8973,21 @@ a timeout whose expiry is not an event is a wait that lies under load; and
 an intermittent leg is a premise nobody pinned — instrument the chokepoint
 on the second sighting, never rerun to green.
 
+## A compact UIDatePicker hosted in SwiftUI drew a pill with NO value text, and every read-back was green (captured 2026-09-04)
+
+The iOS lane passed the pickers scene end to end — `expect_picker` read the
+control's date back correctly, the labels the handler wrote matched, the
+AX role read `datetime` — and the first CAPTURE of the scene for the
+pickers page showed four grey 60x30 pills with nothing written on them. A
+compact `UIDatePicker` inside a `UIViewRepresentable` under SwiftUI's
+`fixedSize` is asked for no size, the representable's default answers none
+that fits, and UIKit collapses the pill to a stub whose label never draws;
+the control HELD the right date the whole time, which is exactly why no
+observation the harness has could see it: the value was right and the
+pixels were wrong. The host answers `sizeThatFits` with the control's
+`systemLayoutSizeFitting` now, and the pill reads "Sep 5, 2026". The class
+to remember: a control whose value is correct and whose rendering is not
+is invisible to every value read, the AX read included; recording mode
+and a capture are the witnesses, and the moment to take one is the moment
+a new hosted control lands on a platform.
+
