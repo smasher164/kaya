@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xa3cb4cff19aad964L
+let spec_hash = 0x33b9ee831818ac41L
 
 let value_bool = 1
 let value_i64 = 2
@@ -60,6 +60,8 @@ let kind_radio = 12
 let kind_grid = 13
 let kind_textarea = 14
 let kind_canvas = 15
+let kind_date_picker = 16
+let kind_time_picker = 17
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3
@@ -103,6 +105,11 @@ let prop_accepts = 15
 let prop_role = 16
 let prop_inset = 17
 let prop_axis = 18
+let prop_date = 19
+let prop_time = 20
+let prop_min_date = 21
+let prop_max_date = 22
+let prop_minute_step = 23
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -303,6 +310,8 @@ let occ_kind_draw_requested = 20
 let occ_kind_tick = 21
 let occ_kind_dropped = 22
 let occ_kind_drag_ended = 23
+let occ_kind_date_changed = 24
+let occ_kind_time_changed = 25
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -721,6 +730,23 @@ let tx_set_reorderable container enabled =
       Buffer.add_int64_le b container;
       Buffer.add_int32_le b (Int32.of_int enabled);
       Buffer.add_int32_le b 0l)
+
+(* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
+let pack_date year month day =
+  Int64.of_int ((year * 10000) + (month * 100) + day)
+
+(* A wire date's components. *)
+let unpack_date packed =
+  let n = Int64.to_int packed in
+  (n / 10000, n / 100 mod 100, n mod 100)
+
+(* A civil time as the wire's I64: hour * 100 + minute. *)
+let pack_time hour minute = Int64.of_int ((hour * 100) + minute)
+
+(* A wire time's components. *)
+let unpack_time packed =
+  let n = Int64.to_int packed in
+  (n / 100, n mod 100)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1190,6 +1216,136 @@ let tx_bind_axis_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant date value. A civil date, packed YYYYMMDD on the wire. *)
+let tx_set_date widget_id year month day =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_date);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 (pack_date year month day)))
+
+(* set_property with a signal-bound date value. *)
+let tx_bind_date widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_date);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_date_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_date);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant time value. A civil time, packed HHMM on the wire. *)
+let tx_set_time widget_id hour minute =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_time);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 (pack_time hour minute)))
+
+(* set_property with a signal-bound time value. *)
+let tx_bind_time widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_time);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_time_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_time);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire. *)
+let tx_set_min_date widget_id year month day =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min_date);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 (pack_date year month day)))
+
+(* set_property with a signal-bound min_date value. *)
+let tx_bind_min_date widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min_date);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_min_date_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min_date);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire. *)
+let tx_set_max_date widget_id year month day =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max_date);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 (pack_date year month day)))
+
+(* set_property with a signal-bound max_date value. *)
+let tx_bind_max_date widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max_date);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_max_date_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max_date);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant minute_step value. *)
+let tx_set_minute_step widget_id minute_step =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_minute_step);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 minute_step))
+
+(* set_property with a signal-bound minute_step value. *)
+let tx_bind_minute_step widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_minute_step);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_minute_step_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_minute_step);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -1625,7 +1781,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -1685,7 +1841,7 @@ let parse_occurrence byte =
       if kind = occ_kind_drag_ended then
         Some (I64 (Int64.of_int (u32_at byte !at)))
       else
-      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed then
+      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed || kind = occ_kind_date_changed || kind = occ_kind_time_changed then
         Some (fst (parse_value byte !at))
       else None
     in

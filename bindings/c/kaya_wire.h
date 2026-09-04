@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xa3cb4cff19aad964ULL
+#define KAYA_SPEC_HASH 0x33b9ee831818ac41ULL
 
 
 /* Create a signal holding `initial`. */
@@ -664,6 +664,30 @@ static inline void kaya_tx_set_reorderable(KayaTx *tx, uint64_t container, uint3
     kaya_wire_u32(tx, enabled);
     kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
+}
+
+/* A civil date as the wire's I64: year * 10000 + month * 100 + day. */
+static inline int64_t kaya_pack_date(int32_t year, int32_t month, int32_t day) {
+    return (int64_t)year * 10000 + (int64_t)month * 100 + (int64_t)day;
+}
+
+/* A wire date's components, through the out params. */
+static inline void kaya_unpack_date(int64_t packed, int32_t *year, int32_t *month,
+                                    int32_t *day) {
+    *year = (int32_t)(packed / 10000);
+    *month = (int32_t)(packed / 100 % 100);
+    *day = (int32_t)(packed % 100);
+}
+
+/* A civil time as the wire's I64: hour * 100 + minute. */
+static inline int64_t kaya_pack_time(int32_t hour, int32_t minute) {
+    return (int64_t)hour * 100 + (int64_t)minute;
+}
+
+/* A wire time's components, through the out params. */
+static inline void kaya_unpack_time(int64_t packed, int32_t *hour, int32_t *minute) {
+    *hour = (int32_t)(packed / 100);
+    *minute = (int32_t)(packed % 100);
 }
 
 /* set_property with a constant text value. */
@@ -1242,6 +1266,166 @@ static inline void kaya_tx_bind_axis_element(KayaTx *tx, uint64_t widget_id, uin
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_property with a constant date value. A civil date, packed YYYYMMDD on the wire. */
+static inline void kaya_tx_set_date(KayaTx *tx, uint64_t widget_id, int32_t year, int32_t month, int32_t day) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(kaya_pack_date(year, month, day)));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound date value. */
+static inline void kaya_tx_bind_date(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_date_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant time value. A civil time, packed HHMM on the wire. */
+static inline void kaya_tx_set_time(KayaTx *tx, uint64_t widget_id, int32_t hour, int32_t minute) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TIME);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(kaya_pack_time(hour, minute)));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound time value. */
+static inline void kaya_tx_bind_time(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TIME);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_time_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TIME);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire. */
+static inline void kaya_tx_set_min_date(KayaTx *tx, uint64_t widget_id, int32_t year, int32_t month, int32_t day) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(kaya_pack_date(year, month, day)));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound min_date value. */
+static inline void kaya_tx_bind_min_date(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_min_date_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire. */
+static inline void kaya_tx_set_max_date(KayaTx *tx, uint64_t widget_id, int32_t year, int32_t month, int32_t day) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(kaya_pack_date(year, month, day)));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound max_date value. */
+static inline void kaya_tx_bind_max_date(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_max_date_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX_DATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant minute_step value. */
+static inline void kaya_tx_set_minute_step(KayaTx *tx, uint64_t widget_id, double minute_step) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MINUTE_STEP);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(minute_step));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound minute_step value. */
+static inline void kaya_tx_bind_minute_step(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MINUTE_STEP);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_minute_step_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MINUTE_STEP);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
@@ -1538,6 +1722,44 @@ static inline int kaya_parse_menu_value_changed(const uint8_t *rec, uint64_t *id
                                                  uint32_t *n_keys, KayaVal *payload) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a date_changed occurrence: same identity head as a click, then
+ * its payload as one Date value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. A Date is a civil
+ * date packed YYYYMMDD; kaya_unpack_date reads its components. */
+static inline int kaya_parse_date_changed(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *keys, uint32_t max_keys,
+                                           uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_DATE_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a time_changed occurrence: same identity head as a click, then
+ * its payload as one Time value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. A Time is a civil
+ * time packed HHMM; kaya_unpack_time reads its components. */
+static inline int kaya_parse_time_changed(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *keys, uint32_t max_keys,
+                                           uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TIME_CHANGED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

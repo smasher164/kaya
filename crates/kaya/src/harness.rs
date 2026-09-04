@@ -73,6 +73,10 @@ pub enum TargetKind {
     /// The radio group: the choice contract in its inline
     /// presentation — same choose/expect verbs as select.
     Radio,
+    /// The pickers (docs/datetime-plan.md D8): driven by set_date /
+    /// set_time through the platform control, read back by expect_picker.
+    DatePicker,
+    TimePicker,
     /// Grids are targetable under the container convention: only index
     /// 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.py).
@@ -146,6 +150,16 @@ pub enum Step {
     Click(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
+    /// Drive a date picker to `2026-09-04` THROUGH the platform control,
+    /// so its own committed event fires (docs/datetime-plan.md D8).
+    SetDate(Target, crate::Date),
+    /// Drive a time picker to `14:30` the same way.
+    SetTime(Target, crate::Time),
+    /// Read the CONTROL's current value back in fixed digits
+    /// (`2026-09-04` / `14:30`) — the one observation for the silent cases
+    /// (a programmatic write, GTK's out-of-range snap) where occurrences
+    /// and labels can only measure an absence.
+    ExpectPicker(Target, String),
     SetText(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
@@ -514,6 +528,9 @@ impl Step {
             | Step::ContextOpen(t) => vec![t],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
+            | Step::SetDate(t, _)
+            | Step::SetTime(t, _)
+            | Step::ExpectPicker(t, _)
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectOrder(t, _)
@@ -611,6 +628,9 @@ impl Step {
             Step::Click { .. } => false,
             Step::Toggle { .. } => false,
             Step::SetValue { .. } => false,
+            Step::SetDate { .. } => false,
+            Step::SetTime { .. } => false,
+            Step::ExpectPicker { .. } => true,
             Step::SetText { .. } => false,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
@@ -704,6 +724,19 @@ pub trait Stage: Send + 'static {
     fn click(&self, target: Target);
     fn toggle(&self, target: Target, on: bool);
     fn set_value(&self, target: Target, value: f64);
+    /// Drive a date picker THROUGH the platform control (its binding,
+    /// state or selected-date property), so the control's own committed
+    /// event fires and the app's handler runs as for a user
+    /// (docs/datetime-plan.md D8). An out-of-range date is the control's
+    /// to refuse (GTK snaps back; the others cannot be driven past their
+    /// bounds), and the scene reads the outcome with expect_picker.
+    fn set_date(&self, target: Target, date: crate::Date);
+    fn set_time(&self, target: Target, time: crate::Time);
+    /// The CONTROL's current value in fixed digits (`2026-09-04` for a
+    /// date picker, `14:30` for a time picker), read from the toolkit —
+    /// never kaya's model of it, which would make the scene agree with
+    /// itself.
+    fn picker_value(&self, target: Target) -> String;
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform keystrokes.
     /// THE CONTRACT, since every backend implements it separately:
@@ -1205,6 +1238,36 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                         .parse()
                         .map_err(|_| format!("set_value wants a number: {line:?}"))?,
                 )
+            }
+            "set_date" => {
+                let (target, date) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("set_date wants a target and YYYY-MM-DD: {line:?}"))?;
+                Step::SetDate(
+                    parse_target(target)?,
+                    date.trim().parse().map_err(|why| format!("set_date: {why} in {line:?}"))?,
+                )
+            }
+            "set_time" => {
+                let (target, time) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("set_time wants a target and HH:MM: {line:?}"))?;
+                Step::SetTime(
+                    parse_target(target)?,
+                    time.trim().parse().map_err(|why| format!("set_time: {why} in {line:?}"))?,
+                )
+            }
+            "expect_picker" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_picker wants a target and a string: {line:?}"))?;
+                let want = parse_string(text)?;
+                if want.parse::<crate::Date>().is_err() && want.parse::<crate::Time>().is_err() {
+                    return Err(format!(
+                        "expect_picker wants YYYY-MM-DD or HH:MM, got {want:?} in {line:?}"
+                    ));
+                }
+                Step::ExpectPicker(parse_target(target)?, want)
             }
             "set_text" => {
                 let (target, text) = rest
@@ -1957,6 +2020,8 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "grid" => TargetKind::Grid,
         "textarea" => TargetKind::Textarea,
         "canvas" => TargetKind::Canvas,
+        "date_picker" => TargetKind::DatePicker,
+        "time_picker" => TargetKind::TimePicker,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -2111,9 +2176,9 @@ fn check_ax(spec: &str) -> Result<(), String> {
     // (macOS's AXRadioGroup and AXScrollArea are both `group`), because a
     // name only one backend can produce is a name no shared scene can
     // assert.
-    const ROLES: [&str; 11] = [
+    const ROLES: [&str; 12] = [
         "button", "label", "field", "checkbox", "slider", "image", "progress",
-        "combobox", "group", "heading", "unknown",
+        "combobox", "group", "heading", "datetime", "unknown",
     ];
     let Some((role, _label)) = spec.split_once('/') else {
         return Err(format!("ax {spec:?} wants <role>/<label>"));
@@ -2671,6 +2736,25 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 stage.set_value(*t, *v);
                 None
             }
+            Step::SetDate(t, d) => {
+                stage.set_date(*t, *d);
+                None
+            }
+            Step::SetTime(t, tm) => {
+                stage.set_time(*t, *tm);
+                None
+            }
+            Step::ExpectPicker(t, want) => Some(match t.kind {
+                TargetKind::DatePicker | TargetKind::TimePicker => poll(|| {
+                    let got = stage.picker_value(*t);
+                    if got == *want {
+                        Ok(got)
+                    } else {
+                        Err(format!("{t:?} holds {got:?}, wanted {want:?}"))
+                    }
+                }),
+                other => Err(format!("expect_picker reads date and time pickers — not {other:?}")),
+            }),
             Step::SetText(t, s) => {
                 stage.set_text(*t, s);
                 None
@@ -3881,6 +3965,8 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Grid => "grid",
         TargetKind::Textarea => "textarea",
         TargetKind::Canvas => "canvas",
+        TargetKind::DatePicker => "date_picker",
+        TargetKind::TimePicker => "time_picker",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -4377,6 +4463,37 @@ mod tests {
     /// asserts against its first word, and `file_save save` would parse
     /// as something and press nothing.
     #[test]
+    fn picker_verbs_parse_fixed_digits_only() {
+        let steps = parse(
+            "set_date date_picker#0 2026-09-04\nset_time time_picker#1 14:30\n\
+             expect_picker date_picker#0 \"2026-09-04\"\nexpect_picker time_picker#1 \"14:30\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            steps[0],
+            Step::SetDate(Target { kind: TargetKind::DatePicker, index: 0, .. }, d)
+                if d == crate::Date::new(2026, 9, 4).unwrap()
+        ));
+        assert!(matches!(
+            steps[1],
+            Step::SetTime(Target { kind: TargetKind::TimePicker, index: 1, .. }, t)
+                if t == crate::Time::new(14, 30).unwrap()
+        ));
+        assert!(matches!(&steps[2], Step::ExpectPicker(_, s) if s == "2026-09-04"));
+        assert!(matches!(&steps[3], Step::ExpectPicker(_, s) if s == "14:30"));
+        // Not a date, not a time, not fixed digits: each refused by name.
+        for bad in [
+            "set_date date_picker#0 2026-02-30",
+            "set_date date_picker#0 9/4/2026",
+            "set_time time_picker#0 24:00",
+            "set_time time_picker#0 2:30",
+            "expect_picker date_picker#0 \"Sep 4\"",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} parsed");
+        }
+    }
+
+    #[test]
     fn save_verbs_parse() {
         assert_eq!(
             parse("expect_save_dialog $TMP/kaya-save-$PID copy").unwrap()[0],
@@ -4587,6 +4704,15 @@ mod tests {
         }
         fn toggle(&self, _: Target, _: bool) {}
         fn set_value(&self, _: Target, _: f64) {}
+        fn set_date(&self, t: Target, d: crate::Date) {
+            self.seen.lock().unwrap().push(format!("set_date {t:?} {d}"));
+        }
+        fn set_time(&self, t: Target, tm: crate::Time) {
+            self.seen.lock().unwrap().push(format!("set_time {t:?} {tm}"));
+        }
+        fn picker_value(&self, _: Target) -> String {
+            "2026-09-04".to_string()
+        }
         fn set_text(&self, _: Target, _: &str) {}
         fn type_text(&self, text: &str) {
             self.seen.lock().unwrap().push(format!("type {text}"));
@@ -5428,6 +5554,11 @@ mod tests {
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
+            fn set_date(&self, _: Target, _: crate::Date) {}
+            fn set_time(&self, _: Target, _: crate::Time) {}
+            fn picker_value(&self, _: Target) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
@@ -5667,6 +5798,11 @@ mod tests {
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
+            fn set_date(&self, _: Target, _: crate::Date) {}
+            fn set_time(&self, _: Target, _: crate::Time) {}
+            fn picker_value(&self, _: Target) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {

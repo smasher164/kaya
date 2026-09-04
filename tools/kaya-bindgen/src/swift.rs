@@ -19,6 +19,7 @@ pub const RESERVED: &[&str] = &[
     // Swift. docs/traps.md: a spec field named like an emitted local
     // packs the buffer offset
     "kayaAt",
+    "kayaPackDate", "kayaUnpackDate", "kayaPackTime", "kayaUnpackTime",
 ];
 
 fn camel(name: &str) -> String {
@@ -66,6 +67,28 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// `bytes`; submit with kaya_submit.");
     c.line("/// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.");
     c.line(&format!("let kayaSpecHash: UInt64 = 0x{:016x}", crate::spec_hash()));
+    c.line("");
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("/// A civil date as the wire's I64: year * 10000 + month * 100 + day.");
+    c.line("func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {");
+    c.line("    Int64(year) * 10000 + Int64(month) * 100 + Int64(day)");
+    c.line("}");
+    c.line("");
+    c.line("/// A wire date's components.");
+    c.line("func kayaUnpackDate(_ packed: Int64) -> (year: Int, month: Int, day: Int) {");
+    c.line("    (Int(packed / 10000), Int(packed / 100 % 100), Int(packed % 100))");
+    c.line("}");
+    c.line("");
+    c.line("/// A civil time as the wire's I64: hour * 100 + minute.");
+    c.line("func kayaPackTime(_ hour: Int, _ minute: Int) -> Int64 {");
+    c.line("    Int64(hour) * 100 + Int64(minute)");
+    c.line("}");
+    c.line("");
+    c.line("/// A wire time's components.");
+    c.line("func kayaUnpackTime(_ packed: Int64) -> (hour: Int, minute: Int) {");
+    c.line("    (Int(packed / 100), Int(packed % 100))");
+    c.line("}");
     c.line("");
     c.line("struct KayaTx {");
     c.line("    var bytes = Data()");
@@ -161,21 +184,46 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
         // Blob setters take the u64 kaya_blob_register handle.
-        let (p, ty, ctor) = match kind {
-            crate::PropKind::Str => (camel(prop), "String", "str"),
-            crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
-            crate::PropKind::F64 => (camel(prop), "Double", "f64"),
-            crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
-            crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
+        let (sig, value) = match kind {
+            crate::PropKind::Str => (
+                format!("_ {}: String", camel(prop)),
+                format!(".str({})", camel(prop)),
+            ),
+            crate::PropKind::Bool => (
+                format!("_ {}: Bool", camel(prop)),
+                format!(".bool({})", camel(prop)),
+            ),
+            crate::PropKind::F64 => (
+                format!("_ {}: Double", camel(prop)),
+                format!(".f64({})", camel(prop)),
+            ),
+            crate::PropKind::Blob => {
+                ("_ handle: UInt64".to_string(), ".blob(handle)".to_string())
+            }
+            crate::PropKind::Enum(_) => (
+                format!("_ {}: Int64", camel(prop)),
+                format!(".i64({})", camel(prop)),
+            ),
+            crate::PropKind::Date => (
+                "_ year: Int, _ month: Int, _ day: Int".to_string(),
+                ".i64(kayaPackDate(year, month, day))".to_string(),
+            ),
+            crate::PropKind::Time => (
+                "_ hour: Int, _ minute: Int".to_string(),
+                ".i64(kayaPackTime(hour, minute))".to_string(),
+            ),
         };
         c.line("");
-        c.line(&format!("    /// set_property with a constant {prop} value."));
-        c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, _ {p}: {ty}) {{"));
+        c.line(&format!(
+            "    /// set_property with a constant {prop} value.{}",
+            crate::date_note(kind)
+        ));
+        c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, {sig}) {{"));
         c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
-        c.line(&format!("        self.value(.{ctor}({p}))"));
+        c.line(&format!("        self.value({value})"));
         c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
@@ -211,6 +259,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", "f64"),
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no window prop is a date or time")
+            }
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -243,6 +294,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no entry prop is a date or time")
+            }
             other => unreachable!("no entry prop carries {other:?}"),
         };
         c.line("");
@@ -276,6 +330,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no section prop is a date or time")
+            }
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -317,6 +374,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", format!(".f64({})", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", ".blob(handle)".to_string()),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", format!(".i64({})", camel(prop))),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         if *prop == "shortcut" {

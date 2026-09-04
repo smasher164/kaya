@@ -87,6 +87,18 @@ pub enum PropKind {
     Blob,
     /// One of the spec's enums, named here. Rides the wire as I64.
     Enum(&'static str),
+    /// A civil calendar date — proleptic Gregorian year, month 1–12,
+    /// day 1–31 — riding the wire as ONE I64 packed decimal
+    /// (`year * 10000 + month * 100 + day`, so 2026-09-04 is 20260904):
+    /// the enum precedent, a label the generators turn into
+    /// component-taking setters and decoders in every binding, while the
+    /// integer is a correct sort and row key for free
+    /// (docs/datetime-plan.md D2). No zone, no instant, by design.
+    Date,
+    /// A civil time of day — hour 0–23, minute 0–59 — packed
+    /// `hour * 100 + minute` (14:30 is 1430). Minutes are the unit; no
+    /// slot for seconds (docs/datetime-plan.md D3).
+    Time,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -143,6 +155,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // the breakpoint diff and the user-driven orientation toggle
     // ordinary property writes.
     ("axis", 18, PropKind::Enum("axis")),
+    // The pickers (docs/datetime-plan.md §3): a date picker's value and
+    // inclusive range, a time picker's value and its minute step.
+    ("date", 19, PropKind::Date),
+    ("time", 20, PropKind::Time),
+    ("min_date", 21, PropKind::Date),
+    ("max_date", 22, PropKind::Date),
+    ("minute_step", 23, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2506,6 +2525,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   transaction with its `dropped`. Identity as in \
                   button_clicked, key values after the header.",
         },
+        Record {
+            kind: 24,
+            name: "date_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::Date),
+            doc: "path_len key values follow, then the date picker's new \
+                  COMMITTED value as one Date (an I64 value, packed decimal). \
+                  The user's intermediate movements inside the control never \
+                  emit; a property write never echoes; the widget owns its \
+                  value, the slider's stance (docs/datetime-plan.md D7).",
+        },
+        Record {
+            kind: 25,
+            name: "time_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::Time),
+            doc: "path_len key values follow, then the time picker's new \
+                  committed value as one Time (an I64 value, packed decimal). \
+                  Same stance as date_changed.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2555,6 +2602,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("grid", 13),
                 ("textarea", 14),
                 ("canvas", 15),
+                ("date_picker", 16),
+                ("time_picker", 17),
             ],
         },
         EnumSpec {
@@ -2636,6 +2685,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("role", 16),
                 ("inset", 17),
                 ("axis", 18),
+                ("date", 19),
+                ("time", 20),
+                ("min_date", 21),
+                ("max_date", 22),
+                ("minute_step", 23),
             ],
         },
         EnumSpec {
@@ -3070,6 +3124,8 @@ mod tests {
                 ("tick", crate::ring::REC_TICK),
                 ("dropped", crate::ring::REC_DROPPED),
                 ("drag_ended", crate::ring::REC_DRAG_ENDED),
+                ("date_changed", crate::ring::REC_DATE_CHANGED),
+                ("time_changed", crate::ring::REC_TIME_CHANGED),
             ]
         );
     }
@@ -3167,7 +3223,14 @@ mod tests {
         // Same order, so the pairing below is the spec's own and not a
         // coincidence of two lists that happen to be the same length.
         for (kind, (name, _)) in WidgetKind::ALL.iter().zip(kind_enum.variants) {
-            let spelled = format!("{kind:?}").to_lowercase();
+            // The variant's snake_case: DatePicker is spelled date_picker.
+            let mut spelled = String::new();
+            for (i, ch) in format!("{kind:?}").chars().enumerate() {
+                if ch.is_uppercase() && i > 0 {
+                    spelled.push('_');
+                }
+                spelled.push(ch.to_ascii_lowercase());
+            }
             assert_eq!(
                 &spelled, name,
                 "kaya: WidgetKind::ALL is out of order with the spec's kind enum \
@@ -3257,6 +3320,8 @@ mod tests {
                     ("kind", "grid") => wire::KIND_GRID,
                     ("kind", "textarea") => wire::KIND_TEXTAREA,
                     ("kind", "canvas") => wire::KIND_CANVAS,
+                    ("kind", "date_picker") => wire::KIND_DATE_PICKER,
+                    ("kind", "time_picker") => wire::KIND_TIME_PICKER,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -3281,6 +3346,11 @@ mod tests {
                     ("prop", "role") => wire::PROP_ROLE,
                     ("prop", "inset") => wire::PROP_INSET,
                     ("prop", "axis") => wire::PROP_AXIS,
+                    ("prop", "date") => wire::PROP_DATE,
+                    ("prop", "time") => wire::PROP_TIME,
+                    ("prop", "min_date") => wire::PROP_MIN_DATE,
+                    ("prop", "max_date") => wire::PROP_MAX_DATE,
+                    ("prop", "minute_step") => wire::PROP_MINUTE_STEP,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

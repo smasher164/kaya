@@ -203,6 +203,15 @@ hours" is a validation the app spells in its handler.
 
 **Recommendation:** date range yes, time range no.
 
+**Amended 2026-09-04, on the first mac run:** the out-of-range answer is
+CLAMP TO THE NEAREST BOUND, not snap back. NSDatePicker moves a
+programmatic or stepped value onto its bound BEFORE its action fires
+(the scene's `set_date 2027-01-01` read back `2026-12-31` and the app heard
+it), UIDatePicker does the same, and a stepper user on any platform lands
+on the bound the same way; so the uniform rule is the platform's own, and
+GTK's arm clamps rather than snapping. "No out-of-range value ever reaches
+the app" holds either way; the scene asserts the bound at both ends.
+
 ### D5 — A picker always holds a value; there is no empty state (RULING, a deliberate cut)
 
 The app declares the initial value when it declares the picker, as a
@@ -345,6 +354,16 @@ below the generators moves.
   locale), `day-selected` as the commit and the out-of-range snap; the
   spin pair with wrap, and the locale's 12/24 read from GSettings'
   `clock-format` with `nl_langinfo(T_FMT)` as the fallback.
+
+**P1 and P4, measured on the mac 2026-09-04 (the depth slice):** the
+commit is the control's own action — NSDatePicker sends it once per
+stepper click, field edit or calendar-overlay pick, and a programmatic
+`dateValue` write sends nothing, so the binding's change IS the commit
+and there is no separate "done" event to wait for; AppKit has no minute
+interval, so the step is snapped in the commit path (D3), while UIKit's
+`minuteInterval` takes it natively. The AX role is `AXDateTimeArea` for
+both kinds (subrole nil), normalized to the closed set's new `datetime`.
+P2, P3 and P5 run with the breadth slice.
 
 ## §3 — The spec, in the record grammar
 

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xa3cb4cff19aad964
+	SpecHash uint64 = 0x33b9ee831818ac41
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -44,6 +44,8 @@ const (
 	KindGrid = 13
 	KindTextarea = 14
 	KindCanvas = 15
+	KindDatePicker = 16
+	KindTimePicker = 17
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -87,6 +89,11 @@ const (
 	PropRole = 16
 	PropInset = 17
 	PropAxis = 18
+	PropDate = 19
+	PropTime = 20
+	PropMinDate = 21
+	PropMaxDate = 22
+	PropMinuteStep = 23
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -287,6 +294,8 @@ const (
 	occTick = 21
 	occDropped = 22
 	occDragEnded = 23
+	occDateChanged = 24
+	occTimeChanged = 25
 )
 
 func pad8(b []byte) []byte {
@@ -833,6 +842,26 @@ func TxSetReorderable(container uint64, enabled uint32) []byte {
 	b = binary.LittleEndian.AppendUint32(b, enabled)
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
+}
+
+// PackDate: a civil date as the wire's I64, year * 10000 + month * 100 + day.
+func PackDate(year, month, day int) int64 {
+	return int64(year)*10000 + int64(month)*100 + int64(day)
+}
+
+// UnpackDate: a wire date's components.
+func UnpackDate(packed int64) (year, month, day int) {
+	return int(packed / 10000), int(packed / 100 % 100), int(packed % 100)
+}
+
+// PackTime: a civil time as the wire's I64, hour * 100 + minute.
+func PackTime(hour, minute int) int64 {
+	return int64(hour)*100 + int64(minute)
+}
+
+// UnpackTime: a wire time's components.
+func UnpackTime(packed int64) (hour, minute int) {
+	return int(packed / 100), int(packed % 100)
 }
 
 // TxSetText: set_property with a constant text value.
@@ -1411,6 +1440,166 @@ func TxBindAxisElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetDate: set_property with a constant date value. A civil date, packed YYYYMMDD on the wire.
+func TxSetDate(widgetID uint64, year, month, day int) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, PackDate(year, month, day))
+	return endRecord(b)
+}
+
+// TxBindDate: set_property with a signal-bound date value.
+func TxBindDate(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindDateElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindDateElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetTime: set_property with a constant time value. A civil time, packed HHMM on the wire.
+func TxSetTime(widgetID uint64, hour, minute int) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTime)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, PackTime(hour, minute))
+	return endRecord(b)
+}
+
+// TxBindTime: set_property with a signal-bound time value.
+func TxBindTime(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTime)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindTimeElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindTimeElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTime)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMinDate: set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire.
+func TxSetMinDate(widgetID uint64, year, month, day int) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, PackDate(year, month, day))
+	return endRecord(b)
+}
+
+// TxBindMinDate: set_property with a signal-bound min_date value.
+func TxBindMinDate(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMinDateElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMinDateElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMaxDate: set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire.
+func TxSetMaxDate(widgetID uint64, year, month, day int) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, PackDate(year, month, day))
+	return endRecord(b)
+}
+
+// TxBindMaxDate: set_property with a signal-bound max_date value.
+func TxBindMaxDate(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMaxDateElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMaxDateElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMaxDate)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMinuteStep: set_property with a constant minute_step value.
+func TxSetMinuteStep(widgetID uint64, minuteStep float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinuteStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, minuteStep)
+	return endRecord(b)
+}
+
+// TxBindMinuteStep: set_property with a signal-bound minute_step value.
+func TxBindMinuteStep(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinuteStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMinuteStepElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMinuteStepElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMinuteStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -1947,7 +2136,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -2104,7 +2293,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occSortRequested {
 		payload = binary.LittleEndian.Uint32(rec[20:])
 	}
-	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged {
+	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged || kind == occDateChanged || kind == occTimeChanged {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
 		switch vtype {

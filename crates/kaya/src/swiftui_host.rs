@@ -11,7 +11,7 @@ use std::ffi::{CString, c_char, c_int, c_void};
 
 use crate::capi::{
     kaya_blob_count, kaya_blob_data, kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled,
-    kaya_emit_value_changed, kaya_next_commands,
+    kaya_emit_value_changed, kaya_next_commands, kaya_emit_date_changed, kaya_emit_time_changed,
 };
 
 /// Redeem a picked file: the locator, the mode, and out-parameters for
@@ -117,6 +117,9 @@ pub struct KayaHostApi {
     pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u64, u8, u8),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
+    /// The pickers' committed values, packed (docs/datetime-plan.md D2).
+    pub emit_date_changed: unsafe extern "C" fn(*const u8, usize, i64),
+    pub emit_time_changed: unsafe extern "C" fn(*const u8, usize, i64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
     pub blob_count: unsafe extern "C" fn() -> u64,
     /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
@@ -338,6 +341,8 @@ pub(crate) fn run() -> i32 {
         emit_text_changed: kaya_emit_text_changed,
         emit_toggled: kaya_emit_toggled,
         emit_value_changed: kaya_emit_value_changed,
+        emit_date_changed: kaya_emit_date_changed,
+        emit_time_changed: kaya_emit_time_changed,
         blob_data: kaya_blob_data,
         blob_count: kaya_blob_count,
         spec_hash: crate::capi::kaya_spec_hash,

@@ -97,6 +97,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::AlertResult { .. }
             | Occurrence::FileDialogResult { .. }
             | Occurrence::ClipboardResult { .. }
+            | Occurrence::DateChanged { .. }
+            | Occurrence::InstanceDateChanged { .. }
+            | Occurrence::TimeChanged { .. }
+            | Occurrence::InstanceTimeChanged { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

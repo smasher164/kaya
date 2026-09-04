@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xa3cb4cff19aad964
+let kayaSpecHash: UInt64 = 0x33b9ee831818ac41
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -122,6 +122,8 @@ private let kindRadio: UInt32 = 12
 private let kindGrid: UInt32 = 13
 private let kindTextarea: UInt32 = 14
 private let kindCanvas: UInt32 = 15
+private let kindDatePicker: UInt32 = 16
+private let kindTimePicker: UInt32 = 17
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -135,6 +137,13 @@ private let propAccepts: UInt32 = 15
 /// Semantic emphasis (docs/styling-plan.md D4); the variant values follow.
 private let propRole: UInt32 = 16
 private let propInset: UInt32 = 17
+/// The pickers' slots (docs/datetime-plan.md D2): packed-decimal I64s —
+/// YYYYMMDD for the three dates, HHMM for the time — and a minute count.
+private let propDate: UInt32 = 19
+private let propTime: UInt32 = 20
+private let propMinDate: UInt32 = 21
+private let propMaxDate: UInt32 = 22
+private let propMinuteStep: UInt32 = 23
 private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
@@ -313,6 +322,13 @@ final class KayaNode: Identifiable {
     var value = 0.0
     var minValue = 0.0
     var maxValue = 1.0
+    /// The pickers' packed values (docs/datetime-plan.md D2); 0 is "no
+    /// bound" for the range, and 1 the step's default.
+    var date: Int64 = 0
+    var minDate: Int64 = 0
+    var maxDate: Int64 = 0
+    var time: Int64 = 0
+    var minuteStep = 1
     // The decoded native image (nil is the placeholder class) and its size
     // as the harness's "WxH" observation ("0x0" before a source lands or
     // after a failed decode).
@@ -624,6 +640,8 @@ final class KayaSceneModel {
     /// compiled clean.
     var entryWidgets: [KayaNode] = []
     var sliders: [KayaNode] = []
+    var datePickers: [KayaNode] = []
+    var timePickers: [KayaNode] = []
     var images: [KayaNode] = []
     var canvases: [KayaNode] = []
     var columns: [KayaNode] = []
@@ -3742,6 +3760,19 @@ enum KayaHost {
         }
     }
 
+    /// A picker's COMMITTED value, packed (docs/datetime-plan.md D7).
+    static func emitDateChanged(_ tag: [UInt8], _ packed: Int64) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_date_changed(buffer.baseAddress, UInt(buffer.count), packed)
+        }
+    }
+
+    static func emitTimeChanged(_ tag: [UInt8], _ packed: Int64) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_time_changed(buffer.baseAddress, UInt(buffer.count), packed)
+        }
+    }
+
     // --- ROW WINDOWING (docs/virtualization-plan.md §3) ---------------
     //
     // EVERY ONE IS NIL-GUARDED: the tools/checks probes host this render path
@@ -4050,6 +4081,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindButton: kayaScene.buttons.append(node)
                 case kindLabel: kayaScene.labels.append(node)
                 case kindSlider: kayaScene.sliders.append(node)
+                case kindDatePicker: kayaScene.datePickers.append(node)
+                case kindTimePicker: kayaScene.timePickers.append(node)
                 case kindEntry: kayaScene.entryWidgets.append(node)
                 case kindCheckbox: kayaScene.checkboxes.append(node)
                 case kindImage: kayaScene.images.append(node)
@@ -4537,6 +4570,21 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMax, valueF64):
                     kayaScene.nodes[id]!.maxValue =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propDate, valueI64):
+                    kayaScene.nodes[id]!.date =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propMinDate, valueI64):
+                    kayaScene.nodes[id]!.minDate =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propMaxDate, valueI64):
+                    kayaScene.nodes[id]!.maxDate =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propTime, valueI64):
+                    kayaScene.nodes[id]!.time =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propMinuteStep, valueF64):
+                    kayaScene.nodes[id]!.minuteStep =
+                        Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -5054,6 +5102,10 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         case kAXTextFieldRole, kAXTextAreaRole: return "field"
         case kAXCheckBoxRole: return "checkbox"
         case kAXSliderRole: return "slider"
+        // NSDatePicker publishes ONE role for a date and a time picker alike
+        // (measured 2026-09-04 on the pickers scene): the closed set's
+        // `datetime` (docs/datetime-plan.md P4).
+        case "AXDateTimeArea": return "datetime"
         case kAXImageRole: return "image"
         case kAXProgressIndicatorRole: return "progress"
         // A chooser is a chooser everywhere and spelled differently
@@ -5997,6 +6049,8 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "checkbox": return kayaTarget(spec, "checkbox", kayaScene.checkboxes)
     case "label": return kayaTarget(spec, "label", kayaScene.labels)
     case "slider": return kayaTarget(spec, "slider", kayaScene.sliders)
+    case "date_picker": return kayaTarget(spec, "date_picker", kayaScene.datePickers)
+    case "time_picker": return kayaTarget(spec, "time_picker", kayaScene.timePickers)
     case "image": return kayaTarget(spec, "image", kayaScene.images)
     case "canvas": return kayaTarget(spec, "canvas", kayaScene.canvases)
     case "column": return kayaTarget(spec, "column", kayaScene.columns)
@@ -6254,6 +6308,50 @@ private func kayaRunScript(_ script: String) {
                     return true
                 }
                 if !ok { failures.append("no such target \(parts[1])") }
+            case "set_date", "set_time":
+                // THROUGH the control (docs/datetime-plan.md D8): its value
+                // moves and its own action fires, the path a user's pick
+                // takes, so the range police and the minute snap run too.
+                let isTime = parts[0] == "set_time"
+                let spelled = String(parts[2])
+                guard let packed = isTime ? kayaParseTime(spelled) : kayaParseDate(spelled) else {
+                    failures.append(
+                        "\(parts[0]) wants \(isTime ? "HH:MM" : "YYYY-MM-DD"), got \(spelled)")
+                    break
+                }
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    let node = isTime
+                        ? kayaTarget(parts[1], "time_picker", kayaScene.timePickers)
+                        : kayaTarget(parts[1], "date_picker", kayaScene.datePickers)
+                    guard let node, let control = kayaPickerControls[node.id] else { return false }
+                    kayaDrivePicker(
+                        control, to: isTime ? kayaDateFromPackedTime(packed) : kayaDateFromPackedDate(packed))
+                    return true
+                }
+                if !ok { failures.append("no such target \(parts[1])") }
+            case "expect_picker":
+                // The CONTROL's value, never the node's: the one observation
+                // for the silent cases (docs/datetime-plan.md D8).
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    if parts[1].hasPrefix("time_picker") {
+                        guard let node = kayaTarget(parts[1], "time_picker", kayaScene.timePickers),
+                            let control = kayaPickerControls[node.id]
+                        else { return nil }
+                        return kayaSpelledTime(kayaPackedTime(kayaControlDate(control)))
+                    }
+                    guard let node = kayaTarget(parts[1], "date_picker", kayaScene.datePickers),
+                        let control = kayaPickerControls[node.id]
+                    else { return nil }
+                    return kayaSpelledDate(kayaPackedDate(kayaControlDate(control)))
+                }
+                if let got, got == want {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) holds \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "choose":
                 // The select's real change route in this interpreter is the
                 // Picker's binding set — mirrored here exactly as set_value
@@ -8915,6 +9013,258 @@ func kayaInvalidateTableGeometry() {
         table.tableGeometryEpoch &+= 1
     }
 }
+
+// ---- the pickers (docs/datetime-plan.md) ------------------------------------
+// The wire packs a date as YYYYMMDD and a time as HHMM (D2); the CONTROL holds
+// an instant, read in the Gregorian calendar of the current zone whatever
+// calendar the user displays, so the round trip is stable and the wire stays
+// Gregorian (D9). Dates are placed at noon so no zone's midnight can move them.
+
+private let kayaCivil: Calendar = {
+    var c = Calendar(identifier: .gregorian)
+    c.timeZone = TimeZone.current
+    return c
+}()
+
+func kayaDateFromPackedDate(_ packed: Int64) -> Date {
+    let parts = DateComponents(
+        year: Int(packed / 10_000), month: Int((packed / 100) % 100), day: Int(packed % 100),
+        hour: 12)
+    return kayaCivil.date(from: parts) ?? Date()
+}
+
+func kayaPackedDate(_ date: Date) -> Int64 {
+    let c = kayaCivil.dateComponents([.year, .month, .day], from: date)
+    return Int64(c.year! * 10_000 + c.month! * 100 + c.day!)
+}
+
+func kayaDateFromPackedTime(_ packed: Int64) -> Date {
+    kayaCivil.date(bySettingHour: Int(packed / 100), minute: Int(packed % 100), second: 0, of: Date())
+        ?? Date()
+}
+
+func kayaPackedTime(_ date: Date) -> Int64 {
+    let c = kayaCivil.dateComponents([.hour, .minute], from: date)
+    return Int64(c.hour! * 100 + c.minute!)
+}
+
+/// The fixed-digit spellings every scene reads (harness.rs Date/Time Display).
+func kayaSpelledDate(_ packed: Int64) -> String {
+    String(format: "%04lld-%02lld-%02lld", packed / 10_000, (packed / 100) % 100, packed % 100)
+}
+
+func kayaSpelledTime(_ packed: Int64) -> String {
+    String(format: "%02lld:%02lld", packed / 100, packed % 100)
+}
+
+/// `YYYY-MM-DD` to packed, refusing what is not a date (a leap rule the
+/// calendar knows; a shape the digits do not fit).
+func kayaParseDate(_ s: String) -> Int64? {
+    let parts = s.split(separator: "-", omittingEmptySubsequences: false)
+    guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+        let y = Int(parts[0]), let m = Int(parts[1]), let d = Int(parts[2])
+    else { return nil }
+    let c = DateComponents(calendar: kayaCivil, year: y, month: m, day: d)
+    guard c.isValidDate else { return nil }
+    return Int64(y * 10_000 + m * 100 + d)
+}
+
+func kayaParseTime(_ s: String) -> Int64? {
+    let parts = s.split(separator: ":", omittingEmptySubsequences: false)
+    guard parts.count == 2, parts[0].count == 2, parts[1].count == 2,
+        let h = Int(parts[0]), let m = Int(parts[1]), (0...23).contains(h), (0...59).contains(m)
+    else { return nil }
+    return Int64(h * 100 + m)
+}
+
+/// THE ONE COMMIT PATH, user or driven (D7, D8): read the control's instant
+/// back as civil parts, CLAMP the date to its range and snap the minute
+/// step, mirror the node, emit. Clamping is AppKit's own answer to a date
+/// past a bound (NSDatePicker moves a programmatic or stepped value onto
+/// the bound before its action fires, measured 2026-09-04) and the rule
+/// every backend follows (D4). A pick that lands on the value already held
+/// emits nothing.
+func kayaPickerCommitted(_ node: KayaNode, isTime: Bool, _ picked: Date, restore: (Date) -> Void) {
+    if isTime {
+        let raw = kayaPackedTime(picked)
+        var packed = raw
+        let step = max(1, node.minuteStep)
+        if step > 1 {
+            var hour = Int(raw / 100)
+            var minute = (Int(raw % 100) + step / 2) / step * step
+            if minute >= 60 {
+                minute = 0
+                hour = (hour + 1) % 24
+            }
+            packed = Int64(hour * 100 + minute)
+            if packed != raw { restore(kayaDateFromPackedTime(packed)) }
+        }
+        if packed == node.time { return }
+        kayaUserWrite { node.time = packed }
+        KayaHost.emitTimeChanged(node.tag, packed)
+    } else {
+        var packed = kayaPackedDate(picked)
+        if node.minDate != 0 && packed < node.minDate { packed = node.minDate }
+        if node.maxDate != 0 && packed > node.maxDate { packed = node.maxDate }
+        if packed != kayaPackedDate(picked) { restore(kayaDateFromPackedDate(packed)) }
+        if packed == node.date { return }
+        kayaUserWrite { node.date = packed }
+        KayaHost.emitDateChanged(node.tag, packed)
+    }
+}
+
+#if os(macOS)
+    typealias KayaPickerControl = NSDatePicker
+    /// The hosted controls by node id, the drag surfaces' registry shape: what
+    /// `set_date`/`set_time` drive and `expect_picker` reads.
+    nonisolated(unsafe) var kayaPickerControls: [UInt64: NSDatePicker] = [:]
+
+    func kayaControlDate(_ control: NSDatePicker) -> Date { control.dateValue }
+
+    /// Drive the control the way a user's pick reaches it: the value moves
+    /// and the control's own action fires.
+    func kayaDrivePicker(_ control: NSDatePicker, to date: Date) {
+        control.dateValue = date
+        control.sendAction(control.action, to: control.target)
+    }
+
+    final class KayaPickerCoordinator: NSObject {
+        var node: KayaNode
+        let isTime: Bool
+        init(node: KayaNode, isTime: Bool) {
+            self.node = node
+            self.isTime = isTime
+        }
+        @objc func changed(_ sender: NSDatePicker) {
+            kayaPickerCommitted(node, isTime: isTime, sender.dateValue) { sender.dateValue = $0 }
+        }
+    }
+
+    /// NSDatePicker in its text-field-and-stepper style with the calendar
+    /// overlay: the mac's compact field (D6). AppKit has no minute interval,
+    /// so the step is snapped in the commit path (D3).
+    struct KayaPickerSurface: NSViewRepresentable {
+        let node: KayaNode
+        let isTime: Bool
+
+        func makeCoordinator() -> KayaPickerCoordinator {
+            KayaPickerCoordinator(node: node, isTime: isTime)
+        }
+
+        func makeNSView(context: Context) -> NSDatePicker {
+            let picker = NSDatePicker()
+            picker.datePickerStyle = .textFieldAndStepper
+            picker.datePickerElements = isTime ? .hourMinute : .yearMonthDay
+            picker.presentsCalendarOverlay = !isTime
+            picker.isBezeled = true
+            picker.target = context.coordinator
+            picker.action = #selector(KayaPickerCoordinator.changed(_:))
+            kayaPickerControls[node.id] = picker
+            apply(picker)
+            return picker
+        }
+
+        func updateNSView(_ picker: NSDatePicker, context: Context) {
+            context.coordinator.node = node
+            kayaPickerControls[node.id] = picker
+            apply(picker)
+        }
+
+        static func dismantleNSView(_ picker: NSDatePicker, coordinator: KayaPickerCoordinator) {
+            if kayaPickerControls[coordinator.node.id] === picker {
+                kayaPickerControls.removeValue(forKey: coordinator.node.id)
+            }
+        }
+
+        private func apply(_ picker: NSDatePicker) {
+            if isTime {
+                picker.dateValue = kayaDateFromPackedTime(node.time)
+            } else {
+                picker.minDate = node.minDate == 0
+                    ? nil : kayaCivil.startOfDay(for: kayaDateFromPackedDate(node.minDate))
+                picker.maxDate = node.maxDate == 0
+                    ? nil
+                    : kayaCivil.date(
+                        byAdding: DateComponents(day: 1, second: -1),
+                        to: kayaCivil.startOfDay(for: kayaDateFromPackedDate(node.maxDate)))
+                picker.dateValue = kayaDateFromPackedDate(node.date)
+            }
+        }
+    }
+#else
+    typealias KayaPickerControl = UIDatePicker
+    nonisolated(unsafe) var kayaPickerControls: [UInt64: UIDatePicker] = [:]
+
+    func kayaControlDate(_ control: UIDatePicker) -> Date { control.date }
+
+    func kayaDrivePicker(_ control: UIDatePicker, to date: Date) {
+        control.date = date
+        control.sendActions(for: .valueChanged)
+    }
+
+    final class KayaPickerCoordinator: NSObject {
+        var node: KayaNode
+        let isTime: Bool
+        init(node: KayaNode, isTime: Bool) {
+            self.node = node
+            self.isTime = isTime
+        }
+        @objc func changed(_ sender: UIDatePicker) {
+            kayaPickerCommitted(node, isTime: isTime, sender.date) { sender.date = $0 }
+        }
+    }
+
+    /// UIDatePicker in its compact style (D6): a pill that opens the calendar
+    /// or the wheel. UIKit has a minute interval of its own.
+    struct KayaPickerSurface: UIViewRepresentable {
+        let node: KayaNode
+        let isTime: Bool
+
+        func makeCoordinator() -> KayaPickerCoordinator {
+            KayaPickerCoordinator(node: node, isTime: isTime)
+        }
+
+        func makeUIView(context: Context) -> UIDatePicker {
+            let picker = UIDatePicker()
+            picker.datePickerMode = isTime ? .time : .date
+            picker.preferredDatePickerStyle = .compact
+            picker.addTarget(
+                context.coordinator, action: #selector(KayaPickerCoordinator.changed(_:)),
+                for: .valueChanged)
+            kayaPickerControls[node.id] = picker
+            apply(picker)
+            return picker
+        }
+
+        func updateUIView(_ picker: UIDatePicker, context: Context) {
+            context.coordinator.node = node
+            kayaPickerControls[node.id] = picker
+            apply(picker)
+        }
+
+        static func dismantleUIView(_ picker: UIDatePicker, coordinator: KayaPickerCoordinator) {
+            if kayaPickerControls[coordinator.node.id] === picker {
+                kayaPickerControls.removeValue(forKey: coordinator.node.id)
+            }
+        }
+
+        private func apply(_ picker: UIDatePicker) {
+            if isTime {
+                picker.minuteInterval = max(1, node.minuteStep)
+                picker.date = kayaDateFromPackedTime(node.time)
+            } else {
+                picker.minimumDate = node.minDate == 0
+                    ? nil : kayaCivil.startOfDay(for: kayaDateFromPackedDate(node.minDate))
+                picker.maximumDate = node.maxDate == 0
+                    ? nil
+                    : kayaCivil.date(
+                        byAdding: DateComponents(day: 1, second: -1),
+                        to: kayaCivil.startOfDay(for: kayaDateFromPackedDate(node.maxDate)))
+                picker.date = kayaDateFromPackedDate(node.date)
+            }
+        }
+    }
+#endif
 
 /// The USER ROUTE's model mirror — the checkbox flip, the drag, the keystroke,
 /// the platform undo. A write nobody batched stales the table observations the
@@ -12412,6 +12762,15 @@ struct KayaRender: View {
             // keep that cap: capping the drawn control below its track rendered
             // a 1:3 row as 38/62 while expect_shares kept passing.
             .frame(maxWidth: node.grow > 0 ? .infinity : 200)
+        case kindDatePicker:
+            // The platform's own control, hosted (docs/datetime-plan.md D6):
+            // the compact field that opens the calendar. Its action is the
+            // commit; the node mirrors it and the emit rides the identity tag.
+            KayaPickerSurface(node: node, isTime: false)
+                .fixedSize()
+        case kindTimePicker:
+            KayaPickerSurface(node: node, isTime: true)
+                .fixedSize()
         case kindEntry:
             KayaEntry(node: node)
         case kindTextarea:

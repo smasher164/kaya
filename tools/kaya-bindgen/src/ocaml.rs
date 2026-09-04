@@ -10,6 +10,7 @@ use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants}
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence", "parse_representation",
     "canonicalize_shortcut", "shortcut_named_keys",
+    "pack_date", "unpack_date", "pack_time", "unpack_time",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
     "include", "inherit", "initializer", "lazy", "let", "match", "method", "module", "mutable",
@@ -131,23 +132,54 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("(* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)");
+    c.line("let pack_date year month day =");
+    c.line("  Int64.of_int ((year * 10000) + (month * 100) + day)");
+    c.line("");
+    c.line("(* A wire date's components. *)");
+    c.line("let unpack_date packed =");
+    c.line("  let n = Int64.to_int packed in");
+    c.line("  (n / 10000, n / 100 mod 100, n mod 100)");
+    c.line("");
+    c.line("(* A civil time as the wire's I64: hour * 100 + minute. *)");
+    c.line("let pack_time hour minute = Int64.of_int ((hour * 100) + minute)");
+    c.line("");
+    c.line("(* A wire time's components. *)");
+    c.line("let unpack_time packed =");
+    c.line("  let n = Int64.to_int packed in");
+    c.line("  (n / 100, n mod 100)");
+
     for (prop, _, kind) in prop_variants(spec) {
         // Blob setters take the u64 kaya_blob_register handle.
-        let (ctor, param) = match kind {
-            crate::PropKind::Str => ("Str", *prop),
-            crate::PropKind::Bool => ("Bool", *prop),
-            crate::PropKind::F64 => ("F64", *prop),
-            crate::PropKind::Blob => ("Blob", "handle"),
-            crate::PropKind::Enum(_) => ("I64", *prop),
+        let (params, value) = match kind {
+            crate::PropKind::Str => (prop.to_string(), format!("Str {prop}")),
+            crate::PropKind::Bool => (prop.to_string(), format!("Bool {prop}")),
+            crate::PropKind::F64 => (prop.to_string(), format!("F64 {prop}")),
+            crate::PropKind::Blob => ("handle".to_string(), "Blob handle".to_string()),
+            crate::PropKind::Enum(_) => (prop.to_string(), format!("I64 {prop}")),
+            crate::PropKind::Date => (
+                "year month day".to_string(),
+                "I64 (pack_date year month day)".to_string(),
+            ),
+            crate::PropKind::Time => (
+                "hour minute".to_string(),
+                "I64 (pack_time hour minute)".to_string(),
+            ),
         };
         c.line("");
-        c.line(&format!("(* set_property with a constant {prop} value. *)"));
-        c.line(&format!("let tx_set_{prop} widget_id {param} ="));
+        c.line(&format!(
+            "(* set_property with a constant {prop} value.{} *)",
+            crate::date_note(kind)
+        ));
+        c.line(&format!("let tx_set_{prop} widget_id {params} ="));
         c.line("  finish tx_kind_set_property (fun b ->");
         c.line("      Buffer.add_int64_le b widget_id;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
-        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line(&format!("      encode_value b ({value}))"));
         c.line("");
         c.line(&format!("(* set_property with a signal-bound {prop} value. *)"));
         c.line(&format!("let tx_bind_{prop} widget_id signal_id ="));
@@ -175,6 +207,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => ("F64", *prop),
             crate::PropKind::Bool => ("Bool", *prop),
             crate::PropKind::Enum(_) => ("I64", *prop),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no window prop is a date or time")
+            }
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -201,6 +236,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::Bool => ("Bool", *prop),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no entry prop is a date or time")
+            }
             other => unreachable!("no entry prop carries {other:?}"),
         };
         c.line("");
@@ -228,6 +266,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::Blob => ("Blob", "handle"),
             crate::PropKind::Enum(_) => ("I64", *prop),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no section prop is a date or time")
+            }
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -326,6 +367,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (format!("F64 {prop}"), *prop),
             crate::PropKind::Blob => ("Blob handle".to_string(), "handle"),
             crate::PropKind::Enum(_) => (format!("I64 {prop}"), *prop),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         if *prop == "shortcut" {

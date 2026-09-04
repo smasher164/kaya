@@ -105,6 +105,10 @@
 
 #define KAYA_OCCURRENCE_DRAG_ENDED 23
 
+#define KAYA_OCCURRENCE_DATE_CHANGED 24
+
+#define KAYA_OCCURRENCE_TIME_CHANGED 25
+
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
@@ -624,6 +628,10 @@
 
 #define KAYA_KIND_CANVAS 15
 
+#define KAYA_KIND_DATE_PICKER 16
+
+#define KAYA_KIND_TIME_PICKER 17
+
 /**
  * Property keys.
  */
@@ -688,6 +696,21 @@
  * column are one node this prop parameterizes.
  */
 #define KAYA_PROP_AXIS 18
+
+/**
+ * The pickers' slots (spec::PROPS): `date`, `min_date` and `max_date`
+ * are packed-decimal dates (YYYYMMDD as one int64), `time` a packed
+ * HHMM, `minute_step` a count (docs/datetime-plan.md D2, D3).
+ */
+#define KAYA_PROP_DATE 19
+
+#define KAYA_PROP_TIME 20
+
+#define KAYA_PROP_MIN_DATE 21
+
+#define KAYA_PROP_MAX_DATE 22
+
+#define KAYA_PROP_MINUTE_STEP 23
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -1101,6 +1124,11 @@ typedef struct KayaHostApi {
                             uint8_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
+  /**
+   * The pickers' committed values, packed (docs/datetime-plan.md D2).
+   */
+  void (*emit_date_changed)(const uint8_t*, uintptr_t, int64_t);
+  void (*emit_time_changed)(const uint8_t*, uintptr_t, int64_t);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
   uint64_t (*blob_count)(void);
   /**
@@ -1654,6 +1682,21 @@ void kaya_emit_sort_requested(const uint8_t *tag, uintptr_t tag_len, uint32_t co
  * combine with kaya_run.
  */
 void kaya_emit_toggled(const uint8_t *tag, uintptr_t tag_len, uint8_t checked);
+
+/**
+ * Presentation side: emit a date picker's COMMITTED value, exactly as a
+ * backend's change handler would — `tag` is the tag bytes delivered
+ * with the picker's CREATE record, `packed` the new date as YYYYMMDD
+ * (docs/datetime-plan.md D2; a value that is not a date panics here, at
+ * the backend, not in the app). Do not combine with kaya_run.
+ */
+void kaya_emit_date_changed(const uint8_t *tag, uintptr_t tag_len, int64_t packed);
+
+/**
+ * Presentation side: emit a time picker's committed value, `packed` as
+ * HHMM. Do not combine with kaya_run.
+ */
+void kaya_emit_time_changed(const uint8_t *tag, uintptr_t tag_len, int64_t packed);
 
 /**
  * Presentation side: emit a slider move, exactly as a backend's

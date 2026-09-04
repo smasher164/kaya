@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xa3cb4cff19aad964
+specHash = 0x33b9ee831818ac41
 
 valueBool :: Word32
 valueBool = 1
@@ -82,6 +82,10 @@ kindTextarea :: Word32
 kindTextarea = 14
 kindCanvas :: Word32
 kindCanvas = 15
+kindDatePicker :: Word32
+kindDatePicker = 16
+kindTimePicker :: Word32
+kindTimePicker = 17
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -168,6 +172,16 @@ propInset :: Word32
 propInset = 17
 propAxis :: Word32
 propAxis = 18
+propDate :: Word32
+propDate = 19
+propTime :: Word32
+propTime = 20
+propMinDate :: Word32
+propMinDate = 21
+propMaxDate :: Word32
+propMaxDate = 22
+propMinuteStep :: Word32
+propMinuteStep = 23
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -568,6 +582,10 @@ occKindDropped :: Word16
 occKindDropped = 22
 occKindDragEnded :: Word16
 occKindDragEnded = 23
+occKindDateChanged :: Word16
+occKindDateChanged = 24
+occKindTimeChanged :: Word16
+occKindTimeChanged = 25
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -803,6 +821,26 @@ txSetDropTarget widget operations pathLen keys = wireRecord txKindSetDropTarget 
 -- Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
 txSetReorderable :: Word64 -> Word32 -> Builder
 txSetReorderable container enabled = wireRecord txKindSetReorderable (word64LE container <> word32LE enabled <> word32LE 0)
+
+-- A civil date as the wire's I64: year * 10000 + month * 100 + day.
+packDate :: Int -> Int -> Int -> Int64
+packDate year month day = fromIntegral (year * 10000 + month * 100 + day)
+
+-- A wire date's components.
+unpackDate :: Int64 -> (Int, Int, Int)
+unpackDate packed =
+  let n = fromIntegral packed :: Int
+   in (n `div` 10000, n `div` 100 `mod` 100, n `mod` 100)
+
+-- A civil time as the wire's I64: hour * 100 + minute.
+packTime :: Int -> Int -> Int64
+packTime hour minute = fromIntegral (hour * 100 + minute)
+
+-- A wire time's components.
+unpackTime :: Int64 -> (Int, Int)
+unpackTime packed =
+  let n = fromIntegral packed :: Int
+   in (n `div` 100, n `mod` 100)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1144,6 +1182,101 @@ txBindAxis widgetId signalId = wireRecord txKindSetProperty
 txBindAxisElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindAxisElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAxis <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant date value. A civil date, packed YYYYMMDD on the wire.
+txSetDate :: Word64 -> Int -> Int -> Int -> Builder
+txSetDate widgetId year month day = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDate <> word32LE sourceConst
+    <> encodeValue (VI64 (packDate year month day)))
+
+-- set_property with a signal-bound date value.
+txBindDate :: Word64 -> Word64 -> Builder
+txBindDate widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDate <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindDateElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindDateElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propDate <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant time value. A civil time, packed HHMM on the wire.
+txSetTime :: Word64 -> Int -> Int -> Builder
+txSetTime widgetId hour minute = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTime <> word32LE sourceConst
+    <> encodeValue (VI64 (packTime hour minute)))
+
+-- set_property with a signal-bound time value.
+txBindTime :: Word64 -> Word64 -> Builder
+txBindTime widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTime <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindTimeElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindTimeElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTime <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire.
+txSetMinDate :: Word64 -> Int -> Int -> Int -> Builder
+txSetMinDate widgetId year month day = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinDate <> word32LE sourceConst
+    <> encodeValue (VI64 (packDate year month day)))
+
+-- set_property with a signal-bound min_date value.
+txBindMinDate :: Word64 -> Word64 -> Builder
+txBindMinDate widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinDate <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMinDateElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMinDateElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinDate <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire.
+txSetMaxDate :: Word64 -> Int -> Int -> Int -> Builder
+txSetMaxDate widgetId year month day = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxDate <> word32LE sourceConst
+    <> encodeValue (VI64 (packDate year month day)))
+
+-- set_property with a signal-bound max_date value.
+txBindMaxDate :: Word64 -> Word64 -> Builder
+txBindMaxDate widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxDate <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMaxDateElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMaxDateElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMaxDate <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant minute_step value.
+txSetMinuteStep :: Word64 -> Double -> Builder
+txSetMinuteStep widgetId minuteStep = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinuteStep <> word32LE sourceConst
+    <> encodeValue (VF64 minuteStep))
+
+-- set_property with a signal-bound minute_step value.
+txBindMinuteStep :: Word64 -> Word64 -> Builder
+txBindMinuteStep widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinuteStep <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMinuteStepElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMinuteStepElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinuteStep <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).
@@ -1514,7 +1647,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -1567,7 +1700,7 @@ parseOccurrence redeem rec = do
                 op <- peekByteOff rec at' :: IO Word32
                 return (Just (VI64 (fromIntegral op)))
               else
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

@@ -2508,7 +2508,11 @@ model would make the scene agree with itself and prove nothing. The
 `role` half is a closed set — `button`, `label`, `field`, `checkbox`,
 `slider`, `image`, `progress`, `combobox`, `group`, `heading`
 (joined 2026-08-12 with the styling pass, the one role-tier value with
-a real-tree observable on every platform), `unknown` — which
+a real-tree observable on every platform), `datetime` (joined
+2026-09-04 with the pickers: a date or time chooser, whichever
+components it shows — macOS publishes one AXDateTimeArea role for
+both, so one normalized name is what every platform can agree on;
+docs/datetime-plan.md P4), `unknown` — which
 NORMALIZES the platforms' own vocabularies so one shared scene reads the
 same everywhere. Two rules keep it honest:
 

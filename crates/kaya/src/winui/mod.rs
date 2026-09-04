@@ -10956,6 +10956,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image(image)
                 }
+                // The picker arms are the breadth slice's (docs/datetime-plan.md
+                // §5 step 6): a picker declared against this backend fails HERE,
+                // by name, never as a widget that quietly is not there.
+                WidgetKind::DatePicker | WidgetKind::TimePicker => {
+                    crate::depth_stub("pickers")
+                }
                 WidgetKind::Canvas => {
                     // The raw-pixel sibling of the arm above, filled by the
                     // SetDrawing arm from a WriteableBitmap
@@ -14086,6 +14092,9 @@ fn target_element(
         K::Checkbox => nth!(core.checkboxes),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
+        K::DatePicker | K::TimePicker => {
+            crate::depth_stub("pickers")
+        }
         K::Label => nth!(core.labels),
         K::Slider => nth!(core.sliders),
         K::Row => nth!(core.rows),
@@ -14159,6 +14168,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
+        K::DatePicker | K::TimePicker => Vec::new(),
     }
 }
 
@@ -15170,6 +15180,18 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
+    // The picker arms are the breadth slice's (docs/datetime-plan.md §5
+    // step 6); until they land a driven picker fails HERE, by name, never
+    // vacuously.
+    fn set_date(&self, t: crate::harness::Target, date: crate::Date) {
+        crate::depth_stub("pickers")
+    }
+    fn set_time(&self, t: crate::harness::Target, time: crate::Time) {
+        crate::depth_stub("pickers")
+    }
+    fn picker_value(&self, t: crate::harness::Target) -> String {
+        crate::depth_stub("pickers")
+    }
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());
@@ -15979,6 +16001,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
                 K::Canvas => find(&core.canvases, &id),
+                K::DatePicker | K::TimePicker => None,
             })
         })
         .ok()

@@ -87,6 +87,8 @@ pub const KAYA_OCCURRENCE_TICK: u16 = 21;
 /// (docs/dnd-plan.md D1).
 pub const KAYA_OCCURRENCE_DROPPED: u16 = 22;
 pub const KAYA_OCCURRENCE_DRAG_ENDED: u16 = 23;
+pub const KAYA_OCCURRENCE_DATE_CHANGED: u16 = 24;
+pub const KAYA_OCCURRENCE_TIME_CHANGED: u16 = 25;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -112,6 +114,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_TICK == ring::REC_TICK
         && KAYA_OCCURRENCE_DROPPED == ring::REC_DROPPED
         && KAYA_OCCURRENCE_DRAG_ENDED == ring::REC_DRAG_ENDED
+        && KAYA_OCCURRENCE_DATE_CHANGED == ring::REC_DATE_CHANGED
+        && KAYA_OCCURRENCE_TIME_CHANGED == ring::REC_TIME_CHANGED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -620,6 +624,8 @@ pub const KAYA_KIND_RADIO: u32 = 12;
 pub const KAYA_KIND_GRID: u32 = 13;
 pub const KAYA_KIND_TEXTAREA: u32 = 14;
 pub const KAYA_KIND_CANVAS: u32 = 15;
+pub const KAYA_KIND_DATE_PICKER: u32 = 16;
+pub const KAYA_KIND_TIME_PICKER: u32 = 17;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -636,6 +642,8 @@ const _: () = assert!(
         && KAYA_KIND_GRID == wire::KIND_GRID
         && KAYA_KIND_TEXTAREA == wire::KIND_TEXTAREA
         && KAYA_KIND_CANVAS == wire::KIND_CANVAS
+        && KAYA_KIND_DATE_PICKER == wire::KIND_DATE_PICKER
+        && KAYA_KIND_TIME_PICKER == wire::KIND_TIME_PICKER
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -653,7 +661,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 15,
+        kinds == 17,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -709,6 +717,14 @@ pub const KAYA_PROP_INSET: u32 = 17;
 /// The arrangement axis (docs/adaptive-layout-plan.md D1): row and
 /// column are one node this prop parameterizes.
 pub const KAYA_PROP_AXIS: u32 = 18;
+/// The pickers' slots (spec::PROPS): `date`, `min_date` and `max_date`
+/// are packed-decimal dates (YYYYMMDD as one int64), `time` a packed
+/// HHMM, `minute_step` a count (docs/datetime-plan.md D2, D3).
+pub const KAYA_PROP_DATE: u32 = 19;
+pub const KAYA_PROP_TIME: u32 = 20;
+pub const KAYA_PROP_MIN_DATE: u32 = 21;
+pub const KAYA_PROP_MAX_DATE: u32 = 22;
+pub const KAYA_PROP_MINUTE_STEP: u32 = 23;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -840,7 +856,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 23,
+    crate::spec::SPEC.occurrence.len() == 25,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -880,6 +896,11 @@ const _: () = assert!(
         && KAYA_PROP_ROLE == wire::PROP_ROLE
         && KAYA_PROP_INSET == wire::PROP_INSET
         && KAYA_PROP_AXIS == wire::PROP_AXIS
+        && KAYA_PROP_DATE == wire::PROP_DATE
+        && KAYA_PROP_TIME == wire::PROP_TIME
+        && KAYA_PROP_MIN_DATE == wire::PROP_MIN_DATE
+        && KAYA_PROP_MAX_DATE == wire::PROP_MAX_DATE
+        && KAYA_PROP_MINUTE_STEP == wire::PROP_MINUTE_STEP
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1048,7 +1069,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 18,
+    crate::spec::PROPS.len() == 23,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -2811,6 +2832,45 @@ pub unsafe extern "C" fn kaya_emit_toggled(tag: *const u8, tag_len: usize, check
     state()
         .ring
         .push_record(ring::REC_TOGGLED, &wire::toggled_body(tag, checked != 0));
+}
+
+/// Presentation side: emit a date picker's COMMITTED value, exactly as a
+/// backend's change handler would — `tag` is the tag bytes delivered
+/// with the picker's CREATE record, `packed` the new date as YYYYMMDD
+/// (docs/datetime-plan.md D2; a value that is not a date panics here, at
+/// the backend, not in the app). Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_date_changed(tag: *const u8, tag_len: usize, packed: i64) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty date picker tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Err(why) = crate::protocol::Date::from_packed(packed) {
+        panic!("kaya: kaya_emit_date_changed: {why}");
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_date_tag(tag, packed);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_DATE_CHANGED, &wire::date_changed_body(tag, packed));
+}
+
+/// Presentation side: emit a time picker's committed value, `packed` as
+/// HHMM. Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_time_changed(tag: *const u8, tag_len: usize, packed: i64) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty time picker tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Err(why) = crate::protocol::Time::from_packed(packed) {
+        panic!("kaya: kaya_emit_time_changed: {why}");
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_time_tag(tag, packed);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_TIME_CHANGED, &wire::time_changed_body(tag, packed));
 }
 
 /// Presentation side: emit a slider move, exactly as a backend's

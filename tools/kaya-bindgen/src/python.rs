@@ -9,7 +9,7 @@ use crate::{Ctx, PropKind, is_padding, prop_variants, record_params, window_prop
 /// Python's keywords and builtins a parameter would shadow.
 pub const RESERVED: &[&str] = &[
     "_enc", "record", "parse_value", "parse_occurrence", "parse_representation", "struct", "BlobHandle",
-    "canonicalize_shortcut",
+    "canonicalize_shortcut", "pack_date", "unpack_date", "pack_time", "unpack_time",
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
     "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
@@ -107,6 +107,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return struct.pack(\"<IHH\", 8 + len(body), kind, 0) + body");
     c.line("");
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("def pack_date(year, month, day):");
+    c.line("    \"\"\"A civil date as the wire's I64: year * 10000 + month * 100 + day.\"\"\"");
+    c.line("    return year * 10000 + month * 100 + day");
+    c.line("");
+    c.line("");
+    c.line("def unpack_date(packed):");
+    c.line("    \"\"\"A wire date as (year, month, day).\"\"\"");
+    c.line("    return packed // 10000, packed // 100 % 100, packed % 100");
+    c.line("");
+    c.line("");
+    c.line("def pack_time(hour, minute):");
+    c.line("    \"\"\"A civil time as the wire's I64: hour * 100 + minute.\"\"\"");
+    c.line("    return hour * 100 + minute");
+    c.line("");
+    c.line("");
+    c.line("def unpack_time(packed):");
+    c.line("    \"\"\"A wire time as (hour, minute).\"\"\"");
+    c.line("    return packed // 100, packed % 100");
+    c.line("");
+
     for r in spec.tx {
         if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
@@ -141,14 +164,26 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let up = prop.to_uppercase();
         // Blob setters take the u64 kaya_blob_register handle, not bytes.
         let (param, ty, expr) = match kind {
-            PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
-            PropKind::Bool => (*prop, "bool", format!("_enc.value({prop})")),
-            PropKind::F64 => (*prop, "float", format!("_enc.value({prop})")),
-            PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
+            PropKind::Str => (prop.to_string(), "str", format!("_enc.value({prop})")),
+            PropKind::Bool => (prop.to_string(), "bool", format!("_enc.value({prop})")),
+            PropKind::F64 => (prop.to_string(), "float", format!("_enc.value({prop})")),
+            PropKind::Enum(_) => (prop.to_string(), "int", format!("_enc.value(int({prop}))")),
             PropKind::Blob => (
-                "handle",
+                "handle".to_string(),
                 "a kaya_blob_register handle, consumed by the next submit",
                 "_enc.value(BlobHandle(handle))".to_string(),
+            ),
+            // COMPONENTS, never the packed integer: pack_date/pack_time
+            // are the only spelling a guest has.
+            PropKind::Date => (
+                "year, month, day".to_string(),
+                "a civil date, packed YYYYMMDD",
+                "_enc.value(pack_date(year, month, day))".to_string(),
+            ),
+            PropKind::Time => (
+                "hour, minute".to_string(),
+                "a civil time, packed HHMM",
+                "_enc.value(pack_time(hour, minute))".to_string(),
             ),
         };
         c.line("");
@@ -176,6 +211,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             PropKind::F64 => ("float", format!("_enc.value({prop})")),
             PropKind::Bool => ("bool", format!("_enc.value({prop})")),
             PropKind::Enum(_) => ("int", format!("_enc.value(int({prop}))")),
+            PropKind::Date | PropKind::Time => {
+                unreachable!("no window prop is a date or time")
+            }
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -197,6 +235,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, expr) = match kind {
             PropKind::Str => ("str", format!("_enc.value({prop})")),
             PropKind::Bool => ("bool", format!("_enc.value({prop})")),
+            PropKind::Date | PropKind::Time => {
+                unreachable!("no entry prop is a date or time")
+            }
             other => unreachable!("no entry prop carries {other:?}"),
         };
         c.line("");
@@ -223,6 +264,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
             PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
+            PropKind::Date | PropKind::Time => {
+                unreachable!("no section prop is a date or time")
+            }
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -301,6 +345,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
             PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
+            PropKind::Date | PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         c.line("");

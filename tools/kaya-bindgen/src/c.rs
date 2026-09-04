@@ -17,6 +17,7 @@ pub const RESERVED: &[&str] = &[
     // kaya_wire_begin(...)`, which a spec field of the same name would
     // redeclare in the same scope. swift.rs has the twin.
     "kaya_at",
+    "kaya_pack_date", "kaya_unpack_date", "kaya_pack_time", "kaya_unpack_time",
 ];
 
 pub fn emit(spec: &ProtocolSpec) -> String {
@@ -271,24 +272,61 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("/* A civil date as the wire's I64: year * 10000 + month * 100 + day. */");
+    c.line("static inline int64_t kaya_pack_date(int32_t year, int32_t month, int32_t day) {");
+    c.line("    return (int64_t)year * 10000 + (int64_t)month * 100 + (int64_t)day;");
+    c.line("}");
+    c.line("");
+    c.line("/* A wire date's components, through the out params. */");
+    c.line("static inline void kaya_unpack_date(int64_t packed, int32_t *year, int32_t *month,");
+    c.line("                                    int32_t *day) {");
+    c.line("    *year = (int32_t)(packed / 10000);");
+    c.line("    *month = (int32_t)(packed / 100 % 100);");
+    c.line("    *day = (int32_t)(packed % 100);");
+    c.line("}");
+    c.line("");
+    c.line("/* A civil time as the wire's I64: hour * 100 + minute. */");
+    c.line("static inline int64_t kaya_pack_time(int32_t hour, int32_t minute) {");
+    c.line("    return (int64_t)hour * 100 + (int64_t)minute;");
+    c.line("}");
+    c.line("");
+    c.line("/* A wire time's components, through the out params. */");
+    c.line("static inline void kaya_unpack_time(int64_t packed, int32_t *hour, int32_t *minute) {");
+    c.line("    *hour = (int32_t)(packed / 100);");
+    c.line("    *minute = (int32_t)(packed % 100);");
+    c.line("}");
+
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
         // Blob setters take the u64 kaya_blob_register handle.
-        let (ty, ctor, param) = match kind {
-            crate::PropKind::Str => ("const char *", "kaya_str", *prop),
-            crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
-            crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
-            crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
-            crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
+        let (sig, value) = match kind {
+            crate::PropKind::Str => (format!("const char *{prop}"), format!("kaya_str({prop})")),
+            crate::PropKind::Bool => (format!("int {prop}"), format!("kaya_bool({prop})")),
+            crate::PropKind::F64 => (format!("double {prop}"), format!("kaya_f64({prop})")),
+            crate::PropKind::Blob => {
+                ("uint64_t handle".to_string(), "kaya_blob(handle)".to_string())
+            }
+            crate::PropKind::Enum(_) => (format!("int64_t {prop}"), format!("kaya_i64({prop})")),
+            crate::PropKind::Date => (
+                "int32_t year, int32_t month, int32_t day".to_string(),
+                "kaya_i64(kaya_pack_date(year, month, day))".to_string(),
+            ),
+            crate::PropKind::Time => (
+                "int32_t hour, int32_t minute".to_string(),
+                "kaya_i64(kaya_pack_time(hour, minute))".to_string(),
+            ),
         };
         c.line("");
-        c.line(&format!("/* set_property with a constant {prop} value. */"));
-        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {ty}{param}) {{"));
+        c.line(&format!("/* set_property with a constant {prop} value.{} */", crate::date_note(kind)));
+        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {sig}) {{"));
         c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
-        c.line(&format!("    kaya_wire_value(tx, {ctor}({param}));"));
+        c.line(&format!("    kaya_wire_value(tx, {value});"));
         c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
         c.line("");
@@ -327,6 +365,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
             crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         if *prop == "shortcut" {
@@ -488,7 +529,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             " * its payload as one {:?} value (strings point into rec). Returns 1",
             r.payload.unwrap()
         ));
-        c.line(" * and fills the outputs, or 0 for other kinds. */");
+        match r.payload.unwrap() {
+            crate::PropKind::Date => {
+                c.line(" * and fills the outputs, or 0 for other kinds. A Date is a civil");
+                c.line(" * date packed YYYYMMDD; kaya_unpack_date reads its components. */");
+            }
+            crate::PropKind::Time => {
+                c.line(" * and fills the outputs, or 0 for other kinds. A Time is a civil");
+                c.line(" * time packed HHMM; kaya_unpack_time reads its components. */");
+            }
+            _ => c.line(" * and fills the outputs, or 0 for other kinds. */"),
+        }
         c.line(&format!(
             "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
         ));

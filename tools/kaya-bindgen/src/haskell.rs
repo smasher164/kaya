@@ -9,6 +9,7 @@ use crate::{Ctx, is_padding, prop_variants, record_params, window_prop_variants}
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
     "canonicalizeShortcut", "shortcutNamedKeys",
+    "packDate", "unpackDate", "packTime", "unpackTime",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -129,22 +130,62 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("-- A civil date as the wire's I64: year * 10000 + month * 100 + day.");
+    c.line("packDate :: Int -> Int -> Int -> Int64");
+    c.line("packDate year month day = fromIntegral (year * 10000 + month * 100 + day)");
+    c.line("");
+    c.line("-- A wire date's components.");
+    c.line("unpackDate :: Int64 -> (Int, Int, Int)");
+    c.line("unpackDate packed =");
+    c.line("  let n = fromIntegral packed :: Int");
+    c.line("   in (n `div` 10000, n `div` 100 `mod` 100, n `mod` 100)");
+    c.line("");
+    c.line("-- A civil time as the wire's I64: hour * 100 + minute.");
+    c.line("packTime :: Int -> Int -> Int64");
+    c.line("packTime hour minute = fromIntegral (hour * 100 + minute)");
+    c.line("");
+    c.line("-- A wire time's components.");
+    c.line("unpackTime :: Int64 -> (Int, Int)");
+    c.line("unpackTime packed =");
+    c.line("  let n = fromIntegral packed :: Int");
+    c.line("   in (n `div` 100, n `mod` 100)");
+
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
         // Blob setters take the u64 kaya_blob_register handle.
-        let (p, ty, ctor) = match kind {
-            crate::PropKind::Str => (camel(prop), "String", "VStr"),
-            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
-            crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
-            crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
-            crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
+        let (params, ty, value) = match kind {
+            crate::PropKind::Str => (camel(prop), "String".to_string(), format!("VStr {}", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "Bool".to_string(), format!("VBool {}", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "Double".to_string(), format!("VF64 {}", camel(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "Word64".to_string(),
+                "VBlob handle".to_string(),
+            ),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64".to_string(), format!("VI64 {}", camel(prop))),
+            crate::PropKind::Date => (
+                "year month day".to_string(),
+                "Int -> Int -> Int".to_string(),
+                "VI64 (packDate year month day)".to_string(),
+            ),
+            crate::PropKind::Time => (
+                "hour minute".to_string(),
+                "Int -> Int".to_string(),
+                "VI64 (packTime hour minute)".to_string(),
+            ),
         };
         c.line("");
-        c.line(&format!("-- set_property with a constant {prop} value."));
+        c.line(&format!(
+            "-- set_property with a constant {prop} value.{}",
+            crate::date_note(kind)
+        ));
         c.line(&format!("txSet{pc} :: Word64 -> {ty} -> Builder"));
-        c.line(&format!("txSet{pc} widgetId {p} = wireRecord txKindSetProperty"));
+        c.line(&format!("txSet{pc} widgetId {params} = wireRecord txKindSetProperty"));
         c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceConst"));
-        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line(&format!("    <> encodeValue ({value}))"));
         c.line("");
         c.line(&format!("-- set_property with a signal-bound {prop} value."));
         c.line(&format!("txBind{pc} :: Word64 -> Word64 -> Builder"));
@@ -168,6 +209,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
             crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no window prop is a date or time")
+            }
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -191,6 +235,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no entry prop is a date or time")
+            }
             other => unreachable!("no entry prop carries {other:?}"),
         };
         c.line("");
@@ -215,6 +262,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no section prop is a date or time")
+            }
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -296,6 +346,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::F64 => (camel(prop), "Double", format!("VF64 {}", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob handle".to_string()),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", format!("VI64 {}", camel(prop))),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         if *prop == "shortcut" {

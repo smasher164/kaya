@@ -725,6 +725,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             matches!(kind, WidgetKind::Slider | WidgetKind::Progress) || is_choice(kind)
         }
         Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
+        // The pickers' own slots (docs/datetime-plan.md §3): a date and its
+        // inclusive range on the date picker, a time and its minute step on
+        // the time picker. A time has no range (D4).
+        Prop::Date | Prop::MinDate | Prop::MaxDate => matches!(kind, WidgetKind::DatePicker),
+        Prop::Time | Prop::MinuteStep => matches!(kind, WidgetKind::TimePicker),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
@@ -772,6 +777,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Checkbox
                 | WidgetKind::Select
                 | WidgetKind::Radio
+                | WidgetKind::DatePicker
+                | WidgetKind::TimePicker
         ),
         // Semantic emphasis (docs/styling-plan.md D4). KIND legality here
         // is the union of the variants' homes; WHICH variant fits which
@@ -795,6 +802,8 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
                 | WidgetKind::Checkbox
                 | WidgetKind::Slider
                 | WidgetKind::Textarea
+                | WidgetKind::DatePicker
+                | WidgetKind::TimePicker
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -883,6 +892,10 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Text => ValueType::Str,
         Prop::Checked => ValueType::Bool,
         Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
+        // Packed civil values (docs/datetime-plan.md D2): the enum
+        // precedent, an I64 the spec labels.
+        Prop::Date | Prop::MinDate | Prop::MaxDate | Prop::Time => ValueType::I64,
+        Prop::MinuteStep => ValueType::F64,
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
@@ -1283,6 +1296,28 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: {kind:?} declares an empty a11y label — an accessible \
              name must say something (bind the text you meant, or leave \
              the label off and let the platform derive the name)"
+        );
+    }
+    // A packed date that is not a date, or a time that is not a time,
+    // dies here by name rather than reaching four backends
+    // (docs/datetime-plan.md §3): the 31st of February, hour 24.
+    if let (Prop::Date | Prop::MinDate | Prop::MaxDate, Value::I64(packed)) = (prop, value) {
+        if let Err(why) = crate::protocol::Date::from_packed(*packed) {
+            panic!("kaya: {prop:?} on {kind:?}: {why}");
+        }
+    }
+    if let (Prop::Time, Value::I64(packed)) = (prop, value) {
+        if let Err(why) = crate::protocol::Time::from_packed(*packed) {
+            panic!("kaya: {prop:?} on {kind:?}: {why}");
+        }
+    }
+    // The minute step is one of the granularities every platform's
+    // control can show (D3); anything else would round differently per
+    // backend.
+    if let (Prop::MinuteStep, Value::F64(step)) = (prop, value) {
+        assert!(
+            matches!(*step as i64, 1 | 5 | 10 | 15 | 30) && step.fract() == 0.0,
+            "kaya: minute_step is 1, 5, 10, 15 or 30, got {step}"
         );
     }
     // Same argument as grow's domain: negative padding has no reading,

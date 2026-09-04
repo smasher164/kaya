@@ -202,28 +202,76 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("    /** A civil date, unpacked from the wire's I64. */");
+    c.line("    public record CivilDate(int year, int month, int day) {}");
+    c.line("");
+    c.line("    /** A civil time, unpacked from the wire's I64. */");
+    c.line("    public record CivilTime(int hour, int minute) {}");
+    c.line("");
+    c.line("    /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */");
+    c.line("    public static long packDate(int year, int month, int day) {");
+    c.line("        return (long) year * 10000 + (long) month * 100 + day;");
+    c.line("    }");
+    c.line("");
+    c.line("    /** A wire date's components. */");
+    c.line("    public static CivilDate unpackDate(long packed) {");
+    c.line("        return new CivilDate((int) (packed / 10000), (int) (packed / 100 % 100),");
+    c.line("                (int) (packed % 100));");
+    c.line("    }");
+    c.line("");
+    c.line("    /** A civil time as the wire's I64: hour * 100 + minute. */");
+    c.line("    public static long packTime(int hour, int minute) {");
+    c.line("        return (long) hour * 100 + minute;");
+    c.line("    }");
+    c.line("");
+    c.line("    /** A wire time's components. */");
+    c.line("    public static CivilTime unpackTime(long packed) {");
+    c.line("        return new CivilTime((int) (packed / 100), (int) (packed % 100));");
+    c.line("    }");
+
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
         // Blob setters take the u64 kaya_blob_register handle.
-        let (p, ty, expr) = match kind {
-            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
-            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
-            crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
+        let (sig, expr) = match kind {
+            crate::PropKind::Str => (
+                format!("String {}", camel(prop)),
+                format!("encodeValue(b, {});", camel(prop)),
+            ),
+            crate::PropKind::Bool => (
+                format!("boolean {}", camel(prop)),
+                format!("encodeValue(b, {});", camel(prop)),
+            ),
+            crate::PropKind::F64 => (
+                format!("double {}", camel(prop)),
+                format!("encodeValue(b, {});", camel(prop)),
+            ),
             crate::PropKind::Blob => (
-                "handle".to_string(),
-                "long",
+                "long handle".to_string(),
                 "encodeValue(b, new BlobHandle(handle));".to_string(),
             ),
             crate::PropKind::Enum(_) => (
-                camel(prop),
-                "long",
+                format!("long {}", camel(prop)),
                 format!("encodeValue(b, {});", camel(prop)),
+            ),
+            crate::PropKind::Date => (
+                "int year, int month, int day".to_string(),
+                "encodeValue(b, packDate(year, month, day));".to_string(),
+            ),
+            crate::PropKind::Time => (
+                "int hour, int minute".to_string(),
+                "encodeValue(b, packTime(hour, minute));".to_string(),
             ),
         };
         c.line("");
-        c.line(&format!("    /** set_property with a constant {prop} value. */"));
-        c.line(&format!("    public static byte[] txSet{pc}(long widgetId, {ty} {p}) {{"));
+        c.line(&format!(
+            "    /** set_property with a constant {prop} value.{} */",
+            crate::date_note(kind)
+        ));
+        c.line(&format!("    public static byte[] txSet{pc}(long widgetId, {sig}) {{"));
         c.line("        Enc b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
@@ -259,6 +307,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 format!("encodeValue(b, {});", camel(prop)),
             ),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no window prop is a date or time")
+            }
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -286,6 +337,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
             crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no entry prop is a date or time")
+            }
             other => unreachable!("no entry prop carries {other:?}"),
         };
         c.line("");
@@ -322,6 +376,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 format!("encodeValue(b, {});", camel(prop)),
             ),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no section prop is a date or time")
+            }
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -434,6 +491,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "long",
                 format!("encodeValue(b, {});", camel(prop)),
             ),
+            crate::PropKind::Date | crate::PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
         };
         c.line("");
         if *prop == "shortcut" {

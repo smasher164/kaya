@@ -1,0 +1,45 @@
+# The pickers (docs/datetime-plan.md §5 step 5). Values are read back in
+# FIXED DIGITS from the CONTROL (expect_picker) and from the label the
+# guest's handler writes (expect); nothing asserts a displayed string.
+expect_picker date_picker#0 "2026-09-04"
+expect_picker time_picker#0 "14:30"
+expect label#0 "date: none"
+expect label#1 "time: none"
+# A driven pick goes THROUGH the control, so its own committed event fires.
+set_date date_picker#0 2026-09-05
+expect label#0 "date: 2026-09-05"
+expect_picker date_picker#0 "2026-09-05"
+# Past the declared range (2026-01-01 ..= 2026-12-31) the pick lands on the
+# nearest bound and is committed as that bound — AppKit's own clamp, the
+# rule everywhere (D4). The control shows it; the app hears the bound.
+set_date date_picker#0 2027-01-01
+expect_picker date_picker#0 "2026-12-31"
+expect label#0 "date: 2026-12-31"
+set_date date_picker#0 2025-12-25
+expect_picker date_picker#0 "2026-01-01"
+expect label#0 "date: 2026-01-01"
+set_date date_picker#0 2026-09-05
+expect label#0 "date: 2026-09-05"
+# The minute step is 15: 10:07 snaps to 10:00 and the app hears 10:00.
+set_time time_picker#0 10:07
+expect_picker time_picker#0 "10:00"
+expect label#1 "time: 10:00"
+# The echo negative: button#0 writes both pickers' signals PROGRAMMATICALLY
+# (2026-03-01, 09:00). The controls move; no occurrence may fire. The one
+# deliberate settle, since the expects below assert an absence.
+click button#0
+expect_picker date_picker#0 "2026-03-01"
+expect_picker time_picker#0 "09:00"
+settle 700
+expect label#0 "date: 2026-09-05"
+expect label#1 "time: 10:00"
+# The template zone: a stamped date picker bound to the row's own Date
+# field (D10 wide), driven by its key; the handler hears the key first.
+expect_picker date_picker@due[b] "2026-11-20"
+set_date date_picker@due[b] 2026-10-10
+expect label#2 "row b: 2026-10-10"
+expect_picker date_picker@due[b] "2026-10-10"
+expect_picker date_picker@due[a] "2026-10-01"
+# The roles the platforms publish, normalized (P4).
+expect_ax date_picker#0 "datetime/Due"
+expect_ax time_picker#0 "datetime/At"

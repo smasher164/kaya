@@ -83,7 +83,10 @@ PAD_EXTRAS = {
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes).
-UNWIRED_SCENES = []
+# The pickers' iOS legs come with the breadth slice (docs/datetime-plan.md
+# §5 step 6): the UIDatePicker arm is in the shared interpreter, and the
+# lane wires the scene once its roles are measured on the phone.
+UNWIRED_SCENES = ["pickers"]
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names

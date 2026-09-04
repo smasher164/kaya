@@ -277,6 +277,10 @@ name = "dnd"
 path = "../../guests/rust/dnd.rs"
 
 [[example]]
+name = "pickers"
+path = "../../guests/rust/pickers.rs"
+
+[[example]]
 name = "progress"
 path = "../../guests/rust/progress.rs"
 

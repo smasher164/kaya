@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xa3cb4cff19aad964L;
+    public static final long SPEC_HASH = 0x33b9ee831818ac41L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -43,6 +43,8 @@ public final class KayaWire {
     public static final int KIND_GRID = 13;
     public static final int KIND_TEXTAREA = 14;
     public static final int KIND_CANVAS = 15;
+    public static final int KIND_DATE_PICKER = 16;
+    public static final int KIND_TIME_PICKER = 17;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -86,6 +88,11 @@ public final class KayaWire {
     public static final int PROP_ROLE = 16;
     public static final int PROP_INSET = 17;
     public static final int PROP_AXIS = 18;
+    public static final int PROP_DATE = 19;
+    public static final int PROP_TIME = 20;
+    public static final int PROP_MIN_DATE = 21;
+    public static final int PROP_MAX_DATE = 22;
+    public static final int PROP_MINUTE_STEP = 23;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -286,6 +293,8 @@ public final class KayaWire {
     public static final short OCC_KIND_TICK = 21;
     public static final short OCC_KIND_DROPPED = 22;
     public static final short OCC_KIND_DRAG_ENDED = 23;
+    public static final short OCC_KIND_DATE_CHANGED = 24;
+    public static final short OCC_KIND_TIME_CHANGED = 25;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -853,6 +862,33 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** A civil date, unpacked from the wire's I64. */
+    public record CivilDate(int year, int month, int day) {}
+
+    /** A civil time, unpacked from the wire's I64. */
+    public record CivilTime(int hour, int minute) {}
+
+    /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
+    public static long packDate(int year, int month, int day) {
+        return (long) year * 10000 + (long) month * 100 + day;
+    }
+
+    /** A wire date's components. */
+    public static CivilDate unpackDate(long packed) {
+        return new CivilDate((int) (packed / 10000), (int) (packed / 100 % 100),
+                (int) (packed % 100));
+    }
+
+    /** A civil time as the wire's I64: hour * 100 + minute. */
+    public static long packTime(int hour, int minute) {
+        return (long) hour * 100 + minute;
+    }
+
+    /** A wire time's components. */
+    public static CivilTime unpackTime(long packed) {
+        return new CivilTime((int) (packed / 100), (int) (packed % 100));
+    }
+
     /** set_property with a constant text value. */
     public static byte[] txSetText(long widgetId, String text) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
@@ -1263,6 +1299,121 @@ public final class KayaWire {
     public static byte[] txBindAxisElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_AXIS).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant date value. A civil date, packed YYYYMMDD on the wire. */
+    public static byte[] txSetDate(long widgetId, int year, int month, int day) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_DATE).putInt(SOURCE_CONST);
+        encodeValue(b, packDate(year, month, day));
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound date value. */
+    public static byte[] txBindDate(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_DATE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindDateElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_DATE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant time value. A civil time, packed HHMM on the wire. */
+    public static byte[] txSetTime(long widgetId, int hour, int minute) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TIME).putInt(SOURCE_CONST);
+        encodeValue(b, packTime(hour, minute));
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound time value. */
+    public static byte[] txBindTime(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TIME).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindTimeElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TIME).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire. */
+    public static byte[] txSetMinDate(long widgetId, int year, int month, int day) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_DATE).putInt(SOURCE_CONST);
+        encodeValue(b, packDate(year, month, day));
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound min_date value. */
+    public static byte[] txBindMinDate(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_DATE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMinDateElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN_DATE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire. */
+    public static byte[] txSetMaxDate(long widgetId, int year, int month, int day) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_DATE).putInt(SOURCE_CONST);
+        encodeValue(b, packDate(year, month, day));
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound max_date value. */
+    public static byte[] txBindMaxDate(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_DATE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMaxDateElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX_DATE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant minute_step value. */
+    public static byte[] txSetMinuteStep(long widgetId, double minuteStep) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MINUTE_STEP).putInt(SOURCE_CONST);
+        encodeValue(b, minuteStep);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound minute_step value. */
+    public static byte[] txBindMinuteStep(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MINUTE_STEP).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMinuteStepElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MINUTE_STEP).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }
@@ -1823,7 +1974,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -1958,7 +2109,7 @@ public final class KayaWire {
         if (kind == OCC_KIND_SORT_REQUESTED) {
             payload = b.getInt(20);
         }
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
             switch (ptype) {

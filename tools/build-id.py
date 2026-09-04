@@ -50,7 +50,7 @@ GATES = {
     "gen-guests": ["crates", "bindings", "guests"],
     # The backends: check-steps stops demanding a runner's legs where that
     # backend declares a depth stub, so REMOVING one must fail.
-    "check-steps": ["guests", "crates", "swift", "android"],
+    "check-steps": ["guests", "crates", "swift", "android", "bindings"],
     "check-shell": [],
     # Everything it reads is under tools/, which rides every key (gate_key).
     "check-python": [],

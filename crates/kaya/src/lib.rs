@@ -92,9 +92,9 @@ pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 /// a struct the one-variant case.
 pub use kaya_derive::KayaGen;
 pub use protocol::{
-    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind,
+    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, Date, EntryProp, MenuItemId, MenuItemKind,
     MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId, TemplateNodeId,
-    FileDialogId, FileMode, PickedFile, PickedId, Representation, UndoDelta, UndoText, Value,
+    FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
 };
 

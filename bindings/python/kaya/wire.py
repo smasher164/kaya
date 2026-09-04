@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xa3cb4cff19aad964
+SPEC_HASH = 0x33b9ee831818ac41
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -40,6 +40,8 @@ KIND_RADIO = 12
 KIND_GRID = 13
 KIND_TEXTAREA = 14
 KIND_CANVAS = 15
+KIND_DATE_PICKER = 16
+KIND_TIME_PICKER = 17
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -83,6 +85,11 @@ PROP_ACCEPTS = 15
 PROP_ROLE = 16
 PROP_INSET = 17
 PROP_AXIS = 18
+PROP_DATE = 19
+PROP_TIME = 20
+PROP_MIN_DATE = 21
+PROP_MAX_DATE = 22
+PROP_MINUTE_STEP = 23
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -284,6 +291,8 @@ OCC_DRAW_REQUESTED = 20
 OCC_TICK = 21
 OCC_DROPPED = 22
 OCC_DRAG_ENDED = 23
+OCC_DATE_CHANGED = 24
+OCC_TIME_CHANGED = 25
 
 
 def _pad(b):
@@ -339,6 +348,26 @@ def record(kind, body):
     """Frame one record."""
     body = _pad(body)
     return struct.pack("<IHH", 8 + len(body), kind, 0) + body
+
+
+def pack_date(year, month, day):
+    """A civil date as the wire's I64: year * 10000 + month * 100 + day."""
+    return year * 10000 + month * 100 + day
+
+
+def unpack_date(packed):
+    """A wire date as (year, month, day)."""
+    return packed // 10000, packed // 100 % 100, packed % 100
+
+
+def pack_time(hour, minute):
+    """A civil time as the wire's I64: hour * 100 + minute."""
+    return hour * 100 + minute
+
+
+def unpack_time(packed):
+    """A wire time as (hour, minute)."""
+    return packed // 100, packed % 100
 
 
 def tx_create_signal(signal_id, initial):
@@ -808,6 +837,81 @@ def tx_bind_axis_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_AXIS, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_date(widget_id, year, month, day):
+    """set_property with a constant date value (a civil date, packed YYYYMMDD)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
+
+
+def tx_bind_date(widget_id, signal_id):
+    """set_property with a signal-bound date value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_DATE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_date_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_DATE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_time(widget_id, hour, minute):
+    """set_property with a constant time value (a civil time, packed HHMM)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TIME, SOURCE_CONST) + _enc.value(pack_time(hour, minute)))
+
+
+def tx_bind_time(widget_id, signal_id):
+    """set_property with a signal-bound time value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TIME, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_time_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TIME, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_min_date(widget_id, year, month, day):
+    """set_property with a constant min_date value (a civil date, packed YYYYMMDD)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
+
+
+def tx_bind_min_date(widget_id, signal_id):
+    """set_property with a signal-bound min_date value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN_DATE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_min_date_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN_DATE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_max_date(widget_id, year, month, day):
+    """set_property with a constant max_date value (a civil date, packed YYYYMMDD)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX_DATE, SOURCE_CONST) + _enc.value(pack_date(year, month, day)))
+
+
+def tx_bind_max_date(widget_id, signal_id):
+    """set_property with a signal-bound max_date value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX_DATE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_max_date_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX_DATE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_minute_step(widget_id, minute_step):
+    """set_property with a constant minute_step value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MINUTE_STEP, SOURCE_CONST) + _enc.value(minute_step))
+
+
+def tx_bind_minute_step(widget_id, signal_id):
+    """set_property with a signal-bound minute_step value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MINUTE_STEP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_minute_step_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MINUTE_STEP, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1101,7 +1205,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
@@ -1186,7 +1290,7 @@ def parse_occurrence(buf):
     payload = None
     if kind in (OCC_SORT_REQUESTED,):
         (payload,) = struct.unpack_from("<I", buf, 20)
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED,):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED,):
         payload, at = parse_value(buf, at)
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)

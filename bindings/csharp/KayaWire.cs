@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xa3cb4cff19aad964;
+    public const ulong SpecHash = 0x33b9ee831818ac41;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -42,6 +42,8 @@ static class KayaWire
     public const uint KindGrid = 13;
     public const uint KindTextarea = 14;
     public const uint KindCanvas = 15;
+    public const uint KindDatePicker = 16;
+    public const uint KindTimePicker = 17;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -85,6 +87,11 @@ static class KayaWire
     public const uint PropRole = 16;
     public const uint PropInset = 17;
     public const uint PropAxis = 18;
+    public const uint PropDate = 19;
+    public const uint PropTime = 20;
+    public const uint PropMinDate = 21;
+    public const uint PropMaxDate = 22;
+    public const uint PropMinuteStep = 23;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -285,6 +292,8 @@ static class KayaWire
     public const ushort OccKindTick = 21;
     public const ushort OccKindDropped = 22;
     public const ushort OccKindDragEnded = 23;
+    public const ushort OccKindDateChanged = 24;
+    public const ushort OccKindTimeChanged = 25;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -876,6 +885,30 @@ static class KayaWire
         return Finish(stream, w, TxKindSetReorderable);
     }
 
+    /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
+    public static long PackDate(int year, int month, int day)
+    {
+        return (long)year * 10000 + (long)month * 100 + day;
+    }
+
+    /// A wire date's components.
+    public static (int Year, int Month, int Day) UnpackDate(long packed)
+    {
+        return ((int)(packed / 10000), (int)(packed / 100 % 100), (int)(packed % 100));
+    }
+
+    /// A civil time as the wire's I64: hour * 100 + minute.
+    public static long PackTime(int hour, int minute)
+    {
+        return (long)hour * 100 + minute;
+    }
+
+    /// A wire time's components.
+    public static (int Hour, int Minute) UnpackTime(long packed)
+    {
+        return ((int)(packed / 100), (int)(packed % 100));
+    }
+
     /// set_property with a constant text value.
     public static byte[] TxSetText(ulong widgetId, string text)
     {
@@ -1326,6 +1359,131 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant date value. A civil date, packed YYYYMMDD on the wire.
+    public static byte[] TxSetDate(ulong widgetId, int year, int month, int day)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDate); w.Write(SourceConst);
+        EncodeValue(w, PackDate(year, month, day));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound date value.
+    public static byte[] TxBindDate(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDate); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindDateElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropDate); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant time value. A civil time, packed HHMM on the wire.
+    public static byte[] TxSetTime(ulong widgetId, int hour, int minute)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTime); w.Write(SourceConst);
+        EncodeValue(w, PackTime(hour, minute));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound time value.
+    public static byte[] TxBindTime(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTime); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindTimeElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTime); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire.
+    public static byte[] TxSetMinDate(ulong widgetId, int year, int month, int day)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinDate); w.Write(SourceConst);
+        EncodeValue(w, PackDate(year, month, day));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound min_date value.
+    public static byte[] TxBindMinDate(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinDate); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMinDateElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinDate); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire.
+    public static byte[] TxSetMaxDate(ulong widgetId, int year, int month, int day)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxDate); w.Write(SourceConst);
+        EncodeValue(w, PackDate(year, month, day));
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound max_date value.
+    public static byte[] TxBindMaxDate(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxDate); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMaxDateElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMaxDate); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant minute_step value.
+    public static byte[] TxSetMinuteStep(ulong widgetId, double minuteStep)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinuteStep); w.Write(SourceConst);
+        EncodeValue(w, minuteStep);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound minute_step value.
+    public static byte[] TxBindMinuteStep(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinuteStep); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMinuteStepElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMinuteStep); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -1770,7 +1928,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -1842,7 +2000,7 @@ static class KayaWire
         {
             payload = BitConverter.ToUInt32(rec, 20);
         }
-        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged)
+        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged || kind == OccKindDateChanged || kind == OccKindTimeChanged)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);
             int plen = BitConverter.ToInt32(rec, at + 4);

@@ -199,6 +199,8 @@ pub(crate) const KIND_RADIO: u32 = 12;
 pub(crate) const KIND_GRID: u32 = 13;
 pub(crate) const KIND_TEXTAREA: u32 = 14;
 pub(crate) const KIND_CANVAS: u32 = 15;
+pub(crate) const KIND_DATE_PICKER: u32 = 16;
+pub(crate) const KIND_TIME_PICKER: u32 = 17;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -319,6 +321,13 @@ pub(crate) const PROP_ROLE: u32 = 16;
 /// carried by the spacing kinds.
 pub(crate) const PROP_INSET: u32 = 17;
 pub(crate) const PROP_AXIS: u32 = 18;
+/// The pickers' value and range slots, packed-decimal I64s the spec
+/// labels Date/Time (docs/datetime-plan.md D2); the step is a count.
+pub(crate) const PROP_DATE: u32 = 19;
+pub(crate) const PROP_TIME: u32 = 20;
+pub(crate) const PROP_MIN_DATE: u32 = 21;
+pub(crate) const PROP_MAX_DATE: u32 = 22;
+pub(crate) const PROP_MINUTE_STEP: u32 = 23;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -727,6 +736,8 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_GRID => WidgetKind::Grid,
         KIND_TEXTAREA => WidgetKind::Textarea,
         KIND_CANVAS => WidgetKind::Canvas,
+        KIND_DATE_PICKER => WidgetKind::DatePicker,
+        KIND_TIME_PICKER => WidgetKind::TimePicker,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -751,6 +762,11 @@ fn prop(raw: u32) -> Prop {
         PROP_ROLE => Prop::Role,
         PROP_INSET => Prop::Inset,
         PROP_AXIS => Prop::Axis,
+        PROP_DATE => Prop::Date,
+        PROP_TIME => Prop::Time,
+        PROP_MIN_DATE => Prop::MinDate,
+        PROP_MAX_DATE => Prop::MaxDate,
+        PROP_MINUTE_STEP => Prop::MinuteStep,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2249,6 +2265,46 @@ pub fn decode_value_changed_tag(tag: &[u8], value: f64) -> Occurrence {
     }
 }
 
+// A date/time-changed occurrence body: the picker's stored tag followed
+// by the new committed value as one I64 (packed decimal, PropKind::Date /
+// PropKind::Time — docs/datetime-plan.md D2).
+pub fn date_changed_body(tag: &[u8], packed: i64) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 16);
+    b.extend_from_slice(tag);
+    write_value(&mut b, &Value::I64(packed), &mut Vec::new());
+    b
+}
+
+pub fn time_changed_body(tag: &[u8], packed: i64) -> Vec<u8> {
+    date_changed_body(tag, packed)
+}
+
+pub fn decode_date_changed_tag(tag: &[u8], packed: i64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    let date = crate::protocol::Date::from_packed(packed)
+        .unwrap_or_else(|why| panic!("kaya: a backend emitted a date that is not one: {why}"));
+    if path.is_empty() {
+        Occurrence::DateChanged { id: WidgetId(id), date }
+    } else {
+        Occurrence::InstanceDateChanged { node: TemplateNodeId(id), path, date }
+    }
+}
+
+pub fn decode_time_changed_tag(tag: &[u8], packed: i64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    let time = crate::protocol::Time::from_packed(packed)
+        .unwrap_or_else(|why| panic!("kaya: a backend emitted a time that is not one: {why}"));
+    if path.is_empty() {
+        Occurrence::TimeChanged { id: WidgetId(id), time }
+    } else {
+        Occurrence::InstanceTimeChanged { node: TemplateNodeId(id), path, time }
+    }
+}
+
 pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
     let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
@@ -3250,6 +3306,8 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Grid => KIND_GRID,
         WidgetKind::Textarea => KIND_TEXTAREA,
         WidgetKind::Canvas => KIND_CANVAS,
+        WidgetKind::DatePicker => KIND_DATE_PICKER,
+        WidgetKind::TimePicker => KIND_TIME_PICKER,
     }
 }
 
@@ -3486,6 +3544,11 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Inset => PROP_INSET,
         Prop::Axis => PROP_AXIS,
         Prop::A11yHint => PROP_A11Y_HINT,
+        Prop::Date => PROP_DATE,
+        Prop::Time => PROP_TIME,
+        Prop::MinDate => PROP_MIN_DATE,
+        Prop::MaxDate => PROP_MAX_DATE,
+        Prop::MinuteStep => PROP_MINUTE_STEP,
     }
 }
 

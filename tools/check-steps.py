@@ -74,7 +74,7 @@ def steps_rel(p):
 TARGET_KINDS = (
     "button", "checkbox", "slider", "entry", "label", "column", "row",
     "image", "scroll", "progress", "select", "radio", "grid",
-    "textarea", "canvas",
+    "textarea", "canvas", "date_picker", "time_picker",
 )
 TARGET_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")@([^\s;]*)")
 INDEX_RE = re.compile(r"\b(" + "|".join(TARGET_KINDS) + r")#([^\s;]*)")
@@ -1785,9 +1785,20 @@ def ax_bus(root):
         bad.append("check-steps: no scene asserts any ax-family verb — "
                    "the verbs were renamed and this clause is blind")
 
+    # A scene the GTK backend depth-stubs has no linux leg BY DESIGN
+    # (tools/lib/scene-features.py --mode exempt, the same rows wired()
+    # reads), so it has no bus wiring to check yet; the clause returns the
+    # moment the stub goes.
+    r = subprocess.run(
+        ["python3", "tools/lib/scene-features.py", "--mode", "exempt"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    linux_exempt = {line.split("\t")[1] for line in r.stdout.splitlines()
+                    if line.startswith("tools/linux/run-suites.sh\t")}
     for scene, verbs in ax_scenes:
         mine = {n: c for n, c in legs.items()
                 if n == scene or n.startswith(scene + "-")}
+        if not mine and scene in linux_exempt:
+            continue
         if not mine:
             bad.append(f'check-steps: scene "{scene}" asserts '
                        f"{verbs[0]} but has no `run \"$proto\" "
@@ -3609,6 +3620,37 @@ with tempfile.TemporaryDirectory() as td:
 stamp_out = generator_stamp(ROOT)
 if stamp_out is not None:
     print(f"check-steps: {stamp_out}", file=sys.stderr)
+    status = 1
+
+
+# THE TARGET KINDS ARE THE SPEC'S KINDS. TARGET_KINDS above is hand-
+# maintained where every other census derives its kinds from the generated
+# wire.py, and a kind missing from it lints no scene that names the kind
+# (found 2026-09-04 with the pickers, docs/datetime-plan.md §5 step 5). So
+# the tuple is held equal to the wire's list, and the watched negative is
+# the tuple one kind short.
+def target_kinds_match_wire(root, kinds):
+    wire = (pathlib.Path(root) / "bindings/python/kaya/wire.py").read_text(
+        encoding="utf-8")
+    spec = sorted(m.lower() for m in re.findall(r"^KIND_([A-Z_]+) = \d+$", wire,
+                                                 flags=re.M))
+    have = sorted(kinds)
+    if spec != have:
+        return (f"check-steps' TARGET_KINDS ({len(have)}) is not the generated "
+                f"wire's kind list ({len(spec)}): "
+                f"missing {sorted(set(spec) - set(have))}, extra "
+                f"{sorted(set(have) - set(spec))} — extend TARGET_KINDS so a "
+                f"scene naming the kind is linted")
+    return None
+
+
+if target_kinds_match_wire(ROOT, TARGET_KINDS[:-1]) is None:
+    selftest_fail("a TARGET_KINDS one kind short of the wire's list passed")
+print(f"check-steps: TARGET_KINDS holds {len(TARGET_KINDS)} kinds, the wire's "
+      "own list (a one-short tuple watched refused)")
+kinds_out = target_kinds_match_wire(ROOT, TARGET_KINDS)
+if kinds_out is not None:
+    print(f"check-steps: {kinds_out}", file=sys.stderr)
     status = 1
 
 if status == 0:

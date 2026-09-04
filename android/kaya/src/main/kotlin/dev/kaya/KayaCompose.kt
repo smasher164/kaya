@@ -1076,7 +1076,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xa3cb4cff19aad964uL
+    private const val SPEC_HASH: ULong = 0x33b9ee831818ac41uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1267,6 +1267,8 @@ object KayaCompose {
     const val KIND_GRID = 13
     const val KIND_TEXTAREA = 14
     const val KIND_CANVAS = 15
+    const val KIND_DATE_PICKER = 16
+    const val KIND_TIME_PICKER = 17
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -9803,6 +9805,7 @@ private fun KayaRenderCore(
         // second place for the echo guard to be got wrong.
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
+        KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER -> depthStub("pickers")
         KayaCompose.KIND_CANVAS -> {
             // THE BLIT (docs/canvas-plan.md §8), interpreting no draw op.
             // STRICTLY 1:1, NEVER STRETCHED (§3.2.1 ruling 2), and THE
@@ -11855,10 +11858,9 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaPresent.emitAlertResult(alert, choice)
 }
 
-// KayaCompose.kt stubs NOTHING again (the dnd arms landed 2026-09-03), so
-// its `depthStub` helper is gone — an unused private function fails
-// check-detekt. THE NEXT DEPTH SLICE PUTS IT BACK, in this exact shape,
-// because a depth stub is a CALL and never a sentence
-// (tools/check-stubs.py, docs/traps.md):
-//     private fun depthStub(scene: String): Nothing =
-//         error("kaya: the $scene scene is not yet materialized on android")
+// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
+// docs/traps.md); the pickers' Compose arm is the breadth slice's
+// (docs/datetime-plan.md §5 step 6). Delete this helper with its last
+// call, or an unused private function fails check-detekt.
+private fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on android")

@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xa3cb4cff19aad964n;
+export const SPEC_HASH = 0x33b9ee831818ac41n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -37,6 +37,8 @@ export const KIND_RADIO = 12;
 export const KIND_GRID = 13;
 export const KIND_TEXTAREA = 14;
 export const KIND_CANVAS = 15;
+export const KIND_DATE_PICKER = 16;
+export const KIND_TIME_PICKER = 17;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -80,6 +82,11 @@ export const PROP_ACCEPTS = 15;
 export const PROP_ROLE = 16;
 export const PROP_INSET = 17;
 export const PROP_AXIS = 18;
+export const PROP_DATE = 19;
+export const PROP_TIME = 20;
+export const PROP_MIN_DATE = 21;
+export const PROP_MAX_DATE = 22;
+export const PROP_MINUTE_STEP = 23;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -281,6 +288,8 @@ export const OCC_DRAW_REQUESTED = 20;
 export const OCC_TICK = 21;
 export const OCC_DROPPED = 22;
 export const OCC_DRAG_ENDED = 23;
+export const OCC_DATE_CHANGED = 24;
+export const OCC_TIME_CHANGED = 25;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -641,6 +650,26 @@ export function tx_set_reorderable(container: number, enabled: number): Uint8Arr
   return record(TX_SET_REORDERABLE, cat(u64(container), u32(enabled), u32(0)));
 }
 
+/** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
+export function pack_date(year: number, month: number, day: number): number {
+  return year * 10000 + month * 100 + day;
+}
+
+/** A wire date as [year, month, day]. */
+export function unpack_date(packed: number): [year: number, month: number, day: number] {
+  return [Math.trunc(packed / 10000), Math.trunc(packed / 100) % 100, packed % 100];
+}
+
+/** A civil time as the wire's I64: hour * 100 + minute. */
+export function pack_time(hour: number, minute: number): number {
+  return hour * 100 + minute;
+}
+
+/** A wire time as [hour, minute]. */
+export function unpack_time(packed: number): [hour: number, minute: number] {
+  return [Math.trunc(packed / 100), packed % 100];
+}
+
 /** set_property with a constant text value. */
 export function tx_set_text(widget_id: number, text: string): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TEXT), u32(SOURCE_CONST), enc.value(text)));
@@ -909,6 +938,81 @@ export function tx_bind_axis(widget_id: number, signal_id: number): Uint8Array {
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_axis_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_AXIS), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant date value. A civil date, packed YYYYMMDD on the wire. */
+export function tx_set_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+}
+
+/** set_property with a signal-bound date value. */
+export function tx_bind_date(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant time value. A civil time, packed HHMM on the wire. */
+export function tx_set_time(widget_id: number, hour: number, minute: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_CONST), enc.value(new I64(pack_time(hour, minute)))));
+}
+
+/** set_property with a signal-bound time value. */
+export function tx_bind_time(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_time_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TIME), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire. */
+export function tx_set_min_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+}
+
+/** set_property with a signal-bound min_date value. */
+export function tx_bind_min_date(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_min_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire. */
+export function tx_set_max_date(widget_id: number, year: number, month: number, day: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_CONST), enc.value(new I64(pack_date(year, month, day)))));
+}
+
+/** set_property with a signal-bound max_date value. */
+export function tx_bind_max_date(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_max_date_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MAX_DATE), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant minute_step value. */
+export function tx_set_minute_step(widget_id: number, minute_step: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_CONST), enc.value(minute_step)));
+}
+
+/** set_property with a signal-bound minute_step value. */
+export function tx_bind_minute_step(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_minute_step_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */
@@ -1224,7 +1328,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -1333,7 +1437,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   // The u32 slot the tag family calls `reserved` is a real value on
   // these (sort_requested's column) — read before the generic tail.
   if ([OCC_SORT_REQUESTED].includes(kind)) payload = read_u32(buf, 20);
-  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED].includes(kind)) [payload, at] = parse_value(buf, at);
+  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED].includes(kind)) [payload, at] = parse_value(buf, at);
   // A paste rides a click tag VERBATIM, so the key path above is already
   // read and the clip sits after it.
   if ([OCC_PASTED].includes(kind)) [payload, at] = parse_clip(buf, at);

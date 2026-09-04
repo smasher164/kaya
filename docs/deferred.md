@@ -10613,3 +10613,49 @@ heights of the six rows above the target, so the reading names the cause
 placement", is the neighbouring class and not this one). The verb trace
 of the sighting is in the flight recorder: run 20260903T170647Z-004640,
 bundle ios-varied-python (verb-trace.txt, 621 records).
+
+## DATE AND TIME PICKERS — the depth slice is on the mac (2026-09-04); the other three backends, iOS's legs and eight bindings' sugar are the breadth slice (docs/datetime-plan.md §5 step 6)
+KEY: date_picker, time_picker, PropKind::Date, PropKind::Time, date_changed, time_changed, set_date, set_time, expect_picker, min_date, max_date, minute_step, datetime role, KayaGen date field, pickers scene, docs/datetime-plan.md
+
+THE DEPTH SLICE (2026-09-04): spec kinds 16/17, PROPS 19–23 on the two new
+typed slots, occurrences 24/25, `Date`/`Time` in the core with packed-decimal
+I64s on the wire, the nine generated wire files with component-taking
+setters and pack/unpack helpers, the Rust sugar in both zones with
+`on_date`/`on_time` and their node twins, the three harness verbs, the
+SwiftUI arm hosting NSDatePicker (mac) and UIDatePicker (iOS), and
+tools/scenes/pickers.steps green on the mac with guests/rust/pickers.rs.
+Measured on the way: AppKit CLAMPS an out-of-range date to the bound before
+its action fires (D4 amended to clamp everywhere); NSDatePicker publishes
+one `AXDateTimeArea` role for a date and a time picker alike (the closed
+`expect_ax` set gained `datetime`).
+
+OPEN, the breadth slice — each backend refuses the scene by name until its
+arm lands, and the lanes carry no pickers legs until then:
+
+- DEPTH STUB: pickers on gtk — the composed date field (GtkMenuButton +
+  GtkPopover + GtkCalendar, the button's label in the locale) and the
+  hour/minute GtkSpinButton pair; the range CLAMPED in the arm since
+  GtkCalendar cannot disable a day; `day-selected` and `value-changed` as
+  the commits; the three Stage methods; AT-SPI role measured and mapped to
+  `datetime`; linux legs on both pools through tools/linux/a11y-leg.sh.
+- DEPTH STUB: pickers on winui — CalendarDatePicker (MinDate/MaxDate) and
+  TimePicker (MinuteIncrement) admitted to tools/winui-bindgen's filter
+  with their event args and bindings.rs regenerated; SelectedDateChanged /
+  SelectedTimeChanged as the commits; the Stage methods; UIA control type
+  measured; windows legs.
+- DEPTH STUB: pickers on compose — the Material idiom (D6): a text field
+  with a trailing calendar/clock icon opening DatePickerDialog / a Dialog
+  around TimePicker under `@OptIn(ExperimentalMaterial3Api)`; the state
+  read back through UTC (P2); the minute step snapped in the arm; the
+  verbs and target table in KayaCompose.kt (check-verbs is red until
+  then, by design); android legs.
+- iOS legs: tools/lib/lanes/ios.py declares the scene off (UNWIRED_SCENES)
+  until UIDatePicker's published role is measured on the phone and mapped
+  to `datetime`.
+- Eight bindings' sugar (Python, Go, C#, Java, Swift, OCaml, Haskell, JS)
+  in both zones per docs/datetime-plan.md §4, and the record machinery
+  learning `Date`/`Time` field types (D10 wide: the four generated row
+  surfaces and the four hand-declared schemas); nine more guests; the scene
+  on every lane's roster; check-sugar-surface red until then, by design.
+- DESIGN.md's first-admissions lines (3378, 3386) struck when the matrix is
+  green.

@@ -99,6 +99,17 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
 /// The property enum's variants.
 pub(crate) use kaya::spec::PropKind;
 
+/// What a Date or Time setter's components MEAN, said in the generated
+/// doc comment: every binding's parameters are bare integers, so the
+/// packing is stated where a reader of the setter will meet it.
+pub(crate) fn date_note(kind: &PropKind) -> &'static str {
+    match kind {
+        PropKind::Date => " A civil date, packed YYYYMMDD on the wire.",
+        PropKind::Time => " A civil time, packed HHMM on the wire.",
+        _ => "",
+    }
+}
+
 /// The protocol fingerprint, baked into every generated file.
 pub(crate) fn spec_hash() -> u64 {
     kaya::spec::hash()

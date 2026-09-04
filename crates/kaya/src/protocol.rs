@@ -571,6 +571,14 @@ pub enum Occurrence {
     ValueChanged { id: WidgetId, value: f64 },
     /// The user moved a stamped copy of a template slider.
     InstanceValueChanged { node: TemplateNodeId, path: Path, value: f64 },
+    /// The user COMMITTED a new date in a date picker the guest created
+    /// directly (docs/datetime-plan.md D7): the value the control holds
+    /// once the user is done, never an intermediate movement.
+    DateChanged { id: WidgetId, date: Date },
+    InstanceDateChanged { node: TemplateNodeId, path: Path, date: Date },
+    /// The user committed a new time in a time picker.
+    TimeChanged { id: WidgetId, time: Time },
+    InstanceTimeChanged { node: TemplateNodeId, path: Path, time: Time },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -905,6 +913,163 @@ pub enum WidgetKind {
     /// Display-only, like Image. Its VIEWBOX is its natural size — the one
     /// widget whose content size is app-decided, hence no width/height prop.
     Canvas,
+    /// A compact field holding a civil DATE that opens the platform's own
+    /// calendar (docs/datetime-plan.md): Prop::Date the value, Prop::MinDate
+    /// and Prop::MaxDate its inclusive range; a committed pick reports as
+    /// DateChanged. Uncontrolled, like the slider. GTK composes it.
+    DatePicker,
+    /// A compact field holding a civil TIME of day (hour and minute):
+    /// Prop::Time the value, Prop::MinuteStep the minute granularity; a
+    /// committed pick reports as TimeChanged. No range (D4).
+    TimePicker,
+}
+
+/// A civil calendar date, the value a date picker holds
+/// (docs/datetime-plan.md D2): proleptic Gregorian, no zone, no instant.
+/// On the wire it is ONE I64, `year * 10000 + month * 100 + day`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Date {
+    pub year: i32,
+    pub month: u8,
+    pub day: u8,
+}
+
+impl Date {
+    pub fn new(year: i32, month: u8, day: u8) -> Result<Date, String> {
+        let d = Date { year, month, day };
+        d.check()?;
+        Ok(d)
+    }
+
+    fn check(self) -> Result<(), String> {
+        if !(1..=12).contains(&self.month) {
+            return Err(format!("month {} is not in 1..=12", self.month));
+        }
+        let days = Self::days_in_month(self.year, self.month);
+        if self.day == 0 || self.day > days {
+            return Err(format!(
+                "{}-{:02} has {} days, not {}",
+                self.year, self.month, days, self.day
+            ));
+        }
+        if !(1..=9999).contains(&self.year) {
+            return Err(format!("year {} is not in 1..=9999", self.year));
+        }
+        Ok(())
+    }
+
+    pub fn days_in_month(year: i32, month: u8) -> u8 {
+        match month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 => {
+                if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
+                    29
+                } else {
+                    28
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// The wire form: packed decimal.
+    pub fn packed(self) -> i64 {
+        self.year as i64 * 10_000 + self.month as i64 * 100 + self.day as i64
+    }
+
+    /// The wire form read back, refusing anything that is not a date.
+    pub fn from_packed(packed: i64) -> Result<Date, String> {
+        if !(1_0101..=9999_1231).contains(&packed) {
+            return Err(format!("{packed} is not a packed date (YYYYMMDD)"));
+        }
+        let year = (packed / 10_000) as i32;
+        let month = ((packed / 100) % 100) as u8;
+        let day = (packed % 100) as u8;
+        Date::new(year, month, day).map_err(|why| format!("{packed}: {why}"))
+    }
+}
+
+impl std::fmt::Display for Date {
+    /// The fixed-digit spelling every scene reads: `2026-09-04`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
+
+impl std::str::FromStr for Date {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Date, String> {
+        let parts: Vec<&str> = s.split('-').collect();
+        if parts.len() != 3 || parts[0].len() != 4 || parts[1].len() != 2 || parts[2].len() != 2 {
+            return Err(format!("{s:?} is not a date (YYYY-MM-DD)"));
+        }
+        let n = |p: &str| p.parse::<u32>().map_err(|_| format!("{s:?} is not a date (YYYY-MM-DD)"));
+        Date::new(n(parts[0])? as i32, n(parts[1])? as u8, n(parts[2])? as u8)
+    }
+}
+
+/// A civil time of day, the value a time picker holds: hour and minute,
+/// no seconds (docs/datetime-plan.md D3). On the wire ONE I64,
+/// `hour * 100 + minute`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Time {
+    pub hour: u8,
+    pub minute: u8,
+}
+
+impl Time {
+    pub fn new(hour: u8, minute: u8) -> Result<Time, String> {
+        if hour > 23 {
+            return Err(format!("hour {hour} is not in 0..=23"));
+        }
+        if minute > 59 {
+            return Err(format!("minute {minute} is not in 0..=59"));
+        }
+        Ok(Time { hour, minute })
+    }
+
+    pub fn packed(self) -> i64 {
+        self.hour as i64 * 100 + self.minute as i64
+    }
+
+    pub fn from_packed(packed: i64) -> Result<Time, String> {
+        if !(0..=2359).contains(&packed) {
+            return Err(format!("{packed} is not a packed time (HHMM)"));
+        }
+        Time::new((packed / 100) as u8, (packed % 100) as u8).map_err(|why| format!("{packed}: {why}"))
+    }
+}
+
+impl std::fmt::Display for Time {
+    /// The fixed-digit spelling every scene reads: `14:30`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:02}:{:02}", self.hour, self.minute)
+    }
+}
+
+impl std::str::FromStr for Time {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Time, String> {
+        let (h, m) = s.split_once(':').ok_or_else(|| format!("{s:?} is not a time (HH:MM)"))?;
+        if h.len() != 2 || m.len() != 2 {
+            return Err(format!("{s:?} is not a time (HH:MM)"));
+        }
+        let n = |p: &str| p.parse::<u8>().map_err(|_| format!("{s:?} is not a time (HH:MM)"));
+        Time::new(n(h)?, n(m)?)
+    }
+}
+
+impl From<Date> for Value {
+    fn from(d: Date) -> Value {
+        Value::I64(d.packed())
+    }
+}
+
+impl From<Time> for Value {
+    fn from(t: Time) -> Value {
+        Value::I64(t.packed())
+    }
 }
 
 impl WidgetKind {
@@ -915,7 +1080,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 15] = [
+    pub(crate) const ALL: [WidgetKind; 17] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -931,6 +1096,8 @@ impl WidgetKind {
         WidgetKind::Grid,
         WidgetKind::Textarea,
         WidgetKind::Canvas,
+        WidgetKind::DatePicker,
+        WidgetKind::TimePicker,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -948,7 +1115,9 @@ impl WidgetKind {
             | WidgetKind::Checkbox
             | WidgetKind::Slider
             | WidgetKind::Select
-            | WidgetKind::Radio => true,
+            | WidgetKind::Radio
+            | WidgetKind::DatePicker
+            | WidgetKind::TimePicker => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
@@ -1114,6 +1283,17 @@ pub enum Prop {
     Min,
     /// A slider's range, upper bound (F64-valued).
     Max,
+    /// A date picker's value (I64-valued on the wire: a packed civil date,
+    /// PropKind::Date — docs/datetime-plan.md D2).
+    Date,
+    /// A time picker's value (I64-valued: a packed hour and minute).
+    Time,
+    /// A date picker's inclusive range (packed dates).
+    MinDate,
+    MaxDate,
+    /// A time picker's minute granularity (F64-valued count: 1, 5, 10,
+    /// 15 or 30; docs/datetime-plan.md D3).
+    MinuteStep,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;
@@ -1825,6 +2005,26 @@ impl OccSink {
                     let body = crate::wire::toggled_body(&tag, checked);
                     ring.push_record(crate::ring::REC_TOGGLED, &body);
                 }
+                Occurrence::DateChanged { id, date } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::date_changed_body(&tag, date.packed());
+                    ring.push_record(crate::ring::REC_DATE_CHANGED, &body);
+                }
+                Occurrence::InstanceDateChanged { node, path, date } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::date_changed_body(&tag, date.packed());
+                    ring.push_record(crate::ring::REC_DATE_CHANGED, &body);
+                }
+                Occurrence::TimeChanged { id, time } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::time_changed_body(&tag, time.packed());
+                    ring.push_record(crate::ring::REC_TIME_CHANGED, &body);
+                }
+                Occurrence::InstanceTimeChanged { node, path, time } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::time_changed_body(&tag, time.packed());
+                    ring.push_record(crate::ring::REC_TIME_CHANGED, &body);
+                }
                 Occurrence::ValueChanged { id, value } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     let body = crate::wire::value_changed_body(&tag, value);
@@ -1981,6 +2181,38 @@ impl OccSink {
                 ring.push_record(
                     crate::ring::REC_SORT_REQUESTED,
                     &crate::wire::sort_body(tag, column),
+                );
+            }
+        }
+    }
+
+    /// The same fast path for a picker's committed date / time: the
+    /// stored tag plus the packed value (docs/datetime-plan.md D2).
+    pub(crate) fn send_date_tag(&self, tag: &[u8], packed: i64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_date_changed_tag(tag, packed)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_DATE_CHANGED,
+                    &crate::wire::date_changed_body(tag, packed),
+                );
+            }
+        }
+    }
+
+    pub(crate) fn send_time_tag(&self, tag: &[u8], packed: i64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_time_changed_tag(tag, packed)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_TIME_CHANGED,
+                    &crate::wire::time_changed_body(tag, packed),
                 );
             }
         }

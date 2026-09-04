@@ -14,17 +14,27 @@ Usage:
 """
 
 import glob
+import pathlib
 import re
 import sys
 
 ROOT = "."
 
-# The 15 widget kinds; the gate passes them in from the GENERATED wire
-# file, so this fallback tracks the spec by construction, not by memory.
+# The 17 widget kinds; the gate passes them in from the GENERATED wire
+# file, and this fallback is HELD EQUAL to that file in main() — the
+# hand list was one kind short twice before it was watched
+# (docs/datetime-plan.md §5 step 5).
 DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
-    "scroll progress select radio grid textarea canvas"
+    "scroll progress select radio grid textarea canvas "
+    "date_picker time_picker"
 ).split()
+
+
+def wire_kinds(root):
+    """The generated wire's kind list, lowercased, sorted."""
+    wire = pathlib.Path(root, "bindings/python/kaya/wire.py").read_text(encoding="utf-8")
+    return sorted(m.lower() for m in re.findall(r"^KIND_([A-Z_]+) = \d+$", wire, flags=re.M))
 
 # Constructors that are plumbing rather than sugar. Named here so that
 # adding a plumbing method cannot quietly widen the Rust surface rule.
@@ -1952,6 +1962,21 @@ def main():
         ROOT = args[0]
 
     status = 0
+    # The fallback list is the wire's list, watched: the same reader over a
+    # list one kind short must disagree.
+    spec = wire_kinds(ROOT)
+    if sorted(DEFAULT_KINDS[:-1]) == spec:
+        print("tpl-surfaces: SELF-TEST FAILED — a DEFAULT_KINDS one kind short matched the wire")
+        return 1
+    if sorted(DEFAULT_KINDS) != spec:
+        print(
+            f"tpl-surfaces: DEFAULT_KINDS ({len(DEFAULT_KINDS)}) is not the generated "
+            f"wire's kind list ({len(spec)}): missing "
+            f"{sorted(set(spec) - set(DEFAULT_KINDS))}, extra "
+            f"{sorted(set(DEFAULT_KINDS) - set(spec))} — extend DEFAULT_KINDS."
+        )
+        return 1
+    print(f"tpl-surfaces: DEFAULT_KINDS holds the wire's {len(spec)} kinds (a one-short list watched refused)")
     for lang, reader, where, minimum in ZONES:
         try:
             names = reader(None)

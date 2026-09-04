@@ -52,6 +52,16 @@ impl ValueKind for F64Kind {
 impl ValueKind for BlobKind {
     const TYPE: ValueType = ValueType::Blob;
 }
+/// The picker markers (docs/datetime-plan.md D2): a civil date or time,
+/// an I64 on the wire in packed decimal, a `Date`/`Time` in the app.
+pub struct DateKind;
+pub struct TimeKind;
+impl ValueKind for DateKind {
+    const TYPE: ValueType = ValueType::I64;
+}
+impl ValueKind for TimeKind {
+    const TYPE: ValueType = ValueType::I64;
+}
 
 /// A first-class typed projection: one field of a record type, by
 /// position, for the two sites with no record instance in hand — binding a
@@ -111,6 +121,20 @@ impl From<f64> for TplSource<F64Kind> {
 impl From<i64> for TplSource<I64Kind> {
     fn from(n: i64) -> Self {
         TplSource { inner: SourceInner::Const(Value::I64(n)), _kind: PhantomData }
+    }
+}
+
+/// A picker's constant value in a template — `t.date_picker(due)` beside
+/// `t.date_picker(Item::due())`.
+impl From<crate::Date> for TplSource<DateKind> {
+    fn from(d: crate::Date) -> Self {
+        TplSource { inner: SourceInner::Const(Value::from(d)), _kind: PhantomData }
+    }
+}
+
+impl From<crate::Time> for TplSource<TimeKind> {
+    fn from(t: crate::Time) -> Self {
+        TplSource { inner: SourceInner::Const(Value::from(t)), _kind: PhantomData }
     }
 }
 
@@ -265,6 +289,37 @@ impl KayaField for f64 {
         match v {
             Value::F64(x) => *x,
             other => panic!("kaya: expected an F64 field, model holds {other:?}"),
+        }
+    }
+}
+
+/// A record field that IS a date (docs/datetime-plan.md D10, wide): an
+/// I64 on the wire, a `Date` everywhere the record is touched, and the
+/// field a template picker binds through `Item::due()`.
+impl KayaField for crate::Date {
+    type Kind = DateKind;
+    fn to_value(&self) -> Value {
+        Value::from(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => crate::Date::from_packed(*n)
+                .unwrap_or_else(|why| panic!("kaya: a Date field holds {n}, which is not one: {why}")),
+            other => panic!("kaya: expected a Date field (I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for crate::Time {
+    type Kind = TimeKind;
+    fn to_value(&self) -> Value {
+        Value::from(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => crate::Time::from_packed(*n)
+                .unwrap_or_else(|why| panic!("kaya: a Time field holds {n}, which is not one: {why}")),
+            other => panic!("kaya: expected a Time field (I64 on the wire), model holds {other:?}"),
         }
     }
 }
@@ -1035,6 +1090,24 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// does not fit, at declare time, naming both sides.
     pub fn role(self, role: crate::Role) -> Self {
         self.tx.set(self.id, Prop::Role, role as i64);
+        self
+    }
+
+    /// A date picker's inclusive lower bound (docs/datetime-plan.md D4).
+    pub fn min_date(self, date: crate::Date) -> Self {
+        self.tx.set(self.id, Prop::MinDate, date);
+        self
+    }
+
+    /// A date picker's inclusive upper bound.
+    pub fn max_date(self, date: crate::Date) -> Self {
+        self.tx.set(self.id, Prop::MaxDate, date);
+        self
+    }
+
+    /// A time picker's minute granularity: 1, 5, 10, 15 or 30 (D3).
+    pub fn minute_step(self, minutes: u8) -> Self {
+        self.tx.set(self.id, Prop::MinuteStep, minutes as f64);
         self
     }
 
@@ -2204,6 +2277,39 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A date picker holding `date` (docs/datetime-plan.md): the compact
+    /// field that opens the platform's calendar. Committed picks arrive as
+    /// `DateChanged` in the occurrence loop; `.min_date()`/`.max_date()`
+    /// chain the range.
+    pub fn date_picker(&mut self, date: crate::Date) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::DatePicker);
+        self.set(w, Prop::Date, date);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A date picker whose value binds a signal carrying a packed date
+    /// (`Value::from(Date)`). Property writes never echo.
+    pub fn date_picker_bound(&mut self, date: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::DatePicker);
+        self.bind(w, Prop::Date, date);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A time picker holding `time`: hour and minute, the compact field
+    /// that opens the platform's clock. `.minute_step()` chains the
+    /// granularity.
+    pub fn time_picker(&mut self, time: crate::Time) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::TimePicker);
+        self.set(w, Prop::Time, time);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    pub fn time_picker_bound(&mut self, time: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::TimePicker);
+        self.bind(w, Prop::Time, time);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A dropdown select over its options — each option becomes a label
     /// child (labels only, scene-checked), `selected` the initial 0-based
     /// index (domain-checked at the root against the option count).
@@ -3221,6 +3327,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().checkbox(src)
     }
 
+    pub fn date_picker(&mut self, src: impl Into<TplSource<DateKind>>) -> TemplateNodeId {
+        self.tpl().date_picker(src)
+    }
+
+    pub fn time_picker(&mut self, src: impl Into<TplSource<TimeKind>>) -> TemplateNodeId {
+        self.tpl().time_picker(src)
+    }
+
     pub fn button(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
         self.tpl().button(src)
     }
@@ -3549,6 +3663,24 @@ impl<M> Messages<M> {
         );
     }
 
+    /// A date picker's committed picks (docs/datetime-plan.md D7).
+    pub fn on_date(&self, w: WidgetId, f: impl Fn(crate::Date) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::DateChanged { date, .. } => Some(f(*date)),
+                _ => None,
+            }),
+        );
+    }
+
+    /// A time picker's committed picks.
+    pub fn on_time(&self, w: WidgetId, f: impl Fn(crate::Time) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::TimeChanged { time, .. } => Some(f(*time)),
+                _ => None,
+            }),
+        );
+    }
+
     /// A select's picks: the new 0-based option index. Rides the
     /// value_changed record (the index travels as f64), so this is
     /// on_value with the index reading.
@@ -3590,6 +3722,27 @@ impl<M> Messages<M> {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceValueChanged { path, value, .. } => {
                     Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped date picker's committed pick, keys first.
+    pub fn on_date_node(&self, n: TemplateNodeId, f: impl Fn(Path, crate::Date) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceDateChanged { path, date, .. } => {
+                    Some(f(path.clone(), *date))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_time_node(&self, n: TemplateNodeId, f: impl Fn(Path, crate::Time) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceTimeChanged { path, time, .. } => {
+                    Some(f(path.clone(), *time))
                 }
                 _ => None,
             }),
@@ -3963,7 +4116,9 @@ impl<M> Messages<M> {
                 | Occurrence::SortRequested { id, .. }
                 | Occurrence::Pasted { id, .. }
                 | Occurrence::Dropped { id, .. }
-                | Occurrence::DragEnded { id, .. } => self
+                | Occurrence::DragEnded { id, .. }
+                | Occurrence::DateChanged { id, .. }
+                | Occurrence::TimeChanged { id, .. } => self
                     .widgets
                     .borrow()
                     .get(&id.0)
@@ -3975,7 +4130,9 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceSortRequested { node, .. }
                 | Occurrence::InstancePasted { node, .. }
                 | Occurrence::InstanceDropped { node, .. }
-                | Occurrence::InstanceDragEnded { node, .. } => self
+                | Occurrence::InstanceDragEnded { node, .. }
+                | Occurrence::InstanceDateChanged { node, .. }
+                | Occurrence::InstanceTimeChanged { node, .. } => self
                     .nodes
                     .borrow()
                     .get(&node.0)
@@ -5798,6 +5955,23 @@ impl<'b> Tpl<'_, 'b> {
         n
     }
 
+    /// A date picker whose VALUE comes from a source — a constant per
+    /// copy, a signal, or the row's own `Date` field (docs/datetime-plan.md
+    /// D10). Committed picks arrive as `InstanceDateChanged` naming this
+    /// node and the copy's key path.
+    pub fn date_picker(&mut self, src: impl Into<TplSource<DateKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::DatePicker);
+        self.apply_source(n, Prop::Date, src.into().inner);
+        n
+    }
+
+    /// A time picker whose value comes from a source.
+    pub fn time_picker(&mut self, src: impl Into<TplSource<TimeKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::TimePicker);
+        self.apply_source(n, Prop::Time, src.into().inner);
+        n
+    }
+
     /// A button whose caption comes from any addressable source — a
     /// constant per stamped copy, a signal, or the element's own field.
     /// Clicks on a stamped copy arrive as `InstanceButtonClicked`,
@@ -6983,6 +7157,10 @@ mod tests {
                     | Occurrence::SectionSelected { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. }
+                    | Occurrence::DateChanged { .. }
+                    | Occurrence::InstanceDateChanged { .. }
+                    | Occurrence::TimeChanged { .. }
+                    | Occurrence::InstanceTimeChanged { .. }
                     | Occurrence::MenuActivated { .. }
                     | Occurrence::InstanceMenuActivated { .. }
                     | Occurrence::MenuToggled { .. }

@@ -1664,6 +1664,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
         K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
         K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
+        K::DatePicker | K::TimePicker => Vec::new(),
     }
 }
 
@@ -5265,6 +5266,9 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Entry | K::Textarea => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
+        K::DatePicker | K::TimePicker => {
+            crate::depth_stub("pickers")
+        }
     };
     core.widgets
         .iter()
@@ -7335,6 +7339,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let picture = gtk4::Picture::new();
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
+                }
+                // The picker arms are the breadth slice's (docs/datetime-plan.md
+                // §5 step 6): a picker declared against this backend fails HERE,
+                // by name, never as a widget that quietly is not there.
+                WidgetKind::DatePicker | WidgetKind::TimePicker => {
+                    crate::depth_stub("pickers")
                 }
                 WidgetKind::Canvas => {
                     // The raw-pixel sibling of the arm above: a
@@ -10862,6 +10872,18 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
+    // The picker arms are the breadth slice's (docs/datetime-plan.md §5
+    // step 6); until they land a driven picker fails HERE, by name, never
+    // vacuously.
+    fn set_date(&self, t: crate::harness::Target, date: crate::Date) {
+        crate::depth_stub("pickers")
+    }
+    fn set_time(&self, t: crate::harness::Target, time: crate::Time) {
+        crate::depth_stub("pickers")
+    }
+    fn picker_value(&self, t: crate::harness::Target) -> String {
+        crate::depth_stub("pickers")
+    }
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());
@@ -13219,6 +13241,9 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Label => nth!(core.labels),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
+        K::DatePicker | K::TimePicker => {
+            crate::depth_stub("pickers")
+        }
         K::Slider => nth!(core.sliders),
         K::Image => nth!(core.images),
         K::Progress => nth!(core.progresses),

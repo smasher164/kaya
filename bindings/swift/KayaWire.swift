@@ -18,7 +18,27 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xa3cb4cff19aad964
+let kayaSpecHash: UInt64 = 0x33b9ee831818ac41
+
+/// A civil date as the wire's I64: year * 10000 + month * 100 + day.
+func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
+    Int64(year) * 10000 + Int64(month) * 100 + Int64(day)
+}
+
+/// A wire date's components.
+func kayaUnpackDate(_ packed: Int64) -> (year: Int, month: Int, day: Int) {
+    (Int(packed / 10000), Int(packed / 100 % 100), Int(packed % 100))
+}
+
+/// A civil time as the wire's I64: hour * 100 + minute.
+func kayaPackTime(_ hour: Int, _ minute: Int) -> Int64 {
+    Int64(hour) * 100 + Int64(minute)
+}
+
+/// A wire time's components.
+func kayaUnpackTime(_ packed: Int64) -> (hour: Int, minute: Int) {
+    (Int(packed / 100), Int(packed % 100))
+}
 
 struct KayaTx {
     var bytes = Data()
@@ -1134,6 +1154,166 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant date value. A civil date, packed YYYYMMDD on the wire.
+    mutating func setDate(_ widgetId: UInt64, _ year: Int, _ month: Int, _ day: Int) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_DATE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(kayaPackDate(year, month, day)))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound date value.
+    mutating func bindDate(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_DATE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindDateElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_DATE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant time value. A civil time, packed HHMM on the wire.
+    mutating func setTime(_ widgetId: UInt64, _ hour: Int, _ minute: Int) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TIME))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(kayaPackTime(hour, minute)))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound time value.
+    mutating func bindTime(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TIME))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindTimeElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TIME))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant min_date value. A civil date, packed YYYYMMDD on the wire.
+    mutating func setMinDate(_ widgetId: UInt64, _ year: Int, _ month: Int, _ day: Int) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_DATE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(kayaPackDate(year, month, day)))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound min_date value.
+    mutating func bindMinDate(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_DATE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMinDateElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN_DATE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant max_date value. A civil date, packed YYYYMMDD on the wire.
+    mutating func setMaxDate(_ widgetId: UInt64, _ year: Int, _ month: Int, _ day: Int) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX_DATE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(kayaPackDate(year, month, day)))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound max_date value.
+    mutating func bindMaxDate(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX_DATE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMaxDateElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX_DATE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant minute_step value.
+    mutating func setMinuteStep(_ widgetId: UInt64, _ minuteStep: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MINUTE_STEP))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(minuteStep))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound minute_step value.
+    mutating func bindMinuteStep(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MINUTE_STEP))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMinuteStepElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MINUTE_STEP))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -1694,6 +1874,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_TICK)
             || kind == UInt16(KAYA_OCCURRENCE_DROPPED)
             || kind == UInt16(KAYA_OCCURRENCE_DRAG_ENDED)
+            || kind == UInt16(KAYA_OCCURRENCE_DATE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -1778,6 +1960,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_MENU_TOGGLED)
             || kind == UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_DATE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))

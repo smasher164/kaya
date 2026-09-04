@@ -14,6 +14,7 @@ pub const RESERVED: &[&str] = &[
     "enc", "record", "pad", "cat", "u32", "u64", "i64", "f64", "parse_value", "parse_clip", "parse_representation",
     "parse_occurrence", "BlobHandle", "I64", "canonicalize_shortcut", "occurrence_blob",
     "install_occurrence_blob", "text_encoder", "text_decoder",
+    "pack_date", "unpack_date", "pack_time", "unpack_time",
     "arguments", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
     "default", "delete", "do", "else", "enum", "eval", "export", "extends", "false", "finally",
     "for", "function", "if", "implements", "import", "in", "instanceof", "interface", "let",
@@ -22,17 +23,29 @@ pub const RESERVED: &[&str] = &[
     "with", "yield",
 ];
 
-fn value_expr(kind: &PropKind, prop: &str) -> (String, &'static str, String) {
-    // (parameter name, its TS type, the encoding expression)
+fn value_expr(kind: &PropKind, prop: &str) -> (String, String) {
+    // (the declared parameter list, the encoding expression) — a list,
+    // because a Date takes its three components and never the packed
+    // integer.
     match kind {
-        PropKind::Str => (prop.into(), "string", format!("enc.value({prop})")),
-        PropKind::Bool => (prop.into(), "boolean", format!("enc.value({prop})")),
-        PropKind::F64 => (prop.into(), "number", format!("enc.value({prop})")),
-        PropKind::Enum(_) => (prop.into(), "number", format!("enc.value(new I64({prop}))")),
+        PropKind::Str => (format!("{prop}: string"), format!("enc.value({prop})")),
+        PropKind::Bool => (format!("{prop}: boolean"), format!("enc.value({prop})")),
+        PropKind::F64 => (format!("{prop}: number"), format!("enc.value({prop})")),
+        PropKind::Enum(_) => (
+            format!("{prop}: number"),
+            format!("enc.value(new I64({prop}))"),
+        ),
         PropKind::Blob => (
-            "handle".into(),
-            "number",
+            "handle: number".to_string(),
             "enc.value(new BlobHandle(handle))".to_string(),
+        ),
+        PropKind::Date => (
+            "year: number, month: number, day: number".to_string(),
+            "enc.value(new I64(pack_date(year, month, day)))".to_string(),
+        ),
+        PropKind::Time => (
+            "hour: number, minute: number".to_string(),
+            "enc.value(new I64(pack_time(hour, minute)))".to_string(),
         ),
     }
 }
@@ -221,12 +234,35 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
+    // A guest never assembles the packed integer by hand: the typed
+    // setters take components and these pack them (spec.rs PropKind).
+    c.line("");
+    c.line("/** A civil date as the wire's I64: year * 10000 + month * 100 + day. */");
+    c.line("export function pack_date(year: number, month: number, day: number): number {");
+    c.line("  return year * 10000 + month * 100 + day;");
+    c.line("}");
+    c.line("");
+    c.line("/** A wire date as [year, month, day]. */");
+    c.line("export function unpack_date(packed: number): [year: number, month: number, day: number] {");
+    c.line("  return [Math.trunc(packed / 10000), Math.trunc(packed / 100) % 100, packed % 100];");
+    c.line("}");
+    c.line("");
+    c.line("/** A civil time as the wire's I64: hour * 100 + minute. */");
+    c.line("export function pack_time(hour: number, minute: number): number {");
+    c.line("  return hour * 100 + minute;");
+    c.line("}");
+    c.line("");
+    c.line("/** A wire time as [hour, minute]. */");
+    c.line("export function unpack_time(packed: number): [hour: number, minute: number] {");
+    c.line("  return [Math.trunc(packed / 100), packed % 100];");
+    c.line("}");
+
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (param, ty, expr) = value_expr(kind, prop);
+        let (param, expr) = value_expr(kind, prop);
         c.line("");
-        c.line(&format!("/** set_property with a constant {prop} value. */"));
-        c.line(&format!("export function tx_set_{prop}(widget_id: number, {param}: {ty}): Uint8Array {{"));
+        c.line(&format!("/** set_property with a constant {prop} value.{} */", crate::date_note(kind)));
+        c.line(&format!("export function tx_set_{prop}(widget_id: number, {param}): Uint8Array {{"));
         c.line(&format!("  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_{up}), u32(SOURCE_CONST), {expr}));"));
         c.line("}");
         c.line("");
@@ -244,11 +280,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // The window-prop duos: element sources are rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (param, ty, expr) = value_expr(kind, prop);
-        assert!(!matches!(kind, PropKind::Blob), "no window prop carries a blob");
+        let (param, expr) = value_expr(kind, prop);
+        assert!(
+            !matches!(kind, PropKind::Blob | PropKind::Date | PropKind::Time),
+            "no window prop carries a blob, a date or a time"
+        );
         c.line("");
         c.line(&format!("/** set_window_prop with a constant {prop} value; window 0, the primary surface. */"));
-        c.line(&format!("export function tx_set_window_{prop}(window: number, {param}: {ty}): Uint8Array {{"));
+        c.line(&format!("export function tx_set_window_{prop}(window: number, {param}): Uint8Array {{"));
         c.line(&format!("  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_{up}), u32(SOURCE_CONST), {expr}));"));
         c.line("}");
         c.line("");
@@ -262,11 +301,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // table (DESIGN.md, Navigation).
     for (prop, _, kind) in crate::entry_prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (param, ty, expr) = value_expr(kind, prop);
+        let (param, expr) = value_expr(kind, prop);
         assert!(matches!(kind, PropKind::Str | PropKind::Bool), "no entry prop carries {kind:?}");
         c.line("");
         c.line(&format!("/** set_entry_prop with a constant {prop} value. */"));
-        c.line(&format!("export function tx_set_entry_{prop}(entry: number, {param}: {ty}): Uint8Array {{"));
+        c.line(&format!("export function tx_set_entry_{prop}(entry: number, {param}): Uint8Array {{"));
         c.line(&format!("  return record(TX_SET_ENTRY_PROP, cat(u64(entry), u32(EPROP_{up}), u32(SOURCE_CONST), {expr}));"));
         c.line("}");
         c.line("");
@@ -280,14 +319,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (param, ty, expr) = value_expr(kind, prop);
+        let (param, expr) = value_expr(kind, prop);
         assert!(
             matches!(kind, PropKind::Str | PropKind::Blob | PropKind::Enum(_)),
             "no section prop carries {kind:?}"
         );
         c.line("");
         c.line(&format!("/** set_section_prop with a constant {prop} value. */"));
-        c.line(&format!("export function tx_set_section_{prop}(section: number, {param}: {ty}): Uint8Array {{"));
+        c.line(&format!("export function tx_set_section_{prop}(section: number, {param}): Uint8Array {{"));
         c.line(&format!("  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_{up}), u32(SOURCE_CONST), {expr}));"));
         c.line("}");
         c.line("");
@@ -337,17 +376,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // Signal binders only for the bindable props.
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (param, ty, expr) = match kind {
+        let (param, expr) = match kind {
             PropKind::Str if *prop == "shortcut" => (
-                prop.to_string(),
-                "string",
+                format!("{prop}: string"),
                 format!("enc.value(canonicalize_shortcut({prop}))"),
             ),
+            PropKind::Date | PropKind::Time => {
+                unreachable!("no menu prop is a date or time")
+            }
             other => value_expr(other, prop),
         };
         c.line("");
         c.line(&format!("/** set_menu_prop with a constant {prop} value. */"));
-        c.line(&format!("export function tx_set_menu_{prop}(item: number, {param}: {ty}): Uint8Array {{"));
+        c.line(&format!("export function tx_set_menu_{prop}(item: number, {param}): Uint8Array {{"));
         c.line(&format!("  return record(TX_SET_MENU_PROP, cat(u64(item), u32(MPROP_{up}), u32(SOURCE_CONST), {expr}));"));
         c.line("}");
         if crate::menu_prop_bindable(prop) {
