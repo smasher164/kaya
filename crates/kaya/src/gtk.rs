@@ -5906,6 +5906,39 @@ fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
 enum ClipOffer {
     Board(gdk::Clipboard),
     Drop(gdk::Drop),
+    /// A drop this process SYNTHESIZED, which is the `drag_file` verb's
+    /// only route on this toolkit: `GdkDrop` is abstract and has no
+    /// constructor, so the platform's drop signal cannot be entered with a
+    /// drag nobody started. The bytes are already in hand
+    /// (docs/dnd-plan.md D6); the REAL foreign gesture is the witness leg.
+    #[cfg(feature = "harness")]
+    Foreign(Rc<ForeignOffer>),
+}
+
+/// One synthesized offer: the mime types it advertises and the bytes under
+/// each, read by `materialize` exactly as a platform drag's are.
+#[cfg(feature = "harness")]
+struct ForeignOffer {
+    formats: gdk::ContentFormats,
+    bytes: HashMap<String, Vec<u8>>,
+}
+
+#[cfg(feature = "harness")]
+impl ForeignOffer {
+    /// The file drop a source outside this app would make: `text/uri-list`
+    /// with the RFC's CRLF terminator, which is the shape the clipboard
+    /// probe measured GDK's own writer using (docs/clipboard-plan.md §5b).
+    fn file(path: &str) -> Result<ForeignOffer, String> {
+        let uri = glib::filename_to_uri(path, None)
+            .map_err(|e| format!("{path} is not a path a file URI can be made of: {e}"))?;
+        Ok(ForeignOffer {
+            formats: gdk::ContentFormats::new(&["text/uri-list"]),
+            bytes: HashMap::from([(
+                "text/uri-list".to_owned(),
+                format!("{uri}\r\n").into_bytes(),
+            )]),
+        })
+    }
 }
 
 impl ClipOffer {
@@ -5913,12 +5946,18 @@ impl ClipOffer {
         match self {
             ClipOffer::Board(board) => board.formats(),
             ClipOffer::Drop(drop) => drop.formats(),
+            #[cfg(feature = "harness")]
+            ClipOffer::Foreign(offer) => offer.formats.clone(),
         }
     }
 
     /// One mime type's bytes, whole, then the callback — None for a failed
     /// transfer (GDK fails an unservable read fast, measured §5b).
     fn read_bytes(&self, mime: &str, done: Box<dyn FnOnce(Option<Vec<u8>>)>) {
+        #[cfg(feature = "harness")]
+        if let ClipOffer::Foreign(offer) = self {
+            return done(offer.bytes.get(mime).cloned());
+        }
         let finish = move |res: Result<
             (gtk4::gio::InputStream, glib::GString),
             glib::Error,
@@ -5939,6 +5978,9 @@ impl ClipOffer {
                 gtk4::gio::Cancellable::NONE,
                 finish,
             ),
+            // Answered above, before `finish` takes the callback.
+            #[cfg(feature = "harness")]
+            ClipOffer::Foreign(_) => unreachable!(),
         }
     }
 
@@ -5959,6 +6001,13 @@ impl ClipOffer {
                 glib::Priority::DEFAULT,
                 gtk4::gio::Cancellable::NONE,
                 move |res| done(res.ok().and_then(|v| v.get::<String>().ok())),
+            ),
+            #[cfg(feature = "harness")]
+            ClipOffer::Foreign(offer) => done(
+                ["text/plain;charset=utf-8", "text/plain"]
+                    .iter()
+                    .find_map(|mime| offer.bytes.get(*mime))
+                    .map(|b| String::from_utf8_lossy(b).into_owned()),
             ),
         }
     }
@@ -6097,6 +6146,50 @@ fn read_stream_to_end(
 /// key path, dot-joined, under a kaya-private id.
 const KAYA_ROW_MIME: &str = "dev.kaya/row";
 
+/// THE REORDER'S INSERTION INDICATOR (docs/dnd-plan.md §5 step 7). WinUI's
+/// `CanReorderItems` was declined because it writes the model, and its
+/// insertion line went with it, so the two widget backends draw their own:
+/// a line at the LANDING EDGE of the row under the pointer — the row's top
+/// for `before`, its bottom for `onto` — put up on enter and motion and
+/// taken down on leave, on drop and when the drag ends.
+///
+/// NO SCENE CAN SEE IT: the indicator is pixels, and every reorder
+/// observable (expect_order, the dropped occurrence's anchor and bit)
+/// answers identically with it gone. tools/check-verbs.py holds its ten
+/// links statically; measured by hand once, filmed on the x11 pool.
+const DROP_BEFORE_CLASS: &str = "kaya-drop-before";
+const DROP_AFTER_CLASS: &str = "kaya-drop-after";
+
+/// The line itself. A GRADIENT rather than a border: a border would grow
+/// the row and displace every row under it in the middle of the drag, which
+/// is the geometry the drop is being aimed at, while a background costs no
+/// layout at all. Adwaita's accent is the platform's own token, as the
+/// table card's colours are. (An `inset` box-shadow draws the same line
+/// here — measured, and refused only because a line is not a shadow.)
+const DND_CSS: &str = "\
+.kaya-drop-before { background-image: linear-gradient(to bottom, \
+@accent_bg_color 3px, transparent 3px); }
+.kaya-drop-after { background-image: linear-gradient(to top, \
+@accent_bg_color 3px, transparent 3px); }
+";
+
+/// Take the indicator off every row of a container.
+fn clear_insertion(rows: &gtk4::Widget) {
+    for child in children_of(rows) {
+        child.remove_css_class(DROP_BEFORE_CLASS);
+        child.remove_css_class(DROP_AFTER_CLASS);
+    }
+}
+
+/// Put it at the landing edge of the row under `(x, y)`, and nowhere else.
+fn show_insertion(rows: &gtk4::Widget, x: f64, y: f64) {
+    clear_insertion(rows);
+    let Some(row) = row_under(rows, x, y) else { return };
+    let Some(bounds) = row.compute_bounds(rows) else { return };
+    let before = y < f64::from(bounds.y()) + f64::from(bounds.height()) / 2.0;
+    row.add_css_class(if before { DROP_BEFORE_CLASS } else { DROP_AFTER_CLASS });
+}
+
 /// The script the `drag` verb runs (docs/dnd-plan.md D10). tools/linux/
 /// run-suites.sh exports it; the verb refuses by name when it is unset,
 /// because a drag that silently does not happen reads as a refused drop.
@@ -6218,8 +6311,8 @@ fn accept_formats(accepts: &str) -> gdk::ContentFormats {
 
 /// What a drag in flight OFFERS, in kaya's vocabulary: the closed kinds as a
 /// mask and the custom ids among `accepted` it carries.
-fn drop_offer<'a>(drop: &gdk::Drop, accepted: &[&'a str]) -> (u32, Vec<&'a str>) {
-    let formats = drop.formats();
+fn drop_offer<'a>(offer: &ClipOffer, accepted: &[&'a str]) -> (u32, Vec<&'a str>) {
+    let formats = offer.formats();
     let mut kinds = 0;
     if clipboard_offers_text(&formats) {
         kinds |= crate::wire::CLIP_TEXT;
@@ -6246,17 +6339,35 @@ fn drop_offer<'a>(drop: &gdk::Drop, accepted: &[&'a str]) -> (u32, Vec<&'a str>)
 /// source (`gdk_drop_get_drag` is null) is answered copy there, so no other
 /// application deletes on kaya's behalf (D2).
 fn drop_action(accepts: &str, operations: u32, drop: &gdk::Drop) -> gdk::DragAction {
+    verdict_action(
+        accepts,
+        operations,
+        &ClipOffer::Drop(drop.clone()),
+        drag_mask(drop.actions()),
+        drop.drag().is_some(),
+    )
+}
+
+/// The same verdict over an offer whose locality and operations are the
+/// caller's to state — the platform's drop reads both off the GdkDrop, the
+/// `drag_file` verb states them (foreign, copy).
+fn verdict_action(
+    accepts: &str,
+    operations: u32,
+    offer: &ClipOffer,
+    source_ops: u32,
+    local: bool,
+) -> gdk::DragAction {
     let (_, accepted) = crate::wire::parse_accept_list(accepts);
-    let (offered, offered_custom) = drop_offer(drop, &accepted);
-    let mask = crate::wire::drop_verdict(
+    let (offered, offered_custom) = drop_offer(offer, &accepted);
+    drag_actions(crate::wire::drop_verdict(
         accepts,
         operations,
         offered,
         &offered_custom,
-        drag_mask(drop.actions()),
-        drop.drag().is_some(),
-    );
-    drag_actions(mask)
+        source_ops,
+        local,
+    ))
 }
 
 /// One stamped row's key path, out of the identity tag every stamped copy
@@ -6476,6 +6587,44 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
     hub.source_ctl.borrow_mut().insert(id.0, source);
 }
 
+/// THE DESTINATION'S OWN ARMS, entered from the platform's drop signal and
+/// from the `drag_file` verb alike: the accept list chooses the richest
+/// representation, the bytes are read with NOTHING WAITING (D2), and the
+/// occurrence goes out when they arrive. `finish` is the platform's
+/// acknowledgement, absent for a drop this process synthesized.
+#[allow(clippy::too_many_arguments)]
+fn deliver_drop(
+    hub: Rc<DndHub>,
+    tag: Vec<u8>,
+    accepts: &str,
+    offer: ClipOffer,
+    action: gdk::DragAction,
+    point: (f64, f64),
+    anchor: crate::protocol::Path,
+    before: bool,
+    finish: Option<gdk::Drop>,
+) {
+    materialize(
+        &offer,
+        accepts,
+        Box::new(move |clip| match clip {
+            Some(clip) => {
+                hub.emit_dropped(&tag, point, drag_mask(action), anchor, before, clip);
+                if let Some(finish) = finish {
+                    finish.finish(action);
+                }
+            }
+            // Nothing transferred is not a drop; the source learns
+            // `none` through its own drag_ended, as a refusal does.
+            None => {
+                if let Some(finish) = finish {
+                    finish.finish(gdk::DragAction::empty());
+                }
+            }
+        }),
+    );
+}
+
 /// (Re)install the platform's drop destination. Called from the drop_target
 /// arm AND from the `accepts` prop, because the two together are one
 /// declaration and the formats a destination advertises come from the list.
@@ -6514,23 +6663,16 @@ fn install_drop_target(core: &CoreState, id: WidgetId) {
         if action.is_empty() {
             return false;
         }
-        // NOTHING WAITS HERE (D2): the bytes arrive when they arrive and the
-        // occurrence goes out then, which is what GtkDropTargetAsync is for.
-        let finish = drop.clone();
-        let hub = drop_hub.clone();
-        let tag = tag.clone();
-        materialize(
-            &ClipOffer::Drop(drop.clone()),
+        deliver_drop(
+            drop_hub.clone(),
+            tag.clone(),
             &accepts,
-            Box::new(move |clip| match clip {
-                Some(clip) => {
-                    hub.emit_dropped(&tag, (x, y), drag_mask(action), Vec::new(), false, clip);
-                    finish.finish(action);
-                }
-                // Nothing transferred is not a drop; the source learns
-                // `none` through its own drag_ended, as a refusal does.
-                None => finish.finish(gdk::DragAction::empty()),
-            }),
+            ClipOffer::Drop(drop.clone()),
+            action,
+            (x, y),
+            Vec::new(),
+            false,
+            Some(drop.clone()),
         );
         true
     });
@@ -6583,7 +6725,10 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
         }
     });
     let end_hub = hub.clone();
+    let end_rows = rows.clone();
     source.connect_drag_end(move |_source, drag, _delete| {
+        // A drag cancelled off the container leaves no other clearing site.
+        clear_insertion(&end_rows);
         let ended = end_hub.row_drag.borrow_mut().take();
         if let Some(row) = ended {
             end_hub.emit_drag_ended(&row.tag, drag_mask(drag.selected_action()));
@@ -6597,13 +6742,27 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     let accept_hub = hub.clone();
     target.connect_accept(move |_target, drop| reorder_takes(&accept_hub, container.0, drop));
     let enter_hub = hub.clone();
-    target.connect_drag_enter(move |_target, drop, _x, _y| {
-        reorder_action(&enter_hub, container.0, drop)
+    let enter_rows = rows.clone();
+    target.connect_drag_enter(move |_target, drop, x, y| {
+        let action = reorder_action(&enter_hub, container.0, drop);
+        if !action.is_empty() {
+            show_insertion(&enter_rows, x, y);
+        }
+        action
     });
     let motion_hub = hub.clone();
-    target.connect_drag_motion(move |_target, drop, _x, _y| {
-        reorder_action(&motion_hub, container.0, drop)
+    let motion_rows = rows.clone();
+    target.connect_drag_motion(move |_target, drop, x, y| {
+        let action = reorder_action(&motion_hub, container.0, drop);
+        if action.is_empty() {
+            clear_insertion(&motion_rows);
+        } else {
+            show_insertion(&motion_rows, x, y);
+        }
+        action
     });
+    let leave_rows = rows.clone();
+    target.connect_drag_leave(move |_target, _drop| clear_insertion(&leave_rows));
     let drop_hub = hub.clone();
     let drop_rows = rows.clone();
     target.connect_drop(move |_target, drop, x, y| {
@@ -6623,26 +6782,17 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
         // landed on, and the identity is the CONTAINER the app registered
         // on (docs/dnd-plan.md D8 as amended).
         let before = y < f64::from(bounds.y()) + f64::from(bounds.height()) / 2.0;
-        let finish = drop.clone();
-        let hub = drop_hub.clone();
-        let tag = container_tag.clone();
-        materialize(
-            &ClipOffer::Drop(drop.clone()),
+        clear_insertion(&drop_rows);
+        deliver_drop(
+            drop_hub.clone(),
+            container_tag.clone(),
             KAYA_ROW_MIME,
-            Box::new(move |clip| match clip {
-                Some(clip) => {
-                    hub.emit_dropped(
-                        &tag,
-                        (x, y),
-                        crate::wire::DRAG_OP_MOVE,
-                        anchor,
-                        before,
-                        clip,
-                    );
-                    finish.finish(gdk::DragAction::MOVE);
-                }
-                None => finish.finish(gdk::DragAction::empty()),
-            }),
+            ClipOffer::Drop(drop.clone()),
+            gdk::DragAction::MOVE,
+            (x, y),
+            anchor,
+            before,
+            Some(drop.clone()),
         );
         true
     });
@@ -6760,12 +6910,23 @@ fn core_declares_source(core: &CoreState, widget: &gtk4::Widget) -> bool {
 
 #[cfg(feature = "harness")]
 fn core_declares_target(core: &CoreState, widget: &gtk4::Widget) -> bool {
+    declared_target_id(core, widget).is_some()
+}
+
+/// Which declared destination a widget IS, for the verb that has to read
+/// that destination's own accept list and tag back out of the hub.
+#[cfg(feature = "harness")]
+fn declared_target_id(core: &CoreState, widget: &gtk4::Widget) -> Option<u64> {
     core.dnd
         .target_ctl
         .borrow()
         .keys()
-        .filter_map(|id| core.widgets.get(&WidgetId(*id)))
-        .any(|native| &native.control() == widget)
+        .copied()
+        .find(|id| {
+            core.widgets
+                .get(&WidgetId(*id))
+                .is_some_and(|native| &native.control() == widget)
+        })
 }
 
 /// THE CANVAS'S WIDGET: a `GdkPaintable` drawn at the size the CORE rastered
@@ -9271,6 +9432,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let table_css = gtk4::CssProvider::new();
         watch_css_errors(&table_css, &css_error);
         load_kaya_css(&table_css, "table header", TABLE_CSS, &css_error);
+        // The reorder's insertion indicator, static for the same reason.
+        let dnd_css = gtk4::CssProvider::new();
+        watch_css_errors(&dnd_css, &css_error);
+        load_kaya_css(&dnd_css, "drop indicator", DND_CSS, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -9295,6 +9460,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &table_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &dnd_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
@@ -11367,6 +11537,71 @@ impl crate::harness::Stage for GtkStage {
             ),
             Err(e) => format!("{driver} could not be run: {e}"),
         }
+    }
+
+    /// A FOREIGN FILE DROP, IN PROCESS (docs/dnd-plan.md D6). `GdkDrop` is
+    /// abstract and has no constructor, so the platform's drop signal cannot
+    /// be entered with a drag nobody started; the destination's own arms are
+    /// entered instead — the same verdict, the same `materialize`, the same
+    /// `deliver_drop` the signal runs — over a synthesized `text/uri-list`
+    /// offer with no drag of ours behind it, which is what makes the verdict
+    /// answer copy (D2). The picked-table registration is `materialize`'s,
+    /// so a dropped file is redeemed exactly as a pasted one is. The REAL
+    /// foreign gesture is the witness leg (tools/linux/dragwitness.py).
+    fn drag_file(&self, path: &str, destination: crate::harness::Target) -> String {
+        // The destination's box is the last frame's, as the drag verb's is.
+        Self::await_frames(2);
+        let path = path.to_owned();
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, destination) else {
+                return format!("no such destination {destination:?}");
+            };
+            let Some(id) = declared_target_id(core, &widget) else {
+                return format!(
+                    "the destination {destination:?} declares no drop_target: \
+                     {} widgets declare one",
+                    core.dnd.targets.borrow().len()
+                );
+            };
+            if !std::path::Path::new(&path).exists() {
+                return format!(
+                    "no file at {path} — the scene's guest writes the file it drops \
+                     (clipboard_seed's rule)"
+                );
+            }
+            let offer = match ForeignOffer::file(&path) {
+                Ok(offer) => ClipOffer::Foreign(Rc::new(offer)),
+                Err(why) => return why,
+            };
+            let Some((operations, tag)) = core.dnd.targets.borrow().get(&id).cloned() else {
+                return format!("the destination {destination:?} withdrew its drop target");
+            };
+            let accepts = core.dnd.accepts_of(id);
+            let action = verdict_action(
+                &accepts,
+                operations,
+                &offer,
+                crate::wire::DRAG_OP_COPY,
+                false,
+            );
+            // A refusal is a verdict, not a failure of the verb: the scene
+            // reads the destination and sees it unchanged.
+            if !action.is_empty() {
+                let point = (f64::from(widget.width()) / 2.0, f64::from(widget.height()) / 2.0);
+                deliver_drop(
+                    core.dnd.clone(),
+                    tag,
+                    &accepts,
+                    offer,
+                    action,
+                    point,
+                    Vec::new(),
+                    false,
+                    None,
+                );
+            }
+            String::new()
+        })
     }
 
     fn header_click(&self, t: crate::harness::Target, column: u32) {

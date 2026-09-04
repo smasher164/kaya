@@ -189,6 +189,12 @@ pub enum Step {
     /// D10). `Some(before)` marks a REORDER: the destination is a row of
     /// the source's own For and the bit says before or onto it.
     Drag(Target, Target, Option<bool>),
+    /// `drag_file "<path>" to <destination>`: a FOREIGN file drop (D6) —
+    /// the path, $TMP/$PID expanded, dropped on the destination as a
+    /// source outside this app would drop it, so the picked-table
+    /// redemption is what the scene reads. No source in the app, so no
+    /// drag_ended.
+    DragFile(String, Target),
     /// Click the table's column header at the 0-based index through
     /// the platform's real header path, so it emits sort_requested
     /// (select_section's drive-and-emit precedent).
@@ -537,6 +543,7 @@ impl Step {
             // holds every variant's Target fields against these arms).
             // docs/traps.md: A Step's SECOND Target was never normalized
             Step::Drag(source, destination, _) => vec![source, destination],
+            Step::DragFile(_, destination) => vec![destination],
             Step::ExpectFolded(child, table) => {
                 let mut out = vec![child];
                 if let Some(table) = table {
@@ -616,6 +623,7 @@ impl Step {
             Step::ExpectWindow { .. } => true,
             Step::ScrollToRow { .. } => false,
             Step::Drag { .. } => false,
+            Step::DragFile { .. } => false,
             Step::HeaderClick { .. } => false,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -763,6 +771,14 @@ pub trait Stage: Send + 'static {
     fn drag(&self, source: Target, destination: Target, reorder: Option<bool>) -> String {
         let _ = (source, destination, reorder);
         "drag is a depth slice on this backend (docs/dnd-plan.md §5)".to_owned()
+    }
+
+    /// Drop `path` on `destination` as a source OUTSIDE this app would
+    /// (docs/dnd-plan.md D6): the file lands as a picked file. The empty
+    /// string when it ran, else the sentence naming what stopped it.
+    fn drag_file(&self, path: &str, destination: Target) -> String {
+        let _ = (path, destination);
+        "drag_file is a depth slice on this backend (docs/dnd-plan.md §5)".to_owned()
     }
     /// The creation index of the FIRST widget of `kind` carrying the
     /// authored a11y_id `id`, and (when present) whose table sort tag
@@ -1655,6 +1671,21 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::Drag(parse_target(words[0])?, parse_target(words[2])?, reorder)
+            }
+            "drag_file" => {
+                // drag_file "<path>" to <destination> — the path quoted like
+                // clipboard_seed's content, since a path may hold spaces.
+                let spec = rest.trim();
+                let close = spec
+                    .strip_prefix('"')
+                    .and_then(|s| s.find('"'))
+                    .ok_or_else(|| format!("drag_file wants a quoted path first: {line:?}"))?;
+                let path = unescape(&spec[1..close + 1]);
+                let words: Vec<&str> = spec[close + 2..].split_whitespace().collect();
+                if words.len() != 2 || words[0] != "to" {
+                    return Err(format!("drag_file wants `\"<path>\" to <destination>`: {line:?}"));
+                }
+                Step::DragFile(path, parse_target(words[1])?)
             }
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
@@ -3124,6 +3155,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     None
                 } else {
                     Some(Err(format!("drag: {off}")))
+                }
+            }
+            Step::DragFile(path, destination) => {
+                let off = stage.drag_file(&expand_path(path), *destination);
+                if off.is_empty() {
+                    None
+                } else {
+                    Some(Err(format!("drag_file: {off}")))
                 }
             }
             Step::HeaderClick(t, column) => {

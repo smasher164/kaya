@@ -83,7 +83,7 @@ executable reorder
 executable dnd
   import: shared
   main-is: dnd.hs
-  build-depends: kaya-guests, bytestring
+  build-depends: kaya-guests, bytestring, directory, filepath, unix
 
 executable feed
   import: shared

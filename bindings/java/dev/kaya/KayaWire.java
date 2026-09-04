@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x4f5c2121bd4d241aL;
+    public static final long SPEC_HASH = 0xa3cb4cff19aad964L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -820,8 +820,8 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. */
-    public static byte[] txSetDragSource(long widget, int present, int fileCount, int customCount, int operations, int pathLen, Object[] reps) {
+    /** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds. */
+    public static byte[] txSetDragSource(long widget, int present, int fileCount, int customCount, int operations, int pathLen, int bound, Object[] reps) {
         Enc b = begin(TX_KIND_SET_DRAG_SOURCE);
         b.putLong(widget);
         b.putInt(present);
@@ -829,7 +829,7 @@ public final class KayaWire {
         b.putInt(customCount);
         b.putInt(operations);
         b.putInt(pathLen);
-        b.putInt(0);
+        b.putInt(bound);
         encodeValues(b, reps);
         return finish(b);
     }

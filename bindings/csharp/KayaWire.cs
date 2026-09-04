@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x4f5c2121bd4d241a;
+    public const ulong SpecHash = 0xa3cb4cff19aad964;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -840,8 +840,8 @@ static class KayaWire
         return Finish(stream, w, TxKindCreateBreakpoint);
     }
 
-    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
-    public static byte[] TxSetDragSource(ulong widget, uint present, uint fileCount, uint customCount, uint operations, uint pathLen, object[] reps)
+    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds.
+    public static byte[] TxSetDragSource(ulong widget, uint present, uint fileCount, uint customCount, uint operations, uint pathLen, uint bound, object[] reps)
     {
         var w = Begin(out var stream);
         w.Write(widget);
@@ -850,7 +850,7 @@ static class KayaWire
         w.Write(customCount);
         w.Write(operations);
         w.Write(pathLen);
-        w.Write(0u);
+        w.Write(bound);
         EncodeValues(w, reps);
         return Finish(stream, w, TxKindSetDragSource);
     }

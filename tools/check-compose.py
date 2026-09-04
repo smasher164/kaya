@@ -35,8 +35,21 @@ STEPS = [
 
 for tasks, sentence in STEPS:
     run = subprocess.run(["gradle", "--console=plain", "-q", *tasks],
-                         cwd=ROOT / "android", check=False)
+                         cwd=ROOT / "android", check=False,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace")
+    sys.stdout.write(run.stdout)
     if run.returncode != 0:
-        print(sentence, file=sys.stderr)
+        # THE SENTENCE SAYS WHAT WAS MEASURED: a unit-test task compiles
+        # its whole classpath first, so a javac error in the JAVA BINDING
+        # fails it too, and it was once reported as the scheme wall
+        # (2026-09-03, the drag-source packer's new argument).
+        if "error:" in run.stdout and "Compilation failed" in run.stdout:
+            failed = [line.strip() for line in run.stdout.split("\n")
+                      if "Execution failed for task" in line]
+            print(f"check-compose: FAIL (a compile error inside {' '.join(tasks)}: "
+                  f"{'; '.join(failed) or 'see javac above'})", file=sys.stderr)
+        else:
+            print(sentence, file=sys.stderr)
         sys.exit(1)
 print("check-compose: OK")

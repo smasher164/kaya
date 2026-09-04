@@ -2385,8 +2385,11 @@ if out:
 # The staged WinUI ruling (docs/traps.md), covering FOUR scene families
 # that share one cause: the leg needs the DESKTOP to itself — menus_*
 # puts a real chord on the system input queue, filedialog_* and save_*
-# are OS-global modal chrome found by walking the desktop, and dnd_*
-# moves the REAL MOUSE and presses it (docs/dnd-plan.md D10). Each runs
+# are OS-global modal chrome found by walking the desktop, and EVERY
+# dnd* leg moves the REAL MOUSE and presses it (docs/dnd-plan.md D10) —
+# the witness legs (dndwitness_*, dndforeign_*) put a second process's
+# window on the desktop and drag between the two, so the prefix is read
+# without its underscore. Each runs
 # ALONE between drains, which in the lane module's ORDER is "a block of
 # its own" — read structurally, so a parallelizing refactor cannot
 # re-pool one without moving it into a wider block this refuses.
@@ -2395,7 +2398,7 @@ def menu_serial(order, path):
     seen = 0
     for block in order:
         for leg in block:
-            if not re.match(r"(menus|filedialog|save|undo|dnd)_", leg):
+            if not re.match(r"(menus|filedialog|save|undo|dnd[a-z]*)_", leg):
                 continue
             seen += 1
             if list(block) != [leg]:
@@ -2403,7 +2406,7 @@ def menu_serial(order, path):
                            f"{len(block) - 1} other leg(s) and lacks "
                            f"the drain/run/drain barrier")
     if seen == 0:
-        bad.append(f"{path}: no menus_*/filedialog_*/save_*/undo_*/dnd_* "
+        bad.append(f"{path}: no menus_*/filedialog_*/save_*/undo_*/dnd* "
                    f"leg found (all five scenes must stay wired)")
     return bad
 
@@ -2419,10 +2422,14 @@ if not menu_serial([["layout_java", "undo_rust"]], "-"):
     selftest_fail("pooled undo leg passed")
 if not menu_serial([["layout_java", "dnd_rust"]], "-"):
     selftest_fail("pooled dnd leg passed")
+if not menu_serial([["layout_java", "dndwitness_rust"]], "-"):
+    selftest_fail("pooled dnd witness leg passed")
+if not menu_serial([["layout_java", "dndforeign_rust"]], "-"):
+    selftest_fail("pooled foreign dnd witness leg passed")
 
 out = menu_serial(win_lane.ORDER, "tools/lib/lanes/win.py")
 if out:
-    print("check-steps: the win lane's menus/filedialog/save/undo/dnd "
+    print("check-steps: the win lane's menus/filedialog/save/undo/dnd* "
           "legs must run in blocks of their own (docs/traps.md — each "
           "needs the desktop to itself):", file=sys.stderr)
     print("\n".join(out), file=sys.stderr)

@@ -201,7 +201,9 @@ type app = {
   widget_pastes : (int64, representation -> unit) Hashtbl.t;
   node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
   widget_drops : (int64, dropped -> unit) Hashtbl.t;
+  node_drops : (int64, Kaya_wire.value list -> dropped -> unit) Hashtbl.t;
   drag_ended_handlers : (int64, op option -> unit) Hashtbl.t;
+  node_drag_ended : (int64, Kaya_wire.value list -> op option -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
   (* The history, per window and NOT one-shot: a history is walked as
      often as the user likes. *)
@@ -317,7 +319,9 @@ let create () =
     widget_pastes = Hashtbl.create 4;
     node_pastes = Hashtbl.create 4;
     widget_drops = Hashtbl.create 4;
+    node_drops = Hashtbl.create 4;
     drag_ended_handlers = Hashtbl.create 4;
+    node_drag_ended = Hashtbl.create 4;
     window_closed = Hashtbl.create 8;
     undone_handlers = Hashtbl.create 4;
     redone_handlers = Hashtbl.create 4;
@@ -1851,7 +1855,7 @@ let draggable ?text ?html ?image ?(files = []) ?(custom = [])
     (Kaya_wire.tx_set_drag_source id !present (List.length files)
        (List.length custom)
        (if empty then 0 else operation_mask operations)
-       0 (List.rev !values))
+       0 0 (List.rev !values))
 
 (* DECLARE that a widget receives drops, performing these operations;
    naming NONE withdraws it. WHAT it takes is its [set_accepts] list,
@@ -1859,6 +1863,51 @@ let draggable ?text ?html ?image ?(files = []) ?(custom = [])
    two (docs/dnd-plan.md D1). *)
 let set_drop_target (Widget id) operations =
   emit (the_tx ()) (Kaya_wire.tx_set_drop_target id (operation_mask operations) 0 [])
+
+(* ONE STAMPED COPY's drag declaration (docs/dnd-plan.md §4): the
+   template node and the copy's keys, outermost first. The per-row payload
+   an app declares after the row's insert; it overrides the template's own
+   for that copy and follows it through a re-stamp. *)
+let draggable_at ?text ?html ?image ?(files = []) ?(custom = [])
+    ?(operations = [ Op.Copy ]) (Node id) ~keys () =
+  let tx = the_tx () in
+  let present = ref 0 in
+  let values = ref [] in
+  let add v = values := v :: !values in
+  List.iter
+    (fun (cid, bytes) ->
+      ignore (accept_list [ cid ]);
+      add (Kaya_wire.Str cid);
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    custom;
+  List.iter (fun (f : picked_file) -> add (Kaya_wire.I64 f.handle)) files;
+  Option.iter
+    (fun bytes ->
+      present := !present lor Kaya_wire.clip_image;
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    image;
+  Option.iter
+    (fun html -> present := !present lor Kaya_wire.clip_html; add (Kaya_wire.Str html))
+    html;
+  Option.iter
+    (fun text -> present := !present lor Kaya_wire.clip_text; add (Kaya_wire.Str text))
+    text;
+  let empty = !present = 0 && files = [] && custom = [] in
+  (* KEYS FIRST, then the reps (set_column_headers' convention). *)
+  emit tx
+    (Kaya_wire.tx_set_drag_source id !present (List.length files)
+       (List.length custom)
+       (if empty then 0 else operation_mask operations)
+       (List.length keys)
+       0
+       (keys @ List.rev !values))
+
+(* [draggable_at]'s twin: ONE stamped copy receives drops with these
+   operations, taking what the template's [set_accepts] names. *)
+let set_drop_target_at (Node id) ~keys operations =
+  emit (the_tx ())
+    (Kaya_wire.tx_set_drop_target id (operation_mask operations)
+       (List.length keys) keys)
 
 (* Rows of this live For drag within their own collection
    (docs/dnd-plan.md D8): the landing arrives at [on_drop] on the For's
@@ -2451,6 +2500,7 @@ module Tpl = struct
     let set_accepts (Node id) kinds =
       emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
+
     (* --- The signal leg ----------------------------------------------
        A signal is app-wide, so every stamped copy reads the SAME value:
        one download's fraction on every row's bar. *)
@@ -2544,6 +2594,84 @@ module Tpl = struct
          (Int32.to_int sort.sort_direction)
          (List.length titles) 0
          (List.map (fun t -> Kaya_wire.Str t) titles))
+
+  (* The template zone's own drag surface (docs/dnd-plan.md §4), at the
+     SUGAR tier beside [columns]: every stamped copy of this node hands
+     this payload over with its own identity, and each representation is
+     a CONSTANT or the ROW'S OWN FIELD — [~text_field:item_title] binds
+     the way [label ~bind_field:item_title] does, resolved per copy and
+     re-declared when the field changes. A file never binds; a copy's own
+     payload is [draggable_at] after its insert, constants only. The
+     copy's keys reach the app through [on_drag_ended_node]. *)
+  let draggable ?text ?text_field ?html ?html_field ?image ?image_field
+      ?(files = []) ?(custom = []) ?(custom_fields = [])
+      ?(operations = [ Op.Copy ]) (Node id) () =
+    let tx = the_tx () in
+    let present = ref 0 in
+    let bound = ref 0 in
+    let count = ref 0 in
+    let values = ref [] in
+    let add v =
+      values := v :: !values;
+      incr count
+    in
+    (* A bound slot rides as the i64 [level << 32 | field], level 0 being
+       the row this template is stamped for; the slot IS its index. *)
+    let slot = function
+      | None -> false
+      | Some index ->
+          bound := !bound lor (1 lsl !count);
+          add (Kaya_wire.I64 (Int64.of_int index));
+          true
+    in
+    let index_of fd = Option.map (fun f -> f.fd_index) fd in
+    List.iter
+      (fun (cid, bytes) ->
+        ignore (accept_list [ cid ]);
+        add (Kaya_wire.Str cid);
+        add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+      custom;
+    List.iter
+      (fun (cid, (fd : (_, bytes) field)) ->
+        ignore (accept_list [ cid ]);
+        add (Kaya_wire.Str cid);
+        ignore (slot (Some fd.fd_index)))
+      custom_fields;
+    List.iter (fun (f : picked_file) -> add (Kaya_wire.I64 f.handle)) files;
+    if image <> None || image_field <> None then begin
+      present := !present lor Kaya_wire.clip_image;
+      if not (slot (index_of image_field)) then
+        add
+          (Kaya_wire.Blob
+             (Kaya_runtime.register_blob (Bytes.of_string (Option.get image))))
+    end;
+    if html <> None || html_field <> None then begin
+      present := !present lor Kaya_wire.clip_html;
+      if not (slot (index_of html_field)) then
+        add (Kaya_wire.Str (Option.get html))
+    end;
+    if text <> None || text_field <> None then begin
+      present := !present lor Kaya_wire.clip_text;
+      if not (slot (index_of text_field)) then
+        add (Kaya_wire.Str (Option.get text))
+    end;
+    let customs = List.length custom + List.length custom_fields in
+    let empty = !present = 0 && files = [] && customs = 0 in
+    emit tx
+      (Kaya_wire.tx_set_drag_source id !present (List.length files) customs
+         (if empty then 0 else operation_mask operations)
+         0 !bound (List.rev !values))
+
+  (* Every stamped copy receives drops with these operations, taking what
+     [set_accepts] names; the landing arrives at [on_drop_node] with the
+     copy's keys. *)
+  let set_drop_target n operations = set_drop_target_at n ~keys:[] operations
+
+  (* An accept list on a template node — re-exported here for
+     [collection_of]'s reason: a drop target is any widget and shares the
+     paste list, so the zone's own surface must carry the declaration
+     [set_drop_target] reads. *)
+  let set_accepts n kinds = Floor.set_accepts n kinds
 
   let when_ (Signal sid) body () =
     let tx = the_tx () in
@@ -2916,6 +3044,18 @@ let on_drop app (Widget id) (handler : dropped -> unit) =
    refused drag, not an error. *)
 let on_drag_ended app (Widget id) (handler : op option -> unit) =
   Hashtbl.replace app.drag_ended_handlers id handler
+
+(* A drop on a stamped copy: the handler also receives the copy's key
+   path, outermost first (docs/dnd-plan.md §4). *)
+let on_drop_node app (Node id)
+    (handler : Kaya_wire.value list -> dropped -> unit) =
+  Hashtbl.replace app.node_drops id handler
+
+(* A stamped copy of this node — a reorderable row is one — finished its
+   drag; the copy's keys first. *)
+let on_drag_ended_node app (Node id)
+    (handler : Kaya_wire.value list -> op option -> unit) =
+  Hashtbl.replace app.node_drag_ended id handler
 
 (* Register a change handler for a live entry: the widget owns its text
    and reports each edit here; the app folds it into its own state —
@@ -3301,34 +3441,43 @@ let dispatch_loop app =
                | None -> ()))
          else if kind = Kaya_wire.occ_kind_dropped then
            (* A drop rides the same tag with four more words
-              (docs/dnd-plan.md D1); the template zone is refused, so a
-              keyed drop reaches no handler. *)
-           (match (drop, keys) with
-           | Some d, [] -> (
-               match Hashtbl.find_opt app.widget_drops id with
-               | Some handler ->
-                   let answer =
-                     {
-                       point = (d.Kaya_wire.dv_x, d.Kaya_wire.dv_y);
-                       operation = operation_of d.Kaya_wire.dv_operation;
-                       anchor = d.Kaya_wire.dv_anchor;
-                       before = d.Kaya_wire.dv_before;
-                       clip =
-                         representation_of
-                           (Some (d.Kaya_wire.dv_clip, d.Kaya_wire.dv_values));
-                     }
-                   in
-                   dispatch app (fun () -> handler answer)
-               | None -> ())
-           | _ -> ())
+              (docs/dnd-plan.md D1), so it arrives on the ordinary
+              widget/node split — a stamped copy's landing and a
+              reorderable row's own drag_ended carry the copy's keys. *)
+           (match drop with
+           | None -> ()
+           | Some d ->
+               let answer =
+                 {
+                   point = (d.Kaya_wire.dv_x, d.Kaya_wire.dv_y);
+                   operation = operation_of d.Kaya_wire.dv_operation;
+                   anchor = d.Kaya_wire.dv_anchor;
+                   before = d.Kaya_wire.dv_before;
+                   clip =
+                     representation_of
+                       (Some (d.Kaya_wire.dv_clip, d.Kaya_wire.dv_values));
+                 }
+               in
+               if keys = [] then
+                 match Hashtbl.find_opt app.widget_drops id with
+                 | Some handler -> dispatch app (fun () -> handler answer)
+                 | None -> ()
+               else
+                 match Hashtbl.find_opt app.node_drops id with
+                 | Some handler -> dispatch app (fun () -> handler keys answer)
+                 | None -> ())
          else if kind = Kaya_wire.occ_kind_drag_ended then
-           (match (payload, keys) with
-           | Some (Kaya_wire.I64 mask), [] -> (
-               match Hashtbl.find_opt app.drag_ended_handlers id with
-               | Some handler ->
-                   let answer = operation_of (Int64.to_int mask) in
-                   dispatch app (fun () -> handler answer)
-               | None -> ())
+           (match payload with
+           | Some (Kaya_wire.I64 mask) ->
+               let answer = operation_of (Int64.to_int mask) in
+               if keys = [] then (
+                 match Hashtbl.find_opt app.drag_ended_handlers id with
+                 | Some handler -> dispatch app (fun () -> handler answer)
+                 | None -> ())
+               else (
+                 match Hashtbl.find_opt app.node_drag_ended id with
+                 | Some handler -> dispatch app (fun () -> handler keys answer)
+                 | None -> ())
            | _ -> ())
          else if
            kind = Kaya_wire.occ_kind_undone || kind = Kaya_wire.occ_kind_redone

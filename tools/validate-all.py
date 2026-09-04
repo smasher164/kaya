@@ -197,8 +197,16 @@ BUDGETS = {
     "linux": 600,
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
     # column and the four quiet matrices since read 498, 442, 488 and
-    # 559s. 600 is 1.2x over that band's top.
-    "windows": 600,
+    # 559s. 600 is 1.2x over that band's top. 950 since 2026-09-03: the
+    # roster grew 239 -> 247 with EIGHT SERIAL legs — six dnd legs (the
+    # verb moves the real mouse, ~31s each under a matrix, 20s alone) and
+    # the two cross-app witness legs (9s and 24s) — a change in kind that
+    # adds ~220s no pool can hide; the first matrix on that roster read
+    # 884s (suites 612) where the previous had read 564, and the lane
+    # standalone the same hour read suites 444s. 950 is 1.07x over the one
+    # contended sample and 1.2x over 564 + the serial arithmetic; to be
+    # re-read on the next quiet matrices.
+    "windows": 950,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -211,8 +219,13 @@ BUDGETS = {
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
-    # run is 267s.
-    "android": 310,
+    # run is 267s. 520 since 2026-09-03: the roster grew 123 -> 126 with
+    # the dnd legs, each a SERIAL runner-channel drag (seven injections at
+    # 1.5s plus their acks, 22-27s a leg under a matrix), and the first
+    # full matrix on that roster read 441s where the previous had read
+    # 306; the lane standalone the same hour read ~160s. 520 is 1.18x over
+    # the one contended sample, to be re-read on the next quiet matrices.
+    "android": 520,
     # 490 since 2026-08-23. What it guards is the DELAYED-plus-NICED band
     # (the launch block above), which has ONE accepted sample: 348s
     # (2026-08-24). It deliberately does not cover the 467s reading from

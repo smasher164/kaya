@@ -1076,7 +1076,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x4f5c2121bd4d241auL
+    private const val SPEC_HASH: ULong = 0xa3cb4cff19aad964uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -5997,6 +5997,12 @@ object KayaCompose {
                                 }
                             }
                         }
+                    }
+                    "drag_file" -> {
+                        // A foreign file drop (docs/dnd-plan.md D6) — no
+                        // foreign source reaches a phone's app (D9), so
+                        // the lane cuts the step rather than fake one.
+                        failures.add("drag_file is a depth slice on android (docs/dnd-plan.md §5)")
                     }
                     "scroll_to_row" -> {
                         // The core maps the KEY to an index in the

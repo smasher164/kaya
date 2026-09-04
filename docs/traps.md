@@ -3328,6 +3328,15 @@ the picker was never aimed. Both guests therefore read TMPDIR first and
 fall back to the platform answer, which is also correct on Windows,
 where there is no TMPDIR and `java.io.tmpdir` is right.
 
+IT RECURS IN EVERY NEW SCENE THAT WRITES A FILE, because the rule lives
+in the guests and not in a gate: the dnd scene's `drag_file
+"$TMP/kaya-dnd-$PID/dropped.txt"` was written fresh in eight guests on
+2026-09-03 and the Java and Swift ones both reached for the platform
+answer, so both legs died on that one step with the harness saying `no
+file at /tmp/nix-shell.…/kaya-dnd-…/dropped.txt` while the six others
+passed. When a new guest needs $TMP, copy the picker guest's four lines
+in that language rather than the idiomatic call.
+
 A third variant of the same bug, from the Python port: reading
 `os.environ["TMPDIR"]` DIRECTLY is not a computation, it is a guess
 about the platform — there is no TMPDIR on Windows, so it fell back to a
@@ -8348,6 +8357,32 @@ callback installed on the window (which keeps the clock running while it is
 installed), bounded at 500ms: the first frame carries the queued layout, the
 second proves it ran.
 
+## A binding's handler registry held ONE closure per id, so the second registration on a widget silently replaced the first (measured 2026-09-03)
+
+The Rust binding's `Messages` kept `HashMap<id, Mapper>` for widgets and
+for template nodes, and every `on_*` did `insert(id, closure)`: two
+registrations on one id kept the LAST. Nothing had ever registered two
+kinds on one id until the template-zone dnd scene put `on_drop_node` and
+`on_drag_ended_node` on the same stamped label — the drop was performed
+(the source read `drag ended copy`) and reached no handler, because the
+drag_ended registration had replaced the drop one a line later. A widget
+that is a drag source AND a drop target is the ordinary case, and a
+reorderable row is one by construction. The registries hold a Vec now,
+asked newest first, so two occurrence kinds coexist and a second
+registration of the SAME kind still wins. THE OTHER EIGHT WERE READ ONE
+BY ONE in the template sweep the same day and NONE has this shape: every
+one keys a SEPARATE table per occurrence kind (Python's and JS's key is
+the pair `(kind, id)`; the six typed bindings declare one map per kind),
+so a drop registration and a drag_ended registration on one id already
+coexist there and a second of the same kind still wins. The three
+bindings with a check surface now assert it rather than leaving it to
+inspection — bindings/python/kaya_app_checks.py and
+bindings/js/kaya_app_checks.ts ("a node carries a drop handler AND a
+drag_ended one") and Go's
+`TestADropAndADragEndedRegistrationCoexistOnOneID`. The rule: A
+REGISTRATION IS ADDITIVE ACROSS OCCURRENCE KINDS; a map from id to one
+closure is a bug waiting for the first widget that does two things.
+
 ## The android drag re-injection raced a slow end: a reorder landed but ACTION_DRAG_ENDED came late, and a fresh injection clobbered it (measured 2026-09-03)
 
 The android `drag` verb is a runner channel: the harness prints a
@@ -8441,6 +8476,56 @@ normalization does not run for it, so the class was invisible until a
 rust-native backend grew the verb — both of them found it the same day.
 `harness::tests::a_drag_normalizes_both_ends` is the runtime guard.
 
+## GTK4's AT-SPI tree cannot say where a widget is on screen — SCREEN extents are 0,0 and WINDOW extents are 26px off (measured 2026-09-03)
+
+The linux cross-app witness leg (tools/linux/dragwitness-leg.py) needs a screen
+point inside kaya's window for a foreign process to release the pointer on, and
+AT-SPI looks like the answer: `a11y-leg.sh` already runs a session bus, the
+labels already carry their text as their accessible name, and a real assistive
+client reads exactly this. It cannot serve, in two separate ways, both measured
+in the lane's own image on both protocols:
+
+- `AtspiComponent.get_extents(SCREEN)` answers `0,0` for EVERY widget. GTK
+  cannot know its window's position under Xvfb with no window manager, and
+  under wayland it can never know it, so there is nothing to add.
+- `get_extents(WINDOW)` is self-consistent but sits 26px up and left of the
+  widget's real place: `label 'hello'` reads `W=12,41,33x20` while the harness's
+  own drag verb pressed its centre at widget (50, 72) — the same 26 for every
+  label in the scene. The tree ignores the CSD shadow (5px, the entry above)
+  and the root's own 16px CSS padding, and the toplevel frame reports the
+  SURFACE size, so the offset cannot be derived from the tree either.
+
+The witness leg takes its geometry from the harness instead: its generated
+scene opens with `drag label#0 to label#3`, and that verb's own
+`KAYA_DIAG dragdrive: ... pressed (x, y), released (x, y)` line names both
+widgets in screen coordinates, measured by the instrument that already knows
+the window origin and the shadow. No lane reads AT-SPI for geometry today, and
+none should start.
+
+## `Gdk.ContentProvider.new_typed` does not exist in PyGObject, and the AttributeError is swallowed inside `prepare` (measured 2026-09-03)
+
+`gdk_content_provider_new_typed(GType, ...)` takes varargs and is not
+introspectable, so the Python binding has no such attribute. That matters
+because the natural way to offer a file from a GTK app is the typed
+`GdkFileList`, and the call sits inside the `GtkDragSource::prepare` handler —
+where GTK catches the Python exception, logs a traceback and takes `None` for
+an answer. The drag then starts with NO content at all and ends `none`, which
+reads exactly like the receiver refusing the type. tools/linux/dragwitness.py
+offers `text/uri-list` bytes with the RFC's CRLF terminator instead, which is
+both what every foreign toolkit puts on the wire and the one files spelling
+kaya's accept list names (`accept_formats` in crates/kaya/src/gtk.rs).
+
+## kaya's x11 toplevel publishes no `_GTK_FRAME_EXTENTS`, so the CSD shadow cannot be read from outside (measured 2026-09-03)
+
+The obvious outside-in route to the shadow measured in the entry above is the
+`_GTK_FRAME_EXTENTS` property GTK sets on its X window. kaya's does not carry
+it — `xprop -id <wid> _GTK_FRAME_EXTENTS` answers "no such atom on any window"
+under bare Xvfb, since GTK publishes it for a window manager to read and there
+is none. The X window is 540x330 for a 530x320 content, so the margin is real
+and only the app itself can report it (`gtk_native_get_surface_transform`).
+Anything outside the process that needs a kaya widget's screen point must take
+it from the harness's own diagnostic, not compute it.
+
 ## TWO OF THE SIX WINDOW TILES the windows lane places its legs in are off the VM's screen (measured 2026-09-03)
 
 `KAYA_WIN_SLOT` tiles a pooled leg's window at
@@ -8459,3 +8544,151 @@ verb refuses an aim whose box is off the screen, or one that has not read
 the same box twice in a row, instead of injecting blind. The tiling itself
 is left as it is — it is the recorder's, and no pooled leg reads a
 coordinate.
+
+## A REAL cross-process drag cannot be driven on macOS: the pointer moves, the button is down, and `beginDraggingSession` still never composes a session (measured 2026-09-03)
+
+docs/probes/dnd-witness-mac-2026-09-03.md, with tools/mac/dragwitness. Every
+premise a synthetic drag needs is TRUE on this host and the drag still does
+not happen. `AXIsProcessTrusted()` is true; a posted
+`CGEvent(.mouseMoved).post(tap: .cghidEventTap)` puts the cursor exactly
+where asked; under a posted press `CGEventSource.buttonState` reads down on
+BOTH `.hidSystemState` and `.combinedSessionState` and
+`NSEvent.pressedMouseButtons` is 1; and the press and its drags reach a real
+`NSView`'s `mouseDown`/`mouseDragged`. Then
+`beginDraggingSession(with:event:source:)` enters AppKit's own nested
+tracking loop, NEVER RETURNS, and never calls
+`draggingSession(_:willBeginAt:)` — so no pasteboard is composed and no
+destination in any process is ever asked. It is a run loop and not a
+deadlock: a `DispatchQueue.main.asyncAfter(1s)` scheduled immediately before
+the call still fires. Held with the source posting its own events and with a
+THIRD process posting them, with and without `kCGMouseEventDeltaX/Y` on the
+drag events, unbundled/`.accessory` and bundled/`.regular`.
+
+TWO SMALLER FACTS FROM THE SAME RUNS, both of which cost a draft: a view
+that does not override `mouseDown` never receives the drag at all
+(NSResponder's default passes the press up the chain and every later
+`mouseDragged` goes with it), and an inactive window's first click is not
+delivered to the view (`acceptsFirstMouse` is false), so a press that must
+reach a view comes SECOND — and past the double-click interval, or it
+arrives as `clickCount 2`.
+
+What a foreign process CAN witness is the PAYLOAD: a drag's pasteboard is a
+named system pasteboard, so `run.py --board` composes kaya's grammar in one
+process and reads all three representations back in another, the
+MIME-shaped custom id included. The gesture itself needs a human.
+
+## An empty `NSPasteboardItem` is ZERO pasteboard items, and `beginDraggingSession` throws on it (measured 2026-09-03)
+
+    NSGenericException: There are 0 items on the pasteboard, but 1 drag
+    images. There must be 1 draggingItem per pasteboardItem.
+    -[NSDraggingSession(NSInternal) _initWithPasteboard:draggingItems:…]
+    -[NSView(NSDrag) beginDraggingSessionWithItems:event:source:]
+
+kaya's mac drag source shipped exactly that shape —
+`NSDraggingItem(pasteboardWriter: NSPasteboardItem())` with nothing written
+on the item, because the payload goes on at BOARD level in
+`draggingSession(_:willBeginAt:)` (probe 3's ruling), which AppKit calls
+only once the drag really begins, long after this count is taken.
+
+WHAT WAS MEASURED, exactly: on the CONSTRUCTED-event route — the one
+`beginDraggingSession` returns from at all, since a synthesized real gesture
+wedges before any of this (the entry above) — an empty writer aborts the
+process and a writer carrying one type returns cleanly. Which of the two a
+REAL gesture meets was NOT measured, and cannot be here; what is known is
+that it is the same `_initWithPasteboard:draggingItems:` and that
+`beginDraggingSession` had never executed in this repo's history, because
+the `drag` verb drives the DESTINATION arms against a pasteboard it builds
+itself (docs/dnd-plan.md D10). `KayaDragDropView.dragWriter` puts the
+payload's text on the writer so it is one item;
+`tools/mac/dragwitness/run.py --selftest` runs both shapes and demands the
+refusal (`writer=empty exit -6 threw=True`, `writer=1 exit 0 threw=False`).
+
+## A real foreign file drop on iOS offers NO `public.file-url`, and the temp copy `loadFileRepresentation` hands back is named after the TYPE (measured 2026-09-03)
+
+Two halves of one arm, both found by the first leg that ever exercised the
+files branch (`drag_file` on the ios lane). The stock Files app registers
+`com.apple.DocumentManager.FINode.File` and the content type and nothing
+else (docs/probes/dnd-probe-ios-2026-09-03.md measurement 3), so an arm that
+keys the FILES bit on `public.file-url` — which
+`kayaProviderOffer`/`kayaReadDropValue` both did — can never fire for a real
+foreign drop. `kayaProviderIsFile` reads `public.file-url` OR a suggested
+NAME plus a representation conforming to `public.data`, which is the shape
+probe 5 recorded.
+
+And the NAME is the provider's, never the copy's: measured with
+`NSItemProvider(contentsOf:)` on a file called `dropped.txt`,
+
+    registeredTypeIdentifiers = ["public.plain-text", "public.file-url", "public.url"]
+    suggestedName = <nil>
+    loadFileRepresentation(public.item) -> …/TemporaryItems/<opaque>/text.txt
+      bytes = dropped bytes
+
+— the right bytes under a name taken from the TYPE, because the provider
+resolved the file through a DATA representation. The arm reads
+`suggestedName ?? url.lastPathComponent` now, and `drag_file`'s own provider
+SETS suggestedName, since a real foreign provider carries it and
+`NSItemProvider(contentsOf:)` does not. The ios dnd leg read
+`files target got text.txt dropped bytes` before the fix.
+
+## PowerShell variable names are CASE-INSENSITIVE, so a `$files` holding a point silently became the `$Files` holding a folder (measured 2026-09-03)
+
+`tools/guest/dnd-witness.ps1` held its scratch folder in `$Files` and, two
+phases later, a drop point in `$files = KayaPoint $win "files target"`.
+Those are ONE VARIABLE. `Start-Process explorer.exe $Files` then passed
+two integers as arguments, explorer.exe ignored them and opened its
+default folder, and the leg's item census read empty against Documents.
+The failure had no signature of its own: three runs printed
+`Explorer listed [] and none of them is explorer.txt`, a hand probe that
+reproduced the driver's exact Explorer sequence in isolation listed the
+items every round, and the difference was invisible because the folder
+still EXISTED and the window still OPENED.
+
+WHAT FOUND IT WAS THE DIAGNOSTIC, rewritten to discriminate (invariant 3):
+`[]` cannot tell "no window" from "a window UIA would not bind" from "a
+window with no items", so the sentence became a per-round census of every
+visible `CabinetWClass` window with its title and its item count, and the
+first run named the cause outright —
+`0x7c2054c 'Documents - File Explorer' items=0 []`.
+
+The folder is `$FilesDir` now, with that reason at its declaration. There
+is no gate for this class: it is PowerShell's own scoping, and the only
+wall available is naming a script's long-lived variables so a local
+cannot alias one.
+
+## A witness census that counted every witness in the container read the sibling leg's as a leak (measured 2026-09-03)
+
+tools/linux/dragwitness-leg.py ends by listing the process table and
+refusing if any `dragwitness.py` survives — the wall against a leftover
+window on the pool slot. Standalone the two witness legs of a pool had
+run one after the other and the census read empty; under the closing
+matrix, and again on the lane standalone once the pool happened to
+schedule them together, `dndwitness-out` on both pools reported one
+witness "outliving" it: `ppid 55313, sess 55319, etime 00:03` — a
+process three seconds old whose parent was the OTHER leg's runner, the
+`dndwitness-in` witness just started beside it. The verdicts were right
+both times (`WITNESS got text hello`, `drag ended copy`); the leak was
+the census's, not the leg's. It keys on the leg's own scratch path now
+(`--file /tmp/kaya-dragwitness-<random>/witness.txt` is on every
+witness's argv), and the witness is stopped by its whole session
+(`start_new_session`, `killpg`, then a wait until the session is empty)
+so a child it forks cannot outlive it either. The rule: A CENSUS THAT
+PROVES "MINE IS GONE" MUST SELECT MINE; a pool runs its legs side by
+side, and every process it finds has an owner.
+
+## A census marker that is a PREFIX of another declaration reads two zones as one (measured 2026-09-03)
+
+`tools/check-sugar-surface.py` scopes its C# template-zone perturbations
+with the marker `"sealed class Tpl"`, and `scoped()`/`cs.count()` refuse
+unless it matches EXACTLY ONCE. The element-bound drag payload added
+`sealed class TplDragRef` beside it, and the marker matched TWICE the
+moment that class landed: two self-tests printed
+`csharp-columns=SELFTEST-BROKEN(matched 2, expected 1)` and
+`csharp-reader=SELFTEST-BROKEN(matched 2, expected 1)` — the gate saying
+out loud that it could no longer tell the two classes apart. It was
+LOUD here only because those clauses count their own matches; a clause
+that merely greps a marker would have silently scoped a block from the
+wrong class's header and kept passing. The four markers carry the
+newline now (`"sealed class Tpl\n"`), which is the whole header line.
+The rule: a class or function header used as a census anchor is
+terminated — by the newline, a paren, or a word boundary — because the
+next surface added to that file may legitimately start with its name.

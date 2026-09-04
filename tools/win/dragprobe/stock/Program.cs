@@ -2,7 +2,11 @@
 //   StockOle.exe target [x y w h]   an OLE drop target that reports every
 //                                   format the drag offered it
 //   StockOle.exe source [x y w h]   an OLE drag source offering a
-//                                   registered custom format plus text
+//                                   registered custom format plus text,
+//                                   plus CF_HDROP for $KAYA_DP_FILE when
+//                                   that names one (the foreign FILE drag
+//                                   the dnd witness legs need, docs/
+//                                   dnd-plan.md §5 step 7)
 // Both print a READY line with the window rect in SCREEN pixels, which is
 // what the SendInput driver aims at, and both exit on their own after
 // KAYA_DP_TTL seconds so a probe run leaves nothing behind.
@@ -18,6 +22,19 @@ namespace KayaDragProbe
     static class StockProgram
     {
         const string CUSTOM = "dev.kaya/note";
+
+        /// DROPFILES: the 20-byte header (pFiles=20, pt={0,0}, fNC=0,
+        /// fWide=1) then the double-NUL-terminated UTF-16 list — the shape
+        /// crates/kaya/src/winui/mod.rs's parse_dropfiles reads back.
+        static byte[] DropFiles(string path)
+        {
+            var names = Encoding.Unicode.GetBytes(path + "\0\0");
+            var buf = new byte[20 + names.Length];
+            BitConverter.GetBytes(20).CopyTo(buf, 0);
+            BitConverter.GetBytes(1).CopyTo(buf, 16);
+            names.CopyTo(buf, 20);
+            return buf;
+        }
 
         [STAThread]
         static void Main(string[] args)
@@ -81,6 +98,12 @@ namespace KayaDragProbe
                     data.Add(cf, payload);
                     data.Add(Native.CF_UNICODETEXT,
                              Encoding.Unicode.GetBytes("kaya stock text\0"));
+                    string file = Environment.GetEnvironmentVariable("KAYA_DP_FILE");
+                    if (!string.IsNullOrEmpty(file))
+                    {
+                        data.Add(Native.CF_HDROP, DropFiles(file));
+                        Log.Line("stock offering CF_HDROP \"" + file + "\"");
+                    }
                     Log.Line("stock DoDragDrop begin: custom \"" + CUSTOM + "\" cf=" + cf +
                              " " + Fmt.Show(payload) + " + CF_UNICODETEXT");
                     int effect;

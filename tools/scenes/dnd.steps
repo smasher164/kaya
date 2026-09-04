@@ -8,14 +8,37 @@ drag label#0 to label#1
 expect label#4 "text target got text hello (copy)"
 expect label#5 "drag ended copy"
 expect label#1 "hello"
+# THE TEMPLATE ZONE (docs/dnd-plan.md §4): a stamped row is a source with
+# its own per-copy payload and a destination with the template's accept
+# list, and both ends report with the copy's keys.
+expect_order column@items "x|y"
+drag label@item[y] to label#1
+expect label#4 "text target got text y (copy)"
+expect label#5 "item y drag ended copy"
+expect label#1 "y"
+drag label#0 to label@item[x]
+expect label#4 "item x got text hello (copy)"
+expect label#5 "drag ended copy"
+# THE BOUND PAYLOAD FOLLOWS THE ROW: a rename re-declares y's copy.
+click button#0
+expect label@item[y] "yy"
+drag label@item[y] to label#1
+expect label#4 "text target got text yy (copy)"
+expect label#1 "yy"
 drag label#0 to label#3
 expect label#5 "drag ended none"
+# THE FILES DROP (D6): a FOREIGN file lands as a picked file, and the
+# guest reads it back through the picked table. The guest writes the file.
+drag_file "$TMP/kaya-dnd-$PID/dropped.txt" to label#3
+expect label#4 "files target got dropped.txt dropped bytes (copy)"
 drag label#0 to label#2
 expect label#4 "note target got dev.kaya/note 5 bytes (move)"
 expect label#5 "drag ended move"
 expect label#0 "moved out"
-expect_order column#0 "a|b|c"
+expect_order column@rows "a|b|c"
 drag label@row[c] to label@row[a] before
-expect_order column#0 "c|a|b"
+expect_order column@rows "c|a|b"
+expect label#5 "row c drag ended move"
 drag label@row[a] to label@row[b] onto
-expect_order column#0 "c|b|a"
+expect_order column@rows "c|b|a"
+expect label#5 "row a drag ended move"

@@ -665,7 +665,9 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx, Representation>> widgetPastes = new();
     internal readonly Dictionary<ulong, Action<Tx, List<object>, Representation>> nodePastes = new();
     internal readonly Dictionary<ulong, Action<Tx, Dropped>> widgetDrops = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>, Dropped>> nodeDrops = new();
     internal readonly Dictionary<ulong, Action<Tx, Op?>> dragEnded = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>, Op?>> nodeDragEnded = new();
     internal ulong nextAlert;
     internal ulong nextFileDialog;
     internal ulong nextClipboardRead;
@@ -1226,8 +1228,9 @@ sealed class KayaApp
                     Dispatch(tx => fn(tx, keys, clip));
             }
             // A drop rides the same tag with four more words
-            // (docs/dnd-plan.md D1); the template zone is refused, so a
-            // keyed drop reaches no handler.
+            // (docs/dnd-plan.md D1), so it arrives on the ordinary
+            // widget/node split — a stamped copy's landing and a
+            // reorderable row's own drag_ended carry the copy's keys (§4).
             else if (kind == KayaWire.OccKindDropped && keys.Count == 0)
             {
                 if (widgetDrops.TryGetValue(id, out var fn)
@@ -1237,12 +1240,29 @@ sealed class KayaApp
                     Dispatch(tx => fn(tx, answer));
                 }
             }
+            else if (kind == KayaWire.OccKindDropped)
+            {
+                if (nodeDrops.TryGetValue(id, out var fn)
+                    && payload is KayaWire.DropValues drop)
+                {
+                    var answer = Dropped.From(drop);
+                    Dispatch(tx => fn(tx, keys, answer));
+                }
+            }
             else if (kind == KayaWire.OccKindDragEnded && keys.Count == 0)
             {
                 if (dragEnded.TryGetValue(id, out var fn))
                 {
                     var answer = Dropped.Operate(payload is uint m ? m : 0);
                     Dispatch(tx => fn(tx, answer));
+                }
+            }
+            else if (kind == KayaWire.OccKindDragEnded)
+            {
+                if (nodeDragEnded.TryGetValue(id, out var fn))
+                {
+                    var answer = Dropped.Operate(payload is uint m ? m : 0);
+                    Dispatch(tx => fn(tx, keys, answer));
                 }
             }
             // Menu occurrences key the menu-item tables — their own id
@@ -2678,6 +2698,32 @@ sealed class Tx
     public void OnDragEnded(Widget w, Action<Tx, Op?> handler) =>
         App.dragEnded[w.Id] = handler;
 
+    /// ONE STAMPED COPY's drag declaration (docs/dnd-plan.md §4): the
+    /// template node and the copy's keys, outermost first. The per-row
+    /// payload an app declares after the row's insert; it overrides the
+    /// template's own for that copy and follows it through a re-stamp.
+    public DragRef DraggableAt(Node n, object[] keys) =>
+        new DragRef(this, n.Id, keys);
+
+    /// DraggableAt's twin: ONE stamped copy receives drops with these
+    /// operations, taking what the template's SetAccepts names.
+    public void SetDropTargetAt(Node n, object[] keys, params Op[] ops)
+    {
+        uint mask = 0;
+        foreach (var op in ops) mask |= (uint)op;
+        Records.Add(KayaWire.TxSetDropTarget(n.Id, mask, (uint)keys.Length, keys));
+    }
+
+    /// A drop on a stamped copy: the handler also receives the copy's key
+    /// path, outermost first.
+    public void OnDrop(Node n, Action<Tx, List<object>, Dropped> handler) =>
+        App.nodeDrops[n.Id] = handler;
+
+    /// A stamped copy of this node — a reorderable row is one — finished
+    /// its drag; the copy's keys first.
+    public void OnDragEnded(Node n, Action<Tx, List<object>, Op?> handler) =>
+        App.nodeDragEnded[n.Id] = handler;
+
     /// Join an accept list: the closed kinds by name plus any custom ids,
     /// space separated. Ids reach every platform's registry verbatim, so
     /// they carry no spaces — which is what makes the join unambiguous.
@@ -3122,6 +3168,23 @@ sealed class Tpl
     /// when the accept list is empty, and emits no occurrence at all.
     public void SetAccepts(Node n, params string[] kinds) =>
         tx.Records.Add(KayaWire.TxSetAccepts(n.Id, Tx.AcceptList(kinds)));
+
+    /// Every stamped copy of n hands over this payload with its own
+    /// identity, each representation a constant or the row's own field
+    /// (docs/dnd-plan.md §4); a copy's OWN payload is Tx.DraggableAt after
+    /// its insert, constants only, and the copy's keys reach the app
+    /// through Tx.OnDragEnded(Node, ...).
+    public TplDragRef Draggable(Node n) => new TplDragRef(tx, n.Id);
+
+    /// Every stamped copy of n receives drops with these operations,
+    /// taking what SetAccepts names; the landing arrives at
+    /// Tx.OnDrop(Node, ...) with the copy's keys.
+    public void SetDropTarget(Node n, params Op[] ops)
+    {
+        uint mask = 0;
+        foreach (var op in ops) mask |= (uint)op;
+        tx.Records.Add(KayaWire.TxSetDropTarget(n.Id, mask, 0, System.Array.Empty<object>()));
+    }
 
     /// What a stamped copy MEANS — semantic emphasis, never appearance.
     /// CONST, like SetAccepts above. The root refuses a role on a kind it
@@ -3671,6 +3734,7 @@ sealed class DragRef
 {
     readonly Tx tx;
     readonly ulong widget;
+    readonly object[] keys;
     string? text;
     string? html;
     byte[]? image;
@@ -3678,10 +3742,11 @@ sealed class DragRef
     readonly List<ulong> files = new();
     readonly List<(string Id, byte[] Bytes)> custom = new();
 
-    internal DragRef(Tx tx, ulong widget)
+    internal DragRef(Tx tx, ulong widget, object[]? keys = null)
     {
         this.tx = tx;
         this.widget = widget;
+        this.keys = keys ?? System.Array.Empty<object>();
     }
 
     public DragRef Text(string value)
@@ -3749,9 +3814,146 @@ sealed class DragRef
             values.Add(text);
         }
         bool empty = present == 0 && files.Count == 0 && custom.Count == 0;
+        // KEYS FIRST, then the reps (set_column_headers' convention).
+        values.InsertRange(0, keys);
         tx.Records.Add(KayaWire.TxSetDragSource(
             widget, present, (uint)files.Count, (uint)custom.Count,
-            empty ? 0 : ops, 0, values.ToArray()));
+            empty ? 0 : ops, (uint)keys.Length, 0, values.ToArray()));
+    }
+}
+
+/// A TEMPLATE node's drag chain (docs/dnd-plan.md §4): each
+/// representation is a CONSTANT or the ROW'S OWN FIELD — Text(row.Title)
+/// binds the way Label(row.Title) does — resolved per stamped copy and
+/// re-declared when that field changes. A file stays constant.
+sealed class TplDragRef
+{
+    readonly Tx tx;
+    readonly ulong node;
+    string? text;
+    uint? textField;
+    string? html;
+    uint? htmlField;
+    byte[]? image;
+    uint? imageField;
+    uint ops;
+    readonly List<ulong> files = new();
+    readonly List<(string Id, byte[]? Bytes, uint? Field)> custom = new();
+
+    internal TplDragRef(Tx tx, ulong node)
+    {
+        this.tx = tx;
+        this.node = node;
+    }
+
+    public TplDragRef Text(string value)
+    {
+        text = value;
+        return this;
+    }
+
+    public TplDragRef Text(Field<string> f)
+    {
+        textField = f.Index;
+        return this;
+    }
+
+    public TplDragRef Html(string value)
+    {
+        html = value;
+        return this;
+    }
+
+    public TplDragRef Html(Field<string> f)
+    {
+        htmlField = f.Index;
+        return this;
+    }
+
+    public TplDragRef Image(byte[] bytes)
+    {
+        image = bytes;
+        return this;
+    }
+
+    public TplDragRef Image(Field<byte[]> f)
+    {
+        imageField = f.Index;
+        return this;
+    }
+
+    public TplDragRef File(PickedFile f)
+    {
+        files.Add(f.Handle);
+        return this;
+    }
+
+    public TplDragRef Custom(string id, byte[] bytes)
+    {
+        Tx.AcceptList(new[] { id });
+        custom.Add((id, bytes, null));
+        return this;
+    }
+
+    public TplDragRef Custom(string id, Field<byte[]> f)
+    {
+        Tx.AcceptList(new[] { id });
+        custom.Add((id, null, f.Index));
+        return this;
+    }
+
+    /// Allow this operation (copy, move, or both across two calls).
+    public TplDragRef Allow(Op op)
+    {
+        ops |= (uint)op;
+        return this;
+    }
+
+    public void Declare()
+    {
+        uint present = 0;
+        uint bound = 0;
+        var values = new List<object>();
+        // A bound slot rides as the i64 `level << 32 | field`; the slot
+        // IS its index in the reps.
+        bool Slot(uint? field)
+        {
+            if (field == null)
+                return false;
+            bound |= 1u << values.Count;
+            values.Add((long)field.Value);
+            return true;
+        }
+        foreach (var (id, bytes, field) in custom)
+        {
+            values.Add(id);
+            if (!Slot(field))
+                values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes!)));
+        }
+        foreach (var handle in files)
+            values.Add((long)handle);
+        if (image != null || imageField != null)
+        {
+            present |= KayaWire.ClipImage;
+            if (!Slot(imageField))
+                values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(image!)));
+        }
+        if (html != null || htmlField != null)
+        {
+            present |= KayaWire.ClipHtml;
+            if (!Slot(htmlField))
+                values.Add(html!);
+        }
+        if (text != null || textField != null)
+        {
+            present |= KayaWire.ClipText;
+            if (!Slot(textField))
+                values.Add(text!);
+        }
+        bool empty = present == 0 && files.Count == 0 && custom.Count == 0;
+        tx.Records.Add(KayaWire.TxSetDragSource(
+            node, present, (uint)files.Count, (uint)custom.Count,
+            empty ? 0 : ops, 0, bound, values.ToArray()));
     }
 }
 

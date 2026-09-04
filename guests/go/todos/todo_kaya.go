@@ -80,6 +80,10 @@ func (r todoRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t,
 
 func (r todoRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
+func (r todoRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
+
+func (r todoRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }
+
 func (r todoRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }
 
 func (r todoRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }

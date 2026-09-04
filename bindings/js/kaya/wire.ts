@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x4f5c2121bd4d241an;
+export const SPEC_HASH = 0xa3cb4cff19aad964n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -626,9 +626,9 @@ export function tx_create_breakpoint(window: number, size_class: WireValue, coun
   return record(TX_CREATE_BREAKPOINT, cat(u64(window), enc.value(size_class), u32(count), u32(0), enc.values(setters)));
 }
 
-/** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. */
-export function tx_set_drag_source(widget: number, present: number, file_count: number, custom_count: number, operations: number, path_len: number, reps: readonly WireValue[]): Uint8Array {
-  return record(TX_SET_DRAG_SOURCE, cat(u64(widget), u32(present), u32(file_count), u32(custom_count), u32(operations), u32(path_len), u32(0), enc.values(reps)));
+/** DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds. */
+export function tx_set_drag_source(widget: number, present: number, file_count: number, custom_count: number, operations: number, path_len: number, bound: number, reps: readonly WireValue[]): Uint8Array {
+  return record(TX_SET_DRAG_SOURCE, cat(u64(widget), u32(present), u32(file_count), u32(custom_count), u32(operations), u32(path_len), u32(bound), enc.values(reps)));
 }
 
 /** DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. */

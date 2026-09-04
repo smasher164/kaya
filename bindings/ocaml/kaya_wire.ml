@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x4f5c2121bd4d241aL
+let spec_hash = 0xa3cb4cff19aad964L
 
 let value_bool = 1
 let value_i64 = 2
@@ -695,8 +695,8 @@ let tx_create_breakpoint window size_class count setters =
       Buffer.add_int32_le b 0l;
       encode_values b setters)
 
-(* DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then. *)
-let tx_set_drag_source widget present file_count custom_count operations path_len reps =
+(* DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds. *)
+let tx_set_drag_source widget present file_count custom_count operations path_len bound reps =
   finish tx_kind_set_drag_source (fun b ->
       Buffer.add_int64_le b widget;
       Buffer.add_int32_le b (Int32.of_int present);
@@ -704,7 +704,7 @@ let tx_set_drag_source widget present file_count custom_count operations path_le
       Buffer.add_int32_le b (Int32.of_int custom_count);
       Buffer.add_int32_le b (Int32.of_int operations);
       Buffer.add_int32_le b (Int32.of_int path_len);
-      Buffer.add_int32_le b 0l;
+      Buffer.add_int32_le b (Int32.of_int bound);
       encode_values b reps)
 
 (* DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source. *)

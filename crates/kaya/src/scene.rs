@@ -62,6 +62,17 @@ enum TplOp {
     /// shows the shared `item` tree, and each stamp emits a
     /// CONTEXT_ATTACH_NODE apply carrying that copy's key path.
     ContextAttachNode { node: u64, item: MenuItemId },
+    /// The drag declarations on a template node (docs/dnd-plan.md §4):
+    /// every stamped copy is a source with this constant payload, or a
+    /// destination with these operations; a per-copy keyed record
+    /// overrides either, set_column_headers' shape.
+    SetDragSource {
+        node: u64,
+        clip: crate::protocol::Clip,
+        bound: Vec<crate::protocol::BoundRep>,
+        operations: u32,
+    },
+    SetDropTarget { node: u64, operations: u32 },
 }
 
 /// The collections ONE COPY of each variant's blueprint owns as data:
@@ -227,6 +238,9 @@ struct Stamp {
     roots: Vec<WidgetId>,
     signal_binds: Vec<(SignalId, WidgetId)>,
     element_binds: Vec<(EntryRef, WidgetId)>,
+    /// The copies whose drag payload binds a row field, per entry: an
+    /// update re-declares each (docs/dnd-plan.md §4).
+    drag_binds: Vec<(EntryRef, WidgetId)>,
     /// Collection instances born with this copy.
     colls: Vec<(CollectionId, PathKey)>,
     for_sites: Vec<(CollectionId, PathKey)>,
@@ -555,6 +569,21 @@ pub(crate) struct Scene {
     /// keys) -> that copy's container. Recorded unconditionally so a LATE
     /// template declaration can re-stamp bars onto existing copies.
     bar_instances: HashMap<(u64, PathKey), WidgetId>,
+    /// EVERY stamped widget node: (template node, copy keys) -> the copy.
+    /// A keyed set_drag_source / set_drop_target resolves through it
+    /// (docs/dnd-plan.md §4), so it is recorded for every kind.
+    node_instances: HashMap<(u64, PathKey), WidgetId>,
+    /// Per-copy drag declarations, bar_overrides one kind over: a keyed
+    /// record's override wins over the template's own at stamp time and
+    /// dies with the row (the template's rides its body as a TplOp).
+    drag_overrides: HashMap<(u64, PathKey), (crate::protocol::Clip, u32)>,
+    drop_overrides: HashMap<(u64, PathKey), u32>,
+    /// A template node's drag declaration, kept for the re-declaration a
+    /// row update owes every copy whose payload binds a field.
+    tpl_drag: HashMap<u64, (crate::protocol::Clip, Vec<crate::protocol::BoundRep>, u32)>,
+    /// entry -> (copy, template node, copy keys) for every stamped copy
+    /// with a bound payload; element_bindings' twin for drag.
+    drag_binds: HashMap<EntryRef, Vec<(WidgetId, u64, PathKey)>>,
     /// EVERY LIVE CANVAS'S VALIDATED DRAWING, live ids and stamped
     /// instance ids alike (docs/canvas-plan.md). This is the raster's
     /// root: a scale report or an appearance flip re-rasters exactly
@@ -2673,95 +2702,70 @@ impl Scene {
                         }
                     }
                 }
-                TxOp::SetDragSource { widget, clip, operations, path } => {
+                TxOp::SetDragSource { widget, clip, bound, operations, path } => {
+                    Self::check_drag_ops(operations, "set_drag_source");
+                    for (id, _) in &clip.custom {
+                        crate::wire::check_custom_id(id, "set_drag_source");
+                    }
                     assert!(
-                        path.is_empty(),
-                        "kaya: set_drag_source keys {path:?} address a stamped copy — the \
-                         template zone lands with the bindings sweep (docs/dnd-plan.md §4)"
+                        bound.is_empty(),
+                        "kaya: set_drag_source on {widget:?} binds a row field, which only a \
+                         declaration inside a For's body can do (docs/dnd-plan.md §4)"
                     );
-                    assert!(
-                        self.widgets.contains_key(&widget),
-                        "kaya: set_drag_source targets {widget:?}, which is not a live widget"
-                    );
-                    assert!(
-                        operations & !(crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE) == 0,
-                        "kaya: set_drag_source operations {operations:#x} name something \
-                         outside copy (1) and move (2) — link and ask are refused \
-                         (docs/dnd-plan.md D3)"
-                    );
-                    let empty = clip.text.is_none()
-                        && clip.html.is_none()
-                        && clip.image.is_none()
-                        && clip.files.is_empty()
-                        && clip.custom.is_empty();
-                    if empty {
-                        self.drag_sources.remove(&widget);
-                        out.push(ApplyOp::SetDragSource {
-                            id: widget,
-                            clip: crate::protocol::ClipOut::default(),
-                            operations: 0,
-                            tag: crate::wire::click_tag(widget.0, &[]),
-                        });
-                    } else {
+                    if path.is_empty() {
                         assert!(
-                            operations != 0,
-                            "kaya: set_drag_source on {widget:?} allows no operation — name \
-                             copy, move or both"
+                            self.widgets.contains_key(&widget),
+                            "kaya: set_drag_source targets {widget:?}, which is not a live \
+                             widget — a template node is declared inside its For's body, and \
+                             one stamped copy is addressed by its keys (docs/dnd-plan.md §4)"
                         );
-                        for (id, _) in &clip.custom {
-                            crate::wire::check_custom_id(id, "set_drag_source");
-                        }
-                        let files = clip
-                            .files
-                            .iter()
-                            .map(|handle| crate::capi::picked_locator(*handle))
-                            .collect();
-                        out.push(ApplyOp::SetDragSource {
-                            id: widget,
-                            clip: crate::protocol::ClipOut {
-                                text: clip.text.clone(),
-                                html: clip.html.clone(),
-                                image: clip.image.clone(),
-                                files,
-                                custom: clip.custom.clone(),
-                            },
+                        let op = self.drag_source_apply(
+                            widget,
+                            &clip,
                             operations,
-                            tag: crate::wire::click_tag(widget.0, &[]),
-                        });
-                        self.drag_sources.insert(widget, (clip, operations));
+                            crate::wire::click_tag(widget.0, &[]),
+                        );
+                        out.push(op);
+                    } else {
+                        // ONE copy's declaration, set_column_headers' keyed
+                        // shape: it overrides the template's for that copy
+                        // and follows the copy through a re-stamp.
+                        let (wid, keypath) = self.keyed_copy(widget.0, &path, "set_drag_source");
+                        let op = self.drag_source_apply(
+                            wid,
+                            &clip,
+                            operations,
+                            crate::wire::click_tag(widget.0, &path),
+                        );
+                        out.push(op);
+                        self.drag_overrides.insert((widget.0, keypath), (clip, operations));
                     }
                 }
                 TxOp::SetDropTarget { widget, operations, path } => {
-                    assert!(
-                        path.is_empty(),
-                        "kaya: set_drop_target keys {path:?} address a stamped copy — the \
-                         template zone lands with the bindings sweep (docs/dnd-plan.md §4)"
-                    );
-                    assert!(
-                        self.widgets.contains_key(&widget),
-                        "kaya: set_drop_target targets {widget:?}, which is not a live widget"
-                    );
-                    assert!(
-                        operations & !(crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE) == 0,
-                        "kaya: set_drop_target operations {operations:#x} name something \
-                         outside copy (1) and move (2) (docs/dnd-plan.md D3)"
-                    );
-                    if operations == 0 {
-                        self.drop_targets.remove(&widget);
-                    } else {
+                    Self::check_drag_ops(operations, "set_drop_target");
+                    if path.is_empty() {
                         assert!(
-                            self.accept_lists.contains_key(&widget),
-                            "kaya: set_drop_target on {widget:?} needs its accept list first — \
-                             what a destination TAKES is its `accepts` prop, the same list a \
-                             paste consults (docs/dnd-plan.md D1)"
+                            self.widgets.contains_key(&widget),
+                            "kaya: set_drop_target targets {widget:?}, which is not a live \
+                             widget — a template node is declared inside its For's body, and \
+                             one stamped copy is addressed by its keys (docs/dnd-plan.md §4)"
                         );
-                        self.drop_targets.insert(widget, operations);
+                        let op = self.drop_target_apply(
+                            widget,
+                            operations,
+                            crate::wire::click_tag(widget.0, &[]),
+                        );
+                        out.push(op);
+                    } else {
+                        let (wid, keypath) = self.keyed_copy(widget.0, &path, "set_drop_target");
+                        let op = self.drop_target_apply(
+                            wid,
+                            operations,
+                            crate::wire::click_tag(widget.0, &path),
+                        );
+                        out.push(op);
+                        self.drop_overrides.insert((widget.0, keypath), operations);
                     }
-                    out.push(ApplyOp::SetDropTarget {
-                        id: widget,
-                        operations,
-                        tag: crate::wire::click_tag(widget.0, &[]),
-                    });
                 }
                 TxOp::SetReorderable { container, enabled } => {
                     assert!(
@@ -4796,8 +4800,224 @@ impl Scene {
                 };
                 self.tpl_drawings.insert(widget.0, drawing);
             }
+            TxOp::SetDragSource { widget, clip, bound, operations, path } => {
+                assert!(
+                    path.is_empty(),
+                    "kaya: a template-zone set_drag_source takes no key path — the per-copy \
+                     re-declaration is a live call against the stamped copy (docs/dnd-plan.md §4)"
+                );
+                assert!(
+                    self.template_nodes.contains_key(&widget.0),
+                    "kaya: set_drag_source targets node {}, which is not declared in this \
+                     template scope",
+                    widget.0
+                );
+                Self::check_drag_ops(operations, "set_drag_source");
+                for (id, _) in &clip.custom {
+                    crate::wire::check_custom_id(id, "set_drag_source");
+                }
+                // A BOUND SLOT NAMES A FIELD OF A FOR IN SCOPE, of the slot's
+                // own kind — set_property's element check, per slot.
+                let depth = scopes
+                    .iter()
+                    .filter(|s| matches!(s.header, ScopeHeader::For { .. }))
+                    .count();
+                let pairs = clip.custom.len() as u32 * 2;
+                let files = clip.files.len() as u32;
+                for rep in &bound {
+                    assert!(
+                        (rep.level as usize) < depth,
+                        "kaya: set_drag_source binds slot {} {} Fors up, but only {depth} \
+                         enclose it",
+                        rep.slot,
+                        rep.level
+                    );
+                    assert!(
+                        rep.slot < pairs || rep.slot >= pairs + files,
+                        "kaya: set_drag_source binds a file slot — a picked handle is not a \
+                         row field"
+                    );
+                    let (collection, variant) = scopes
+                        .iter()
+                        .rev()
+                        .filter_map(|s| match s.header {
+                            ScopeHeader::For { collection, .. } => Some((collection, s.current.variant)),
+                            ScopeHeader::When { .. } => None,
+                        })
+                        .nth(rep.level as usize)
+                        .expect("level checked against For depth above");
+                    let schema = &self.collections[&collection].variants[variant as usize];
+                    assert!(
+                        (rep.field as usize) < schema.len(),
+                        "kaya: set_drag_source binds field {} of variant {variant} of \
+                         {collection:?}, which has {} fields",
+                        rep.field,
+                        schema.len()
+                    );
+                    let bytes_shaped = (rep.slot < pairs && rep.slot % 2 == 1)
+                        || (clip.image.is_some() && rep.slot == pairs + files);
+                    let wanted = if bytes_shaped { ValueType::Blob } else { ValueType::Str };
+                    assert!(
+                        schema[rep.field as usize] == wanted,
+                        "kaya: set_drag_source slot {} wants a {wanted:?} field and field {} of \
+                         variant {variant} of {collection:?} is a {:?}",
+                        rep.slot,
+                        rep.field,
+                        schema[rep.field as usize]
+                    );
+                }
+                self.tpl_drag.insert(widget.0, (clip.clone(), bound.clone(), operations));
+                let top = scopes.last_mut().unwrap();
+                top.current.ops.push(TplOp::SetDragSource { node: widget.0, clip, bound, operations });
+            }
+            TxOp::SetDropTarget { widget, operations, path } => {
+                assert!(
+                    path.is_empty(),
+                    "kaya: a template-zone set_drop_target takes no key path — the per-copy \
+                     re-declaration is a live call against the stamped copy (docs/dnd-plan.md §4)"
+                );
+                assert!(
+                    self.template_nodes.contains_key(&widget.0),
+                    "kaya: set_drop_target targets node {}, which is not declared in this \
+                     template scope",
+                    widget.0
+                );
+                Self::check_drag_ops(operations, "set_drop_target");
+                let top = scopes.last_mut().unwrap();
+                top.current.ops.push(TplOp::SetDropTarget { node: widget.0, operations });
+            }
             other => panic!("kaya: {other:?} is not valid inside a template"),
         }
+    }
+
+    fn check_drag_ops(operations: u32, record: &str) {
+        assert!(
+            operations & !(crate::wire::DRAG_OP_COPY | crate::wire::DRAG_OP_MOVE) == 0,
+            "kaya: {record} operations {operations:#x} name something outside copy (1) and \
+             move (2) — link and ask are refused (docs/dnd-plan.md D3)"
+        );
+    }
+
+    /// The apply twin of a drag declaration: files as locators, the
+    /// identity tag the emits hand back.
+    fn drag_source_apply(
+        &mut self,
+        id: WidgetId,
+        clip: &crate::protocol::Clip,
+        operations: u32,
+        tag: Vec<u8>,
+    ) -> ApplyOp {
+        let empty = clip.text.is_none()
+            && clip.html.is_none()
+            && clip.image.is_none()
+            && clip.files.is_empty()
+            && clip.custom.is_empty();
+        if empty {
+            self.drag_sources.remove(&id);
+            return ApplyOp::SetDragSource {
+                id,
+                clip: crate::protocol::ClipOut::default(),
+                operations: 0,
+                tag,
+            };
+        }
+        assert!(
+            operations != 0,
+            "kaya: set_drag_source on {id:?} allows no operation — name copy, move or both"
+        );
+        let files = clip.files.iter().map(|handle| crate::capi::picked_locator(*handle)).collect();
+        self.drag_sources.insert(id, (clip.clone(), operations));
+        ApplyOp::SetDragSource {
+            id,
+            clip: crate::protocol::ClipOut {
+                text: clip.text.clone(),
+                html: clip.html.clone(),
+                image: clip.image.clone(),
+                files,
+                custom: clip.custom.clone(),
+            },
+            operations,
+            tag,
+        }
+    }
+
+    /// A template clip with every bound slot read from the copy's own
+    /// rows (`chain`, innermost last), the shape the backend receives.
+    fn resolve_bound_clip(
+        &self,
+        clip: &crate::protocol::Clip,
+        bound: &[crate::protocol::BoundRep],
+        chain: &[EntryRef],
+    ) -> crate::protocol::Clip {
+        let mut resolved = clip.clone();
+        for rep in bound {
+            let entry = &chain[chain.len() - 1 - rep.level as usize];
+            let value = self.coll_instances[&(entry.0, entry.1.clone())].entries[&entry.2].1
+                [rep.field as usize]
+                .clone();
+            resolved.set_slot(rep.slot, value);
+        }
+        resolved
+    }
+
+    /// An entry changed: every copy whose payload binds a field of it is
+    /// re-declared from the rows as they are now (element_bindings' rule,
+    /// one record over). A per-copy override still wins.
+    fn refresh_drag_binds(&mut self, entry: &EntryRef, out: &mut Vec<ApplyOp>) {
+        let Some(binds) = self.drag_binds.get(entry).cloned() else {
+            return;
+        };
+        for (wid, node, copy_path) in binds {
+            if self.drag_overrides.contains_key(&(node, copy_path.clone())) {
+                continue;
+            }
+            let Some((clip, bound, ops)) = self.tpl_drag.get(&node).cloned() else {
+                continue;
+            };
+            let Some(site) = self.for_sites.get(&(entry.0, entry.1.clone())) else {
+                continue;
+            };
+            let mut chain = site.chain.clone();
+            chain.push(entry.clone());
+            let resolved = self.resolve_bound_clip(&clip, &bound, &chain);
+            let op = self.drag_source_apply(
+                wid,
+                &resolved,
+                ops,
+                crate::wire::click_tag(node, &path_values(&copy_path)),
+            );
+            out.push(op);
+        }
+    }
+
+    fn drop_target_apply(&mut self, id: WidgetId, operations: u32, tag: Vec<u8>) -> ApplyOp {
+        if operations == 0 {
+            self.drop_targets.remove(&id);
+        } else {
+            assert!(
+                self.accept_lists.contains_key(&id),
+                "kaya: set_drop_target on {id:?} needs its accept list first — what a \
+                 destination TAKES is its `accepts` prop, the same list a paste consults \
+                 (docs/dnd-plan.md D1)"
+            );
+            self.drop_targets.insert(id, operations);
+        }
+        ApplyOp::SetDropTarget { id, operations, tag }
+    }
+
+    /// A keyed drag record's copy: the template node and the copy keys
+    /// name exactly one stamped widget, or the record is refused by name.
+    fn keyed_copy(&self, node: u64, path: &[Value], record: &str) -> (WidgetId, PathKey) {
+        assert!(
+            self.template_nodes.contains_key(&node),
+            "kaya: {record} keys {path:?} address a stamped copy, and {node} names no \
+             template node — keys resolve in the template space alone (docs/dnd-plan.md §4)"
+        );
+        let keypath: PathKey = path.iter().map(Key::from_value).collect();
+        let wid = *self.node_instances.get(&(node, keypath.clone())).unwrap_or_else(|| {
+            panic!("kaya: {record} keys {path:?} name no stamped copy of node {node}")
+        });
+        (wid, keypath)
     }
 
     /// Assemble a closed scope's blueprint(s). A For's cases must be total —
@@ -5025,6 +5245,8 @@ impl Scene {
         }
         self.bar_overrides.retain(|(_, p), _| *p != copy_path);
         self.drawing_overrides.retain(|(_, p), _| *p != copy_path);
+        self.drag_overrides.retain(|(_, p), _| *p != copy_path);
+        self.drop_overrides.retain(|(_, p), _| *p != copy_path);
     }
 
     /// The blueprint over `collection` is known: record what one of its rows
@@ -5149,7 +5371,7 @@ impl Scene {
         }
         // Same constructor: the data changed; every property fed by
         // this entry follows, each from its own field.
-        if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
+        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())) {
             for (widget, prop, field) in bound {
                 out.push(ApplyOp::SetProp {
                     id: *widget,
@@ -5158,6 +5380,7 @@ impl Scene {
                 });
             }
         }
+        self.refresh_drag_binds(&(id, path, key), out);
     }
 
     /// A restamped copy was appended to its container; move it back to
@@ -5239,7 +5462,7 @@ impl Scene {
              variant {stored} (update, not update_field, changes a constructor)"
         );
         current[field as usize] = value.clone();
-        if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
+        if let Some(bound) = self.element_bindings.get(&(id, path.clone(), key.clone())) {
             for (widget, prop, bound_field) in bound {
                 if *bound_field == field {
                     out.push(ApplyOp::SetProp {
@@ -5250,6 +5473,7 @@ impl Scene {
                 }
             }
         }
+        self.refresh_drag_binds(&(id, path, key), out);
     }
 
     fn remove_entry(
@@ -5417,6 +5641,22 @@ impl Scene {
                         kind: *kind,
                         tag,
                     });
+                    self.node_instances.insert((*node, copy_path.clone()), id);
+                    // A per-copy drag override outlives its copy's widgets
+                    // (reap_nested's rule) and is re-applied on re-stamp;
+                    // the template's own declaration comes in body order
+                    // below and yields to it.
+                    if let Some((clip, ops)) =
+                        self.drag_overrides.get(&(*node, copy_path.clone())).cloned()
+                    {
+                        let op = self.drag_source_apply(
+                            id,
+                            &clip,
+                            ops,
+                            crate::wire::click_tag(*node, &path_values(copy_path)),
+                        );
+                        out.push(op);
+                    }
                     if *kind == WidgetKind::Canvas {
                         // Recorded unconditionally, so a LATE template
                         // declaration reaches copies that already exist
@@ -5435,6 +5675,12 @@ impl Scene {
                 }
                 TplOp::SetProp { node, prop, value } => {
                     let id = node_map[node];
+                    // A stamped copy's accept list is the core's own record
+                    // too: the drop verdict for a stamped destination reads
+                    // it (docs/dnd-plan.md §4), as the live arm does.
+                    if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, value) {
+                        self.accept_lists.insert(id, list.clone());
+                    }
                     match value {
                         PropValue::Const(v) => out.push(ApplyOp::SetProp {
                             id,
@@ -5474,6 +5720,45 @@ impl Scene {
                     parent: node_map[parent],
                     child: node_map[child],
                 }),
+                TplOp::SetDragSource { node, clip, bound, operations } => {
+                    let id = node_map[node];
+                    if !bound.is_empty() {
+                        // Every entry a bound slot reads from: the copy is
+                        // re-declared when any of them changes.
+                        for rep in bound {
+                            let entry = chain[chain.len() - 1 - rep.level as usize].clone();
+                            let binds = self.drag_binds.entry(entry.clone()).or_default();
+                            if !binds.iter().any(|(w, _, _)| *w == id) {
+                                binds.push((id, *node, copy_path.clone()));
+                                stamp.drag_binds.push((entry, id));
+                            }
+                        }
+                    }
+                    if !self.drag_overrides.contains_key(&(*node, copy_path.clone())) {
+                        let resolved = self.resolve_bound_clip(clip, bound, chain);
+                        let op = self.drag_source_apply(
+                            id,
+                            &resolved,
+                            *operations,
+                            crate::wire::click_tag(*node, &path_values(copy_path)),
+                        );
+                        out.push(op);
+                    }
+                }
+                TplOp::SetDropTarget { node, operations } => {
+                    let id = node_map[node];
+                    let ops = self
+                        .drop_overrides
+                        .get(&(*node, copy_path.clone()))
+                        .copied()
+                        .unwrap_or(*operations);
+                    let op = self.drop_target_apply(
+                        id,
+                        ops,
+                        crate::wire::click_tag(*node, &path_values(copy_path)),
+                    );
+                    out.push(op);
+                }
                 TplOp::Collection { id } => {
                     // THE INSTANCE IS ALREADY THERE, born with the row's
                     // record (`birth_nested`), and a re-stamp on band entry
@@ -5707,6 +5992,10 @@ impl Scene {
         // on a same-key re-insert.
         let dead: std::collections::HashSet<WidgetId> = stamp.widgets.iter().copied().collect();
         self.bar_instances.retain(|_, wid| !dead.contains(wid));
+        self.node_instances.retain(|_, wid| !dead.contains(wid));
+        self.drag_sources.retain(|wid, _| !dead.contains(wid));
+        self.drop_targets.retain(|wid, _| !dead.contains(wid));
+        self.accept_lists.retain(|wid, _| !dead.contains(wid));
         self.drawing_instances.retain(|_, wid| !dead.contains(wid));
         self.drawings.retain(|wid, _| !dead.contains(wid));
         // The size policy's three side tables die with the canvas: an
@@ -5750,6 +6039,11 @@ impl Scene {
         }
         for (entry, widget) in &stamp.element_binds {
             if let Some(bound) = self.element_bindings.get_mut(entry) {
+                bound.retain(|(w, _, _)| w != widget);
+            }
+        }
+        for (entry, widget) in &stamp.drag_binds {
+            if let Some(bound) = self.drag_binds.get_mut(entry) {
                 bound.retain(|(w, _, _)| w != widget);
             }
         }

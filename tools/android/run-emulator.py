@@ -1393,50 +1393,123 @@ def scene_script_cut(scene, cut, keep, extra=""):
     return ";".join(prefix) + ";"
 
 
-def scene_script_drop(scene, verb, target, keep):
-    """ONE STEP OUT OF THE MIDDLE, where a CUT can only take a tail:
-    the identity scene's `expect_title window#1` reads the declared
-    NAME off a window this host has not got, and below it sit the live
-    widgets and the SECOND expect_app_icon. Every guard is
-    scene_script_cut's, restated for a middle step: the step must be
-    there EXACTLY ONCE, the keep verbs are mandatory, the dropped step
-    is printed. NAMED BY VERB AND TARGET, never by the whole line —
-    retyping a declared value in a runner is the second source of truth
-    guests/assets/identity.toml exists to prevent."""
-    path = ROOT / f"tools/scenes/{scene}.steps"
+def drop_block(lines, specs, keep):
+    """The DROP's decision, over normalized lines and nothing else —
+    (kept, dropped), or a ValueError carrying the sentence. Pure so its
+    refusals can be watched firing at import (drop_block_selftest)."""
     keeps = keep.split()
     if not keeps:
-        die(f"run-emulator: dropping `{verb} {target}` from {path} "
-            f"with no `keep` verb — say which assertions this drop may "
-            f"not take with it, or the leg can be trimmed until it "
-            f"asserts nothing")
+        raise ValueError(
+            f"dropping {list(specs)} with no `keep` verb — say which "
+            f"assertions this drop may not take with it, or the leg can "
+            f"be trimmed until it asserts nothing")
+    at = []
+    for spec in specs:
+        words = spec.split()
+        hits = [i for i, line in enumerate(lines)
+                if line.split()[:len(words)] == words]
+        if len(hits) != 1:
+            raise ValueError(
+                f"the scene has {len(hits)} `{spec}` steps and this lane "
+                f"drops exactly one — it was reshaped and nobody re-read "
+                f"what the phone can express. Fix the leg, do not widen "
+                f"the drop.")
+        at.append(hits[0])
+    at.sort()
+    if at != list(range(at[0], at[0] + len(at))):
+        raise ValueError(
+            f"the dropped steps {[lines[i] for i in at]} are not one "
+            f"block — a drop takes a step and the assertions it feeds, "
+            f"never a step from the top and an assertion from the bottom")
+    gone = set(at)
+    kept = [line for i, line in enumerate(lines) if i not in gone]
+
+    def asserted(seq, verb, target=None):
+        return {line for line in seq
+                if (p := line.split()) and p[0] == verb
+                and (target is None or (len(p) > 1 and p[1] == target))}
+
+    for tok in keeps:
+        verb, _, target = tok.partition("=")
+        whole = asserted(lines, verb, target or None)
+        survived = asserted(kept, verb, target or None)
+        if not survived:
+            raise ValueError(
+                f"dropping {[lines[i] for i in at]} leaves no `{tok}` "
+                f"step at all — the leg would pass without asserting the "
+                f"thing it exists for")
+        if survived != whole:
+            raise ValueError(
+                f"dropping {[lines[i] for i in at]} takes "
+                f"{sorted(whole - survived)} — the drop may not take an "
+                f"assertion of `{tok}` with it")
+    return kept, [lines[i] for i in at]
+
+
+def drop_block_selftest():
+    """The refusals above, watched firing on every launch — the runner
+    is the only wall a lane's cut has, and a guard nobody has seen fail
+    is worse than none (CLAUDE.md invariant 3)."""
+    sample = ['drag label#0 to label#1',
+              'expect label#4 "text target got text hello (copy)"',
+              'drag_file "$TMP/f.txt" to label#3',
+              'expect label#4 "files target got f.txt (copy)"',
+              'expect_order column@rows "a|b|c"']
+    good = ('drag_file', 'expect label#4 "files target got f.txt (copy)"')
+    reds = 0
+    for specs, keep, why in (
+            (good, "", "no keep verb"),
+            (("expect",), "expect_order", "a spec matching four steps"),
+            (("scroll_end",), "expect_order", "a spec matching nothing"),
+            (("drag_file", 'expect_order column@rows "a|b|c"'),
+             "expect_order", "two hits that are not one block"),
+            ((good[0], good[1], 'expect_order column@rows "a|b|c"'),
+             "expect_order", "a drop taking a keep's own assertion")):
+        try:
+            drop_block(list(sample), specs, keep)
+        except ValueError:
+            reds += 1
+            continue
+        die(f"run-emulator: SELF-TEST FAIL — drop_block accepted {why}")
+    kept, gone = drop_block(list(sample), good, "expect_order")
+    if len(kept) != 3 or len(gone) != 2:
+        die("run-emulator: SELF-TEST FAIL — drop_block refused the real "
+            f"shape ({len(kept)} kept, {len(gone)} dropped)")
+    print(f"run-emulator: drop_block refused {reds} bad drops", flush=True)
+
+
+drop_block_selftest()
+
+
+def scene_script_drop(scene, specs, keep, why):
+    """A BLOCK OUT OF THE MIDDLE, where a CUT can only take a tail: the
+    identity scene's `expect_title window#1` reads the declared NAME off
+    a window this host has not got, and below it sit the live widgets
+    and the SECOND expect_app_icon; the dnd scene's `drag_file` is a
+    FOREIGN source no phone app can be handed (docs/dnd-plan.md D9), and
+    the one assertion it feeds goes with it — an expect over a step that
+    did not run is a lie. EACH SPEC IS A LEADING RUN OF WORDS, AS SHORT
+    AS IT CAN BE while naming exactly one step — `drag_file` is the
+    whole spec, and identity's stops at `expect_title window#1` rather
+    than retyping the declared name after it, which is the second source
+    of truth guests/assets/identity.toml exists to prevent. Only a
+    discriminator no shorter spec has may be a quoted value: six steps
+    share `expect label#4`. THE iOS LANE TAKES THE SAME LIST AND THE
+    SAME GRAMMAR — two mobile lanes, one question, and two answers is
+    how lanes drift — and tools/ios/run-sim.py's own drop still names
+    ONE step by (verb, target): it takes this shape when it next needs a
+    block, which is the same `drag_file` cut (docs/dnd-plan.md D9)."""
+    path = ROOT / f"tools/scenes/{scene}.steps"
     lines = [" ".join(line.split()) for line in
              path.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
-    hits = [i for i, line in enumerate(lines)
-            if line.split()[:2] == [verb, target]]
-    if len(hits) != 1:
-        die(f"run-emulator: {path} has {len(hits)} `{verb} {target}` "
-            f"steps and this lane drops exactly one — the scene was "
-            f"reshaped and nobody re-read what the phone can express. "
-            f"Fix the leg, do not widen the drop.")
-    kept = lines[:hits[0]] + lines[hits[0] + 1:]
-
-    def asserted(seq, v):
-        return {line for line in seq if line.split()[:1] == [v]}
-
-    for v in keeps:
-        whole, survived = asserted(lines, v), asserted(kept, v)
-        if not survived:
-            die(f"run-emulator: dropping `{verb} {target}` from {path} "
-                f"leaves no `{v}` step at all — the leg would pass "
-                f"without asserting the thing it exists for")
-        if survived != whole:
-            die(f"run-emulator: dropping `{verb} {target}` from {path} "
-                f"takes {sorted(whole - survived)} — the drop may not "
-                f"take an assertion of `{v}` with it")
-    print(f"run-emulator: NOT RUN on this host (no auxiliary windows): "
-          f"{lines[hits[0]]}", file=sys.stderr)
+    try:
+        kept, gone = drop_block(lines, specs, keep)
+    except ValueError as e:
+        die(f"run-emulator: {path}: {e}")
+    for line in gone:
+        print(f"run-emulator: NOT RUN on this host ({why}): {line}",
+              file=sys.stderr)
     return ";".join(kept) + ";"
 
 
@@ -1454,8 +1527,8 @@ def script_for(scene):
             verb, keep, extra = mods["cut"]
             text = scene_script_cut(scene, verb, keep, extra)
         elif "drop" in mods:
-            verb, target, keep = mods["drop"]
-            text = scene_script_drop(scene, verb, target, keep)
+            specs, keep, why = mods["drop"]
+            text = scene_script_drop(scene, specs, keep, why)
         else:
             text = scene_script(scene)
         _scripts[scene] = text + mods.get("append", "")

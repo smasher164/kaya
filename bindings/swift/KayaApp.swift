@@ -990,12 +990,144 @@ struct KayaCopyRef {
     }
 }
 
+/// A TEMPLATE node's drag chain (docs/dnd-plan.md §4): each representation
+/// is a CONSTANT or the ROW'S OWN FIELD — text(row.title) binds the way
+/// label(row.title) does — resolved per stamped copy and re-declared when
+/// that field changes. A file stays constant.
+struct KayaTplDragRef {
+    let tx: KayaAppTx
+    let node: UInt64
+    private var text: String?
+    private var textField: UInt32?
+    private var html: String?
+    private var htmlField: UInt32?
+    private var image: [UInt8]?
+    private var imageField: UInt32?
+    private var files: [UInt64] = []
+    private var custom: [(String, [UInt8]?, UInt32?)] = []
+    private var ops: UInt32 = 0
+
+    init(tx: KayaAppTx, node: UInt64) {
+        self.tx = tx
+        self.node = node
+    }
+
+    func text(_ text: String) -> KayaTplDragRef {
+        var next = self
+        next.text = text
+        return next
+    }
+
+    func text(_ f: KayaField<String>) -> KayaTplDragRef {
+        var next = self
+        next.textField = f.index
+        return next
+    }
+
+    func html(_ html: String) -> KayaTplDragRef {
+        var next = self
+        next.html = html
+        return next
+    }
+
+    func html(_ f: KayaField<String>) -> KayaTplDragRef {
+        var next = self
+        next.htmlField = f.index
+        return next
+    }
+
+    func image(_ bytes: [UInt8]) -> KayaTplDragRef {
+        var next = self
+        next.image = bytes
+        return next
+    }
+
+    func image(_ f: KayaField<Data>) -> KayaTplDragRef {
+        var next = self
+        next.imageField = f.index
+        return next
+    }
+
+    func file(_ f: KayaPickedFile) -> KayaTplDragRef {
+        var next = self
+        next.files.append(f.handle)
+        return next
+    }
+
+    func custom(_ id: String, _ bytes: [UInt8]) -> KayaTplDragRef {
+        _ = kayaAcceptList([id])
+        var next = self
+        next.custom.append((id, bytes, nil))
+        return next
+    }
+
+    func custom(_ id: String, _ f: KayaField<Data>) -> KayaTplDragRef {
+        _ = kayaAcceptList([id])
+        var next = self
+        next.custom.append((id, nil, f.index))
+        return next
+    }
+
+    /// Allow this operation (copy, move, or both across two calls).
+    func allow(_ op: KayaOp) -> KayaTplDragRef {
+        var next = self
+        next.ops |= op.rawValue
+        return next
+    }
+
+    func declare() {
+        var present: UInt32 = 0
+        var bound: UInt32 = 0
+        var values: [KayaValue] = []
+        // A bound slot rides as the i64 `level << 32 | field`; the slot
+        // IS its index in the reps.
+        func slot(_ field: UInt32?) -> Bool {
+            guard let field else { return false }
+            bound |= 1 << UInt32(values.count)
+            values.append(.i64(Int64(field)))
+            return true
+        }
+        for (id, bytes, field) in custom {
+            values.append(.str(id))
+            if !slot(field) {
+                values.append(.blob(kayaRegisterBlob(Data(bytes!))))
+            }
+        }
+        for handle in files {
+            values.append(.i64(Int64(bitPattern: handle)))
+        }
+        if image != nil || imageField != nil {
+            present |= UInt32(KAYA_CLIP_IMAGE)
+            if !slot(imageField) {
+                values.append(.blob(kayaRegisterBlob(Data(image!))))
+            }
+        }
+        if html != nil || htmlField != nil {
+            present |= UInt32(KAYA_CLIP_HTML)
+            if !slot(htmlField) {
+                values.append(.str(html!))
+            }
+        }
+        if text != nil || textField != nil {
+            present |= UInt32(KAYA_CLIP_TEXT)
+            if !slot(textField) {
+                values.append(.str(text!))
+            }
+        }
+        let empty = present == 0 && files.isEmpty && custom.isEmpty
+        tx.tx.setDragSource(
+            node, present, UInt32(files.count), UInt32(custom.count),
+            empty ? 0 : ops, 0, bound, values)
+    }
+}
+
 /// The drag chain: the copy chain's representations plus the operations
 /// the source allows; declare() sends it. An EMPTY chain withdraws, which
 /// is how a same-app move removes its source (docs/dnd-plan.md D1, D2).
 struct KayaDragRef {
     let tx: KayaAppTx
     let widget: UInt64
+    let keys: [KayaValue]
     private var text: String?
     private var html: String?
     private var image: [UInt8]?
@@ -1003,9 +1135,10 @@ struct KayaDragRef {
     private var custom: [(String, [UInt8])] = []
     private var ops: UInt32 = 0
 
-    init(tx: KayaAppTx, widget: UInt64) {
+    init(tx: KayaAppTx, widget: UInt64, keys: [KayaValue] = []) {
         self.tx = tx
         self.widget = widget
+        self.keys = keys
     }
 
     func text(_ text: String) -> KayaDragRef {
@@ -1069,9 +1202,10 @@ struct KayaDragRef {
             values.append(.str(text))
         }
         let empty = present == 0 && files.isEmpty && custom.isEmpty
+        // KEYS FIRST, then the reps (set_column_headers' convention).
         tx.tx.setDragSource(
             widget, present, UInt32(files.count), UInt32(custom.count),
-            empty ? 0 : ops, 0, values)
+            empty ? 0 : ops, UInt32(keys.count), 0, keys + values)
     }
 }
 
@@ -1318,7 +1452,9 @@ final class KayaApp {
     private var widgetPastes: [UInt64: (KayaAppTx, KayaRepresentation) throws -> Void] = [:]
     private var nodePastes: [UInt64: (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void] = [:]
     private var widgetDrops: [UInt64: (KayaAppTx, KayaDropped) throws -> Void] = [:]
+    private var nodeDrops: [UInt64: (KayaAppTx, [KayaValue], KayaDropped) throws -> Void] = [:]
     private var dragEnded: [UInt64: (KayaAppTx, KayaOp?) throws -> Void] = [:]
+    private var nodeDragEnded: [UInt64: (KayaAppTx, [KayaValue], KayaOp?) throws -> Void] = [:]
     private var nextClipboardRead: UInt64 = 0
     private var nextAlert: UInt64 = 0
     private var nextFileDialog: UInt64 = 0
@@ -1793,6 +1929,20 @@ final class KayaApp {
         dragEnded[w.id] = handler
     }
 
+    func onDrop(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaDropped) throws -> Void
+    ) {
+        nodeDrops[n.id] = handler
+    }
+
+    func onDragEnded(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaOp?) throws -> Void
+    ) {
+        nodeDragEnded[n.id] = handler
+    }
+
     /// Bind the picker's one-shot result handler; it retires with the
     /// result.
     func onFileDialog(
@@ -2009,17 +2159,28 @@ final class KayaApp {
                     dispatch { try build { tx in try handler(tx, keys, answer) } }
                 }
             // A drop rides the same tag with four more words
-            // (docs/dnd-plan.md D1); the template zone is refused, so a
-            // keyed drop reaches no handler.
+            // (docs/dnd-plan.md D1), so it arrives on the ordinary
+            // widget/node split — a stamped copy's landing and a
+            // reorderable row's own drag_ended carry the copy's keys (§4).
             case (UInt16(KAYA_OCCURRENCE_DROPPED), true):
                 if let handler = widgetDrops[id], let drop {
                     let answer = kayaDropped(drop)
                     dispatch { try build { tx in try handler(tx, answer) } }
                 }
+            case (UInt16(KAYA_OCCURRENCE_DROPPED), false):
+                if let handler = nodeDrops[id], let drop {
+                    let answer = kayaDropped(drop)
+                    dispatch { try build { tx in try handler(tx, keys, answer) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_DRAG_ENDED), true):
                 if let handler = dragEnded[id] {
                     let answer = kayaOperation(choice)
                     dispatch { try build { tx in try handler(tx, answer) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DRAG_ENDED), false):
+                if let handler = nodeDragEnded[id] {
+                    let answer = kayaOperation(choice)
+                    dispatch { try build { tx in try handler(tx, keys, answer) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT), _):
                 // One-shot. EMPTY IS CANCEL — no platform can confirm an
@@ -3195,6 +3356,39 @@ final class KayaAppTx {
         app.onDragEnded(w, handler)
     }
 
+    /// ONE STAMPED COPY's drag declaration (docs/dnd-plan.md §4): the
+    /// template node and the copy's keys, outermost first. The per-row
+    /// payload an app declares after the row's insert; it overrides the
+    /// template's own for that copy and follows it through a re-stamp.
+    func draggableAt(_ n: KayaNodeHandle, at keys: [KayaValue]) -> KayaDragRef {
+        KayaDragRef(tx: self, widget: n.id, keys: keys)
+    }
+
+    /// `draggableAt`'s twin: ONE stamped copy receives drops with these
+    /// operations, taking what the template's `setAccepts` names.
+    func setDropTargetAt(_ n: KayaNodeHandle, at keys: [KayaValue], _ ops: [KayaOp]) {
+        tx.setDropTarget(
+            n.id, ops.reduce(0) { $0 | $1.rawValue }, UInt32(keys.count), keys)
+    }
+
+    /// A drop on a stamped copy: the handler also receives the copy's key
+    /// path, outermost first.
+    func onDrop(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaDropped) throws -> Void
+    ) {
+        app.onDrop(n, handler)
+    }
+
+    /// A stamped copy of this node — a reorderable row is one — finished
+    /// its drag; the copy's keys first.
+    func onDragEnded(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaOp?) throws -> Void
+    ) {
+        app.onDragEnded(n, handler)
+    }
+
     /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
     /// packed sRGB hex (0xRRGGBB). `light:`/`dark:` are the per-appearance
     /// overrides, whichever you leave out filled from `seed`, and the core
@@ -3728,6 +3922,22 @@ final class KayaTpl {
     /// empty. CONST ONLY — on Android the list IS the native registration.
     func setAccepts(_ n: KayaNodeHandle, _ kinds: [String]) {
         tx.tx.setAccepts(n.id, kayaAcceptList(kinds))
+    }
+
+    /// Every stamped copy of `n` hands over this payload with its own
+    /// identity, each representation a constant or the row's own field
+    /// (docs/dnd-plan.md §4); a copy's OWN payload is
+    /// `KayaAppTx.draggableAt` after its insert, constants only, and the
+    /// copy's keys reach the app through the node flavour of `onDragEnded`.
+    func draggable(_ n: KayaNodeHandle) -> KayaTplDragRef {
+        KayaTplDragRef(tx: tx, node: n.id)
+    }
+
+    /// Every stamped copy of `n` receives drops with these operations,
+    /// taking what `setAccepts` names; the landing arrives at the node
+    /// flavour of `onDrop` with the copy's keys.
+    func setDropTarget(_ n: KayaNodeHandle, _ ops: [KayaOp]) {
+        tx.tx.setDropTarget(n.id, ops.reduce(0) { $0 | $1.rawValue }, 0, [])
     }
 
     /// What a stamped copy MEANS: semantic emphasis, never appearance.

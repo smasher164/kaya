@@ -1298,16 +1298,45 @@ pub fn decode_transaction_with_blobs(
                 let custom_count = r.u32() as usize;
                 let operations = r.u32();
                 let path_len = r.u32() as usize;
-                let _reserved = r.u32();
+                let bound_mask = r.u32();
                 let mut flat = r.record();
                 assert!(
                     flat.len() >= path_len,
                     "kaya: set_drag_source declares {path_len} keys but carries {} values",
                     flat.len()
                 );
-                let reps = flat.split_off(path_len);
+                let mut reps = flat.split_off(path_len);
+                // A bound slot rides as an i64 (level << 32 | field) where
+                // the clip expects the slot's own kind: lift it out and put
+                // a placeholder of that kind back for clip_from_values.
+                let mut bound = Vec::new();
+                for (slot, rep) in reps.iter_mut().enumerate() {
+                    if bound_mask & (1u32 << slot) == 0 {
+                        continue;
+                    }
+                    let packed = match rep {
+                        Value::I64(v) => *v as u64,
+                        other => panic!(
+                            "kaya: set_drag_source bound slot {slot} carries {other:?}, wanted \
+                             the i64 element reference"
+                        ),
+                    };
+                    bound.push(crate::protocol::BoundRep {
+                        slot: slot as u32,
+                        level: (packed >> 32) as u32,
+                        field: (packed & 0xffff_ffff) as u32,
+                    });
+                    let pairs = custom_count * 2;
+                    let bytes_shaped = (slot < pairs && slot % 2 == 1)
+                        || (slot == pairs + file_count && present & CLIP_IMAGE != 0);
+                    *rep = if bytes_shaped {
+                        Value::Blob(crate::protocol::Blob(std::sync::Arc::from(&[][..])))
+                    } else {
+                        Value::Str(String::new())
+                    };
+                }
                 let clip = clip_from_values(present, file_count, custom_count, reps, "set_drag_source");
-                TxOp::SetDragSource { widget, clip, operations, path: flat }
+                TxOp::SetDragSource { widget, clip, bound, operations, path: flat }
             }
             TX_SET_DROP_TARGET => {
                 let widget = WidgetId(r.u64());
@@ -2943,30 +2972,42 @@ impl Writer {
                     }
                 })
             }
-            TxOp::SetDragSource { widget, clip, operations, path } => {
+            TxOp::SetDragSource { widget, clip, bound, operations, path } => {
                 self.record(TX_SET_DRAG_SOURCE, |b, blobs| {
                     b.extend_from_slice(&widget.0.to_le_bytes());
-                    // The clip header (present, files, custom, reserved) is
-                    // write_clip's; here the reserved slot carries the
-                    // operations and the keys precede the reps.
-                    let mut body = Vec::new();
-                    write_clip(&mut body, clip, blobs);
-                    let (header, values) = body.split_at(16);
-                    b.extend_from_slice(&header[..12]);
+                    let mut present = 0u32;
+                    if clip.text.is_some() {
+                        present |= CLIP_TEXT;
+                    }
+                    if clip.html.is_some() {
+                        present |= CLIP_HTML;
+                    }
+                    if clip.image.is_some() {
+                        present |= CLIP_IMAGE;
+                    }
+                    b.extend_from_slice(&present.to_le_bytes());
+                    b.extend_from_slice(&(clip.files.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(clip.custom.len() as u32).to_le_bytes());
                     b.extend_from_slice(&operations.to_le_bytes());
                     b.extend_from_slice(&(path.len() as u32).to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
-                    // values: count u32, pad u32, then the items — the keys
-                    // are spliced in ahead of the reps under one count.
-                    let mut r = Reader { buf: values, at: 0, blobs: &|_| None };
-                    let count = r.u32() as usize;
-                    let _pad = r.u32();
-                    b.extend_from_slice(&((path.len() + count) as u32).to_le_bytes());
+                    let mask = bound.iter().fold(0u32, |m, r| m | (1u32 << r.slot));
+                    b.extend_from_slice(&mask.to_le_bytes());
+                    // The reps in canonical order, a bound slot's value
+                    // replaced by its packed element reference; the keys
+                    // ride ahead of them under one count.
+                    let mut reps = clip_values(clip);
+                    for r in bound {
+                        reps[r.slot as usize] =
+                            Value::I64(((u64::from(r.level) << 32) | u64::from(r.field)) as i64);
+                    }
+                    b.extend_from_slice(&((path.len() + reps.len()) as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     for key in path {
                         write_value(b, key, blobs);
                     }
-                    b.extend_from_slice(&values[8..]);
+                    for v in &reps {
+                        write_value(b, v, blobs);
+                    }
                 })
             }
             TxOp::SetDropTarget { widget, operations, path } => {
@@ -3274,6 +3315,29 @@ fn clip_from_values(
         clip.text = Some(clip_str(it.next(), "text"));
     }
     clip
+}
+
+/// A clip's values in the CANONICAL ORDER (write_clip's, one list).
+#[cfg(test)]
+fn clip_values(clip: &crate::protocol::Clip) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (id, bytes) in &clip.custom {
+        out.push(Value::Str(id.clone()));
+        out.push(Value::Blob(bytes.clone()));
+    }
+    for handle in &clip.files {
+        out.push(Value::I64(handle.0 as i64));
+    }
+    if let Some(image) = &clip.image {
+        out.push(Value::Blob(image.clone()));
+    }
+    if let Some(html) = &clip.html {
+        out.push(Value::Str(html.clone()));
+    }
+    if let Some(text) = &clip.text {
+        out.push(Value::Str(text.clone()));
+    }
+    out
 }
 
 fn clip_str(v: Option<Value>, what: &str) -> String {
@@ -3956,6 +4020,50 @@ mod tests {
                     ("dev.kaya/card".into(), Blob::from(&b"{}"[..])),
                 ],
             }),
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let table = w.blobs.clone();
+        let decoded = wire_decode_with(&w.into_bytes(), &table);
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// A drag source's bound slots ride the record as packed element
+    /// references under the `bound` mask and come back as BoundReps with
+    /// the slot's placeholder in the clip (docs/dnd-plan.md §4); a keyed
+    /// record's path rides ahead of the reps.
+    #[test]
+    fn drag_source_bound_slots_round_trip() {
+        use crate::protocol::{Blob, BoundRep, Clip};
+        let bound_clip = Clip {
+            text: Some(String::new()),
+            html: Some("<b>k</b>".into()),
+            custom: vec![("dev.kaya/note".into(), Blob::from(&[][..]))],
+            ..Clip::default()
+        };
+        let ops = vec![
+            TxOp::SetDragSource {
+                widget: WidgetId(31),
+                bound: vec![
+                    BoundRep { slot: bound_clip.slot_of_custom_bytes(0), level: 0, field: 1 },
+                    BoundRep { slot: bound_clip.slot_of_text(), level: 1, field: 0 },
+                ],
+                clip: bound_clip,
+                operations: DRAG_OP_COPY,
+                path: Vec::new(),
+            },
+            TxOp::SetDragSource {
+                widget: WidgetId(31),
+                clip: Clip { text: Some("yy".into()), ..Clip::default() },
+                bound: Vec::new(),
+                operations: DRAG_OP_COPY | DRAG_OP_MOVE,
+                path: vec![Value::from("y")],
+            },
         ];
         let mut w = Writer::new();
         for op in &ops {

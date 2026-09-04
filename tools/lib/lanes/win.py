@@ -138,6 +138,19 @@ ORDER = [
     [
      "dnd_java",
     ],
+    # THE CROSS-APP WITNESSES (docs/dnd-plan.md §5 step 7), each alone for
+    # dnd_rust's reason and one more: a second process's window is on the
+    # desktop and a real drag crosses between them, so a pooled leg would
+    # be dragged over AND would take the foreground the gesture needs.
+    # `dndwitness` is kaya SOURCE -> a stock Win32 OLE reader; `dndforeign`
+    # is a Win32 OLE source and Explorer -> kaya, which is the classic
+    # route's own reason for existing (probe 2).
+    [
+     "dndwitness_rust",
+    ],
+    [
+     "dndforeign_rust",
+    ],
     # ranges_rust ALONE: `type` injects OS-GLOBAL keystrokes and
     # `compose` starts a TSF composition in whatever document holds the
     # keyboard focus — a pooled leg stealing the foreground mid-scene

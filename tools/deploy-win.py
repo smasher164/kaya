@@ -764,6 +764,15 @@ kill_guests()
 # ONE LIST feeds both the flat-artifact manifest and the stamp. A .ps1
 # is NAMED individually (the .cmd/.vbs globs ship themselves), and
 # check-staging censuses this list against tools/guest/*.ps1 on disk.
+
+# THE FOREIGN PROCESS THE CROSS-APP WITNESSES DRAG WITH (docs/dnd-plan.md
+# §5 step 7): tools/win/dragprobe's stock Win32/OLE app, ONE copy shared
+# with the probe that measured probes 1 and 2, staged where the probe's
+# own run.py stages it so a hand run and the lane build the same tree.
+WITNESS_SOURCES = (sorted((ROOT / "tools/win/dragprobe/stock").glob("*"))
+                   + sorted((ROOT / "tools/win/dragprobe/shared").glob("*")))
+
+
 def deploy_artifacts():
     return (SCENE_EXES
             + [TARGET / "kaya.dll", BOOTSTRAP]
@@ -777,7 +786,8 @@ def deploy_artifacts():
                ROOT / "tools/guest/desk-warm.ps1",
                ROOT / "tools/guest/wait-exit.ps1",
                ROOT / "tools/guest/fetch-zip.ps1",
-               ROOT / "tools/guest/flightrec.ps1"])
+               ROOT / "tools/guest/flightrec.ps1",
+               ROOT / "tools/guest/dnd-witness.ps1"])
 
 
 def deploy_stamp():
@@ -799,7 +809,8 @@ def deploy_stamp():
               + sorted(p for p in (ROOT / "bindings/python/kaya").rglob("*")
                        if p.is_file())
               + [ROOT / "bindings/js/package.json"]
-              + sorted((ROOT / "bindings/js/kaya").glob("*.ts")))
+              + sorted((ROOT / "bindings/js/kaya").glob("*.ts"))
+              + WITNESS_SOURCES)
     h = hashlib.sha256()
     for p in inputs:
         body = p.read_bytes()
@@ -929,6 +940,22 @@ else:
                "-o C:\\kaya\\cs-out && copy /y C:\\kaya\\resources.pri "
                'C:\\kaya\\cs-out\\resources.pri >nul"') != 0:
         die("dotnet build (cs-out) failed on the VM")
+    # The foreign witness, in the probe's own tree. Its build is
+    # incremental and it is the ONLY thing on the VM that can hand kaya a
+    # classic-Win32 drag, so the witness legs say so by name when it is
+    # missing rather than timing out against nothing.
+    for d in ("dragprobe", "dragprobe\\src", "dragprobe\\src\\stock",
+              "dragprobe\\src\\shared"):
+        must_ssh(f"cmd /c if not exist C:\\kaya\\{d} mkdir C:\\kaya\\{d}")
+    if scp_to(sorted((ROOT / "tools/win/dragprobe/stock").glob("*")),
+              "C:/kaya/dragprobe/src/stock/") != 0:
+        die("deploy-win: could not ship the stock OLE witness")
+    if scp_to(sorted((ROOT / "tools/win/dragprobe/shared").glob("*")),
+              "C:/kaya/dragprobe/src/shared/") != 0:
+        die("deploy-win: could not ship the stock OLE witness's shared half")
+    if run_ssh('cmd /c "cd /d C:\\kaya\\dragprobe\\src\\stock && dotnet '
+               'build -v q --nologo -c Release"') != 0:
+        die("dotnet build (the stock OLE witness) failed on the VM")
     # Quote-free on purpose: Windows sshd re-wraps the command in its
     # own cmd /c "...", and interior double quotes re-pair across the
     # line (docs/traps.md).

@@ -276,6 +276,9 @@ module KayaApp
     copy,
     emptyClip,
     Clip (..),
+    emptyTplClip,
+    TplClip (..),
+    TplRep (..),
     Representation (..),
     readClipboard,
     setAccepts,
@@ -284,6 +287,10 @@ module KayaApp
     Dropped (..),
     setDragSource,
     setDropTarget,
+    setDragSourceAt,
+    setDropTargetAt,
+    setNodeDragSource,
+    setNodeDropTarget,
     setReorderable,
     onDrop,
     onDragEnded,
@@ -434,6 +441,35 @@ emptyClip =
       clipImage = Nothing,
       clipFiles = [],
       clipCustom = []
+    }
+
+-- | ONE REPRESENTATION of a TEMPLATE drag payload (docs/dnd-plan.md §4):
+-- a constant, or the ROW'S OWN FIELD, which every stamped copy resolves
+-- from its own record — @TplField (field \@"title" \@Item)@ binds the way
+-- @label (field \@"title" \@Item)@ does.
+data TplRep v = TplConst v | TplField (KField v)
+
+-- | 'Clip' one zone up: what a TEMPLATE node hands over, each
+-- representation a constant or the row's own field. A file never binds —
+-- a picked handle is not a field.
+data TplClip = TplClip
+  { tplClipText :: Maybe (TplRep String),
+    tplClipHtml :: Maybe (TplRep String),
+    tplClipImage :: Maybe (TplRep BS.ByteString),
+    tplClipFiles :: [PickedFile],
+    tplClipCustom :: [(String, TplRep BS.ByteString)]
+  }
+
+-- | The empty template clip, to fill in:
+-- @TplDraggable emptyTplClip { tplClipText = Just (TplField (field \@"title" \@Item)) } [OpCopy]@.
+emptyTplClip :: TplClip
+emptyTplClip =
+  TplClip
+    { tplClipText = Nothing,
+      tplClipHtml = Nothing,
+      tplClipImage = Nothing,
+      tplClipFiles = [],
+      tplClipCustom = []
     }
 
 -- | One file the picker answered with: a handle to redeem, a display
@@ -1666,7 +1702,76 @@ operationOf m
 -- LIVE WIDGETS ONLY, and the argument type is the refusal: the template
 -- zone lands with its own slice (docs\/dnd-plan.md §4).
 setDragSource :: Widget -> Clip -> [Op] -> Build ()
-setDragSource (Widget w) clip ops = emitBIO $ do
+setDragSource (Widget w) clip ops = emitBIO (dragSourceRecord w [] clip ops)
+
+-- | The TEMPLATE builder (docs/dnd-plan.md §4): the reps in canonical
+-- order, a bound slot carrying the i64 @level << 32 | field@ under the
+-- @bound@ mask. Level 0 is the row this template is stamped for, as it
+-- is in every bind*Field binder.
+tplDragSourceRecord :: Word64 -> TplClip -> [Op] -> IO Builder
+tplDragSourceRecord w clip ops = do
+  customValues <-
+    concat
+      <$> mapM
+        ( \(ident, rep) -> case rep of
+            TplField (KField i) ->
+              return [W.VStr (acceptToken ident), W.VI64 (fromIntegral i)]
+            TplConst bytes -> do
+              h <- registerBlob bytes
+              return [W.VStr (acceptToken ident), W.VBlob h]
+        )
+        (tplClipCustom clip)
+  imageValue <- case tplClipImage clip of
+    Nothing -> return []
+    Just (TplField (KField i)) -> return [W.VI64 (fromIntegral i)]
+    Just (TplConst bytes) -> (: []) . W.VBlob <$> registerBlob bytes
+  let strValue rep = case rep of
+        TplField (KField i) -> W.VI64 (fromIntegral i)
+        TplConst text -> W.VStr text
+      present =
+        maybe 0 (const W.clipText) (tplClipText clip)
+          + maybe 0 (const W.clipHtml) (tplClipHtml clip)
+          + maybe 0 (const W.clipImage) (tplClipImage clip)
+      files = map (W.VI64 . fromIntegral . pickedHandle) (tplClipFiles clip)
+      values =
+        customValues
+          ++ files
+          ++ imageValue
+          ++ maybe [] ((: []) . strValue) (tplClipHtml clip)
+          ++ maybe [] ((: []) . strValue) (tplClipText clip)
+      -- The bound slots BY POSITION, canonical order: a custom pair's
+      -- second half, then the image, the html and the text.
+      afterCustom = 2 * length (tplClipCustom clip) + length (tplClipFiles clip)
+      afterImage = afterCustom + length imageValue
+      afterHtml = afterImage + maybe 0 (const 1) (tplClipHtml clip)
+      slots =
+        [2 * i + 1 | (i, (_, TplField _)) <- zip [0 :: Int ..] (tplClipCustom clip)]
+          ++ [afterCustom | isTplField (tplClipImage clip)]
+          ++ [afterImage | isTplField (tplClipHtml clip)]
+          ++ [afterHtml | isTplField (tplClipText clip)]
+      bound = sum [2 ^ s | s <- slots] :: Word32
+      empty =
+        present == 0 && null (tplClipFiles clip) && null (tplClipCustom clip)
+  return
+    ( W.txSetDragSource
+        w
+        present
+        (fromIntegral (length (tplClipFiles clip)))
+        (fromIntegral (length (tplClipCustom clip)))
+        (if empty then 0 else operationMask ops)
+        0
+        bound
+        values
+    )
+
+isTplField :: Maybe (TplRep v) -> Bool
+isTplField (Just (TplField _)) = True
+isTplField _ = False
+
+-- | The one set_drag_source builder the live, template and keyed forms
+-- share: KEYS FIRST, then the reps (set_column_headers' convention).
+dragSourceRecord :: Word64 -> [W.Value] -> Clip -> [Op] -> IO Builder
+dragSourceRecord w keys clip ops = do
   customValues <-
     concat
       <$> mapM
@@ -1697,8 +1802,9 @@ setDragSource (Widget w) clip ops = emitBIO $ do
         (fromIntegral (length (clipFiles clip)))
         (fromIntegral (length (clipCustom clip)))
         (if empty then 0 else operationMask ops)
+        (fromIntegral (length keys))
         0
-        values
+        (keys ++ values)
     )
 
 -- | DECLARE that a widget receives drops, performing these operations;
@@ -1708,6 +1814,20 @@ setDragSource (Widget w) clip ops = emitBIO $ do
 setDropTarget :: Widget -> [Op] -> Build ()
 setDropTarget (Widget w) ops =
   emitB (W.txSetDropTarget w (operationMask ops) 0 [])
+
+-- | ONE STAMPED COPY's drag declaration (docs\/dnd-plan.md §4): the
+-- template node and the copy's keys, outermost first. The per-row
+-- payload an app declares after the row's insert; it overrides the
+-- template's own for that copy and follows it through a re-stamp.
+setDragSourceAt :: Node -> [W.Value] -> Clip -> [Op] -> Build ()
+setDragSourceAt (Node n) keys clip ops =
+  emitBIO (dragSourceRecord n keys clip ops)
+
+-- | 'setDragSourceAt''s twin: ONE stamped copy receives drops with these
+-- operations, taking what the template's 'TplAccepts' names.
+setDropTargetAt :: Node -> [W.Value] -> [Op] -> Build ()
+setDropTargetAt (Node n) keys ops =
+  emitB (W.txSetDropTarget n (operationMask ops) (fromIntegral (length keys)) keys)
 
 -- | Rows of this live For drag within their own collection
 -- (docs\/dnd-plan.md D8): the landing arrives at 'onDrop' on the For's
@@ -2629,6 +2749,16 @@ data TplAttr where
   -- accept list, so without this 'onPaste' at a Node could never fire
   -- (docs\/tpl-props-plan.md §1).
   TplAccepts :: [String] -> TplAttr
+  -- | What every stamped copy of this node hands over when dragged, and
+  -- the operations it allows, carried with each copy's own identity —
+  -- each representation a constant or the ROW'S OWN FIELD
+  -- (docs\/dnd-plan.md §4). A copy's OWN payload, constants only, is
+  -- 'setDragSourceAt' after its insert.
+  TplDraggable :: TplClip -> [Op] -> TplAttr
+  -- | Every stamped copy of this node receives drops, performing these
+  -- operations; what it TAKES is its 'TplAccepts' list. The landing
+  -- arrives at 'onDrop' on the Node, with the copy's keys.
+  TplDropTarget :: [Op] -> TplAttr
 
 applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
@@ -2638,9 +2768,20 @@ applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
+applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
+applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
 
 setNodeAccepts :: Node -> [String] -> Tpl ()
 setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
+
+-- | The dynamic path under 'TplDraggable'; a withdraw needs it.
+setNodeDragSource :: Node -> TplClip -> [Op] -> Tpl ()
+setNodeDragSource (Node n) clip ops = emitTIO (tplDragSourceRecord n clip ops)
+
+-- | The dynamic path under 'TplDropTarget'.
+setNodeDropTarget :: Node -> [Op] -> Tpl ()
+setNodeDropTarget (Node n) ops =
+  emitT (W.txSetDropTarget n (operationMask ops) 0 [])
 
 setNodeInset :: Node -> Double -> Tpl ()
 setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
@@ -3280,7 +3421,9 @@ data App = App
     appWidgetPastes :: IORef (Map.Map Word64 (Representation -> IO ())),
     appNodePastes :: IORef (Map.Map Word64 ([W.Value] -> Representation -> IO ())),
     appWidgetDrops :: IORef (Map.Map Word64 (Dropped -> IO ())),
+    appNodeDrops :: IORef (Map.Map Word64 ([W.Value] -> Dropped -> IO ())),
     appDragEnded :: IORef (Map.Map Word64 (Maybe Op -> IO ())),
+    appNodeDragEnded :: IORef (Map.Map Word64 ([W.Value] -> Maybe Op -> IO ())),
     -- Menu dispatch tables, keyed by MENU ITEM id — their own id space,
     -- separate from every widget/node table. The node flavors receive
     -- the stamped copy's key path.
@@ -3473,6 +3616,17 @@ class HandlerTarget e where
   -- 'columns' live, 'columnsAt' per stamped copy (docs\/tables-plan.md).
   onSort :: App -> e -> Keyed e (Int -> IO ()) -> IO ()
 
+  -- | Take dropped content here (docs\/dnd-plan.md D8): a live widget's
+  -- own drops or a reorderable For's landings, and at a Node the drops on
+  -- every stamped copy, the copy's keys first. Only fires for a widget
+  -- that declared 'DropTarget' over an accept list.
+  onDrop :: App -> e -> Keyed e (Dropped -> IO ()) -> IO ()
+
+  -- | A drag that began here has ended: 'Nothing' is a cancelled or
+  -- refused drag, not an error. At a Node — a reorderable row is one —
+  -- the copy's keys come first.
+  onDragEnded :: App -> e -> Keyed e (Maybe Op -> IO ()) -> IO ()
+
 instance HandlerTarget Widget where
   type Keyed Widget p = p
   onClick app (Widget n) handler =
@@ -3487,6 +3641,10 @@ instance HandlerTarget Widget where
     modifyIORef' (appWidgetPastes app) (Map.insert n handler)
   onSort app (Widget n) handler =
     modifyIORef' (appSortHandlers app) (Map.insert n handler)
+  onDrop app (Widget n) handler =
+    modifyIORef' (appWidgetDrops app) (Map.insert n handler)
+  onDragEnded app (Widget n) handler =
+    modifyIORef' (appDragEnded app) (Map.insert n handler)
 
 instance HandlerTarget Node where
   type Keyed Node p = [W.Value] -> p
@@ -3502,22 +3660,10 @@ instance HandlerTarget Node where
     modifyIORef' (appNodePastes app) (Map.insert n handler)
   onSort app (Node n) handler =
     modifyIORef' (appNodeSorts app) (Map.insert n handler)
-
--- | Take dropped content at a live widget, or a reorderable For's
--- landings (docs\/dnd-plan.md D8). Only fires for a widget that
--- declared 'DropTarget' over an accept list.
---
--- LIVE WIDGETS ONLY, and the argument type is the refusal: a stamped
--- copy's drops land with the template zone's own slice (§4).
-onDrop :: App -> Widget -> (Dropped -> IO ()) -> IO ()
-onDrop app (Widget w) handler =
-  modifyIORef' (appWidgetDrops app) (Map.insert w handler)
-
--- | A drag that began at this widget has ended: 'Nothing' is a
--- cancelled or refused drag, not an error.
-onDragEnded :: App -> Widget -> (Maybe Op -> IO ()) -> IO ()
-onDragEnded app (Widget w) handler =
-  modifyIORef' (appDragEnded app) (Map.insert w handler)
+  onDrop app (Node n) handler =
+    modifyIORef' (appNodeDrops app) (Map.insert n handler)
+  onDragEnded app (Node n) handler =
+    modifyIORef' (appNodeDragEnded app) (Map.insert n handler)
 
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
@@ -3583,7 +3729,9 @@ newApp =
     <*> newIORef Map.empty -- appWidgetPastes
     <*> newIORef Map.empty -- appNodePastes
     <*> newIORef Map.empty -- appWidgetDrops
+    <*> newIORef Map.empty -- appNodeDrops
     <*> newIORef Map.empty -- appDragEnded
+    <*> newIORef Map.empty -- appNodeDragEnded
     <*> newIORef Map.empty -- appMenuActivated
     <*> newIORef Map.empty -- appMenuActivatedNode
     <*> newIORef Map.empty -- appMenuToggled
@@ -3758,11 +3906,12 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindDropped -> do
           -- A drop rides the same tag with four more words
-          -- (docs/dnd-plan.md D1); the template zone is refused, so a
-          -- keyed drop reaches no handler.
-          case (drop_, keys) of
-            (Just d, []) -> do
-              handlers <- readIORef (appWidgetDrops app)
+          -- (docs/dnd-plan.md D1), so it arrives on the ordinary
+          -- widget/node split — a stamped copy's landing and a
+          -- reorderable row's own drag_ended carry the copy's keys (§4).
+          case drop_ of
+            Nothing -> return ()
+            Just d -> do
               let answer =
                     Dropped
                       { droppedPoint = (W.dropX d, W.dropY d),
@@ -3771,15 +3920,25 @@ dispatchLoop app = do
                         droppedBefore = W.dropBefore d,
                         droppedClip = representationOf (Just (W.dropClip d))
                       }
-              dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
-            _ -> return ()
+              case keys of
+                [] -> do
+                  handlers <- readIORef (appWidgetDrops app)
+                  dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
+                ks -> do
+                  handlers <- readIORef (appNodeDrops app)
+                  dispatch (mapM_ (\h -> h ks answer) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindDragEnded -> do
-          case (payload, keys) of
-            (Just (W.VI64 mask), []) -> do
-              handlers <- readIORef (appDragEnded app)
+          case payload of
+            Just (W.VI64 mask) -> do
               let answer = operationOf (fromIntegral mask)
-              dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
+              case keys of
+                [] -> do
+                  handlers <- readIORef (appDragEnded app)
+                  dispatch (mapM_ ($ answer) (Map.lookup ident handlers))
+                ks -> do
+                  handlers <- readIORef (appNodeDragEnded app)
+                  dispatch (mapM_ (\h -> h ks answer) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindFileDialogResult -> do

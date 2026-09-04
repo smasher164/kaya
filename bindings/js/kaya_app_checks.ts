@@ -413,26 +413,134 @@ if (isMainThread) {
   check("the onUndone handler fires with the label", undoneLabel === "add e");
 
   // ------------------------------------------------- the drag surface
-  // (docs/dnd-plan.md D1, D3, §4). The template zone is refused BY NAME
-  // here, as the size policy is: one handle serves both zones.
-  check("a template drag source is refused by name", throws(() => {
-    app.window(() => {
-      kaya.column(() => {
-        for (const _t of todos) {
-          kaya.label("x").draggable({ text: "hi" });
-        }
-      });
+  // (docs/dnd-plan.md D1, D3, §4). THE TEMPLATE ZONE: one handle serves
+  // both zones, so the declaration is the same chain on a template node
+  // — every stamped copy is born with it — and the KEYED form names one
+  // copy after its insert.
+  const kindOfRec = (r: Uint8Array): number => new DataView(r.buffer, r.byteOffset).getUint16(4, true);
+  const firstStr = (r: Uint8Array, at: number): string | null => {
+    const view = new DataView(r.buffer, r.byteOffset);
+    if (view.getUint32(at + 8, true) !== wire.VALUE_STR) return null;
+    const size = view.getUint32(at + 12, true);
+    return new TextDecoder().decode(r.subarray(at + 16, at + 16 + size));
+  };
+  shipped.length = 0;
+  let dndNode = 0;
+  let dndHandle!: ReturnType<typeof kaya.label>;
+  app.window(() => {
+    kaya.column(() => {
+      for (const _t of todos) {
+        dndHandle = kaya
+          .label("x")
+          .accepts(kaya.ACCEPT_TEXT)
+          .draggable({ text: "hi" })
+          .dropTarget(kaya.OP_COPY)
+          .onDrop(() => {})
+          .onDragEnded(() => {});
+        dndNode = dndHandle.id;
+      }
     });
-  }, /LIVE-ZONE declaration/));
-  check("a template drop target is refused by name", throws(() => {
-    app.window(() => {
-      kaya.column(() => {
-        for (const _t of todos) {
-          kaya.label("x").accepts(kaya.ACCEPT_TEXT).dropTarget(kaya.OP_COPY);
-        }
-      });
+  });
+  check("a template node is a drag source with a CONSTANT payload", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DRAG_SOURCE);
+    if (recs.length !== 1) return false;
+    const view = new DataView(recs[0]!.buffer, recs[0]!.byteOffset);
+    return Number(view.getBigUint64(8, true)) === dndNode && view.getUint32(32, true) === 0;
+  })());
+  check("a template node is a drop target for every copy", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DROP_TARGET);
+    if (recs.length !== 1) return false;
+    const view = new DataView(recs[0]!.buffer, recs[0]!.byteOffset);
+    return Number(view.getBigUint64(8, true)) === dndNode && view.getUint32(20, true) === 0;
+  })());
+  // THE REGISTRY IS ADDITIVE ACROSS OCCURRENCE KINDS (docs/traps.md): a
+  // node is a drop target AND a drag source, so the second registration
+  // must not replace the first.
+  check("a node carries a drop handler AND a drag_ended one", (() => {
+    const nodes = (app as unknown as { _nodeHandlers: Map<string, unknown> })._nodeHandlers;
+    return nodes.has(`${wire.OCC_DROPPED}:${dndNode}`) && nodes.has(`${wire.OCC_DRAG_ENDED}:${dndNode}`);
+  })());
+  // THE ELEMENT-BOUND PAYLOAD (docs/dnd-plan.md §4, ruled 2026-09-03): a
+  // representation IS the row's own field, the way `label({ bind: row.title })`
+  // binds — the slot carries `level << 32 | field` and the `bound` mask names
+  // it, so every stamped copy resolves its own.
+  const valuesOf = (r: Uint8Array, at: number): unknown[] => {
+    const count = new DataView(r.buffer, r.byteOffset).getUint32(at, true);
+    const out: unknown[] = [];
+    let off = at + 8;
+    for (let i = 0; i < count; i++) {
+      const [v, next] = wire.parse_value(r, off);
+      out.push(v);
+      off = next;
+    }
+    return out;
+  };
+  shipped.length = 0;
+  let boundHandle!: ReturnType<typeof kaya.label>;
+  let boundField!: K.FieldRef;
+  app.window(() => {
+    kaya.column(() => {
+      for (const t of todos) {
+        boundField = t.title as unknown as K.FieldRef;
+        boundHandle = kaya.label({ bind: t.title }).draggable({
+          text: t.title,
+          custom: { "dev.kaya/note": new TextEncoder().encode("note!") },
+          operations: [kaya.OP_COPY],
+        });
+      }
     });
-  }, /LIVE-ZONE declaration/));
+  });
+  check("a bound drag payload names its slots in the mask", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DRAG_SOURCE);
+    if (recs.length !== 1) return false;
+    // Canonical slots: the custom id 0, its bytes 1, then text 2.
+    return new DataView(recs[0]!.buffer, recs[0]!.byteOffset).getUint32(36, true) === 1 << 2;
+  })());
+  check("a bound slot carries level << 32 | field, its neighbours untouched", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DRAG_SOURCE);
+    if (recs.length !== 1) return false;
+    const values = valuesOf(recs[0]!, 40);
+    return values.length === 3 && values[0] === "dev.kaya/note" && values[2] === 0;
+  })());
+  app.build(() => {
+    // A SIGNAL HAS NO ROW: refused by name rather than coerced to a repr
+    // on every stamped copy.
+    check(
+      "a drag payload bound to a signal is refused by name",
+      throws(() => kaya.label("x").draggable({ text: kaya.signal("s") as unknown as string }), /cannot be a signal/),
+    );
+    // THE KEYED FORM NAMES ONE COPY, whose payload is resolved already.
+    check(
+      "a row's field on the keyed form is refused by name",
+      throws(() => boundHandle.draggableAt(["k"], { text: boundField }), /already resolved/),
+    );
+    // A LIVE WIDGET HAS NO ROW: the field was minted by the tracer above.
+    check(
+      "a live widget's drag payload cannot bind a row's field",
+      throws(() => kaya.label("x").draggable({ text: boundField }), /has no row/),
+    );
+  });
+  // THE KEYED FORM: after the row's insert, one copy by (node, keys).
+  shipped.length = 0;
+  app.build(() => {
+    dndHandle.draggableAt(["y"], { text: "y", operations: [kaya.OP_COPY] });
+    dndHandle.dropTargetAt(["y"], kaya.OP_COPY);
+  });
+  check("draggableAt carries the copy's keys before the payload", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DRAG_SOURCE);
+    if (recs.length !== 1) return false;
+    return new DataView(recs[0]!.buffer, recs[0]!.byteOffset).getUint32(32, true) === 1 && firstStr(recs[0]!, 40) === "y";
+  })());
+  check("dropTargetAt carries the copy's keys", (() => {
+    const recs = shipped.at(-1)!.filter((r) => kindOfRec(r) === wire.TX_SET_DROP_TARGET);
+    if (recs.length !== 1) return false;
+    return new DataView(recs[0]!.buffer, recs[0]!.byteOffset).getUint32(20, true) === 1 && firstStr(recs[0]!, 24) === "y";
+  })());
+  // AND A LIVE WIDGET HAS NO KEYS: the keyed form names one stamped copy.
+  app.build(() => {
+    check("draggableAt on a live widget is refused by name", throws(() => kaya.label("x").draggableAt(["k"], { text: "hi" }), /names ONE STAMPED COPY/));
+    check("dropTargetAt on a live widget is refused by name", throws(() => kaya.label("x").dropTargetAt(["k"], kaya.OP_COPY), /names ONE STAMPED COPY/));
+  });
   app.build(() => {
     // LINK AND ASK ARE REFUSED (D3), and the word is named in the refusal.
     check("an operation outside copy and move is refused by name", throws(() => kaya.label("x").draggable({ text: "hi", operations: ["link"] }), /"link" is not a drag operation/));

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x4f5c2121bd4d241a
+let kayaSpecHash: UInt64 = 0xa3cb4cff19aad964
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -1124,12 +1124,25 @@ struct KayaDragPayload {
             pressedAt = sourcePayload == nil ? nil : convert(event.locationInWindow, from: nil)
         }
 
+        /// THE WRITER MUST CARRY A TYPE. An empty NSPasteboardItem is ZERO
+        /// pasteboard items and AppKit throws NSGenericException — "There
+        /// are 0 items on the pasteboard, but 1 drag images" — the moment a
+        /// REAL gesture starts the session (measured 2026-09-03 with
+        /// tools/mac/dragwitness; docs/traps.md). The payload itself is
+        /// written at BOARD level in willBeginAt below, which AppKit calls
+        /// only once the drag really begins.
+        private func dragWriter(_ payload: KayaDragPayload) -> NSPasteboardItem {
+            let writer = NSPasteboardItem()
+            writer.setString(payload.text ?? "", forType: .string)
+            return writer
+        }
+
         override func mouseDragged(with event: NSEvent) {
-            guard let start = pressedAt, sourcePayload != nil else { return }
+            guard let start = pressedAt, let payload = sourcePayload else { return }
             let now = convert(event.locationInWindow, from: nil)
             guard hypot(now.x - start.x, now.y - start.y) >= 4 else { return }
             pressedAt = nil
-            let item = NSDraggingItem(pasteboardWriter: NSPasteboardItem())
+            let item = NSDraggingItem(pasteboardWriter: dragWriter(payload))
             item.setDraggingFrame(bounds, contents: nil)
             beginDraggingSession(with: [item], event: event, source: self)
         }
@@ -1235,11 +1248,18 @@ struct KayaDragPayload {
         let mask: NSDragOperation
         let location: NSPoint
         weak var window: NSWindow?
-        init(board: NSPasteboard, mask: NSDragOperation, location: NSPoint, window: NSWindow?) {
+        /// nil `draggingSource` is AppKit's own spelling of a foreign drag,
+        /// which is what `drag_file` presents (docs/dnd-plan.md D6).
+        let local: Bool
+        init(
+            board: NSPasteboard, mask: NSDragOperation, location: NSPoint, window: NSWindow?,
+            local: Bool = true
+        ) {
             self.board = board
             self.mask = mask
             self.location = location
             self.window = window
+            self.local = local
         }
         var draggingDestinationWindow: NSWindow? { window }
         var draggingSourceOperationMask: NSDragOperation { mask }
@@ -1247,7 +1267,7 @@ struct KayaDragPayload {
         var draggedImageLocation: NSPoint { location }
         var draggedImage: NSImage? { nil }
         var draggingPasteboard: NSPasteboard { board }
-        var draggingSource: Any? { self }
+        var draggingSource: Any? { local ? self : nil }
         var draggingSequenceNumber: Int { 0 }
         func slideDraggedImage(to screenPoint: NSPoint) {}
         func enumerateDraggingItems(
@@ -1315,6 +1335,33 @@ struct KayaDragPayload {
         KayaHost.emitDragEnded(source.identityTag, kayaDragOpMask(op))
         return nil
     }
+
+    /// Drop `path` on the destination as a FOREIGN source would (docs/
+    /// dnd-plan.md D6): a real named pasteboard carrying the file URL, no
+    /// source of ours, so the verdict answers `local: false` and the
+    /// picked-table redemption is the whole observable. Main thread.
+    func kayaDriveFileDrop(path: String, destination: KayaNode) -> String? {
+        guard let view = kayaDragSurfaces[destination.id] else {
+            return "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
+        }
+        guard FileManager.default.fileExists(atPath: path) else {
+            return "no file at \(path) — the scene's guest writes the file it drops (clipboard_seed's rule)"
+        }
+        let board = NSPasteboard(name: .init("dev.kaya.dragfile.\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.declareTypes([.fileURL], owner: nil)
+        board.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
+        let point = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+        let info = KayaDragInfo(
+            board: board, mask: [.copy], location: view.convert(point, to: nil),
+            window: view.window, local: false)
+        var op = view.draggingEntered(info)
+        if op != [] { op = view.draggingUpdated(info) }
+        if op != [] {
+            if !view.performDragOperation(info) { op = [] }
+        }
+        return nil
+    }
 #endif
 
 #if !os(macOS)
@@ -1370,6 +1417,18 @@ struct KayaDragPayload {
         return provider
     }
 
+    /// A provider whose item is a FILE. NO `public.file-url` COMES OFF A REAL
+    /// FOREIGN DROP — measured on the pad 2026-09-03
+    /// (docs/probes/dnd-probe-ios-2026-09-03.md measurement 3, docs/traps.md):
+    /// the stock Files app offers `com.apple.DocumentManager.FINode.File` and
+    /// the content type, so a file is told by its suggested NAME plus a
+    /// representation `loadFileRepresentation` can copy.
+    func kayaProviderIsFile(_ provider: NSItemProvider) -> Bool {
+        if provider.registeredTypeIdentifiers.contains(kayaClipUTI("files")) { return true }
+        guard let name = provider.suggestedName, !name.isEmpty else { return false }
+        return provider.hasItemConformingToTypeIdentifier("public.data")
+    }
+
     /// What a session offers, in kaya's vocabulary: the closed kinds as a mask
     /// and the custom ids among `accepted` it carries. THE TYPES ANSWER, never
     /// the bytes — the hover verdict is synchronous (docs/dnd-plan.md §0).
@@ -1384,7 +1443,7 @@ struct KayaDragPayload {
         if types.contains(kayaClipUTI("image")) || types.contains("public.tiff") {
             mask |= kayaClipImage
         }
-        if types.contains(kayaClipUTI("files")) { mask |= kayaClipFiles }
+        if providers.contains(where: kayaProviderIsFile) { mask |= kayaClipFiles }
         return (mask, customAccepted.filter { types.contains($0) })
     }
 
@@ -1411,16 +1470,22 @@ struct KayaDragPayload {
             }
             return
         }
-        if kinds & kayaClipFiles != 0, let provider = offering(kayaClipUTI("files")) {
+        if kinds & kayaClipFiles != 0, let provider = providers.first(where: kayaProviderIsFile) {
             // THE BYTES ARE KEPT, NOT THE HANDLE (docs/dnd-plan.md D6): the
             // provider's copy dies when this callback returns, so the arm
             // copies it into the container and registers THAT with the picked
             // table, exactly as the picker registers a picked URL.
             _ = provider.loadFileRepresentation(forTypeIdentifier: "public.item") { url, _ in
                 guard let url else { return deliver(nil) }
+                // THE NAME IS THE PROVIDER'S, NOT THE TEMP COPY'S: measured
+                // 2026-09-03 (docs/traps.md) — a provider that resolves the
+                // file through a DATA representation writes a copy named
+                // after the TYPE (`text.txt`), and only `suggestedName`
+                // carries what the user dropped.
+                let name = provider.suggestedName ?? url.lastPathComponent
                 let kept = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingPathComponent("kaya-drop-\(UUID().uuidString)")
-                    .appendingPathComponent(url.lastPathComponent)
+                    .appendingPathComponent(name)
                 do {
                     try FileManager.default.createDirectory(
                         at: kept.deletingLastPathComponent(),
@@ -1434,7 +1499,7 @@ struct KayaDragPayload {
                     answer(
                         KayaClipValue(
                             clip: kayaClipFiles, locators: [kept.absoluteString],
-                            names: [url.lastPathComponent]))
+                            names: [name]))
                 }
             }
             return
@@ -1681,18 +1746,20 @@ struct KayaDragPayload {
     final class KayaDropSessionDouble: NSObject, UIDropSession {
         let items: [UIDragItem]
         let point: CGPoint
-        let local: KayaDragSessionDouble
+        /// nil `localDragSession` is UIKit's own spelling of a foreign drag,
+        /// which is what `drag_file` presents (docs/dnd-plan.md D6).
+        let local: KayaDragSessionDouble?
         let progress = Progress()
         var progressIndicatorStyle: UIDropSessionProgressIndicatorStyle = .none
 
-        init(items: [UIDragItem], point: CGPoint, local: KayaDragSessionDouble) {
+        init(items: [UIDragItem], point: CGPoint, local: KayaDragSessionDouble?) {
             self.items = items
             self.point = point
             self.local = local
         }
 
         var localDragSession: (any UIDragSession)? { local }
-        var allowsMoveOperation: Bool { local.allowsMoveOperation }
+        var allowsMoveOperation: Bool { local?.allowsMoveOperation ?? false }
         var isRestrictedToDraggingApplication: Bool { false }
         func location(in view: UIView) -> CGPoint { point }
         func hasItemsConforming(toTypeIdentifiers typeIdentifiers: [String]) -> Bool {
@@ -1768,6 +1835,38 @@ struct KayaDragPayload {
             if op != kayaDragOpNone { view.dropInteraction(site, performDrop: session) }
         }
         KayaHost.emitDragEnded(source.identityTag, op)
+        return nil
+    }
+
+    /// Drop `path` on the destination as a FOREIGN source would (docs/
+    /// dnd-plan.md D6): a real `NSItemProvider` over the file with NO drag
+    /// session behind it, which is UIKit's spelling of foreign, so the verdict
+    /// answers `local: false` and the picked-table redemption is the whole
+    /// observable. No source of ours, so no `drag_ended`. Main thread.
+    func kayaDriveFileDrop(path: String, destination: KayaNode) -> String? {
+        guard let view = kayaDragSurfaces[destination.id], let site = view.dropSite else {
+            return
+                "\(destination.kind == kindLabel ? "label" : "widget") \(destination.id) is not a drop destination — it declares no drop_target and sits in no reorderable For"
+        }
+        guard FileManager.default.fileExists(atPath: path) else {
+            return "no file at \(path) — the scene's guest writes the file it drops"
+        }
+        let url = URL(fileURLWithPath: path)
+        guard let provider = NSItemProvider(contentsOf: url) else {
+            return "no NSItemProvider for \(path)"
+        }
+        // A REAL foreign file provider carries the file's name (probe 5's
+        // Files-app measurement); `NSItemProvider(contentsOf:)` leaves
+        // suggestedName nil, so the double would be unfaithful without this.
+        provider.suggestedName = url.lastPathComponent
+        let point = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        let session = KayaDropSessionDouble(
+            items: [UIDragItem(itemProvider: provider)], point: point, local: nil)
+        guard view.dropInteraction(site, canHandle: session) else { return nil }
+        let op = view.dropInteraction(site, sessionDidUpdate: session).operation
+        if kayaDragOpMask(op) != kayaDragOpNone {
+            view.dropInteraction(site, performDrop: session)
+        }
         return nil
     }
 #endif
@@ -6505,6 +6604,31 @@ private func kayaRunScript(_ script: String) {
                     return kayaDriveDrag(source: src, destination: dst, reorder: reorder)
                 }
                 if let off { failures.append("drag: \(off)") }
+            case "drag_file":
+                // drag_file "<path>" to <destination> — a foreign file drop
+                // (docs/dnd-plan.md D6); the path is quoted and $TMP/$PID
+                // expanded like clipboard_seed's.
+                let spec = parts.dropFirst().joined(separator: " ")
+                guard spec.hasPrefix("\""),
+                    let close = spec.dropFirst().firstIndex(of: "\"")
+                else {
+                    failures.append("drag_file wants a quoted path first")
+                    break
+                }
+                let rawPath = String(spec[spec.index(after: spec.startIndex)..<close])
+                let tail = spec[spec.index(after: close)...].split(separator: " ").map(String.init)
+                guard tail.count == 2, tail[0] == "to" else {
+                    failures.append("drag_file wants `\"<path>\" to <destination>`")
+                    break
+                }
+                let path = kayaExpandPath(rawPath)
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let dst = kayaAnyTarget(Substring(tail[1])) else {
+                        return "no such destination \(tail[1])"
+                    }
+                    return kayaDriveFileDrop(path: path, destination: dst)
+                }
+                if let off { failures.append("drag_file: \(off)") }
             case "scroll_to_row":
                 // The core maps the KEY to an index in the collection's current
                 // order and the tier scrolls that row to the viewport's TOP. An

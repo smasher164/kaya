@@ -1312,6 +1312,73 @@ print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers pinned, "
       f"{len(KEYED_ARMS) + len(COLUMN_ONLY)} watched negatives refused",
       file=sys.stderr)
 
+# --- THE REORDER'S INSERTION INDICATOR, ON THE ONE BACKEND THAT DRAWS
+# --- ITS OWN (docs/dnd-plan.md §5 step 7)
+# WinUI declines `CanReorderItems` (D8), so the platform draws no
+# insertion line and kaya draws it. NO SCENE CAN SEE IT: the line is
+# pixels, and expect_order, the drop's anchor and its before bit all
+# answer identically with it gone — which is how a reorder could ship
+# with no landing affordance at all and every lane stay green. So the
+# four arms are byte-frozen here, doctored away one at a time.
+WINUI = "crates/kaya/src/winui/mod.rs"
+DROP_LINE_ARMS = [
+    ("shown at the landing edge while a row drag hovers a reorderable row",
+     "    if !dropping && reorder_row && verdict != crate::wire::DRAG_OP_NONE {\n"
+     "        let _ = show_drop_line(&element, upper);\n"
+     "    } else {\n"
+     "        hide_drop_line();\n"
+     "    }",
+     "    let _ = (reorder_row, upper);"),
+    ("cleared when the pointer leaves the row",
+     "    element.DragLeave(&DragEventHandler::new(move |_, _| {\n"
+     "        hide_drop_line();\n"
+     "        Ok(())\n"
+     "    }))?;\n",
+     ""),
+    ("painted in the platform's own token, never a literal",
+     '    "Background=\\"{ThemeResource AccentFillColorDefaultBrush}\\" ",',
+     '    "Background=\\"#FF0078D4\\" ",'),
+    ("an adorner Popup, never a child of the For's own panel",
+     "            let popup = Popup::new()?;\n"
+     "            popup.SetChild(&line)?;",
+     "            let popup = Popup::new()?;"),
+]
+
+
+def drop_line_problems(text):
+    bad = []
+    for what, marker, _ in DROP_LINE_ARMS:
+        if text.count(marker) != 1:
+            bad.append(f"{WINUI}: the reorder insertion indicator is no "
+                       f"longer {what} — this arm's exact text is gone "
+                       f"({marker.strip().splitlines()[0]!r})")
+    # A LITERAL COLOUR IS THE BREACH the token clause exists to refuse,
+    # and the marker above is only one spelling of it.
+    xaml = re.search(r"const DROP_LINE_XAML.*?;", text, re.S)
+    if xaml and re.search(r"#[0-9A-Fa-f]{6,8}", xaml.group(0)):
+        bad.append(f"{WINUI}: DROP_LINE_XAML names a colour literal — the "
+                   f"indicator wears the platform's accent token, the rule "
+                   f"the table card already carries")
+    return bad
+
+
+drop_line_text = (ROOT / WINUI).read_text(encoding="utf-8")
+drop_line_out = drop_line_problems(drop_line_text)
+for _what, _marker, _broken in DROP_LINE_ARMS:
+    _doctored = g.doctor(f"insertion indicator: {_what}", drop_line_text,
+                         re.escape(_marker), _broken)
+    if not drop_line_problems(_doctored):
+        fail(f"check-verbs SELF-TEST: the insertion indicator passed with "
+             f"the arm {_what!r} doctored away")
+if drop_line_out:
+    print("check-verbs: the reorder's insertion indicator is the one "
+          "reorder affordance no scene can assert:", file=sys.stderr)
+    print("\n".join(drop_line_out), file=sys.stderr)
+drop_line_status = 1 if drop_line_out else 0
+print(f"check-verbs: insertion indicator: {len(DROP_LINE_ARMS)} arms "
+      f"pinned, {len(DROP_LINE_ARMS)} watched negatives refused",
+      file=sys.stderr)
+
 # The verb trace's watched negatives, each on a doctored copy with its
 # substitution count printed (kaya_gate.doctor), each demanding the
 # sentence the real clause would print.
@@ -1490,10 +1557,100 @@ print(f"check-verbs: step targets: {norm_variants} variants read, "
       f"{norm_multi} carrying two, {len(NORM_NEGATIVES)} watched negatives "
       f"refused", file=sys.stderr)
 
+# --- THE REORDER'S INSERTION INDICATOR IS DRAWN --------------------
+# docs/dnd-plan.md D8 declined WinUI's CanReorderItems because it writes
+# the model, and its insertion line and auto-scroll went with it — so the
+# two widget backends draw the line themselves (§5 step 7). NO SCENE CAN
+# SEE IT: the line is pixels, and every reorder observable (expect_order,
+# the dropped occurrence's anchor and its before bit) answers identically
+# with it gone, which is how a reorder can ship with no landing feedback
+# at all and every lane stay green. So the LINKS are held statically —
+# the sheet, the provider that carries it to the display, and the six
+# call sites inside the reorder's own installer — each removable on its
+# own and each watched being removed. GTK's half only; WinUI's is that
+# backend's own slice.
+GTK = "crates/kaya/src/gtk.rs"
+
+INDICATOR_SITES = [
+    ("the enter arm puts it up", "show_insertion(&enter_rows, x, y);"),
+    ("the motion arm puts it up", "show_insertion(&motion_rows, x, y);"),
+    ("the motion arm takes it down when the drag stops being takeable",
+     "clear_insertion(&motion_rows);"),
+    ("the leave arm takes it down",
+     "target.connect_drag_leave(move |_target, _drop| "
+     "clear_insertion(&leave_rows));"),
+    ("the drop arm takes it down", "clear_insertion(&drop_rows);"),
+    ("the drag's end takes it down", "clear_insertion(&end_rows);"),
+]
+INDICATOR_SHEET = [
+    ("the before edge's rule", ".kaya-drop-before { background-image: "
+     "linear-gradient(to bottom, "),
+    ("the onto edge's rule", ".kaya-drop-after { background-image: "
+     "linear-gradient(to top, "),
+    ("the sheet is loaded", 'load_kaya_css(&dnd_css, "drop indicator", '
+     "DND_CSS, &css_error);"),
+    ("the provider reaches the display",
+     "gtk4::style_context_add_provider_for_display(\n"
+     "                &display,\n"
+     "                &dnd_css,"),
+]
+
+
+def reorder_body(gtk_src):
+    """install_reorder's own block, or None."""
+    at = gtk_src.find("fn install_reorder(")
+    if at < 0:
+        return None
+    return balanced(gtk_src, gtk_src.index("{", gtk_src.index(")", at)))
+
+
+def indicator_census(gtk_src):
+    """Findings, plus the length of the installer body that was read."""
+    out = []
+    body = reorder_body(gtk_src)
+    if body is None:
+        return ["crates/kaya/src/gtk.rs declares no install_reorder, so the "
+                "insertion-indicator clause read nothing"], 0
+    for label, marker in INDICATOR_SITES:
+        if body.count(marker) != 1:
+            out.append(f"the reorder's insertion indicator: {label} — "
+                       f"`{marker}` stands {body.count(marker)} times inside "
+                       f"install_reorder, wanted once (docs/dnd-plan.md "
+                       f"§5 step 7)")
+    for label, marker in INDICATOR_SHEET:
+        if marker not in gtk_src:
+            out.append(f"the reorder's insertion indicator: {label} — "
+                       f"gtk.rs no longer spells `{marker.strip()}`, so the "
+                       f"class is added to a row nothing paints")
+    return out, len(body)
+
+
+ind_out, ind_read = indicator_census(real(GTK))
+if ind_read < 500:
+    g.refuse(f"read only {ind_read} characters of install_reorder out of "
+             f"{GTK} — the installer moved and this census agrees with "
+             f"anything")
+for line in ind_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+ind_status = 1 if ind_out else 0
+
+gtk_real = real(GTK)
+for label, marker in INDICATOR_SITES + INDICATOR_SHEET:
+    doctored = g.doctor(f"the indicator's {label} cut", gtk_real,
+                        re.escape(marker), "")
+    if not indicator_census(doctored)[0]:
+        fail(f"check-verbs SELF-TEST: the insertion-indicator census passed "
+             f"with `{marker}` cut out of {GTK}")
+print(f"check-verbs: the reorder's insertion indicator: "
+      f"{len(INDICATOR_SITES)} call sites + {len(INDICATOR_SHEET)} sheet "
+      f"links, {len(INDICATOR_SITES) + len(INDICATOR_SHEET)} watched "
+      f"negatives refused", file=sys.stderr)
+
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
-        or metrics_status or keyed_status or vtrace_status or norm_status):
+        or metrics_status or keyed_status or drop_line_status
+        or vtrace_status or norm_status or ind_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -1501,5 +1658,7 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"the ax spelling in 3 harnesses + the verb trace in 3 "
           f"harnesses + the windowed tier's loop "
           f"+ the metrics class channel + the keyed target arms on 4 "
-          f"backends + every Step's Targets normalized "
+          f"backends + the reorder insertion indicator's 4 WinUI arms "
+          f"+ the reorder's insertion indicator on GTK "
+          f"+ every Step's Targets normalized "
           f"+ spec hash against 2 interpreters")

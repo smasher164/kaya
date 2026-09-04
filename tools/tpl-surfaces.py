@@ -145,7 +145,7 @@ def keyword_block(src, start_re, end_re):
 # offers, in that language's own convention; compared case-normalised.
 
 def zone_rust(_):
-    body = brace_block(read("crates/kaya/src/app.rs"), r"^impl Tpl<'_, '_> \{")
+    body = brace_block(read("crates/kaya/src/app.rs"), r"^impl(?:<'b>)? Tpl<'_, '[_b]> \{")
     if body is None:
         return None
     return set(re.findall(r"^\s{4}pub fn ([a-z_0-9]+)", body, re.M))
@@ -297,7 +297,7 @@ PROP_MEMBERS = {
 
 
 def members_rust(_):
-    body = brace_block(read("crates/kaya/src/app.rs"), r"^impl Tpl<'_, '_> \{")
+    body = brace_block(read("crates/kaya/src/app.rs"), r"^impl(?:<'b>)? Tpl<'_, '[_b]> \{")
     return None if body is None else set(re.findall(r"^\s{4}pub fn ([a-z_0-9]+)", body, re.M))
 
 
@@ -383,7 +383,7 @@ PROP_ZONES = [
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
     ("js", members_js,
      "class Handle plus the zone-blind option writers "
-     "(bindings/js/kaya/index.ts)", 12),
+     "(bindings/js/kaya/index.ts)", 14),
 ]
 
 
@@ -448,9 +448,12 @@ def table_rust(_):
         nested,
         re.M | re.S,
     )
+    # The registry holds a Vec per id and is asked newest first, since a
+    # widget is legitimately two things at once (docs/traps.md, "A
+    # binding's handler registry held ONE closure per id").
     node_sort = re.search(
         r"^\s{4}pub fn on_sort_node\s*\(.*?Fn\(Path,\s*u32\).*?"
-        r"self\.nodes\.borrow_mut\(\)\.insert",
+        r"self\.nodes\.borrow_mut\(\)\.entry\(",
         messages,
         re.M | re.S,
     )
@@ -1142,7 +1145,7 @@ RECORD_POINTS = ("nested record collection", "record instance addressing")
 
 def record_rust(_):
     src = read("crates/kaya/src/app.rs")
-    tpl = brace_block(src, r"^impl Tpl<'_, '_> \{")
+    tpl = brace_block(src, r"^impl(?:<'b>)? Tpl<'_, '[_b]> \{")
     coll = brace_block(src, r"^impl<T: KayaSum> Collection<T> \{")
     if None in (tpl, coll):
         return None
@@ -1503,7 +1506,7 @@ SOURCE_POINTS = ("button caption",)
 
 def sources_rust(_):
     src = read("crates/kaya/src/app.rs")
-    body = brace_block(src, r"^impl Tpl<'_, '_> \{")
+    body = brace_block(src, r"^impl(?:<'b>)? Tpl<'_, '[_b]> \{")
     if body is None:
         return None
     m = re.search(r"^\s{4}pub fn button\(([^)]*)\)", body, re.M)
@@ -1777,7 +1780,7 @@ def show_member(member):
 
 def facade_rust():
     src = read("crates/kaya/src/app.rs")
-    tpl = brace_block(src, r"^impl Tpl<'_, '_> \{")
+    tpl = brace_block(src, r"^impl(?:<'b>)? Tpl<'_, '[_b]> \{")
     row = brace_block(src, r"^impl<'b> Row<'_, 'b> \{")
     if tpl is None or row is None:
         return None

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x4f5c2121bd4d241a
+specHash = 0xa3cb4cff19aad964
 
 valueBool :: Word32
 valueBool = 1
@@ -792,9 +792,9 @@ txSetSizePolicy widgetId policy = wireRecord txKindSetSizePolicy (word64LE widge
 txCreateBreakpoint :: Word64 -> Value -> Word32 -> [Value] -> Builder
 txCreateBreakpoint window sizeClass count setters = wireRecord txKindCreateBreakpoint (word64LE window <> encodeValue sizeClass <> word32LE count <> word32LE 0 <> encodeValues setters)
 
--- DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
-txSetDragSource :: Word64 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
-txSetDragSource widget present fileCount customCount operations pathLen reps = wireRecord txKindSetDragSource (word64LE widget <> word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE operations <> word32LE pathLen <> word32LE 0 <> encodeValues reps)
+-- DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds.
+txSetDragSource :: Word64 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> [Value] -> Builder
+txSetDragSource widget present fileCount customCount operations pathLen bound reps = wireRecord txKindSetDragSource (word64LE widget <> word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE operations <> word32LE pathLen <> word32LE bound <> encodeValues reps)
 
 -- DECLARE that `widget` receives drops, with `operations` a mask over the drag_op enum naming what it will perform (copy 1, move 2; copy alone by default). WHAT it accepts is the existing `accepts` prop — the same list a paste consults, so a widget declares its vocabulary once. The hover verdict is the intersection of the source's operations with these, over a type the accept list names; a foreign source into kaya is always answered copy (D2). A zero mask withdraws the declaration. Keys as in set_drag_source.
 txSetDropTarget :: Word64 -> Word32 -> Word32 -> [Value] -> Builder

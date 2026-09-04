@@ -1869,7 +1869,38 @@ impl<'a> Tx<'a> {
     /// the copy chain's shape plus the operations it allows
     /// (docs/dnd-plan.md D1). An empty chain withdraws the declaration.
     pub fn draggable(&mut self, widget: WidgetId) -> DragRef<'_, 'a> {
-        DragRef { tx: self, widget, clip: crate::protocol::Clip::default(), operations: 0 }
+        DragRef {
+            tx: self,
+            widget,
+            clip: crate::protocol::Clip::default(),
+            operations: 0,
+            path: Vec::new(),
+        }
+    }
+
+    /// ONE stamped copy's drag declaration (docs/dnd-plan.md §4): the
+    /// template node and the copy's keys, outermost first, name it — the
+    /// per-row payload an app declares after the row's insert. It
+    /// overrides the template's own declaration for that copy and follows
+    /// the copy through a re-stamp.
+    pub fn draggable_at(&mut self, node: TemplateNodeId, path: &Path) -> DragRef<'_, 'a> {
+        DragRef {
+            tx: self,
+            widget: WidgetId(node.0),
+            clip: crate::protocol::Clip::default(),
+            operations: 0,
+            path: path.clone(),
+        }
+    }
+
+    /// ONE stamped copy's drop declaration, `draggable_at`'s twin; the
+    /// copy's accept list is the template's `accepts`.
+    pub fn drop_target_at(&mut self, node: TemplateNodeId, path: &Path, ops: &[Op]) {
+        self.ops.push(TxOp::SetDropTarget {
+            widget: WidgetId(node.0),
+            operations: ops.iter().fold(0, |m, op| m | op.mask()),
+            path: path.clone(),
+        });
     }
 
     /// Declare that this widget receives drops, performing these
@@ -3297,6 +3328,23 @@ impl<'b> Row<'_, 'b> {
         self.tpl().accepts(node, kinds)
     }
 
+    pub fn draggable(&mut self, node: TemplateNodeId) -> TplDragRef<'_, 'b> {
+        TplDragRef {
+            tx: self.tx.as_deref_mut().expect("a row's transaction is open until the row ends"),
+            node,
+            clip: crate::protocol::Clip::default(),
+            text_field: None,
+            html_field: None,
+            image_field: None,
+            custom_fields: Vec::new(),
+            operations: 0,
+        }
+    }
+
+    pub fn drop_target(&mut self, node: TemplateNodeId, ops: &[Op]) {
+        self.tpl().drop_target(node, ops)
+    }
+
     pub fn role(&mut self, node: TemplateNodeId, role: crate::Role) {
         self.tpl().role(node, role)
     }
@@ -3355,8 +3403,14 @@ impl Drop for Row<'_, '_> {
 pub struct Messages<M> {
     // Two tables, though the ids no longer collide: the wire routes by
     // path_len, not by number (wire.rs, the click-tag block).
-    widgets: RefCell<HashMap<u64, Mapper<M>>>,
-    nodes: RefCell<HashMap<u64, Mapper<M>>>,
+    /// EVERY registration on an id, newest first at dispatch: a widget
+    /// is legitimately a drag source AND a drop target, and a stamped row
+    /// answers its drop and its drag_ended through two registrations on
+    /// one template node (docs/dnd-plan.md §4). Two registrations for
+    /// the same occurrence keep the last-wins rule, since the newest is
+    /// asked first.
+    widgets: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
+    nodes: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
     // Menu items are their own id space — their own table ("two
     // tables, always" is N tables by now, still always).
     menu_items: RefCell<HashMap<u64, Mapper<M>>>,
@@ -3440,9 +3494,7 @@ impl<M> Messages<M> {
     where
         M: Clone + 'static,
     {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::ButtonClicked { .. } => Some(msg.clone()),
                 _ => None,
             }),
@@ -3454,9 +3506,7 @@ impl<M> Messages<M> {
     /// collection by key and re-declares the header with the new
     /// indicator (docs/tables-plan.md).
     pub fn on_sort(&self, w: WidgetId, f: impl Fn(u32) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::SortRequested { column, .. } => Some(f(*column)),
                 _ => None,
             }),
@@ -3464,9 +3514,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_sort_node(&self, n: TemplateNodeId, f: impl Fn(Path, u32) -> M + 'static) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceSortRequested { path, column, .. } => {
                     Some(f(path.clone(), *column))
                 }
@@ -3478,9 +3526,7 @@ impl<M> Messages<M> {
     /// An edit maps through `f` — an enum tuple constructor fits:
     /// `msgs.on_change(field, Msg::Draft)`.
     pub fn on_change(&self, w: WidgetId, f: impl Fn(String) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::TextChanged { text, .. } => Some(f(text.clone())),
                 _ => None,
             }),
@@ -3488,9 +3534,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_toggle(&self, w: WidgetId, f: impl Fn(bool) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::Toggled { checked, .. } => Some(f(*checked)),
                 _ => None,
             }),
@@ -3498,9 +3542,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_value(&self, w: WidgetId, f: impl Fn(f64) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::ValueChanged { value, .. } => Some(f(*value)),
                 _ => None,
             }),
@@ -3517,9 +3559,7 @@ impl<M> Messages<M> {
     /// The template flavors: stamped-copy occurrences carry the key
     /// path naming the copy, outermost first.
     pub fn on_click_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceButtonClicked { path, .. } => Some(f(path.clone())),
                 _ => None,
             }),
@@ -3527,9 +3567,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_change_node(&self, n: TemplateNodeId, f: impl Fn(Path, String) -> M + 'static) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceTextChanged { path, text, .. } => {
                     Some(f(path.clone(), text.clone()))
                 }
@@ -3539,9 +3577,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_toggle_node(&self, n: TemplateNodeId, f: impl Fn(Path, bool) -> M + 'static) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceToggled { path, checked, .. } => {
                     Some(f(path.clone(), *checked))
                 }
@@ -3551,9 +3587,7 @@ impl<M> Messages<M> {
     }
 
     pub fn on_value_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64) -> M + 'static) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceValueChanged { path, value, .. } => {
                     Some(f(path.clone(), *value))
                 }
@@ -3573,9 +3607,7 @@ impl<M> Messages<M> {
         n: TemplateNodeId,
         f: impl Fn(Path, crate::protocol::Representation) -> M + 'static,
     ) {
-        self.nodes.borrow_mut().insert(
-            n.0,
-            Box::new(move |occ| match occ {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstancePasted { path, clip, .. } => {
                     Some(f(path.clone(), clip.clone()))
                 }
@@ -3770,9 +3802,7 @@ impl<M> Messages<M> {
         w: WidgetId,
         f: impl Fn(crate::protocol::Representation) -> M + 'static,
     ) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::Pasted { clip, .. } => Some(f(clip.clone())),
                 _ => None,
             }),
@@ -3784,9 +3814,7 @@ impl<M> Messages<M> {
     /// reorder's anchor. The transaction this message causes is the
     /// visible effect; a same-app move removes its original in it.
     pub fn on_drop(&self, w: WidgetId, f: impl Fn(Dropped) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::Dropped { point, operation, anchor, before, clip, .. } => {
                     Some(f(Dropped {
                         point: *point,
@@ -3805,10 +3833,46 @@ impl<M> Messages<M> {
     /// destination did, `None` for cancelled or refused. A move that
     /// landed outside this app removes its original here.
     pub fn on_drag_ended(&self, w: WidgetId, f: impl Fn(Option<Op>) -> M + 'static) {
-        self.widgets.borrow_mut().insert(
-            w.0,
-            Box::new(move |occ| match occ {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::DragEnded { operation, .. } => Some(f(Op::from_mask(*operation))),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The template flavour of [`Self::on_drop`]: a drop on a stamped copy
+    /// of `n`, the copy's keys first.
+    pub fn on_drop_node(&self, n: TemplateNodeId, f: impl Fn(Path, Dropped) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceDropped { path, point, operation, anchor, before, clip, .. } => {
+                    Some(f(
+                        path.clone(),
+                        Dropped {
+                            point: *point,
+                            operation: Op::from_mask(*operation),
+                            anchor: anchor.clone(),
+                            before: *before,
+                            clip: clip.clone(),
+                        },
+                    ))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// The template flavour of [`Self::on_drag_ended`]: a stamped copy of
+    /// `n` — a reorderable row is one — finished its drag; the copy's keys
+    /// first. This is the registration a row's own drag_ended reaches.
+    pub fn on_drag_ended_node(
+        &self,
+        n: TemplateNodeId,
+        f: impl Fn(Path, Option<Op>) -> M + 'static,
+    ) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceDragEnded { path, operation, .. } => {
+                    Some(f(path.clone(), Op::from_mask(*operation)))
+                }
                 _ => None,
             }),
         );
@@ -3899,9 +3963,11 @@ impl<M> Messages<M> {
                 | Occurrence::SortRequested { id, .. }
                 | Occurrence::Pasted { id, .. }
                 | Occurrence::Dropped { id, .. }
-                | Occurrence::DragEnded { id, .. } => {
-                    self.widgets.borrow().get(&id.0).and_then(|f| f(&occ))
-                }
+                | Occurrence::DragEnded { id, .. } => self
+                    .widgets
+                    .borrow()
+                    .get(&id.0)
+                    .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
                 Occurrence::InstanceButtonClicked { node, .. }
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
@@ -3909,9 +3975,11 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceSortRequested { node, .. }
                 | Occurrence::InstancePasted { node, .. }
                 | Occurrence::InstanceDropped { node, .. }
-                | Occurrence::InstanceDragEnded { node, .. } => {
-                    self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
-                }
+                | Occurrence::InstanceDragEnded { node, .. } => self
+                    .nodes
+                    .borrow()
+                    .get(&node.0)
+                    .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
                 Occurrence::CloseRequested { window } => {
                     self.close_requested.borrow().get(&window.0).map(|f| f())
                 }
@@ -4169,6 +4237,7 @@ pub struct DragRef<'t, 'a> {
     widget: WidgetId,
     clip: crate::protocol::Clip,
     operations: u32,
+    path: crate::protocol::Path,
 }
 
 impl DragRef<'_, '_> {
@@ -4213,6 +4282,120 @@ impl DragRef<'_, '_> {
         self.tx.ops.push(TxOp::SetDragSource {
             widget: self.widget,
             clip: self.clip,
+            bound: Vec::new(),
+            operations: self.operations,
+            path: self.path,
+        });
+    }
+}
+
+/// The template zone's drag chain (docs/dnd-plan.md §4): each
+/// representation is a CONSTANT or the row's own FIELD — `.text(Item::
+/// title())` the way `row.label(Item::title())` binds — resolved per
+/// stamped copy and re-declared when that field changes. A signal has no
+/// row and is refused by name; a file is a picked handle and stays
+/// constant.
+#[must_use = "a drag chain declares nothing until .declare()"]
+pub struct TplDragRef<'t, 'b> {
+    tx: &'t mut Tx<'b>,
+    node: TemplateNodeId,
+    clip: crate::protocol::Clip,
+    text_field: Option<u32>,
+    html_field: Option<u32>,
+    image_field: Option<u32>,
+    custom_fields: Vec<Option<u32>>,
+    operations: u32,
+}
+
+impl TplDragRef<'_, '_> {
+    fn field_of(src: SourceInner, what: &str) -> (Value, Option<u32>) {
+        match src {
+            SourceInner::Const(v) => (v, None),
+            SourceInner::Field(f) => (Value::Str(String::new()), Some(f)),
+            SourceInner::Signal(_) => panic!(
+                "kaya: a drag payload's {what} cannot be a signal — a row template binds a \
+                 constant or the row's own field (docs/dnd-plan.md §4)"
+            ),
+        }
+    }
+
+    pub fn text(mut self, src: impl Into<TplSource<StrKind>>) -> Self {
+        let (v, f) = Self::field_of(src.into().inner, "text");
+        self.clip.text = Some(match v {
+            Value::Str(s) => s,
+            other => panic!("kaya: drag text is {other:?}"),
+        });
+        self.text_field = f;
+        self
+    }
+
+    pub fn html(mut self, src: impl Into<TplSource<StrKind>>) -> Self {
+        let (v, f) = Self::field_of(src.into().inner, "html");
+        self.clip.html = Some(match v {
+            Value::Str(s) => s,
+            other => panic!("kaya: drag html is {other:?}"),
+        });
+        self.html_field = f;
+        self
+    }
+
+    pub fn image(mut self, src: impl Into<TplSource<BlobKind>>) -> Self {
+        let (v, f) = Self::field_of(src.into().inner, "image");
+        self.clip.image = Some(match v {
+            Value::Blob(b) => b,
+            Value::Str(_) => crate::protocol::Blob(std::sync::Arc::from(&[][..])),
+            other => panic!("kaya: drag image is {other:?}"),
+        });
+        self.image_field = f;
+        self
+    }
+
+    pub fn custom(mut self, id: impl Into<String>, src: impl Into<TplSource<BlobKind>>) -> Self {
+        let (v, f) = Self::field_of(src.into().inner, "custom bytes");
+        let bytes = match v {
+            Value::Blob(b) => b,
+            Value::Str(_) => crate::protocol::Blob(std::sync::Arc::from(&[][..])),
+            other => panic!("kaya: drag custom bytes are {other:?}"),
+        };
+        self.clip.custom.push((id.into(), bytes));
+        self.custom_fields.push(f);
+        self
+    }
+
+    pub fn file(mut self, handle: crate::protocol::PickedId) -> Self {
+        self.clip.files.push(handle);
+        self
+    }
+
+    pub fn allow(mut self, op: Op) -> Self {
+        self.operations |= op.mask();
+        self
+    }
+
+    pub fn declare(self) {
+        let mut bound = Vec::new();
+        for (i, f) in self.custom_fields.iter().enumerate() {
+            if let Some(field) = f {
+                bound.push(crate::protocol::BoundRep {
+                    slot: self.clip.slot_of_custom_bytes(i),
+                    level: 0,
+                    field: *field,
+                });
+            }
+        }
+        if let Some(field) = self.image_field {
+            bound.push(crate::protocol::BoundRep { slot: self.clip.slot_of_image(), level: 0, field });
+        }
+        if let Some(field) = self.html_field {
+            bound.push(crate::protocol::BoundRep { slot: self.clip.slot_of_html(), level: 0, field });
+        }
+        if let Some(field) = self.text_field {
+            bound.push(crate::protocol::BoundRep { slot: self.clip.slot_of_text(), level: 0, field });
+        }
+        self.tx.ops.push(TxOp::SetDragSource {
+            widget: WidgetId(self.node.0),
+            clip: self.clip,
+            bound,
             operations: self.operations,
             path: Vec::new(),
         });
@@ -5486,7 +5669,7 @@ pub struct Tpl<'a, 'b> {
     tx: &'a mut Tx<'b>,
 }
 
-impl Tpl<'_, '_> {
+impl<'b> Tpl<'_, 'b> {
     pub fn widget(&mut self, kind: WidgetKind) -> TemplateNodeId {
         let id = self.tx.ctx.alloc_node();
         self.tx.ops.push(TxOp::CreateWidget {
@@ -5823,6 +6006,35 @@ impl Tpl<'_, '_> {
     pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
         let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
         self.set(node, Prop::Accepts, list.join(" ").as_str());
+    }
+
+    /// Every stamped copy of `node` drags this payload, each
+    /// representation a constant or the ROW'S OWN FIELD (docs/dnd-plan.md
+    /// §4); one copy's override is [`Tx::draggable_at`] after its insert.
+    /// The copy's identity — its keys — reaches the app through
+    /// `on_drag_ended_node`.
+    pub fn draggable(&mut self, node: TemplateNodeId) -> TplDragRef<'_, 'b> {
+        TplDragRef {
+            tx: self.tx,
+            node,
+            clip: crate::protocol::Clip::default(),
+            text_field: None,
+            html_field: None,
+            image_field: None,
+            custom_fields: Vec::new(),
+            operations: 0,
+        }
+    }
+
+    /// Every stamped copy of `node` receives drops with these operations,
+    /// taking what the template's `accepts` names; the landing arrives
+    /// through `on_drop_node` with the copy's keys.
+    pub fn drop_target(&mut self, node: TemplateNodeId, ops: &[Op]) {
+        self.tx.ops.push(TxOp::SetDropTarget {
+            widget: WidgetId(node.0),
+            operations: ops.iter().fold(0, |m, op| m | op.mask()),
+            path: Vec::new(),
+        });
     }
 
     /// What a stamped copy MEANS — semantic emphasis, never appearance

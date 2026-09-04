@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,6 +137,8 @@ type App struct {
 	nodePastes     map[uint64]func(*Tx, []any, Representation)
 	widgetDrops    map[uint64]func(*Tx, Dropped)
 	dragEnded      map[uint64]func(*Tx, Op)
+	nodeDrops      map[uint64]func(*Tx, []any, Dropped)
+	nodeDragEnded  map[uint64]func(*Tx, []any, Op)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	// Menu dispatch tables, keyed by MENU ITEM id — their own id space,
 	// separate from every widget/node table. The node flavors receive
@@ -207,6 +210,8 @@ func NewApp() *App {
 		nodePastes:     make(map[uint64]func(*Tx, []any, Representation)),
 		widgetDrops:    make(map[uint64]func(*Tx, Dropped)),
 		dragEnded:      make(map[uint64]func(*Tx, Op)),
+		nodeDrops:      make(map[uint64]func(*Tx, []any, Dropped)),
+		nodeDragEnded:  make(map[uint64]func(*Tx, []any, Op)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
@@ -2554,6 +2559,16 @@ type Dropped struct {
 	Clip      Representation
 }
 
+func droppedOf(v DropValues) Dropped {
+	return Dropped{
+		Point:     v.Point,
+		Operation: Op(v.Operation),
+		Anchor:    v.Anchor,
+		Before:    v.Before,
+		Clip:      representation(v.Clip),
+	}
+}
+
 // operations folds a guest's words into the drag_op mask; empty
 // withdraws the declaration.
 func operations(ops []Op) uint32 {
@@ -2583,6 +2598,7 @@ func (tx *Tx) Draggable(w Widget) DragRef {
 type DragRef struct {
 	tx     *Tx
 	widget uint64
+	keys   []any
 	text   *string
 	html   *string
 	image  []byte
@@ -2653,7 +2669,8 @@ func (r DragRef) Declare() {
 		mask = 0
 	}
 	r.tx.emit(TxSetDragSource(r.widget, present, uint32(len(r.files)),
-		uint32(len(r.custom)), mask, 0, values))
+		uint32(len(r.custom)), mask, uint32(len(r.keys)), 0,
+		append(append([]any{}, r.keys...), values...)))
 }
 
 // SetDropTarget declares that a widget receives drops, performing these
@@ -2672,6 +2689,22 @@ func (w Widget) DropTarget(ops ...Op) Widget {
 	}
 	w.tx.SetDropTarget(w, ops...)
 	return w
+}
+
+// DraggableAt begins ONE STAMPED COPY's drag declaration
+// (docs/dnd-plan.md §4): the template node and the copy's keys,
+// outermost first. The per-row payload an app declares after the row's
+// insert; it overrides the template's own for that copy and follows it
+// through a re-stamp.
+func (tx *Tx) DraggableAt(n Node, keys []any) DragRef {
+	return DragRef{tx: tx, widget: n.id, keys: append([]any{}, keys...)}
+}
+
+// SetDropTargetAt is DraggableAt's twin: ONE stamped copy receives drops
+// with these operations, taking what the template's SetAccepts names.
+func (tx *Tx) SetDropTargetAt(n Node, keys []any, ops ...Op) {
+	tx.emit(TxSetDropTarget(n.id, operations(ops), uint32(len(keys)),
+		append([]any{}, keys...)))
 }
 
 // SetReorderable makes every stamped row of a live For drag within its
@@ -2697,6 +2730,18 @@ func (a *App) OnDrop(w Widget, fn func(*Tx, Dropped)) {
 // on: OpNone for a cancelled or refused drag, which is not an error.
 func (a *App) OnDragEnded(w Widget, fn func(*Tx, Op)) {
 	a.dragEnded[w.id] = fn
+}
+
+// OnDropNode is OnDrop's template flavor: a drop on a stamped copy of n,
+// the copy's keys first.
+func (a *App) OnDropNode(n Node, fn func(*Tx, []any, Dropped)) {
+	a.nodeDrops[n.id] = fn
+}
+
+// OnDragEndedNode is OnDragEnded's template flavor: a stamped copy of n
+// — a reorderable row is one — finished its drag, the copy's keys first.
+func (a *App) OnDragEndedNode(n Node, fn func(*Tx, []any, Op)) {
+	a.nodeDragEnded[n.id] = fn
 }
 
 // WindowRef chains window props, the construction-sugar tier.
@@ -3340,6 +3385,150 @@ func (t *Tpl) BindA11yHint[S interface {
 // the focused widget's accept list (docs/tpl-props-plan.md §1).
 func (t *Tpl) SetAccepts(n Node, kinds ...string) {
 	t.tx.emit(TxSetAccepts(n.id, acceptList(kinds)))
+}
+
+// Draggable begins the template's drag declaration: every stamped copy
+// of n hands over this payload with its own identity, each
+// representation a constant or the row's own field (docs/dnd-plan.md
+// §4). A copy's OWN payload is Tx.DraggableAt after its insert,
+// constants only; the copy's keys reach the app through OnDragEndedNode.
+func (t *Tpl) Draggable(n Node) TplDragRef {
+	return TplDragRef{tx: t.tx, node: n.id}
+}
+
+// TplStr is what a template drag payload's text or html comes from: a
+// constant, or the row's own string field. TplBlob is its blob twin.
+type TplStr interface{ ~string | Field[string] }
+
+// TplBlob is TplStr for the byte-shaped representations.
+type TplBlob interface{ ~[]byte | Field[[]byte] }
+
+// TplDragRef accumulates a TEMPLATE node's set_drag_source
+// (docs/dnd-plan.md §4): each representation is a CONSTANT or the row's
+// own FIELD — .Text(row.Title()) binds the way row.Label(row.Title())
+// does — resolved per stamped copy and re-declared when the field moves.
+// A file is a picked handle and stays constant.
+type TplDragRef struct {
+	tx           *Tx
+	node         uint64
+	text         *string
+	textField    *uint32
+	html         *string
+	htmlField    *uint32
+	image        []byte
+	imageField   *uint32
+	files        []uint64
+	custom       [][2]any // id, bytes
+	customFields []*uint32
+	ops          []Op
+}
+
+func (r TplDragRef) Text[S TplStr](src S) TplDragRef {
+	if f, ok := any(src).(Field[string]); ok {
+		r.textField = &f.index
+		return r
+	}
+	text := reflect.ValueOf(src).String()
+	r.text = &text
+	return r
+}
+
+func (r TplDragRef) HTML[S TplStr](src S) TplDragRef {
+	if f, ok := any(src).(Field[string]); ok {
+		r.htmlField = &f.index
+		return r
+	}
+	html := reflect.ValueOf(src).String()
+	r.html = &html
+	return r
+}
+
+func (r TplDragRef) Image[S TplBlob](src S) TplDragRef {
+	if f, ok := any(src).(Field[[]byte]); ok {
+		r.imageField = &f.index
+		r.image = []byte{}
+		return r
+	}
+	r.image = reflect.ValueOf(src).Bytes()
+	return r
+}
+
+func (r TplDragRef) File(f PickedFile) TplDragRef {
+	r.files = append(r.files, f.Handle)
+	return r
+}
+
+func (r TplDragRef) Custom[S TplBlob](id string, src S) TplDragRef {
+	acceptList([]string{id})
+	if f, ok := any(src).(Field[[]byte]); ok {
+		r.custom = append(r.custom, [2]any{id, []byte(nil)})
+		r.customFields = append(r.customFields, &f.index)
+		return r
+	}
+	r.custom = append(r.custom, [2]any{id, reflect.ValueOf(src).Bytes()})
+	r.customFields = append(r.customFields, nil)
+	return r
+}
+
+// Allow names an operation this source permits.
+func (r TplDragRef) Allow(op Op) TplDragRef {
+	r.ops = append(r.ops, op)
+	return r
+}
+
+// Declare puts the declaration on the wire; a bound slot rides as the
+// i64 `level << 32 | field` under the `bound` mask.
+func (r TplDragRef) Declare() {
+	var present, bound uint32
+	values := make([]any, 0, 8)
+	slot := func(field *uint32) bool {
+		if field == nil {
+			return false
+		}
+		bound |= 1 << uint32(len(values))
+		values = append(values, int64(*field))
+		return true
+	}
+	for i, pair := range r.custom {
+		values = append(values, pair[0])
+		if !slot(r.customFields[i]) {
+			values = append(values, BlobHandle(RegisterBlob(pair[1].([]byte))))
+		}
+	}
+	for _, handle := range r.files {
+		values = append(values, int64(handle))
+	}
+	if r.image != nil {
+		present |= ClipImage
+		if !slot(r.imageField) {
+			values = append(values, BlobHandle(RegisterBlob(r.image)))
+		}
+	}
+	if r.html != nil || r.htmlField != nil {
+		present |= ClipHtml
+		if !slot(r.htmlField) {
+			values = append(values, *r.html)
+		}
+	}
+	if r.text != nil || r.textField != nil {
+		present |= ClipText
+		if !slot(r.textField) {
+			values = append(values, *r.text)
+		}
+	}
+	mask := operations(r.ops)
+	if present == 0 && len(r.files) == 0 && len(r.custom) == 0 {
+		mask = 0
+	}
+	r.tx.emit(TxSetDragSource(r.node, present, uint32(len(r.files)),
+		uint32(len(r.custom)), mask, 0, bound, values))
+}
+
+// SetDropTarget declares that every stamped copy of n receives drops
+// with these operations, taking what SetAccepts names; the landing
+// arrives at OnDropNode with the copy's keys.
+func (t *Tpl) SetDropTarget(n Node, ops ...Op) {
+	t.tx.emit(TxSetDropTarget(n.id, operations(ops), 0, nil))
 }
 
 // SetRole declares what each stamped copy MEANS — semantic emphasis,
@@ -4244,26 +4433,28 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
 			}
 		// A drop rides the same tag with four more words
-		// (docs/dnd-plan.md D1). NO WIDGET/NODE SPLIT: a dnd handler is
-		// registered by WIDGET id and the template zone is refused in
-		// this slice (§4), so there is one table and a keyed occurrence
-		// — a reorderable row's own drag_ended — matches no
-		// registration rather than a missing arm.
-		case kind == occDropped:
+		// (docs/dnd-plan.md D1), so it arrives on the ordinary
+		// widget/node split — a stamped copy's landing and a
+		// reorderable row's own drag_ended carry the copy's keys (§4).
+		case kind == occDropped && len(keys) == 0:
 			if fn := a.widgetDrops[id]; fn != nil && isDrop {
-				drop := Dropped{
-					Point:     dropValues.Point,
-					Operation: Op(dropValues.Operation),
-					Anchor:    dropValues.Anchor,
-					Before:    dropValues.Before,
-					Clip:      representation(dropValues.Clip),
-				}
+				drop := droppedOf(dropValues)
 				a.dispatch(func(tx *Tx) { fn(tx, drop) })
 			}
-		case kind == occDragEnded:
+		case kind == occDropped:
+			if fn := a.nodeDrops[id]; fn != nil && isDrop {
+				drop := droppedOf(dropValues)
+				a.dispatch(func(tx *Tx) { fn(tx, keys, drop) })
+			}
+		case kind == occDragEnded && len(keys) == 0:
 			if fn := a.dragEnded[id]; fn != nil {
 				op := Op(operationWord)
 				a.dispatch(func(tx *Tx) { fn(tx, op) })
+			}
+		case kind == occDragEnded:
+			if fn := a.nodeDragEnded[id]; fn != nil {
+				op := Op(operationWord)
+				a.dispatch(func(tx *Tx) { fn(tx, keys, op) })
 			}
 		// An undo moved core state without a transaction, so the mirror
 		// follows HERE — before any handler, and whether or not one is

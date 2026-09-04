@@ -445,33 +445,71 @@ class _Handle:
 
         App-updated state — re-declare when the payload changes, and
         declaring NOTHING withdraws it, which is how a same-app move
-        removes its source (docs/dnd-plan.md D1, D2). Returns the
-        handle."""
-        _live_zone_only(self)
+        removes its source (docs/dnd-plan.md D1, D2). On a TEMPLATE NODE
+        every stamped copy is born with this payload and its own
+        identity, each representation a constant or the ROW'S OWN FIELD
+        (`text=row.title`, docs/dnd-plan.md §4); `draggable_at` gives one
+        copy its own, constants only. Returns the handle."""
+        return self._draggable((), text, html, image, files, custom,
+                               operations)
+
+    def draggable_at(self, *keys, text=None, html=None, image=None,
+                     files=(), custom=None, operations=None):
+        """ONE stamped copy's drag declaration (docs/dnd-plan.md §4): the
+        copy's keys, outermost first, then the payload `draggable` takes.
+
+        The per-row payload an app declares after the row's insert; it
+        overrides the template's own for that copy and follows it through
+        a re-stamp. Returns the handle."""
+        _template_zone_only(self, "draggable_at")
+        return self._draggable(keys, text, html, image, files, custom,
+                               operations)
+
+    def _draggable(self, keys, text, html, image, files, custom,
+                   operations):
         reps = []
+        bound = 0
         present = 0
         custom = dict(custom or {})
         files = list(files)
+
+        def slot(what, value):
+            """Append one representation, bound or constant, and say
+            which it was — the slot IS its index in `reps`."""
+            nonlocal bound
+            ref = _drag_slot(self, keys, what, value)
+            if ref is None:
+                return False
+            bound |= 1 << len(reps)
+            reps.append(ref)
+            return True
+
         for ident, data in custom.items():
             _accept_list([ident])  # an id with a space would not survive
             reps.append(str(ident))
-            reps.append(wire.BlobHandle(runtime.register_blob(data)))
+            if not slot("custom bytes", data):
+                reps.append(wire.BlobHandle(runtime.register_blob(data)))
         for picked in files:
             reps.append(getattr(picked, "handle", picked))
         if image is not None:
             present |= wire.CLIP_IMAGE
-            reps.append(wire.BlobHandle(runtime.register_blob(image)))
+            if not slot("image", image):
+                reps.append(wire.BlobHandle(runtime.register_blob(image)))
         if html is not None:
             present |= wire.CLIP_HTML
-            reps.append(str(html))
+            if not slot("html", html):
+                reps.append(str(html))
         if text is not None:
             present |= wire.CLIP_TEXT
-            reps.append(str(text))
+            if not slot("text", text):
+                reps.append(str(text))
         empty = present == 0 and not files and not custom
         mask = 0 if empty else _operations(
             (OP_COPY,) if operations is None else operations)
+        keys = list(keys)
         _records().append(wire.tx_set_drag_source(
-            self.id, present, len(files), len(custom), mask, 0, reps))
+            self.id, present, len(files), len(custom), mask, len(keys),
+            bound, [*keys, *reps]))
         return self
 
     def drop_target(self, *operations):
@@ -480,25 +518,37 @@ class _Handle:
 
         WHAT it takes is its `accepts` list, which must be declared
         first — a destination has one vocabulary, not two
-        (docs/dnd-plan.md D1). Returns the handle."""
-        _live_zone_only(self)
+        (docs/dnd-plan.md D1). On a TEMPLATE NODE every stamped copy
+        receives drops with these operations, taking what the template's
+        `accepts` names. Returns the handle."""
         _records().append(
             wire.tx_set_drop_target(self.id, _operations(operations), 0, []))
         return self
 
+    def drop_target_at(self, *keys, operations=()):
+        """ONE stamped copy's drop declaration, `draggable_at`'s twin;
+        the copy's accept list is the template's `accepts`. Returns the
+        handle."""
+        _template_zone_only(self, "drop_target_at")
+        keys = list(keys)
+        _records().append(wire.tx_set_drop_target(
+            self.id, _operations(operations), len(keys), keys))
+        return self
+
     def on_drop(self, fn):
         """Take dropped content here: fn(dropped), with the `Dropped` of
-        docs/dnd-plan.md D1. ONLY FIRES FOR A WIDGET THAT DECLARED
-        `drop_target` over an `accepts` list, or for a reorderable For's
-        container (D8). Returns the handle."""
-        _live_zone_only(self)
+        docs/dnd-plan.md D1, or fn(*keys, dropped) for a stamped copy —
+        the copy's key path first, as on_paste delivers. ONLY FIRES FOR A
+        WIDGET THAT DECLARED `drop_target` over an `accepts` list, or for
+        a reorderable For's container (D8). Returns the handle."""
         _app._register(self, wire.OCC_DROPPED, fn)
         return self
 
     def on_drag_ended(self, fn):
         """A drag that began here has ended: fn(operation), OP_COPY,
-        OP_MOVE or None for cancelled or refused. Returns the handle."""
-        _live_zone_only(self)
+        OP_MOVE or None for cancelled or refused — fn(*keys, operation)
+        for a stamped copy, which is how a reorderable row's own end
+        arrives. Returns the handle."""
         _app._register(self, wire.OCC_DRAG_ENDED, fn)
         return self
 
@@ -1642,14 +1692,53 @@ def _dropped(payload):
                    _representation((clip, values)))
 
 
-def _live_zone_only(handle):
-    """The template zone is refused by name until its own slice
-    (docs/dnd-plan.md §4); the core refuses a keyed record too."""
-    if isinstance(handle, Node):
+def _drag_slot(handle, keys, what, value):
+    """One drag representation's source (docs/dnd-plan.md §4): the row's
+    own field, packed as `level << 32 | field` for the slot it fills, or
+    None for a constant the caller writes itself.
+
+    `.draggable(text=row.title)` binds the way `label(bind=row.title)`
+    does, and every stamped copy resolves it from its own record.
+    """
+    if isinstance(value, Signal):
+        raise TypeError(
+            f"kaya: a drag payload's {what} cannot be a signal — a "
+            "payload is app-updated state, re-declared when it changes "
+            "(docs/dnd-plan.md D1), and inside a For's body it binds a "
+            "constant or the row's own field (§4)")
+    if isinstance(value, FieldRef):
+        level, field = value._level(), value._index
+    elif isinstance(value, Element):
+        level, field = value._level(), 0
+    elif isinstance(value, _CaseElement):
+        raise TypeError(
+            f"kaya: a drag payload's {what} takes one of the row's "
+            "fields (row.title), not a case element — inside a case arm "
+            "project the field (docs/dnd-plan.md §4)")
+    else:
+        return None
+    if keys:
         raise RuntimeError(
-            "kaya: drag and drop is a LIVE-ZONE declaration in this slice — "
-            "a widget inside a row template is neither a drag source nor a "
-            "drop target (docs/dnd-plan.md §4)")
+            f"kaya: draggable_at names ONE stamped copy, whose payload is "
+            f"already resolved — bind {what} to the row's field in the "
+            "For's body instead (docs/dnd-plan.md §4)")
+    if not isinstance(handle, Node):
+        raise RuntimeError(
+            f"kaya: a live widget's drag payload cannot bind {what} to a "
+            "row's field — a live widget is one thing on screen and has "
+            "no row (docs/dnd-plan.md §4)")
+    return (level << 32) | field
+
+
+def _template_zone_only(handle, what):
+    """A keyed drag declaration names ONE STAMPED COPY, so it takes the
+    template node the copy was stamped from — a live widget is exactly
+    one thing on screen and has no keys (docs/dnd-plan.md §4)."""
+    if not isinstance(handle, Node):
+        raise RuntimeError(
+            f"kaya: {what} names ONE STAMPED COPY — it takes a template "
+            "node and that copy's keys, and a live widget is one thing on "
+            "screen (docs/dnd-plan.md §4)")
 
 
 def _operations(operations):

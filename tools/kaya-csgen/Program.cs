@@ -403,6 +403,8 @@ static class Program
         Set("SetA11yHint", ["Node n", "Signal s"], "n, s");
         Set("SetA11yHint", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetAccepts", ["Node n", "params string[] kinds"], "n, kinds");
+        FwdAs("TplDragRef", "Draggable", ["Node n"], "n");
+        Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");
         Set("SetRole", ["Node n", "Role role"], "n, role");
         Set("SetInset", ["Node n", "double pad"], "n, pad");
         // Fwd leaves a trailing blank line; the class brace closes on it.

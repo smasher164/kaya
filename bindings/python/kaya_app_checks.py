@@ -2321,32 +2321,181 @@ check(
 check("this desktop reports auxiliary windows", caps.aux_windows is True)
 
 # --- THE DRAG SURFACE (docs/dnd-plan.md D1, D3, §4) -----------------
-# The template zone is refused BY NAME here, as the size policy is: one
-# handle serves both zones in this binding, so a raise is the only wall.
+# THE TEMPLATE ZONE: one handle serves both zones in this binding, so the
+# declaration is the same chain on a Node — every stamped copy is born
+# with it — and the KEYED form names one copy after its insert.
 app_dnd = kaya.App()
 with app_dnd.build():
     dnd_items = kaya.collection()
+    dnd_keyed = kaya.collection()
+
+
+def _path_len(rec, at):
+    return int.from_bytes(rec[at:at + 4], "little")
+
+
+def _first_str(rec, at):
+    """The first Value of the counted sequence beginning at `at` (a
+    count and a reserved word, then the values)."""
+    kind = int.from_bytes(rec[at + 8:at + 12], "little")
+    size = int.from_bytes(rec[at + 12:at + 16], "little")
+    if kind != kaya.wire.VALUE_STR:
+        return None
+    return rec[at + 16:at + 16 + size].decode()
+
+
+dnd_node = [None]
 with app_dnd.build():
     with kaya.column():
         with kaya.for_each(dnd_items):
-            for what, call in (
-                    ("drag source",
-                     lambda: kaya.label("x").draggable(text="hi")),
-                    ("drop target",
-                     lambda: kaya.label("x").accepts(kaya.ACCEPT_TEXT)
-                     .drop_target(kaya.OP_COPY)),
-                    ("drop handler",
-                     lambda: kaya.label("x").on_drop(lambda d: None)),
-            ):
-                before_dnd = len(kaya._tx)
-                try:
-                    call()
-                    ok = False
-                except RuntimeError as exc:
-                    ok = "LIVE-ZONE declaration in this slice" in str(exc)
-                _rewind(before_dnd)
-                check(f"a template-node {what} is refused by name", ok)
-            kaya.label("empty")
+            before_dnd = len(kaya._tx)
+            dnd_node[0] = (kaya.label("x")
+                           .accepts(kaya.ACCEPT_TEXT)
+                           .draggable(text="hi")
+                           .drop_target(kaya.OP_COPY)
+                           .on_drop(lambda *a: None)
+                           .on_drag_ended(lambda *a: None))
+            made = list(kaya._tx[before_dnd:])
+            sources = [rec for rec in made
+                       if _rec_kind(rec) == kaya.wire.TX_SET_DRAG_SOURCE]
+            targets = [rec for rec in made
+                       if _rec_kind(rec) == kaya.wire.TX_SET_DROP_TARGET]
+            check("a template node is a drag source with a CONSTANT "
+                  "payload",
+                  len(sources) == 1 and _path_len(sources[0], 32) == 0
+                  and int.from_bytes(sources[0][8:16], "little")
+                  == dnd_node[0].id)
+            check("a template node is a drop target for every copy",
+                  len(targets) == 1 and _path_len(targets[0], 20) == 0
+                  and int.from_bytes(targets[0][8:16], "little")
+                  == dnd_node[0].id)
+            # THE REGISTRY IS ADDITIVE ACROSS OCCURRENCE KINDS
+            # (docs/traps.md): a node is a drop target AND a drag source,
+            # so a second registration must not replace the first.
+            check("a node carries a drop handler AND a drag_ended one",
+                  (kaya.wire.OCC_DROPPED, dnd_node[0].id)
+                  in app_dnd._node_handlers
+                  and (kaya.wire.OCC_DRAG_ENDED, dnd_node[0].id)
+                  in app_dnd._node_handlers)
+
+# THE ELEMENT-BOUND PAYLOAD (docs/dnd-plan.md §4, ruled 2026-09-03): a
+# representation IS the row's own field, the way `label(bind=row.title)`
+# binds — the slot carries `level << 32 | field` and the `bound` mask
+# names it, so every stamped copy resolves its own.
+@dataclass
+class DndItem:
+    title: str
+    note: bytes
+
+
+def _dnd_values(rec, at):
+    """The counted value sequence beginning at `at`, decoded."""
+    count = int.from_bytes(rec[at:at + 4], "little")
+    out = []
+    off = at + 8
+    for _ in range(count):
+        value, off = kaya.wire.parse_value(rec, off)
+        out.append(value)
+    return out
+
+
+dnd_field = [None]
+with app_dnd.window():
+    dnd_bound = kaya.collection(DndItem)
+    with kaya.column():
+        for dnd_row in dnd_bound.rows():
+            dnd_field[0] = dnd_row.title
+            before_dnd = len(kaya._tx)
+            bound_node = kaya.label(bind=dnd_row.title).draggable(
+                text=dnd_row.title,
+                custom={"dev.kaya/note": dnd_row.note},
+                operations=(kaya.OP_COPY,))
+            bound_src = [rec for rec in kaya._tx[before_dnd:]
+                         if _rec_kind(rec) == kaya.wire.TX_SET_DRAG_SOURCE]
+            # Canonical slots: the custom id 0, its bytes 1, then text 2.
+            check("a bound drag payload names its slots in the mask",
+                  len(bound_src) == 1
+                  and int.from_bytes(bound_src[0][36:40], "little")
+                  == (1 << 1) | (1 << 2))
+            check("a bound slot carries level << 32 | field",
+                  len(bound_src) == 1
+                  and _dnd_values(bound_src[0], 40)[1:] == [1, 0])
+            check("a constant slot beside a bound one is untouched",
+                  len(bound_src) == 1
+                  and _dnd_values(bound_src[0], 40)[0] == "dev.kaya/note")
+
+            # A SIGNAL HAS NO ROW: refused by name rather than coerced to
+            # a repr on every stamped copy.
+            before_dnd = len(kaya._tx)
+            try:
+                kaya.label("x").draggable(text=kaya.signal("s"))
+                ok = False
+            except TypeError as exc:
+                ok = "cannot be a signal" in str(exc)
+            _rewind(before_dnd)
+            check("a drag payload bound to a signal is refused by name", ok)
+
+            # THE KEYED FORM NAMES ONE COPY, whose payload is resolved
+            # already — a field there would name a row it cannot see.
+            before_dnd = len(kaya._tx)
+            try:
+                bound_node.draggable_at("k", text=dnd_row.title)
+                ok = False
+            except RuntimeError as exc:
+                ok = "already resolved" in str(exc)
+            _rewind(before_dnd)
+            check("a row's field on the keyed form is refused by name", ok)
+
+with app_dnd.window():
+    with kaya.column():
+        # A LIVE WIDGET HAS NO ROW: the field is minted by the tracer
+        # inside the For above and carried out here.
+        before_dnd = len(kaya._tx)
+        try:
+            kaya.label("x").draggable(text=dnd_field[0])
+            ok = False
+        except RuntimeError as exc:
+            ok = "has no row" in str(exc)
+        _rewind(before_dnd)
+        check("a live widget's drag payload cannot bind a row's field", ok)
+
+# THE KEYED FORM: after the row's insert, one copy by (node, keys).
+with app_dnd.build():
+    dnd_keyed.insert("y", "why")
+    before_dnd = len(kaya._tx)
+    dnd_node[0].draggable_at("y", text="y", operations=(kaya.OP_COPY,))
+    dnd_node[0].drop_target_at("y", operations=(kaya.OP_COPY,))
+    made = list(kaya._tx[before_dnd:])
+    keyed_src = [rec for rec in made
+                 if _rec_kind(rec) == kaya.wire.TX_SET_DRAG_SOURCE]
+    keyed_tgt = [rec for rec in made
+                 if _rec_kind(rec) == kaya.wire.TX_SET_DROP_TARGET]
+    check("draggable_at carries the copy's keys before the payload",
+          len(keyed_src) == 1 and _path_len(keyed_src[0], 32) == 1
+          and _first_str(keyed_src[0], 40) == "y")
+    check("drop_target_at carries the copy's keys",
+          len(keyed_tgt) == 1 and _path_len(keyed_tgt[0], 20) == 1
+          and _first_str(keyed_tgt[0], 24) == "y")
+
+# AND A LIVE WIDGET HAS NO KEYS: the keyed form names one stamped copy,
+# so it takes a template node and refuses a widget by name.
+with app_dnd.build():
+    with kaya.column():
+        for what, call in (
+                ("draggable_at",
+                 lambda: kaya.label("x").draggable_at("k", text="hi")),
+                ("drop_target_at",
+                 lambda: kaya.label("x").drop_target_at(
+                     "k", operations=(kaya.OP_COPY,))),
+        ):
+            before_dnd = len(kaya._tx)
+            try:
+                call()
+                ok = False
+            except RuntimeError as exc:
+                ok = "names ONE STAMPED COPY" in str(exc)
+            _rewind(before_dnd)
+            check(f"{what} on a live widget is refused by name", ok)
 
 with app_dnd.build():
     with kaya.column():

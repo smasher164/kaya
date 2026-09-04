@@ -517,31 +517,55 @@ export class Handle {
    * withdraws it, which is how a same-app move removes its source
    * (docs/dnd-plan.md D1, D2). Chains. */
   draggable(opts: DraggableOptions = {}): this {
-    liveZoneOnly(this);
+    return this._draggable([], opts);
+  }
+
+  /** ONE stamped copy's drag declaration (docs/dnd-plan.md §4): the
+   * copy's keys, outermost first, then the payload `draggable` takes.
+   * The per-row payload an app declares after the row's insert; it
+   * overrides the template's own for that copy and follows it through a
+   * re-stamp. Chains. */
+  draggableAt(keys: Key[], opts: DraggableOptions = {}): this {
+    templateZoneOnly(this, "draggableAt");
+    return this._draggable(keys, opts);
+  }
+
+  private _draggable(keys: Key[], opts: DraggableOptions): this {
     const reps: wire.WireValue[] = [];
     let present = 0;
+    let bound = 0;
     const custom = Object.entries(opts.custom ?? {});
     const files = [...(opts.files ?? [])];
+    // Append one representation, bound or constant, and say which it
+    // was — the slot IS its index in `reps`.
+    const slot = (what: string, value: unknown): boolean => {
+      const ref = dragSlot(this, keys, what, value);
+      if (ref === null) return false;
+      bound |= 1 << reps.length;
+      reps.push(ref);
+      return true;
+    };
     for (const [ident, data] of custom) {
       acceptList([ident]);
-      reps.push(ident, new BlobHandle(runtime.registerBlob(data)));
+      reps.push(ident);
+      if (!slot("custom bytes", data)) reps.push(new BlobHandle(runtime.registerBlob(data as Uint8Array)));
     }
     for (const picked of files) reps.push(new I64(typeof picked === "number" ? picked : picked.handle));
     if (opts.image !== undefined) {
       present |= wire.CLIP_IMAGE;
-      reps.push(new BlobHandle(runtime.registerBlob(opts.image)));
+      if (!slot("image", opts.image)) reps.push(new BlobHandle(runtime.registerBlob(opts.image as Uint8Array)));
     }
     if (opts.html !== undefined) {
       present |= wire.CLIP_HTML;
-      reps.push(String(opts.html));
+      if (!slot("html", opts.html)) reps.push(String(opts.html));
     }
     if (opts.text !== undefined) {
       present |= wire.CLIP_TEXT;
-      reps.push(String(opts.text));
+      if (!slot("text", opts.text)) reps.push(String(opts.text));
     }
     const empty = present === 0 && files.length === 0 && custom.length === 0;
     const mask = empty ? 0 : operationMask(opts.operations ?? [OP_COPY]);
-    records().push(wire.tx_set_drag_source(this.id, present, files.length, custom.length, mask, 0, reps));
+    records().push(wire.tx_set_drag_source(this.id, present, files.length, custom.length, mask, keys.length, bound, [...keyPath(keys), ...reps]));
     return this;
   }
 
@@ -550,8 +574,15 @@ export class Handle {
    * its `accepts` list, which must be declared first — a destination has
    * one vocabulary, not two (docs/dnd-plan.md D1). Chains. */
   dropTarget(...operations: string[]): this {
-    liveZoneOnly(this);
     records().push(wire.tx_set_drop_target(this.id, operationMask(operations), 0, []));
+    return this;
+  }
+
+  /** ONE stamped copy's drop declaration, `draggableAt`'s twin; the
+   * copy's accept list is the template's `accepts`. Chains. */
+  dropTargetAt(keys: Key[], ...operations: string[]): this {
+    templateZoneOnly(this, "dropTargetAt");
+    records().push(wire.tx_set_drop_target(this.id, operationMask(operations), keys.length, keyPath(keys)));
     return this;
   }
 
@@ -560,7 +591,6 @@ export class Handle {
    * `dropTarget` over an `accepts` list, or for a reorderable For's
    * container (D8). Chains. */
   onDrop(fn: Handler): this {
-    liveZoneOnly(this);
     app()._register(this, wire.OCC_DROPPED, fn);
     return this;
   }
@@ -568,7 +598,6 @@ export class Handle {
   /** A drag that began here has ended: fn(operation), OP_COPY, OP_MOVE
    * or null for cancelled or refused. Chains. */
   onDragEnded(fn: Handler): this {
-    liveZoneOnly(this);
     app()._register(this, wire.OCC_DRAG_ENDED, fn);
     return this;
   }
@@ -1187,8 +1216,18 @@ export type RowsOptions = {
   onDrop?: Handler;
 };
 /** The clip a drag hands over, in `copy`'s own shape, plus the
- * operations the source allows (docs/dnd-plan.md D1). */
-export type DraggableOptions = CopyOptions & { operations?: readonly string[] };
+ * operations the source allows (docs/dnd-plan.md D1). INSIDE A FOR'S
+ * BODY a representation may be the ROW'S OWN FIELD instead of a
+ * constant, the way `label({ bind: row.title })` binds; every stamped
+ * copy resolves it from its own record (docs/dnd-plan.md §4). */
+export type DraggableOptions = {
+  text?: string | FieldRef;
+  html?: string | FieldRef;
+  image?: Uint8Array | FieldRef;
+  files?: readonly (PickedFile | number)[];
+  custom?: Readonly<Record<string, Uint8Array | FieldRef>>;
+  operations?: readonly string[];
+};
 export type ColumnsOptions = RowsOptions & { sort?: Sort; onSort?: Handler };
 
 export class Collection<E, R> extends BoundCollection<E, R> {
@@ -1756,14 +1795,54 @@ function operationMask(operations: readonly string[]): number {
   return mask;
 }
 
-/** The template zone is refused by name until its own slice
- * (docs/dnd-plan.md §4); the core refuses a keyed record too. */
-function liveZoneOnly(handle: Handle): void {
-  if (handle instanceof Widget && handle.isNode) {
+/** A keyed declaration names ONE STAMPED COPY, so it takes a template
+ * node — a live widget is one thing on screen and has no keys
+ * (docs/dnd-plan.md §4). */
+function templateZoneOnly(handle: Handle, what: string): void {
+  if (!(handle instanceof Widget && handle.isNode)) {
     throw new Error(
-      "kaya: drag and drop is a LIVE-ZONE declaration in this slice — a widget inside a row template is neither a drag source nor a drop target (docs/dnd-plan.md §4)",
+      `kaya: ${what} names ONE STAMPED COPY — it takes a template node and that copy's keys, and a live widget is one thing on screen (docs/dnd-plan.md §4)`,
     );
   }
+}
+
+/** One drag representation's source (docs/dnd-plan.md §4): the row's own
+ * field, packed as `level << 32 | field` for the slot it fills, or null
+ * for a constant the caller writes itself. `draggable({ text: row.title })`
+ * binds the way `label({ bind: row.title })` does, and every stamped copy
+ * resolves it from its own record. */
+function dragSlot(handle: Handle, keys: Key[], what: string, value: unknown): I64 | null {
+  if (value instanceof Signal) {
+    throw new TypeError(
+      `kaya: a drag payload's ${what} cannot be a signal — a payload is app-updated state, re-declared when it changes (docs/dnd-plan.md D1), and inside a For's body it binds a constant or the row's own field (§4)`,
+    );
+  }
+  let level: number;
+  let field: number;
+  if (value instanceof FieldRef) {
+    level = value._level();
+    field = value._index;
+  } else if (value instanceof Element) {
+    level = value._level();
+    field = 0;
+  } else if (value instanceof CaseElement) {
+    throw new TypeError(
+      `kaya: a drag payload's ${what} takes one of the row's fields (row.title), not a case element — inside a case arm project the field (docs/dnd-plan.md §4)`,
+    );
+  } else {
+    return null;
+  }
+  if (keys.length > 0) {
+    throw new Error(
+      `kaya: draggableAt names ONE stamped copy, whose payload is already resolved — bind ${what} to the row's field in the For's body instead (docs/dnd-plan.md §4)`,
+    );
+  }
+  if (!(handle instanceof Widget && handle.isNode)) {
+    throw new Error(
+      `kaya: a live widget's drag payload cannot bind ${what} to a row's field — a live widget is one thing on screen and has no row (docs/dnd-plan.md §4)`,
+    );
+  }
+  return new I64(level * 2 ** 32 + field);
 }
 
 function dropped(payload: wire.DroppedPayload): Dropped {

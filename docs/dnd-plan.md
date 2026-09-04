@@ -232,9 +232,33 @@ that shape — `loadFileRepresentation(forTypeIdentifier: "public.item")`
 STARTED inside `performDrop`, the temp copy copied again under the app's
 own `NSTemporaryDirectory()`, and that URL registered in
 `kayaPickedURLs`, which is the table `kaya_swiftui_open_picked` reads.
-No leg exercises it yet: dnd.steps' files target is the REFUSED type,
-and a files DROP joins the scene when the picked-table drop route lands
-(§5 step 4's own note).
+EXERCISED SINCE 2026-09-03 by `drag_file "<path>" to <destination>`,
+the harness verb for a FOREIGN file drop: the guest writes
+$TMP/kaya-dnd-$PID/dropped.txt (the picker and clipboard scenes' own
+convention), the mac verb builds a named pasteboard carrying the file
+URL and calls the destination's real arms with a nil draggingSource
+(AppKit's own spelling of foreign), the reader registers the URL in the
+picked table, and the guest reads `dropped.txt dropped bytes` back
+through `PickedFile::open`. The other desktops deliver the same drop
+in-process to their own arms — the WinUI arm through the classic OLE
+target it registers, which is the route a real file drop takes there, so
+the verb exercises the arms and not a stand-in; a phone cuts the step
+(D9); the REAL foreign gesture is step 7's witness, and step 7 measures it impossible to drive without a human on
+the mac (docs/probes/dnd-witness-mac-2026-09-03.md).
+
+iOS TOOK THE SAME VERB 2026-09-03, and it is the first leg anywhere that
+ever exercised the files branch. The guest writes the file under the
+directory `$TMP` names on that platform (`~/Documents`, the picker's own
+root — guests/rust/dnd.rs' `scene_root`), the verb hands a real
+`NSItemProvider(contentsOf:)` to a `KayaDropSessionDouble` whose
+`localDragSession` is NIL — UIKit's own spelling of foreign — and the
+verdict answers `local: false`, so the drop is a copy and the picked-table
+redemption is what the guest reads back. TWO DEFECTS IN THE FILES BRANCH
+CAME OUT WITH IT, both in docs/traps.md: the FILES bit was keyed on
+`public.file-url`, which a real foreign drop does not offer at all, and the
+NAME was read off `loadFileRepresentation`'s temp copy, which is named
+after the TYPE. Both now go through `kayaProviderIsFile` and
+`suggestedName`.
 
 ### D7 — The mac destination is an AppKit view, not a SwiftUI DropDelegate (RULING, visual and testability)
 
@@ -315,6 +339,18 @@ the discriminator that says a source is local, so the arm needs no id of
 its own in the ClipData. A FOREIGN drag therefore offers neither image
 nor custom: they are NOT ON OFFER rather than offered and empty.
 
+AND NO FOREIGN SOURCE REACHES A PHONE APP AT ALL, which is what the
+android lane does with `drag_file` (D6's harness verb): the step is CUT,
+not faked. tools/lib/lanes/android.py's MODS drops it together with the
+one assertion it feeds — `expect label#4 "files target got dropped.txt
+dropped bytes (copy)"` — and the runner prints both as NOT RUN naming
+the reason, while every drag between the app's own widgets runs. The
+Kotlin `drag_file` arm keeps its depth sentence, so a lane that ever
+wires the step reads why instead of passing on nothing. Faking one was
+refused: a drop this app synthesized for itself would exercise the local
+path the other drags already cover and would assert the redemption of a
+file no foreign process handed over.
+
 ### D10 — The harness verb drives real input where the lane has it (RULING)
 
 One shared verb, `drag <source> to <destination> [at <row key> before|onto]`,
@@ -339,7 +375,9 @@ addressed by kind and id like every other verb. Per lane:
   is re-injected, three tries 2s apart, since a REFUSED drop acks too and
   a missing ack means no gesture reached the app at all. Its expiry
   sentence carries the four counters it measured. The point delivered to
-  the app is in the destination's own top-left space, in DP.
+  the app is in the destination's own top-left space, in DP. `drag_file`
+  has NO android route — the platform hands a phone app no foreign drag
+  — so the lane cuts that step and the assertion it feeds (D9).
 - mac: the in-process AppKit route — a real `NSPasteboard` built from
   the source's declaration and the real `NSDraggingDestination` arms
   called in order on the main thread — because real input is refused
@@ -513,6 +551,56 @@ family, not two.
 | JS | do | `w.draggable({ text, custom, operations: [OP_COPY] })` | `w.accepts("text").dropTarget(OP_COPY)` | `items.rows({ reorderable: true, onDrop: fn })` | `w.onDrop(fn)` / `w.onDragEnded(fn)` |
 | C floor | records only | the generated `kaya_tx_set_drag_source` packer | `kaya_tx_set_drop_target` | `kaya_tx_set_reorderable` | the occurrence bytes; no decoder, as for `pasted` |
 
+AND THE TEMPLATE ZONE'S OWN SPELLINGS, landed in all nine 2026-09-03 —
+the DECLARATION in the For's body, the KEYED record after the row's
+insert, and the two node handlers. Seven bindings tell the zones apart by
+the receiver's TYPE and so reuse the live name; Python's and JS's one
+handle serves both zones, so their declaration and handlers ARE the live
+spellings and only the keyed verbs are new:
+
+| language | template declaration | keyed per copy | node handlers | bound payload | verdict |
+| --- | --- | --- | --- | --- | --- |
+| Rust | `row.draggable(node).text(..).declare()`, `row.drop_target(node, &[Op::Copy])` | `tx.draggable_at(node, &keys)`, `tx.drop_target_at(node, &keys, &[Op::Copy])` | `msgs.on_drop_node(n, ..)` / `msgs.on_drag_ended_node(n, ..)` | `row.draggable(n).text(Item::title())` | do |
+| Python | `node.draggable(text=..)`, `node.drop_target(OP_COPY)` — the live chain, on a Node | `node.draggable_at(*keys, text=..)`, `node.drop_target_at(*keys, operations=(OP_COPY,))` | `node.on_drop(fn)` / `node.on_drag_ended(fn)`, `fn(*keys, ..)` | `node.draggable(text=row.title)` | do |
+| Go | `row.Draggable(n).Text(..).Declare()`, `row.SetDropTarget(n, kaya.OpCopy)` (`Tpl` under it, `SumCase` beside it) | `tx.DraggableAt(n, keys)`, `tx.SetDropTargetAt(n, keys, kaya.OpCopy)` | `app.OnDropNode(n, ..)` / `app.OnDragEndedNode(n, ..)` | `row.Draggable(n).Text(row.Title())` (`TplDragRef`) | do |
+| C# | `row.Draggable(n).Text(..).Declare()`, `row.SetDropTarget(n, Op.Copy)` | `tx.DraggableAt(n, keys)`, `tx.SetDropTargetAt(n, keys, Op.Copy)` | `tx.OnDrop(Node, ..)` / `tx.OnDragEnded(Node, ..)`, overloads | `row.Draggable(n).Text(row.Title)` (`TplDragRef`) | do |
+| Java | `row.draggable(n).text(..).declare()`, `row.setDropTarget(n, Op.COPY)` | `tx.draggableAt(n, keys..)`, `tx.setDropTargetAt(n, keys, Op.COPY)` | `app.onDrop(Node, DropHandler)` / `app.onDragEnded(Node, DragEndedHandler)` | `row.draggable(n).text(row.title)` (`TplDragRef`) | do |
+| Swift | `row.t.draggable(n).text(..).declare()`, `row.t.setDropTarget(n, [.copy])` | `tx.draggableAt(n, at: keys)`, `tx.setDropTargetAt(n, at: keys, [.copy])` | `tx.onDrop(_ n:) { .. }` / `tx.onDragEnded(_ n:) { .. }`, overloads | `row.t.draggable(n).text(row.title)` (`KayaTplDragRef`) | do |
+| OCaml | `Tpl.draggable ~text ~operations n ()`, `Tpl.set_drop_target n [Op.Copy]` (the sugar tier, not `Tpl.Floor`) | `draggable_at ~text n ~keys ()`, `set_drop_target_at n ~keys [Op.Copy]` | `on_drop_node app n fn` / `on_drag_ended_node app n fn` | `Tpl.draggable ~text_field:item_title n ()` | do |
+| Haskell | the `TplDraggable TplClip [Op]` and `TplDropTarget [Op]` attrs; `setNodeDragSource` / `setNodeDropTarget` dynamic | `setDragSourceAt n keys clip ops`, `setDropTargetAt n keys ops` | `onDrop app (Node ..)` / `onDragEnded app (Node ..)` through `HandlerTarget` | `TplDraggable emptyTplClip {tplClipText = Just (TplField (field @"title" @Item))}` | do |
+| JS | `node.draggable({ text })`, `node.dropTarget(OP_COPY)` — the live chain, on a template node | `node.draggableAt(keys, { text })`, `node.dropTargetAt(keys, OP_COPY)` | `node.onDrop(fn)` / `node.onDragEnded(fn)`, `fn(row, ..)` | `node.draggable({ text: row.title })` | do |
+| C floor | records only | the same packers with a non-zero `path_len` | the occurrence bytes; no decoder | the same packers with a non-zero `bound` mask | records only |
+
+THE ELEMENT-BOUND PAYLOAD, ruled 2026-09-03 ("churn is free") and in all
+nine the same day: inside a For's body a representation IS THE ROW'S OWN
+FIELD, spelled the way that binding's template `label` already takes one —
+Rust's and Go's field tokens, Python's and JS's field objects, the
+generated accessors in C#, Java and Swift, OCaml's `~text_field` beside
+its `~bind_field`, Haskell's `TplField (field @"title" @Item)`. The
+binding computes each bound slot's canonical index (custom id and bytes
+per pair, then files, image, html, text), ORs the `bound` mask and packs
+`level << 32 | field` into that slot; the core resolves it per stamped
+copy and re-declares when the field changes (crates/kaya/src/scene.rs's
+`resolve_bound_clip` / `refresh_drag_binds`). A FILE NEVER BINDS — a
+picked handle is not a field — and the LIVE chain and the KEYED `_at`
+form stay constant-only: refused BY TYPE in the seven bindings whose
+template zone has its own chain (Rust's and Go's `TplDragRef`, C#'s and
+Java's `TplDragRef`, Swift's `KayaTplDragRef`, OCaml's labelled argument,
+Haskell's `TplClip`) and BY NAME in Python and JS, whose one handle
+serves both zones. A SIGNAL is refused by name everywhere it can be
+handed one: a payload is app-updated state, re-declared when it changes.
+The scene's proof is the rename — `click button#0` moves y's title to
+`yy`, and the next drag of `label@item[y]` hands over `yy`.
+
+THE KEYED FORM IS `_at`-SUFFIXED EVERYWHERE, mirroring the Rust
+reference rather than putting the keys first on the live verb: Python and
+JS spell the live `drop_target(*operations)` with POSITIONAL operations,
+so leading keys are unspellable there, and a distinct verb keeps one name
+per semantics in all nine while leaving the live chain untouched. It
+takes a TEMPLATE NODE and refuses a live widget — by TYPE in the seven,
+and in one byte-frozen sentence in Python and JS ("names ONE STAMPED
+COPY").
+
 The C floor gets no `dnd` guest and no decoder in this slice, which is
 this section's own ruling ("The C floor is the records") and the shape
 `pasted` already has there: the packers ride the generator, the
@@ -529,32 +617,57 @@ Op`), and a named STRING in the two whose accept list is already strings
 writes anything else). `none` is never spelled by a guest; it is what a
 cancelled or refused drag hands the source.
 
-THE TEMPLATE ZONE IS REFUSED IN ALL NINE, by the wall each binding
-already has: by TYPE in the seven whose zones are separate handles (a
-`Node`/`KayaNodeHandle`/`node` cannot be passed), and by name in the two
-whose one handle serves both — Python and JS raise the byte-frozen
-sentence "kaya: drag and drop is a LIVE-ZONE declaration in this slice —
-a widget inside a row template is neither a drag source nor a drop
-target (docs/dnd-plan.md §4)". The core refuses a keyed record beside
-them (crates/kaya/src/scene.rs). tools/check-sugar-surface.py holds all
-of it: five spellings × nine bindings, a watched fake-name negative per
-spelling, the sentence perturbed once per ambient file, and the seven
-typed refusals watched firing against a spliced breach.
+THE TEMPLATE ZONE LANDED 2026-09-03 IN ALL NINE (core + Rust first, the
+eight others in the sweep that followed), in TWO SHAPES the spec already
+carried. A declaration in the For's body — `row.draggable(node)
+.text(..).allow(..).declare()` and `row.drop_target(node, &[Op])` beside
+the template's own `accepts` — reaches every stamped copy with a
+CONSTANT payload and the copy's own identity tag, and a KEYED per-copy
+record — `tx.draggable_at(node, &keys)` / `tx.drop_target_at(node,
+&keys, ops)` after the row's insert — overrides it for one copy and
+follows that copy through a re-stamp, exactly as set_column_headers'
+keyed form does (crates/kaya/src/scene.rs: node_instances, the two
+override maps, the two TplOps). The landing and the drag's end reach the
+app with the copy's keys first: `on_drop_node` and `on_drag_ended_node`,
+which is also the registration a reorderable row's own drag_ended had
+lacked. The scene's column#2 is the proof: `label@item[y]` drags its
+per-copy text into the live target and reports `item y drag ended
+copy`, the live source drops onto `label@item[x]` and the stamped
+target reports `item x got text hello (copy)`, and each reorder ends
+with `row c drag ended move`. AN ELEMENT-BOUND PAYLOAD — `.text(Item::
+title())` in the body, the way a label binds a field — was NOT spelled
+here at first: the reps rode the record as plain Values with no source
+discriminator. RULED AND BUILT 2026-09-03 (record 49's `bound` mask, the
+table above): the keyed form is no longer how a row's data reaches its
+payload, it is the per-copy OVERRIDE. Before this the zone was refused in all nine;
+tools/check-sugar-surface.py's DND SURFACE clause is the FLIP of that
+refusal now — the template declaration, the two keyed verbs and the two
+node handlers, nine bindings each, read out of the block that owns them
+where the live and template spellings are one word. Its watched
+negatives: a fake name per spelling refused 9/9, the two ambient files'
+keyed-refusal sentence perturbed once each with the count printed, and
+the OLD live-zone sentence spliced back into each of them, which must
+redden the zone-open clause. Both were watched firing against the real
+files (a renamed `Tpl.Draggable` in Go, the live-zone refusal restored in
+Python).
 
-A STAMPED COPY'S OWN OUTCOME HAS NO REGISTRATION SURFACE, and that is
-the ONE gap the sweep leaves open — found by Go's own
+~~A STAMPED COPY'S OWN OUTCOME HAS NO REGISTRATION SURFACE~~ — CLOSED
+2026-09-03 by the node handlers above. It was found by Go's own
 `TestEveryLiveDispatchArmHasATemplateNodeSibling`, which refuses a live
-dispatch arm with no template-node sibling. A reorderable For's rows ARE
+dispatch arm with no template-node sibling: a reorderable For's rows ARE
 stamped copies, so `drag_ended` for a row drag arrives keyed (the mac arm
-hands the occurrence the SOURCE's tag), while every binding registers a
-drag handler by WIDGET id: the keyed occurrence matches no registration.
-`dropped` is unaffected — a reorder's landing carries the CONTAINER's
-tag (D8 amended), which is live. Deliberate, and stated rather than
-papered over: an `on_drop_node`/`on_drag_ended_node` pair is the template
-zone's own slice, beside the keyed `set_drag_source` the core refuses
-today. Go's arms therefore carry NO widget/node split at all — one table
-keyed by widget id — because a node arm reading a widget table would be
-the silent drop that test exists to forbid.
+hands the occurrence the SOURCE's tag) while every binding registered a
+drag handler by WIDGET id alone, and the keyed occurrence matched no
+registration. All nine now split their drop and drag_ended dispatch on
+the key path exactly as their paste dispatch does, and the scene's `row c
+drag ended move` is the observation. THE REGISTRY ITSELF was the other
+half: a map from id to ONE closure loses the first of two registrations,
+which is what the Rust binding did until this slice (docs/traps.md, "A
+binding's handler registry held ONE closure per id"). The other eight
+were read one by one and none has that shape — each keys a SEPARATE table
+per occurrence kind — and the two check surfaces (bindings/python's and
+bindings/js's kaya_app_checks, Go's tplzone_test.go) now assert that a
+drop handler and a drag_ended handler coexist on one id.
 
 WHAT THE OCCURRENCE SIDE COST: the tx records reached every binding
 through the generator, but `dropped` and `drag_ended` were in no
@@ -625,8 +738,9 @@ the wayland clipboard legs; then iOS.
    `Dropped { point, operation, anchor, before, clip }`, `Msgs::on_drag_ended`
    handing `Option<Op>`; guests/rust/dnd.rs and tools/scenes/dnd.steps,
    wired as the mac lane's dnd-rust leg (alone between drains).
-   The files drop waits on the picked-table redemption's drop route
-   (D6) and joins the scene with it.
+   THE FILES DROP JOINED 2026-09-03 through `drag_file` (D6's note),
+   green on the mac; the row's own drag_ended and the template zone's
+   two shapes joined the scene the same day (§4).
 5. Breadth: GTK (`GtkDropTargetAsync` for every target, the X11 verb),
    GTK DONE 2026-09-03: a GtkDragSource over the declared payload and a
    GtkDropTargetAsync over the accept list per declared widget; the
@@ -696,6 +810,32 @@ the wayland clipboard legs; then iOS.
    lane could see it: every click on that backend is programmatic and this
    is the first injected system touch it has ever taken.
 
+   COMPOSE TAKES THE TEMPLATE ZONE WITH NO NEW KOTLIN, measured
+   2026-09-03: the whole depth-2 scene minus the cut below ran green the
+   first time the leg saw it, seven injections all served on try 1,
+   `dnd-compose: PASS (16s)` inside a compose suite ALL PASS at 46 legs
+   / 100s. That is a property of the contract rather than luck, and it
+   is why the zone cost this backend nothing — a stamped copy's
+   declaration arrives as the SAME apply op as a live one, carrying the
+   copy's tag, and both arms resolve `KayaSceneModel.nodes[id]`; the
+   copy's own outcome rides `identityTag`, which falls back to the
+   CREATE tag that every stamped copy now carries (D8 amended), so a
+   reorderable row's `drag_ended` needed no emit site of its own; a
+   template `accepts` is an ordinary per-node SetProp; and the keyed
+   target `label@item[y]` resolves through `tableStamp(node.tag)`, the
+   arm the 2026-09-01 keyed-target slice already gave every tagged kind.
+   THE FOREIGN FILE DROP IS CUT HERE, honestly (D9): the lane drops
+   `drag_file` and the one assertion it feeds through
+   tools/lib/lanes/android.py's MODS, and the Kotlin arm keeps its depth
+   sentence. The runner's `drop` grammar grew for it — a drop is now a
+   contiguous BLOCK named by step specs, each spec a leading run of
+   words matching exactly one step (the verb alone where the scene has
+   one, the whole line where the discriminator is the quoted text) —
+   because the old (verb, target) form could name one step and this cut
+   is a step plus the `expect label#4` it feeds, one of six. Its
+   refusals run as five watched negatives at every launch, count
+   printed.
+
    WINUI DONE 2026-09-03: both routes, as probes 1 and 2 measured them.
    XAML carries every WinRT drag — `CanDrag` + `DragStarting` filling a
    `DataPackage` (custom ids as `SetData(id, IRandomAccessStream)` over a
@@ -730,3 +870,144 @@ the wayland clipboard legs; then iOS.
    reaches no registration (the ledger's open item).
 7. Cross-app witnesses per desktop, and the reorder affordance's own
    insertion indicator on the two backends that must draw it.
+   THE MAC HALF, MEASURED 2026-09-03
+   (docs/probes/dnd-witness-mac-2026-09-03.md, tools/mac/dragwitness): a
+   real cross-process drag CANNOT BE DRIVEN on this host. Every premise
+   holds — the accessibility grant is given, a posted CGEvent moves the
+   cursor exactly where told, the left button reads down on both event
+   source state ids, and the press and its drags reach a real NSView's
+   own `mouseDown`/`mouseDragged` — and
+   `beginDraggingSession(with:event:source:)` still enters AppKit's nested
+   tracking loop, never returns and never calls
+   `draggingSession(_:willBeginAt:)`, so no pasteboard is composed and no
+   destination in any process is ever asked. Held with a third process
+   posting the pointer, with movement deltas, bundled, and at `.regular`
+   activation policy. So the two mac lane legs this step asks for are NOT
+   wired: a human at the machine is the only driver AppKit accepts, and
+   the honest substitute a gate could still run — the interpreter's own
+   `KayaDragDropView` compiled with a probe, driven against a pasteboard a
+   FOREIGN process wrote and its composed payload read back by one — is
+   named in the probe and not built.
+   WHAT THE ATTEMPT DID BUY: the cross-process byte exchange is proven
+   (`run.py --board` composes kaya's payload grammar in one process and
+   reads all three representations, the MIME-shaped custom id included,
+   in another), and it found a SHIPPED DEFECT in kaya's mac drag source —
+   an empty `NSPasteboardItem` is zero pasteboard items, and on the one
+   route `beginDraggingSession` returns from here it aborts the process.
+   No lane could see it: the `drag` verb never calls
+   `beginDraggingSession` at all (fixed; docs/traps.md carries the
+   measurement AND its limit; `run.py --selftest` is the watched
+   negative).
+
+
+   LINUX DONE 2026-09-03, both pools. THE WITNESS is
+   tools/linux/dragwitness.py, a stock PyGObject GTK4 client with nothing
+   of kaya in it: a `GtkDragSource` offering text and a file, and a
+   `GtkDropTarget` that says what arrived, both reporting on stdout.
+   tools/linux/dragwitness-leg.py runs it beside the guest on the leg's own
+   session and walks a REAL pointer between the two windows with
+   tools/linux/dragdrive.py's own gesture — `dndwitness-out` drags kaya's
+   declared source into the witness (which prints `got text hello`) and
+   `dndwitness-in` drags the witness's file into kaya's files target, which
+   is the one route through the real `GtkDropTargetAsync` with `local:
+   false` that the in-process `drag_file` verb cannot exercise; kaya's
+   guest reads it back out of the picked table as
+   `files target got witness.txt witness bytes (copy)`, and the witness is
+   told `copy` (D2's foreign rule). BOTH ENDS ARE READ ON EVERY LEG. Two
+   findings, both in docs/traps.md: AT-SPI cannot say where a widget is
+   (SCREEN extents are 0,0 on both protocols and WINDOW extents are 26px
+   off), so the leg takes its geometry from the harness's own
+   `KAYA_DIAG dragdrive` line; and `Gdk.ContentProvider.new_typed` is not
+   introspectable, with the AttributeError swallowed inside `prepare` so
+   the drag silently offers nothing.
+
+   THE INSERTION INDICATOR on GTK: during a row drag over a reorderable
+   For, a 3px accent line at the landing edge of the row under the pointer
+   — its top for `before`, its bottom for `onto` — put up on enter and
+   motion and taken down on leave, on drop and when the drag ends. It is
+   `background-image: linear-gradient(..., @accent_bg_color 3px,
+   transparent 3px)` on the row: a line rather than a shadow, and no
+   layout, since a border would grow the row and displace every row under
+   it in the middle of the drag. NO SCENE CAN SEE IT — every reorder
+   observable answers identically with it gone — so tools/check-verbs.py
+   holds the ten links (six call sites inside install_reorder, the two
+   rules, the sheet's load and the provider that carries it to the
+   display), each watched being cut. Measured once by hand on the x11
+   pool, by filming the dnd-rust leg and reading the frames: the resting
+   state is the container's 1px focus outline and the indicator is three
+   more pixels at a row's edge, present through the drag and gone on the
+   frame after the drop.
+
+   THE `drag_file` VERB'S GTK ARM landed with it (D6): `GdkDrop` is
+   abstract and has no constructor, so the platform's drop signal cannot be
+   entered with a drag nobody started. The destination's own arms are
+   factored out instead — `deliver_drop`, which the platform's `connect_drop`
+   and the verb both call, over a `ClipOffer::Foreign` the verdict answers
+   `local: false` for; `materialize` is what registers the file in the
+   picked table, so a dropped file is redeemed exactly as a pasted one is.
+
+
+   WINDOWS DONE 2026-09-03, both directions as lane legs plus the
+   indicator. THE WITNESS IS THE STOCK OLE APP THE PROBES WERE MEASURED
+   AGAINST (tools/win/dragprobe/stock, one copy, staged and built by
+   tools/deploy-win.py where the probe's own run.py stages it), driven by
+   tools/guest/dnd-witness.ps1 in the interactive session — a drag is real
+   mouse input and OLE's modal loop reads the real message queue.
+   BOTH LEGS ASSERT THROUGH KAYA'S OWN MODEL, read back out of the running
+   app over UI Automation: the guest's status label is what the app wrote
+   when the occurrence arrived, so a green witness is kaya having taken a
+   foreign payload rather than a log line about one.
+   `dndwitness_rust` (kaya SOURCE -> the foreign reader): the foreign
+   process enumerated `dev.kaya/note(cf=49573,TYMED_ISTREAM)`,
+   `CF_UNICODETEXT(cf=13,HGLOBAL)` and `dev.kaya/local.<pid>` and read
+   `utf8="note!"` and `"hello"` back, and kaya's source learned `drag
+   ended copy` through `DropCompleted` — probe 1's forward measurement,
+   now on the real app, with the pid-named local marker proved VISIBLE to
+   a foreign reader (which is what makes local-versus-foreign answerable
+   from the format list at all).
+   `dndforeign_rust` (a Win32 OLE source and Explorer -> kaya): THE
+   CLASSIC ROUTE'S FIRST REAL DROP. `RegisterDragDrop` was armed on
+   2026-09-03 and nothing had ever sent it a drag, so its arming census
+   was the whole of its record; the leg drops text and a FILE from
+   `DoDragDrop` into kaya's declared destinations and the guest reports
+   `text target got text kaya stock text (copy)` and `files target got
+   note.txt foreign bytes (copy)` — D6 end to end from a foreign source,
+   CF_HDROP through `parse_dropfiles` and `picked_register` to the
+   guest's own `PickedFile::open`. AND EXPLORER ITSELF, the third phase
+   and probe 2's own question, with its own file so the label it produces
+   cannot be the previous drop's: a real drag out of a File Explorer
+   window's list item reads `files target got explorer.txt explorer bytes
+   (copy)`. What made that phase work was rewriting its DIAGNOSTIC to
+   discriminate — `[]` cannot tell "no window" from "a window UIA will not
+   bind" from "a window with no items", and the per-round census that
+   replaced it named the cause on its first run (docs/traps.md).
+   Both legs run ALONE between drains (check-steps' menu_serial reads the
+   `dnd*` prefix without its underscore now) and both sweep their
+   processes at the end.
+   THE INSERTION INDICATOR is kaya's own, because D8 declines
+   `CanReorderItems`: while a row drag hovers a reorderable For's row, a
+   2-DIP line at the LANDING EDGE — the row's top for `before`, its
+   bottom for `onto`, the same half `drop_identity` reads — shown from the
+   `DragOver` arm and cleared on `DragLeave`, on `Drop` and on
+   `DropCompleted`. A POPUP AND NOT A CHILD: WinUI has no adorner layer,
+   and a line added to the For's own panel would be a child every
+   `child_order` index counts. Its colour is
+   `{ThemeResource AccentFillColorDefaultBrush}`, the platform's own
+   token, the rule the table card already carries. NO SCENE CAN SEE IT —
+   `expect_order`, the drop's anchor and its before bit all answer
+   identically with it gone — so tools/check-verbs.py byte-freezes the
+   four arms with a watched negative each, and the picture is a hand
+   measurement: driven over a real reorder drag on the VM 2026-09-03, the
+   line is `#0067C0` (Windows 11's light `AccentFillColorDefaultBrush`),
+   exactly 2 rows tall, straddling row a's top edge at the `before` hold
+   and its bottom edge at the `onto` hold, and gone the frame after the
+   release.
+   AND `drag_file` (D6) IS THE OLE ROUTE'S OWN IN-PROCESS EXERCISE: the
+   verb hands kaya's registered `IDropTarget` a CF_HDROP-only
+   `IDataObject` at the destination's screen point, so the hit test, the
+   verdict, the picked-table registration and the `dropped` emission are
+   the arms a real Explorer drag takes. The data object is hand-rolled
+   for `ole_get_data`'s own reason — STGMEDIUM's generated declaration is
+   gated on `Win32_Graphics_Gdi` (crates/kaya/Cargo.toml), so neither
+   `#[implement(IDataObject)]` nor the generated `SetData` exists in this
+   feature set.

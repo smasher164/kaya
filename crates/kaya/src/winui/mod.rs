@@ -78,6 +78,7 @@ use bindings::Microsoft::UI::Xaml::Media::{
 // which is not the child's own arranged box once the child carries an
 // explicit size. See `canvas_track_of`.
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::LayoutInformation;
+use bindings::Microsoft::UI::Xaml::Controls::Primitives::Popup;
 use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -7760,6 +7761,69 @@ fn dnd_widget_at(core: &CoreState, x: f64, y: f64) -> Option<u64> {
     best.map(|(_, id)| id)
 }
 
+/// THE REORDER'S INSERTION INDICATOR (docs/dnd-plan.md §5 step 7): while a
+/// row drag hovers a reorderable For's row, a line at the LANDING EDGE —
+/// the row's top for `before`, its bottom for `onto`, which is the same
+/// half `drop_identity` reads. NO SCENE CAN SEE IT: it is pixels, and
+/// expect_order answers identically with it gone, so tools/check-verbs.py
+/// byte-freezes the four arms (shown on hover, cleared on leave, cleared
+/// on drop, painted in the platform's token) with a watched negative each.
+/// A POPUP AND NOT A CHILD: WinUI has no adorner layer, and a line added
+/// to the For's own panel would be a child every `child_order` index
+/// counts. The colour is the platform's token, never a literal.
+const DROP_LINE_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background=\"{ThemeResource AccentFillColorDefaultBrush}\" ",
+    "IsHitTestVisible=\"False\"/>"
+);
+
+/// Fluent's own list-reorder rule is 2 DIP; the line straddles the edge.
+const DROP_LINE_THICKNESS: f64 = 2.0;
+
+thread_local! {
+    static DROP_LINE: RefCell<Option<(Popup, Grid)>> = const { RefCell::new(None) };
+}
+
+fn show_drop_line(
+    row: &bindings::Microsoft::UI::Xaml::UIElement,
+    before: bool,
+) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::{FrameworkElement, UIElement};
+    use windows_core::Interface;
+    let frame: FrameworkElement = row.cast()?;
+    let origin = row
+        .TransformToVisual(None::<&UIElement>)?
+        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+    let width = frame.ActualWidth()?;
+    let height = frame.ActualHeight()?;
+    let edge = f64::from(origin.Y) + if before { 0.0 } else { height };
+    let root = row.XamlRoot()?;
+    DROP_LINE.with_borrow_mut(|held| -> windows_core::Result<()> {
+        if held.is_none() {
+            let line: Grid = XamlReader::Load(&HSTRING::from(DROP_LINE_XAML))?.cast()?;
+            line.SetHeight(DROP_LINE_THICKNESS)?;
+            let popup = Popup::new()?;
+            popup.SetChild(&line)?;
+            popup.SetIsHitTestVisible(false)?;
+            *held = Some((popup, line));
+        }
+        let (popup, line) = held.as_ref().expect("just filled");
+        line.SetWidth(width)?;
+        popup.SetXamlRoot(&root)?;
+        popup.SetHorizontalOffset(f64::from(origin.X))?;
+        popup.SetVerticalOffset(edge - DROP_LINE_THICKNESS / 2.0)?;
+        popup.SetIsOpen(true)
+    })
+}
+
+fn hide_drop_line() {
+    DROP_LINE.with_borrow(|held| {
+        if let Some((popup, _)) = held {
+            let _ = popup.SetIsOpen(false);
+        }
+    });
+}
+
 /// Attach a widget's drag and drop handlers ONCE: WinRT events have no
 /// idempotent add, so a re-declaration must not stack a second copy of
 /// every handler.
@@ -7796,6 +7860,7 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
             // The source learns the outcome (D1) — WinUI's counterpart to
             // AppKit's session-ended operation.
             let operation = drag_ops_of(args.DropResult()?);
+            hide_drop_line();
             CORE.with_borrow(|core| {
                 if let Some(core) = core.as_ref() {
                     if let Some(tag) = source_tag(core, id) {
@@ -7809,6 +7874,10 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
     let hover = DragEventHandler::new(move |_, args| xaml_drag_event(id, args, false));
     element.DragEnter(&hover)?;
     element.DragOver(&hover)?;
+    element.DragLeave(&DragEventHandler::new(move |_, _| {
+        hide_drop_line();
+        Ok(())
+    }))?;
     element.Drop(&DragEventHandler::new(move |_, args| xaml_drag_event(id, args, true)))?;
     Ok(())
 }
@@ -7837,19 +7906,30 @@ fn xaml_drag_event(
     });
     args.SetAcceptedOperation(package_op(verdict))?;
     args.SetHandled(true)?;
-    if !dropping || verdict == crate::wire::DRAG_OP_NONE {
-        return Ok(());
-    }
     let element = CORE.with_borrow(|core| {
         core.as_ref()
             .and_then(|core| core.widgets.get(&WidgetId(id)))
             .map(NativeWidget::element)
     });
-    let Some(Ok(element)) = element else { return Ok(()) };
+    let Some(Ok(element)) = element else {
+        hide_drop_line();
+        return Ok(());
+    };
     // `point` is the DESTINATION's own top-left DIP coordinates.
     let point = args.GetPosition(&element)?;
     let height = element.cast::<FrameworkElement>()?.ActualHeight()?;
     let upper = f64::from(point.Y) < height / 2.0;
+    let reorder_row = CORE.with_borrow(|core| {
+        core.as_ref().is_some_and(|core| core.reorder_rows.contains_key(&id))
+    });
+    if !dropping && reorder_row && verdict != crate::wire::DRAG_OP_NONE {
+        let _ = show_drop_line(&element, upper);
+    } else {
+        hide_drop_line();
+    }
+    if !dropping || verdict == crate::wire::DRAG_OP_NONE {
+        return Ok(());
+    }
     let landing = CORE.with_borrow(|core| {
         let core = core.as_ref()?;
         let (tag, anchor, before) = drop_identity(core, id, upper)?;
@@ -8260,6 +8340,251 @@ fn arm_ole_route(core: &mut CoreState) {
         "kaya: winui OLE drop route armed (OleInitialize {ole_code:?}{apartment}): {}",
         armed.join(" ")
     );
+}
+
+/// A FOREIGN drag's data object: CF_HDROP and NOTHING ELSE, so no local
+/// marker and `ole_offer` answers `local: false`. HAND-ROLLED for
+/// `ole_get_data`'s own reason — STGMEDIUM's generated declaration is
+/// gated on `Win32_Graphics_Gdi` (crates/kaya/Cargo.toml), so neither
+/// `#[implement(IDataObject)]` nor the generated `SetData` exists here.
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct ForeignFiles {
+    vtable: *const ForeignFilesVtbl,
+    refs: std::sync::atomic::AtomicU32,
+    dropfiles: Vec<u8>,
+}
+
+#[cfg(feature = "harness")]
+type ForeignRaw = *mut core::ffi::c_void;
+
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct ForeignFilesVtbl {
+    query_interface: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows_core::GUID,
+        *mut ForeignRaw,
+    ) -> windows_core::HRESULT,
+    add_ref: unsafe extern "system" fn(ForeignRaw) -> u32,
+    release: unsafe extern "system" fn(ForeignRaw) -> u32,
+    get_data: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+        *mut KayaStgMedium,
+    ) -> windows_core::HRESULT,
+    get_data_here: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+        *mut KayaStgMedium,
+    ) -> windows_core::HRESULT,
+    query_get_data: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+    ) -> windows_core::HRESULT,
+    get_canonical_format_etc: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+        *mut windows::Win32::System::Com::FORMATETC,
+    ) -> windows_core::HRESULT,
+    set_data: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+        *const KayaStgMedium,
+        i32,
+    ) -> windows_core::HRESULT,
+    enum_format_etc:
+        unsafe extern "system" fn(ForeignRaw, u32, *mut ForeignRaw) -> windows_core::HRESULT,
+    d_advise: unsafe extern "system" fn(
+        ForeignRaw,
+        *const windows::Win32::System::Com::FORMATETC,
+        u32,
+        ForeignRaw,
+        *mut u32,
+    ) -> windows_core::HRESULT,
+    d_unadvise: unsafe extern "system" fn(ForeignRaw, u32) -> windows_core::HRESULT,
+    enum_d_advise: unsafe extern "system" fn(ForeignRaw, *mut ForeignRaw) -> windows_core::HRESULT,
+}
+
+#[cfg(feature = "harness")]
+const E_NOINTERFACE: windows_core::HRESULT = windows_core::HRESULT(0x8000_4002u32 as i32);
+#[cfg(feature = "harness")]
+const E_NOTIMPL: windows_core::HRESULT = windows_core::HRESULT(0x8000_4001u32 as i32);
+#[cfg(feature = "harness")]
+const DV_E_FORMATETC: windows_core::HRESULT = windows_core::HRESULT(0x8004_0064u32 as i32);
+#[cfg(feature = "harness")]
+const OOM: windows_core::HRESULT = windows_core::HRESULT(0x8007_000Eu32 as i32);
+
+#[cfg(feature = "harness")]
+impl ForeignFiles {
+    const VTABLE: ForeignFilesVtbl = ForeignFilesVtbl {
+        query_interface: Self::query_interface,
+        add_ref: Self::add_ref,
+        release: Self::release,
+        get_data: Self::get_data,
+        get_data_here: Self::not_impl_medium,
+        query_get_data: Self::query_get_data,
+        get_canonical_format_etc: Self::canonical,
+        set_data: Self::set_data,
+        enum_format_etc: Self::enum_format_etc,
+        d_advise: Self::d_advise,
+        d_unadvise: Self::d_unadvise,
+        enum_d_advise: Self::enum_d_advise,
+    };
+
+    /// The object, as the `IDataObject` a drop target takes. One
+    /// reference, transferred to the returned interface.
+    fn new(path: &str) -> windows::Win32::System::Com::IDataObject {
+        let raw = Box::into_raw(Box::new(ForeignFiles {
+            vtable: &Self::VTABLE,
+            refs: std::sync::atomic::AtomicU32::new(1),
+            dropfiles: build_dropfiles(&[path.to_owned()]),
+        })) as ForeignRaw;
+        unsafe { windows_core::Interface::from_raw(raw) }
+    }
+
+    unsafe extern "system" fn query_interface(
+        this: ForeignRaw,
+        iid: *const windows_core::GUID,
+        out: *mut ForeignRaw,
+    ) -> windows_core::HRESULT {
+        let wanted = unsafe { *iid };
+        let ours = wanted == <windows_core::IUnknown as windows_core::Interface>::IID
+            || wanted == <windows::Win32::System::Com::IDataObject as windows_core::Interface>::IID;
+        if !ours {
+            unsafe { *out = core::ptr::null_mut() };
+            return E_NOINTERFACE;
+        }
+        unsafe {
+            Self::add_ref(this);
+            *out = this;
+        }
+        windows_core::HRESULT(0)
+    }
+
+    unsafe extern "system" fn add_ref(this: ForeignRaw) -> u32 {
+        let me = unsafe { &*(this as *const ForeignFiles) };
+        me.refs.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+    }
+
+    unsafe extern "system" fn release(this: ForeignRaw) -> u32 {
+        let left = {
+            let me = unsafe { &*(this as *const ForeignFiles) };
+            me.refs.fetch_sub(1, std::sync::atomic::Ordering::Release) - 1
+        };
+        if left == 0 {
+            drop(unsafe { Box::from_raw(this as *mut ForeignFiles) });
+        }
+        left
+    }
+
+    /// CF_HDROP as HGLOBAL, a FRESH allocation per call: the reader
+    /// finishes with `ReleaseStgMedium`, which frees what it was given.
+    unsafe extern "system" fn get_data(
+        this: ForeignRaw,
+        format: *const windows::Win32::System::Com::FORMATETC,
+        medium: *mut KayaStgMedium,
+    ) -> windows_core::HRESULT {
+        let etc = unsafe { *format };
+        if u32::from(etc.cfFormat) != CF_HDROP
+            || etc.tymed & (windows::Win32::System::Com::TYMED_HGLOBAL.0 as u32) == 0
+        {
+            return DV_E_FORMATETC;
+        }
+        let me = unsafe { &*(this as *const ForeignFiles) };
+        let bytes = &me.dropfiles;
+        unsafe {
+            let Ok(hglobal) = windows::Win32::System::Memory::GlobalAlloc(
+                windows::Win32::System::Memory::GMEM_MOVEABLE,
+                bytes.len().max(1),
+            ) else {
+                return OOM;
+            };
+            let p = windows::Win32::System::Memory::GlobalLock(hglobal);
+            if p.is_null() {
+                return OOM;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), p as *mut u8, bytes.len());
+            let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
+            *medium = KayaStgMedium {
+                tymed: windows::Win32::System::Com::TYMED_HGLOBAL.0 as u32,
+                handle: hglobal.0,
+                unk_for_release: core::ptr::null_mut(),
+            };
+        }
+        windows_core::HRESULT(0)
+    }
+
+    unsafe extern "system" fn query_get_data(
+        _this: ForeignRaw,
+        format: *const windows::Win32::System::Com::FORMATETC,
+    ) -> windows_core::HRESULT {
+        let etc = unsafe { *format };
+        if u32::from(etc.cfFormat) == CF_HDROP
+            && etc.tymed & (windows::Win32::System::Com::TYMED_HGLOBAL.0 as u32) != 0
+        {
+            windows_core::HRESULT(0)
+        } else {
+            DV_E_FORMATETC
+        }
+    }
+
+    unsafe extern "system" fn not_impl_medium(
+        _this: ForeignRaw,
+        _format: *const windows::Win32::System::Com::FORMATETC,
+        _medium: *mut KayaStgMedium,
+    ) -> windows_core::HRESULT {
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn canonical(
+        _this: ForeignRaw,
+        _wanted: *const windows::Win32::System::Com::FORMATETC,
+        out: *mut windows::Win32::System::Com::FORMATETC,
+    ) -> windows_core::HRESULT {
+        unsafe { *out = ole_format(0, 0) };
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn set_data(
+        _this: ForeignRaw,
+        _format: *const windows::Win32::System::Com::FORMATETC,
+        _medium: *const KayaStgMedium,
+        _release: i32,
+    ) -> windows_core::HRESULT {
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn enum_format_etc(
+        _this: ForeignRaw,
+        _direction: u32,
+        out: *mut ForeignRaw,
+    ) -> windows_core::HRESULT {
+        unsafe { *out = core::ptr::null_mut() };
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn d_advise(
+        _this: ForeignRaw,
+        _format: *const windows::Win32::System::Com::FORMATETC,
+        _flags: u32,
+        _sink: ForeignRaw,
+        _token: *mut u32,
+    ) -> windows_core::HRESULT {
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn d_unadvise(_this: ForeignRaw, _token: u32) -> windows_core::HRESULT {
+        E_NOTIMPL
+    }
+
+    unsafe extern "system" fn enum_d_advise(
+        _this: ForeignRaw,
+        out: *mut ForeignRaw,
+    ) -> windows_core::HRESULT {
+        unsafe { *out = core::ptr::null_mut() };
+        E_NOTIMPL
+    }
 }
 
 fn window_class(hwnd: isize) -> String {
@@ -13973,6 +14298,44 @@ fn drag_plan(
     })
 }
 
+/// The destination's centre in SCREEN pixels for `drag_file`, or the
+/// sentence naming what stopped the drop. The point is the one the OLE
+/// route hit-tests with, so it is checked against `dnd_widget_at` here
+/// rather than trusted.
+#[cfg(feature = "harness")]
+fn drag_file_plan(
+    destination: crate::harness::Target,
+) -> windows_core::Result<Result<(i32, i32), String>> {
+    type Aim = Result<(i32, i32), String>;
+    WinUiStage::on_ui_read(move |core| -> windows_core::Result<Aim> {
+        let Some(onto) = target_widget_id(core, destination) else {
+            return Ok(Err(format!("no such target {destination:?}")));
+        };
+        if !core.drop_targets.contains_key(&onto) && !core.reorder_rows.contains_key(&onto) {
+            return Ok(Err(format!(
+                "{destination:?} is not a drop destination — it declares no drop_target and sits in no reorderable For"
+            )));
+        }
+        if let Ok(content) = core.window.Content() {
+            let _ = content.UpdateLayout();
+        }
+        let Some(boxed) = widget_screen_rect(core, onto) else {
+            return Ok(Err("the destination has no laid-out box yet".to_owned()));
+        };
+        if boxed.2 <= 0.0 || boxed.3 <= 0.0 {
+            return Ok(Err("the destination has no laid-out box yet".to_owned()));
+        }
+        let at = ((boxed.0 + boxed.2 / 2.0) as i32, (boxed.1 + boxed.3 / 2.0) as i32);
+        match dnd_widget_at(core, f64::from(at.0), f64::from(at.1)) {
+            Some(hit) if hit == onto => Ok(Ok(at)),
+            other => Ok(Err(format!(
+                "the destination's centre {at:?} hit-tests to {other:?}, not to {destination:?} \
+                 (widget {onto}) — the OLE route names a widget by the drop POINT"
+            ))),
+        }
+    })
+}
+
 #[cfg(feature = "harness")]
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
@@ -15379,6 +15742,80 @@ impl crate::harness::Stage for WinUiStage {
         eprintln!("kaya: winui drag {source:?} at {from:?} -> {destination:?} at {to:?}");
         inject_drag(from, to);
         String::new()
+    }
+
+    fn drag_file(&self, path: &str, destination: crate::harness::Target) -> String {
+        // THE CLASSIC ROUTE'S OWN ARMS (docs/dnd-plan.md D6): a foreign
+        // file drop is what `RegisterDragDrop` exists for, so the verb
+        // hands kaya's own IDropTarget a CF_HDROP-only IDataObject at the
+        // destination's screen point and the whole read — hit test,
+        // verdict, picked-table registration, `dropped` — is the one a
+        // real Explorer drag takes (§5 step 7's witness drives that one).
+        const UNLAID: &str = "the destination has no laid-out box yet";
+        if !std::path::Path::new(path).exists() {
+            return format!(
+                "no file at {path} — the scene's guest writes the file it drops \
+                 (clipboard_seed's rule)"
+            );
+        }
+        let mut aimed: Result<(i32, i32), String> = Err(UNLAID.to_owned());
+        let mut last: Option<(i32, i32)> = None;
+        for _ in 0..80 {
+            aimed = match drag_file_plan(destination) {
+                Ok(aim) => aim,
+                Err(e) => return format!("<unreadable: {e}>"),
+            };
+            match &aimed {
+                Ok(at) if last == Some(*at) => break,
+                Ok(at) => last = Some(*at),
+                Err(_) => last = None,
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let at = match (aimed, last) {
+            (Ok(at), Some(settled)) if at == settled => at,
+            (Ok(at), _) => return format!("the destination's box never settled — last read {at:?}"),
+            (Err(sentence), _) => return sentence,
+        };
+        let path = path.to_owned();
+        Self::on_ui_bare(move || -> windows_core::Result<String> {
+            use windows::Win32::System::Ole::{DROPEFFECT, IDropTarget};
+            // The BORROW IS DROPPED before the arms run: they take their
+            // own (the on_ui_bare lesson, one RefCell over).
+            let target = CORE.with_borrow(|core| {
+                core.as_ref().and_then(|core| {
+                    core.ole_targets.last().map(|(_, target)| target.clone())
+                })
+            });
+            let Some(target): Option<IDropTarget> = target else {
+                return Ok(
+                    "the OLE drop route is not armed on this window, so a foreign drop has \
+                     nowhere to land — arm_ole_route prints its census on the first drain"
+                        .to_owned(),
+                );
+            };
+            let data = ForeignFiles::new(&path);
+            let point = windows::Win32::Foundation::POINTL { x: at.0, y: at.1 };
+            let keys = windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS(1);
+            let allowed = DROPEFFECT(crate::wire::DRAG_OP_COPY);
+            let mut effect = allowed;
+            unsafe { target.DragEnter(&data, keys, point, &mut effect)? };
+            let entered = effect.0;
+            effect = allowed;
+            unsafe { target.DragOver(keys, point, &mut effect)? };
+            let hovered = effect.0;
+            if hovered == crate::wire::DRAG_OP_NONE {
+                unsafe { target.DragLeave()? };
+                return Ok(format!(
+                    "the destination refused the file drop — DragEnter answered {entered} and \
+                     DragOver {hovered}, so its accept list takes no files (docs/dnd-plan.md D1)"
+                ));
+            }
+            effect = allowed;
+            unsafe { target.Drop(&data, keys, point, &mut effect)? };
+            Ok(String::new())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
 

@@ -341,6 +341,79 @@ pub struct AppIdentity {
 /// than a duplicate check; `custom` is the one plural field with names.
 /// kaya DERIVES NOTHING — the one exception is `files`, which also gets a
 /// text rendition of the paths.
+/// One clip slot bound to a row field rather than a constant: `slot`
+/// indexes the record's value block in its canonical order (custom id,
+/// custom bytes per pair, then files, image, html, text), `level` counts
+/// enclosing Fors outward as set_property's element source does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundRep {
+    pub slot: u32,
+    pub level: u32,
+    pub field: u32,
+}
+
+/// The canonical slot index of each single-valued representation, given
+/// the counts ahead of it; the two plural kinds take their slots first.
+impl Clip {
+    pub fn slot_of_text(&self) -> u32 {
+        self.slot_of_html() + u32::from(self.html.is_some())
+    }
+    pub fn slot_of_html(&self) -> u32 {
+        self.slot_of_image() + u32::from(self.image.is_some())
+    }
+    pub fn slot_of_image(&self) -> u32 {
+        (self.custom.len() * 2 + self.files.len()) as u32
+    }
+    pub fn slot_of_custom_bytes(&self, index: usize) -> u32 {
+        (index * 2 + 1) as u32
+    }
+    /// Put a resolved value into the slot a BoundRep names.
+    pub fn set_slot(&mut self, slot: u32, value: Value) {
+        let pairs = self.custom.len() as u32 * 2;
+        let files = self.files.len() as u32;
+        if slot < pairs {
+            let (i, half) = ((slot / 2) as usize, slot % 2);
+            match (half, value) {
+                (0, Value::Str(s)) => self.custom[i].0 = s,
+                (1, Value::Blob(b)) => self.custom[i].1 = b,
+                (_, other) => panic!("kaya: a bound custom slot resolved to {other:?}"),
+            }
+        } else if slot < pairs + files {
+            panic!("kaya: a file slot cannot bind a row field (a picked handle is not a field)");
+        } else {
+            let mut at = pairs + files;
+            if self.image.is_some() {
+                if slot == at {
+                    match value {
+                        Value::Blob(b) => self.image = Some(b),
+                        other => panic!("kaya: a bound image slot resolved to {other:?}"),
+                    }
+                    return;
+                }
+                at += 1;
+            }
+            if self.html.is_some() {
+                if slot == at {
+                    match value {
+                        Value::Str(s) => self.html = Some(s),
+                        other => panic!("kaya: a bound html slot resolved to {other:?}"),
+                    }
+                    return;
+                }
+                at += 1;
+            }
+            if self.text.is_some() && slot == at {
+                match value {
+                    Value::Str(s) => self.text = Some(s),
+                    other => panic!("kaya: a bound text slot resolved to {other:?}"),
+                }
+                return;
+            }
+            panic!("kaya: bound slot {slot} names no representation of this clip");
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Clip {
     pub text: Option<String>,
@@ -1477,9 +1550,16 @@ pub enum TxOp {
     },
     /// DECLARE that a widget can be dragged and what it hands over
     /// (docs/dnd-plan.md D1): a clip plus a mask over the drag_op enum. An
-    /// empty clip withdraws it. `path` keys address a stamped copy; the
-    /// template zone is refused until the bindings sweep lands it.
-    SetDragSource { widget: WidgetId, clip: Clip, operations: u32, path: Vec<Value> },
+    /// empty clip withdraws it. `path` keys address a stamped copy; inside
+    /// a For's body `bound` names the clip slots that are the row's own
+    /// fields (docs/dnd-plan.md §4), each resolved per stamped copy.
+    SetDragSource {
+        widget: WidgetId,
+        clip: Clip,
+        bound: Vec<BoundRep>,
+        operations: u32,
+        path: Vec<Value>,
+    },
     /// DECLARE that a widget receives drops with the given operation mask
     /// (what it accepts is its `accepts` prop). Zero withdraws it.
     SetDropTarget { widget: WidgetId, operations: u32, path: Vec<Value> },

@@ -288,7 +288,10 @@ public final class KayaApp {
     private final java.util.Map<Long, PasteHandler> nodePastes = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Dropped>> widgetDrops =
             new java.util.HashMap<>();
+    private final java.util.Map<Long, DropHandler> nodeDrops = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Op>> dragEnded =
+            new java.util.HashMap<>();
+    private final java.util.Map<Long, DragEndedHandler> nodeDragEnded =
             new java.util.HashMap<>();
     private long nextClipboardRead;
     // Undo/redo handlers, keyed by WINDOW because the ledger is. NOT
@@ -329,6 +332,18 @@ public final class KayaApp {
      * the one representation that arrived. */
     public interface PasteHandler {
         void accept(Tx tx, List<Object> keys, Representation clip);
+    }
+
+    /** A template widget's drop handler: the stamped copy's keys, then
+     * what the drop delivered (docs/dnd-plan.md §4). */
+    public interface DropHandler {
+        void accept(Tx tx, List<Object> keys, Dropped drop);
+    }
+
+    /** A template widget's drag-ended handler: the stamped copy's keys,
+     * then what its drag settled on — null for cancelled or refused. */
+    public interface DragEndedHandler {
+        void accept(Tx tx, List<Object> keys, Op operation);
     }
 
     /** A template checkbox's toggle handler: the stamped copy's keys,
@@ -1181,6 +1196,129 @@ public final class KayaApp {
         }
     }
 
+    /** A TEMPLATE node's drag chain (docs/dnd-plan.md §4): each
+     * representation is a CONSTANT or the ROW'S OWN FIELD — text(row.title)
+     * binds the way label(row.title) does — resolved per stamped copy and
+     * re-declared when that field changes. A file stays constant. */
+    public static final class TplDragRef {
+        private final Tx tx;
+        private final long node;
+        private String text;
+        private Integer textField;
+        private String html;
+        private Integer htmlField;
+        private byte[] image;
+        private Integer imageField;
+        private int ops;
+        private final java.util.List<Long> files = new java.util.ArrayList<>();
+        private final java.util.List<Object[]> custom = new java.util.ArrayList<>();
+
+        TplDragRef(Tx tx, long node) {
+            this.tx = tx;
+            this.node = node;
+        }
+
+        public TplDragRef text(String value) {
+            this.text = value;
+            return this;
+        }
+
+        public TplDragRef text(KayaRecords.Field<String> f) {
+            this.textField = f.index;
+            return this;
+        }
+
+        public TplDragRef html(String value) {
+            this.html = value;
+            return this;
+        }
+
+        public TplDragRef html(KayaRecords.Field<String> f) {
+            this.htmlField = f.index;
+            return this;
+        }
+
+        public TplDragRef image(byte[] bytes) {
+            this.image = bytes;
+            return this;
+        }
+
+        public TplDragRef image(KayaRecords.Field<byte[]> f) {
+            this.imageField = f.index;
+            return this;
+        }
+
+        public TplDragRef file(PickedFile f) {
+            files.add(f.handle());
+            return this;
+        }
+
+        public TplDragRef custom(String id, byte[] bytes) {
+            acceptList(id);
+            custom.add(new Object[] {id, bytes, null});
+            return this;
+        }
+
+        public TplDragRef custom(String id, KayaRecords.Field<byte[]> f) {
+            acceptList(id);
+            custom.add(new Object[] {id, null, f.index});
+            return this;
+        }
+
+        /** Allow this operation (copy, move, or both across two calls). */
+        public TplDragRef allow(Op op) {
+            ops |= op.mask;
+            return this;
+        }
+
+        public void declare() {
+            int present = 0;
+            int[] bound = {0};
+            java.util.List<Object> values = new java.util.ArrayList<>();
+            // A bound slot rides as the i64 `level << 32 | field`; the
+            // slot IS its index in the reps.
+            java.util.function.Predicate<Integer> slot = field -> {
+                if (field == null) {
+                    return false;
+                }
+                bound[0] |= 1 << values.size();
+                values.add((long) field);
+                return true;
+            };
+            for (Object[] rep : custom) {
+                values.add(rep[0]);
+                if (!slot.test((Integer) rep[2])) {
+                    values.add(new KayaWire.BlobHandle(
+                            KayaRing.blobRegister((byte[]) rep[1])));
+                }
+            }
+            for (long handle : files) {
+                values.add(handle);
+            }
+            if (image != null || imageField != null) {
+                present |= KayaWire.CLIP_IMAGE;
+                if (!slot.test(imageField)) {
+                    values.add(new KayaWire.BlobHandle(KayaRing.blobRegister(image)));
+                }
+            }
+            if (html != null || htmlField != null) {
+                present |= KayaWire.CLIP_HTML;
+                if (!slot.test(htmlField)) {
+                    values.add(html);
+                }
+            }
+            if (text != null || textField != null) {
+                present |= KayaWire.CLIP_TEXT;
+                if (!slot.test(textField)) {
+                    values.add(text);
+                }
+            }
+            boolean empty = present == 0 && files.isEmpty() && custom.isEmpty();
+            tx.emit(KayaWire.txSetDragSource(node, present, files.size(),
+                    custom.size(), empty ? 0 : ops, 0, bound[0], values.toArray()));
+        }
+    }
+
     /** The drag chain: the copy chain's representations plus the
      * operations the source allows; declare() sends it. An EMPTY chain
      * withdraws, which is how a same-app move removes its source
@@ -1188,6 +1326,7 @@ public final class KayaApp {
     public static final class DragRef {
         private final Tx tx;
         private final long widget;
+        private final Object[] keys;
         private String text;
         private String html;
         private byte[] image;
@@ -1196,8 +1335,13 @@ public final class KayaApp {
         private final java.util.List<Object[]> custom = new java.util.ArrayList<>();
 
         DragRef(Tx tx, long widget) {
+            this(tx, widget, new Object[] {});
+        }
+
+        DragRef(Tx tx, long widget, Object[] keys) {
             this.tx = tx;
             this.widget = widget;
+            this.keys = keys;
         }
 
         public DragRef text(String value) {
@@ -1256,8 +1400,10 @@ public final class KayaApp {
                 values.add(text);
             }
             boolean empty = present == 0 && files.isEmpty() && custom.isEmpty();
+            // KEYS FIRST, then the reps (set_column_headers' convention).
+            values.addAll(0, java.util.Arrays.asList(keys));
             tx.emit(KayaWire.txSetDragSource(widget, present, files.size(),
-                    custom.size(), empty ? 0 : ops, 0, values.toArray()));
+                    custom.size(), empty ? 0 : ops, keys.length, 0, values.toArray()));
         }
     }
 
@@ -2825,6 +2971,14 @@ public final class KayaApp {
             t.setAccepts(n, kinds);
         }
 
+        public TplDragRef draggable(Node n) {
+            return t.draggable(n);
+        }
+
+        public void setDropTarget(Node n, Op... ops) {
+            t.setDropTarget(n, ops);
+        }
+
         /** A collection declared inside this row's template — the
          * nested-instance shape. */
         public Collection collection() {
@@ -4249,6 +4403,25 @@ public final class KayaApp {
             emit(KayaWire.txSetDropTarget(w.id, mask, 0, new Object[] {}));
         }
 
+        /** ONE STAMPED COPY's drag declaration (docs/dnd-plan.md §4):
+         * the template node and the copy's keys, outermost first. The
+         * per-row payload an app declares after the row's insert; it
+         * overrides the template's own for that copy and follows it
+         * through a re-stamp. */
+        public DragRef draggableAt(Node n, Object... keys) {
+            return new DragRef(this, n.id, keys);
+        }
+
+        /** draggableAt's twin: ONE stamped copy receives drops with these
+         * operations, taking what the template's setAccepts names. */
+        public void setDropTargetAt(Node n, Object[] keys, Op... ops) {
+            int mask = 0;
+            for (Op op : ops) {
+                mask |= op.mask;
+            }
+            emit(KayaWire.txSetDropTarget(n.id, mask, keys.length, keys));
+        }
+
         /** Rows of this live For drag within their own collection
          * (docs/dnd-plan.md D8): the landing arrives at onDrop on the
          * For's own container and the app confirms with a move. */
@@ -4730,6 +4903,26 @@ public final class KayaApp {
          */
         public void setAccepts(Node n, String... kinds) {
             tx.emit(KayaWire.txSetAccepts(n.id, acceptList(kinds)));
+        }
+
+        /** Every stamped copy of n hands over this payload with its own
+         * identity, each representation a constant or the row's own field
+         * (docs/dnd-plan.md §4); a copy's OWN payload is
+         * {@link Tx#draggableAt}, constants only, and the copy's keys reach
+         * the app through {@link KayaApp#onDragEnded(Node, DragEndedHandler)}. */
+        public TplDragRef draggable(Node n) {
+            return new TplDragRef(tx, n.id);
+        }
+
+        /** Every stamped copy of n receives drops with these operations,
+         * taking what setAccepts names; the landing arrives at
+         * {@link KayaApp#onDrop(Node, DropHandler)} with the copy's keys. */
+        public void setDropTarget(Node n, Op... ops) {
+            int mask = 0;
+            for (Op op : ops) {
+                mask |= op.mask;
+            }
+            tx.emit(KayaWire.txSetDropTarget(n.id, mask, 0, new Object[] {}));
         }
 
         // The template flavor of the sugar: bindings take field
@@ -5292,6 +5485,18 @@ public final class KayaApp {
         nodePastes.put(n.id, handler);
     }
 
+    /** A drop on a stamped copy: the handler also receives the copy's key
+     * path, outermost first (docs/dnd-plan.md §4). */
+    public void onDrop(Node n, DropHandler handler) {
+        nodeDrops.put(n.id, handler);
+    }
+
+    /** A stamped copy of this node — a reorderable row is one — finished
+     * its drag; the copy's keys first. */
+    public void onDragEnded(Node n, DragEndedHandler handler) {
+        nodeDragEnded.put(n.id, handler);
+    }
+
     /**
      * Fold an undo's payload into the collection model; it is
      * core-authoritative, so nothing here re-derives anything. NO
@@ -5812,12 +6017,19 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_DROPPED && occ.keys.isEmpty()) {
                 // A drop rides the same tag with four more words
-                // (docs/dnd-plan.md D1); the template zone is refused, so
-                // a keyed drop reaches no handler.
+                // (docs/dnd-plan.md D1), so it arrives on the ordinary
+                // widget/node split — a stamped copy's landing and a
+                // reorderable row's own drag_ended carry the copy's keys.
                 BiConsumer<Tx, Dropped> handler = widgetDrops.get(occ.id);
                 if (handler != null && occ.payload instanceof KayaWire.DropValues drop) {
                     Dropped answer = dropped(drop);
                     dispatch(tx -> handler.accept(tx, answer));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DROPPED) {
+                DropHandler handler = nodeDrops.get(occ.id);
+                if (handler != null && occ.payload instanceof KayaWire.DropValues drop) {
+                    Dropped answer = dropped(drop);
+                    dispatch(tx -> handler.accept(tx, occ.keys, answer));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_DRAG_ENDED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, Op> handler = dragEnded.get(occ.id);
@@ -5825,6 +6037,13 @@ public final class KayaApp {
                     Op answer = operation(
                             occ.payload instanceof Integer m ? m : 0);
                     dispatch(tx -> handler.accept(tx, answer));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DRAG_ENDED) {
+                DragEndedHandler handler = nodeDragEnded.get(occ.id);
+                if (handler != null) {
+                    Op answer = operation(
+                            occ.payload instanceof Integer m ? m : 0);
+                    dispatch(tx -> handler.accept(tx, occ.keys, answer));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_UNDONE
                     || occ.kind == KayaWire.OCC_KIND_REDONE) {

@@ -1094,6 +1094,20 @@ for proto in x11 wayland; do
     run "$proto" dnd-haskell env KAYA_SELFTEST=dnd "$(hs_bin dnd)"
     run "$proto" dnd-java env KAYA_SELFTEST=dnd KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE CROSS-APP WITNESSES (docs/dnd-plan.md D9, §5 step 7): a FOREIGN
+    # GTK client — tools/linux/dragwitness.py, which links nothing of
+    # kaya's — beside the guest on the leg's own session, with a real
+    # pointer walked between the two windows. `out` drags kaya's declared
+    # source into the witness and the witness prints what it took; `in`
+    # drags the witness's file into kaya's files target, which is the one
+    # route through the REAL GtkDropTargetAsync with `local: false` that
+    # the in-process `drag_file` verb cannot exercise. Both legs read BOTH
+    # ends, and the driver writes the guest's scene itself (its docstring
+    # says why it is not a shared one).
+    run "$proto" dndwitness-out python3 tools/linux/dragwitness-leg.py "$proto" out \
+        "$CARGO_TARGET_DIR/debug/examples/dnd"
+    run "$proto" dndwitness-in python3 tools/linux/dragwitness-leg.py "$proto" in \
+        "$CARGO_TARGET_DIR/debug/examples/dnd"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

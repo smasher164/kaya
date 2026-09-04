@@ -230,6 +230,10 @@ sealed class TableItemRow
 
     public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
 
+    public TplDragRef Draggable(Node n) => t.Draggable(n);
+
+    public void SetDropTarget(Node n, params Op[] ops) => t.SetDropTarget(n, ops);
+
     public void SetRole(Node n, Role role) => t.SetRole(n, role);
 
     public void SetInset(Node n, double pad) => t.SetInset(n, pad);

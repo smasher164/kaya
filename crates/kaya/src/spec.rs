@@ -1306,7 +1306,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("custom_count", FieldTy::U32),
                 f("operations", FieldTy::U32),
                 f("path_len", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("bound", FieldTy::U32),
                 f("reps", FieldTy::Values),
             ],
             payload: None,
@@ -1321,9 +1321,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   custom ids withdraws the declaration. The core answers \
                   every hover from this and the destination's own \
                   declaration with no app round trip (D2). `path_len` keys \
-                  after the header address a stamped copy the way \
-                  set_column_headers' do; the template zone lands with the \
-                  bindings sweep and a keyed record is refused until then.",
+                  after the header address ONE stamped copy the way \
+                  set_column_headers' do. INSIDE A FOR'S BODY the widget is \
+                  a template node and `bound` is a mask over the reps' slot \
+                  indices (canonical order: custom id and bytes per pair, \
+                  then files, image, html, text): a bound slot carries an \
+                  i64 `level << 32 | field` — set_property's element source \
+                  — and every stamped copy resolves it from its own row, \
+                  re-declaring when that field changes (docs/dnd-plan.md \
+                  §4). A live widget refuses a bound slot by name; a file \
+                  slot never binds.",
         },
         Record {
             kind: 50,

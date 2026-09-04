@@ -872,10 +872,11 @@ def check_dnd_handler(snake, pascal, camel, payload, findings=None):
     want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
              f"func {camel}\\([\\s\\S]{{0,30}}_ w: KayaWidget,"
              f"[\\s\\S]{{0,90}}{swift_ty}\\) throws -> Void", findings)
-    # Typed on Widget, which is the template zone's refusal: onDraw's
-    # own shape one surface over.
+    # A HandlerTarget class method, this binding's own way of serving a
+    # Widget and a Node from one name — `Keyed Widget p = p` is the live
+    # arm (docs/dnd-plan.md §4).
     want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
-             f"^{camel} :: App -> Widget -> \\({hs_ty}\\) -> IO \\(\\)",
+             f"^  {camel} :: App -> e -> Keyed e \\({hs_ty}\\) -> IO \\(\\)",
              findings)
     want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
              f"^let {snake} app \\(Widget id\\)", findings)
@@ -926,19 +927,291 @@ for _fake_args, _fake_payload in (
                       f"handler that exists nowhere)")
 
 
-# AND THE TEMPLATE ZONE IS REFUSED, all nine (docs/dnd-plan.md §4): seven
-# bindings refuse with a TYPE — their dnd verbs take the LIVE handle, so
-# a template node cannot be passed — and what is checked is that no
-# template-zone spelling has appeared beside them. The TWO whose one
-# handle serves both zones raise, and their sentence is frozen BYTE FOR
-# BYTE, COMPARED FLATTENED (the size-policy clause's own discipline).
-def dnd_sentence():
-    SENTENCE = ("kaya: drag and drop is a LIVE-ZONE declaration in this "
-                "slice — a widget inside a row template is neither a drag "
-                "source nor a drop target (docs/dnd-plan.md §4)")
+# AND THE TEMPLATE ZONE IS DEMANDED, all nine (docs/dnd-plan.md §4). The
+# zone landed 2026-09-03 and this clause is the flip of the refusal it
+# replaces: a DECLARATION in the For's body (a constant payload and an
+# operation set every stamped copy is born with), a KEYED per-copy record
+# after the row's insert, and the two NODE HANDLERS a copy's landing and
+# its drag's end arrive at with the copy's keys first.
+#
+# SEVEN BINDINGS ARE READ OUT OF THE BLOCK THAT OWNS THEM, because their
+# live and template spellings are the same word and only the receiver's
+# type tells them apart. THE TWO AMBIENT ONES (python, js) have ONE handle
+# for both zones, so their template declaration and node handlers ARE the
+# live spellings and the pattern here cannot distinguish them — what
+# opens the zone for them is the ABSENCE of the old live-zone refusal,
+# which the clause below holds by splicing that sentence back in.
+def check_dnd_tpl_declaration(snake, pascal, camel, hs, findings=None):
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}\\(&mut self, node: TemplateNodeId\\)", findings)
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"def {snake}\\(self, text=None", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(t \\*Tpl\\) {pascal}\\(n Node\\) TplDragRef", findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public TplDragRef {pascal}\\(Node n\\)", findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public TplDragRef {camel}\\(Node n\\)", findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func {camel}\\(_ n: KayaNodeHandle\\) -> KayaTplDragRef",
+             findings)
+    # AN ATTR beside TplAccepts, this binding's own template idiom.
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"^  Tpl{hs} :: TplClip -> \\[Op\\] -> TplAttr", findings)
+    # THE SUGAR TIER, not Tpl.Floor, which no example scene may spell
+    # (invariant 5): two-space indent inside `module Tpl`, where the LIVE
+    # spelling sits at column 0.
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^  let {snake} \\?text", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"{camel}\\(opts: DraggableOptions", findings)
+
+
+check_dnd_tpl_declaration("draggable", "Draggable", "draggable", "Draggable")
+
+
+def check_dnd_tpl_drop_target(snake, pascal, camel, hs, findings=None):
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}\\(&mut self, node: TemplateNodeId, "
+             f"ops: &\\[Op\\]\\)", findings)
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"def {snake}\\(self, \\*operations\\)", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(t \\*Tpl\\) Set{pascal}\\(n Node, ops \\.\\.\\.Op\\)",
+             findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public void Set{pascal}\\(Node n, params Op\\[\\] ops\\)",
+             findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public void set{pascal}\\(Node n, Op\\.\\.\\. ops\\)", findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func set{pascal}\\(_ n: KayaNodeHandle, _ ops: \\[KayaOp\\]\\)",
+             findings)
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"^  Tpl{hs} :: \\[Op\\] -> TplAttr", findings)
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^  let set_{snake} n operations", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"{camel}\\(\\.\\.\\.operations: string\\[\\]\\)", findings)
+
+
+check_dnd_tpl_drop_target("drop_target", "DropTarget", "dropTarget",
+                          "DropTarget")
+
+
+# THE KEYED PER-COPY RECORD, all nine: (template node, keys) names ONE
+# stamped copy, and the declaration follows that copy through a re-stamp.
+def check_dnd_keyed_source(snake, pascal, camel, hs, findings=None):
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}_at\\(&mut self, node: TemplateNodeId, "
+             f"path: &Path\\)", findings)
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"def {snake}_at\\(self, \\*keys, text=None", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(tx \\*Tx\\) {pascal}At\\(n Node, keys \\[\\]any\\) "
+             f"DragRef", findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public DragRef {pascal}At\\(Node n, object\\[\\] keys\\)",
+             findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public DragRef {camel}At\\(Node n, Object\\.\\.\\. keys\\)",
+             findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func {camel}At\\(_ n: KayaNodeHandle, "
+             f"at keys: \\[KayaValue\\]\\) -> KayaDragRef", findings)
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"^set{hs}At :: Node -> \\[W\\.Value\\] -> Clip -> \\[Op\\] -> "
+             f"Build \\(\\)", findings)
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^let {snake}_at \\?text", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"{camel}At\\(keys: Key\\[\\], opts: DraggableOptions", findings)
+
+
+check_dnd_keyed_source("draggable", "Draggable", "draggable", "DragSource")
+
+
+def check_dnd_keyed_target(snake, pascal, camel, hs, findings=None):
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}_at\\(&mut self, node: TemplateNodeId, "
+             f"path: &Path, ops: &\\[Op\\]\\)", findings)
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"def {snake}_at\\(self, \\*keys, operations=\\(\\)\\)", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(tx \\*Tx\\) Set{pascal}At\\(n Node, keys \\[\\]any, "
+             f"ops \\.\\.\\.Op\\)", findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public void Set{pascal}At\\(Node n, object\\[\\] keys, "
+             f"params Op\\[\\] ops\\)", findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public void set{pascal}At\\(Node n, Object\\[\\] keys, "
+             f"Op\\.\\.\\. ops\\)", findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func set{pascal}At\\(_ n: KayaNodeHandle, "
+             f"at keys: \\[KayaValue\\], _ ops: \\[KayaOp\\]\\)", findings)
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"^set{hs}At :: Node -> \\[W\\.Value\\] -> \\[Op\\] -> "
+             f"Build \\(\\)", findings)
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^let set_{snake}_at \\(Node id\\) ~keys operations", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"{camel}At\\(keys: Key\\[\\], \\.\\.\\.operations: string\\[\\]\\)",
+             findings)
+
+
+check_dnd_keyed_target("drop_target", "DropTarget", "dropTarget", "DropTarget")
+
+
+# THE ELEMENT-BOUND PAYLOAD, all nine (docs/dnd-plan.md §4, ruled
+# 2026-09-03): inside a For's body a representation IS the row's own
+# field, spelled the way that binding's template `label` takes one, and
+# the binding computes the slot and packs `level << 32 | field`. Read out
+# of the block that owns it — the TEMPLATE chain's own type in the seven
+# that have one, and the rep-by-rep call in the two ambient bindings,
+# whose one handle serves both zones. The LIVE chain and the KEYED form
+# stay constant-only: refused by TYPE in the seven (no such chain, no
+# such overload) and by NAME in the two, which their kaya_app_checks
+# negatives hold.
+def check_dnd_bound(snake, pascal, camel, findings=None):
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}\\(mut self, src: impl Into<TplSource<StrKind>>\\)",
+             findings)
+    # The rep's own name reaches the slot helper, which refuses a signal
+    # and packs the element reference.
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"slot\\(\"{snake}\", {snake}\\)", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(r TplDragRef\\) {pascal}\\[S TplStr\\]", findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public TplDragRef {pascal}\\(Field<string> f\\)", findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public TplDragRef {camel}\\(KayaRecords\\.Field<String> f\\)",
+             findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func {camel}\\(_ f: KayaField<String>\\) -> KayaTplDragRef",
+             findings)
+    # A field of the TEMPLATE clip, beside the constant one it replaces.
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"tplClip{pascal} :: Maybe \\(TplRep String\\)", findings)
+    # A labelled argument beside the constant's, `label`'s own
+    # ~bind_field convention one surface over.
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^  let draggable \\?{snake} \\?{snake}_field", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"slot\\(\"{snake}\", opts\\.{snake}\\)", findings)
+
+
+check_dnd_bound("text", "Text", "text")
+
+fake = []
+check_dnd_bound("kaya_fake_bound", "KayaFakeBound", "kayaFakeBound",
+                findings=fake)
+dnd_fake = sum(1 for m in fake if "drag surface's" in m)
+if dnd_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({dnd_fake}/9 dnd bound-payload patterns fired for a "
+                  f"representation that exists nowhere)")
+print(f"check-sugar-surface: dnd bound-payload negatives refused "
+      f"{dnd_fake}/9")
+
+
+# THE TWO NODE HANDLERS: a stamped copy's landing and its drag's end reach
+# the app the way that binding already delivers a stamped button's click —
+# keys first. Rust/Go/OCaml suffix the name, C#/Java/Swift OVERLOAD on the
+# node type, Haskell reaches it through HandlerTarget's `Keyed Node p =
+# [Value] -> p`, and the two ambient bindings' one handle carries it.
+def check_dnd_node_handler(snake, pascal, camel, payload, findings=None):
+    go_ty, cs_ty, java_ty, swift_ty, hs_ty = payload
+    want_dnd("rust", "crates/kaya/src/app.rs", snake,
+             f"pub fn {snake}_node\\(", findings)
+    want_dnd("python", "bindings/python/kaya/__init__.py", snake,
+             f"def {snake}\\(self, fn\\)", findings)
+    want_dnd("go", "bindings/go/app.go", snake,
+             f"func \\(a \\*App\\) {pascal}Node\\(n Node, "
+             f"fn func\\(\\*Tx, \\[\\]any, {go_ty}\\)\\)", findings)
+    want_dnd("csharp", "bindings/csharp/KayaApp.cs", snake,
+             f"public void {pascal}\\(Node n, "
+             f"Action<Tx, List<object>, {cs_ty}> handler\\)", findings)
+    want_dnd("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+             f"public void {camel}\\(Node n, {java_ty} handler\\)", findings)
+    want_dnd("swift", "bindings/swift/KayaApp.swift", snake,
+             f"func {camel}\\([\\s\\S]{{0,40}}_ n: KayaNodeHandle,"
+             f"[\\s\\S]{{0,110}}{swift_ty}\\) throws -> Void", findings)
+    want_dnd("haskell", "bindings/haskell/KayaApp.hs", snake,
+             f"^  {camel} :: App -> e -> Keyed e \\({hs_ty}\\) -> IO \\(\\)",
+             findings)
+    want_dnd("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+             f"^let {snake}_node app \\(Node id\\)", findings)
+    want_dnd("js", "bindings/js/kaya/index.ts", snake,
+             f"  {camel}\\(fn: Handler\\): this", findings)
+
+
+check_dnd_node_handler("on_drop", "OnDrop", "onDrop",
+                       ("Dropped", "Dropped", "DropHandler", "KayaDropped",
+                        "Dropped -> IO \\(\\)"))
+check_dnd_node_handler("on_drag_ended", "OnDragEnded", "onDragEnded",
+                       ("Op", "Op\\?", "DragEndedHandler", "KayaOp\\?",
+                        "Maybe Op -> IO \\(\\)"))
+
+# THEIR BUILT-IN NEGATIVES: a spelling that exists nowhere must fail in
+# every binding, or the patterns have rotted into something that can only
+# pass.
+for _fake_check, _fake_args, _fake_what in (
+        (check_dnd_tpl_declaration,
+         ("kaya_fake_tpl_drag", "KayaFakeTplDrag", "kayaFakeTplDrag",
+          "KayaFakeTplDrag"), "template draggable"),
+        (check_dnd_tpl_drop_target,
+         ("kaya_fake_tpl_target", "KayaFakeTplTarget", "kayaFakeTplTarget",
+          "KayaFakeTplTarget"), "template drop_target"),
+        (check_dnd_keyed_source,
+         ("kaya_fake_keyed_drag", "KayaFakeKeyedDrag", "kayaFakeKeyedDrag",
+          "KayaFakeKeyedDrag"), "keyed draggable_at"),
+        (check_dnd_keyed_target,
+         ("kaya_fake_keyed_target", "KayaFakeKeyedTarget",
+          "kayaFakeKeyedTarget", "KayaFakeKeyedTarget"),
+         "keyed drop_target_at"),
+):
+    fake = []
+    _fake_check(*_fake_args, findings=fake)
+    dnd_fake = sum(1 for m in fake if "drag surface's" in m)
+    if dnd_fake != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed "
+                      f"({dnd_fake}/9 dnd '{_fake_what}' patterns fired for "
+                      f"a spelling that exists nowhere)")
+for _fake_args, _fake_payload in (
+        (("on_kaya_fake_node_drop", "OnKayaFakeNodeDrop",
+          "onKayaFakeNodeDrop"),
+         ("Dropped", "Dropped", "DropHandler", "KayaDropped",
+          "Dropped -> IO \\(\\)")),
+        (("on_kaya_fake_node_ended", "OnKayaFakeNodeEnded",
+          "onKayaFakeNodeEnded"),
+         ("Op", "Op\\?", "DragEndedHandler", "KayaOp\\?",
+          "Maybe Op -> IO \\(\\)")),
+):
+    fake = []
+    check_dnd_node_handler(*_fake_args, _fake_payload, findings=fake)
+    dnd_fake = sum(1 for m in fake if "drag surface's" in m)
+    if dnd_fake != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed "
+                      f"({dnd_fake}/9 dnd node-handler patterns fired for a "
+                      f"handler that exists nowhere)")
+
+
+# THE TWO AMBIENT BINDINGS' HALF, which no pattern above can carry: one
+# handle serves both zones there, so the zone is open exactly while the
+# old LIVE-ZONE refusal is GONE — and the KEYED form, which names one
+# stamped copy, refuses a LIVE widget in one BYTE-FROZEN SENTENCE,
+# COMPARED FLATTENED (the size-policy clause's own discipline).
+def dnd_ambient_zone():
+    REFUSED = ("kaya: drag and drop is a LIVE-ZONE declaration in this "
+               "slice")
+    SENTENCE = ("kaya: <v> names ONE STAMPED COPY — it takes a template "
+                "node and that copy's keys, and a live widget is one thing "
+                "on screen (docs/dnd-plan.md §4)")
 
     def flat(text):
         text = re.sub(r'"\s*\n\s*"', "", text)
+        text = re.sub(r"\$?\{[A-Za-z_][A-Za-z_0-9]*\}", "<v>", text)
         return re.sub(r"\s+", " ", text)
 
     AMBIENT = ["bindings/python/kaya/__init__.py",
@@ -947,73 +1220,43 @@ def dnd_sentence():
     fails = []
     want = re.sub(r"\s+", " ", SENTENCE)
     for name in AMBIENT:
-        if want not in flat(read_rel(name)):
-            fails.append(f"{name} serves both zones with ONE handle but "
-                         f"does not refuse a template-node drag surface "
-                         f"in the frozen words: \"{want}\"")
-    # ONCE PER FILE: each is read through its own splice rule, so a
-    # clause that had stopped reading ONE of them would be invisible to a
-    # single probe.
+        body = read_rel(name)
+        if REFUSED in flat(body):
+            fails.append(f"{name} still refuses the template zone by name "
+                         f"— the zone LANDED 2026-09-03 and one handle "
+                         f"serves both zones here, so that sentence closes "
+                         f"it again (docs/dnd-plan.md §4)")
+        if want not in flat(body):
+            fails.append(f"{name} does not refuse a KEYED declaration on a "
+                         f"LIVE widget in the frozen words: \"{want}\"")
+    # ONCE PER FILE, both directions: the refusal spliced back in must be
+    # SEEN, and the frozen sentence perturbed must go red.
     for name in AMBIENT:
-        doctored, n = sub_count("neither a drag", "neither a Drag",
-                                read_rel(name))
-        out.append(f"check-sugar-surface: dnd template-zone sentence "
+        body = read_rel(name)
+        spliced = body + "\n" + REFUSED + "\n"
+        if REFUSED not in flat(spliced):
+            fails.append(f"the dnd zone-open self-test could not see the "
+                         f"live-zone refusal spliced into {name} — a clause "
+                         f"that cannot fire is not a clause")
+        else:
+            out.append(f"check-sugar-surface: dnd zone-open refusal seen in "
+                       f"a spliced copy of {name}")
+        doctored, n = sub_count("ONE STAMPED COPY", "ONE stamped copy", body)
+        out.append(f"check-sugar-surface: dnd keyed-refusal sentence "
                    f"perturbation applied {n} substitution(s) in {name}")
         if n < 1:
-            fails.append(f"the dnd template-zone sentence self-test "
-                         f"perturbed NOTHING in {name} — a negative that "
-                         f"did not perturb is a failed test")
+            fails.append(f"the dnd keyed-refusal self-test perturbed NOTHING "
+                         f"in {name} — a negative that did not perturb is a "
+                         f"failed test")
         elif want in flat(doctored):
-            fails.append(f"the dnd template-zone sentence self-test "
-                         f"stayed GREEN against a doctored copy of "
-                         f"{name} — the clause reads something else")
-    # The seven typed refusals, each with the line that WOULD breach it
-    # spliced into a copy: a refusal nobody has watched fire is a pattern
-    # that can only pass.
-    TYPED = [
-        ("rust", "crates/kaya/src/app.rs",
-         r"pub fn (draggable|drop_target|reorderable)\("
-         r"&mut self, node: TemplateNodeId",
-         "    pub fn draggable(&mut self, node: TemplateNodeId) {"),
-        ("go", "bindings/go/app.go",
-         r"func \(t \*Tpl\) (Draggable|SetDropTarget|SetReorderable)\(",
-         "func (t *Tpl) Draggable(n Node) DragRef {"),
-        ("csharp", "bindings/csharp/KayaApp.cs",
-         r"(DragRef Draggable|void SetDropTarget|void SetReorderable)"
-         r"\(Node ",
-         "    public DragRef Draggable(Node n) => null;"),
-        ("java", "bindings/java/dev/kaya/KayaApp.java",
-         r"(DragRef draggable|void setDropTarget|void setReorderable)"
-         r"\(Node ",
-         "    public DragRef draggable(Node n) { return null; }"),
-        ("swift", "bindings/swift/KayaApp.swift",
-         r"func (draggable|setDropTarget|setReorderable)"
-         r"\(_ n: KayaNodeHandle",
-         "    func draggable(_ n: KayaNodeHandle) -> KayaDragRef { }"),
-        ("haskell", "bindings/haskell/KayaApp.hs",
-         r"^(setDragSource|setDropTarget|setReorderable) :: Node",
-         "setDragSource :: Node -> Clip -> [Op] -> Build ()"),
-        ("ocaml", "bindings/ocaml/kaya_app.ml",
-         r"^let (draggable|set_drop_target|set_reorderable) \(Node ",
-         "let set_drop_target (Node id) operations = ignore id"),
-    ]
-    for lang, rel, pattern, breach in TYPED:
-        if grep_file(pattern, rel):
-            fails.append(f"{lang} spells a template-zone drag surface — "
-                         f"the zone is refused BY TYPE in this slice "
-                         f"(docs/dnd-plan.md §4)")
-        if not grep_e(pattern, read_rel(rel) + "\n" + breach + "\n"):
-            fails.append(f"the {lang} template-zone refusal did not fire "
-                         f"against a copy carrying \"{breach}\" — a "
-                         f"refusal that cannot fire is not a refusal")
-        else:
-            out.append(f"check-sugar-surface: dnd template-zone refusal "
-                       f"fired for {lang}'s spliced breach")
+            fails.append(f"the dnd keyed-refusal self-test stayed GREEN "
+                         f"against a doctored copy of {name} — the clause "
+                         f"reads something else")
     out.extend("check-sugar-surface: " + line for line in fails)
     return out, not fails
 
 
-dnd_lines, dnd_ok = dnd_sentence()
+dnd_lines, dnd_ok = dnd_ambient_zone()
 print("\n".join(dnd_lines))
 if not dnd_ok:
     status = 1
@@ -1306,7 +1549,7 @@ def tpl_table_probe():
     # they are.
     cs = read_rel("bindings/csharp/KayaApp.cs")
 
-    text, n = scoped(cs, "sealed class Tpl", "sealed class CopyRef",
+    text, n = scoped(cs, "sealed class Tpl\n", "sealed class CopyRef",
                      "    public void Columns(",
                      "    public void ColumnsRemoved(")
     run_leaf("csharp-columns", src, CS_CHAIN, text or cs, n,
@@ -1338,7 +1581,7 @@ def tpl_table_probe():
              "csharp's TEMPLATE-zone table cannot spell on_sort")
 
     text, n = scoped(
-        cs, "sealed class Tx", "sealed class Tpl",
+        cs, "sealed class Tx", "sealed class Tpl\n",
         "    public void Columns(Node n, IReadOnlyList<object> keys,",
         "    public void ColumnsAt(Node n, IReadOnlyList<object> "
         "keys,")
@@ -1346,17 +1589,17 @@ def tpl_table_probe():
              "csharp's TEMPLATE-zone table cannot spell keyed "
              "re-declaration")
 
-    text, n = scoped(cs, "sealed class Tx", "sealed class Tpl",
+    text, n = scoped(cs, "sealed class Tx", "sealed class Tpl\n",
                      "(uint)titles.Length, (uint)keys.Count,",
                      "(uint)titles.Length, 0,")
     run_leaf("csharp-keyed-len", src, CS_CHAIN, text or cs, n,
              "csharp's TEMPLATE-zone table cannot spell keyed "
              "re-declaration")
 
-    old = "sealed class Tpl"
+    old = "sealed class Tpl\n"
     n = cs.count(old)
     run_leaf("csharp-reader", src, CS_CHAIN,
-             cs.replace(old, "sealed class TplRemoved")
+             cs.replace(old, "sealed class TplRemoved\n")
              if n == 1 else cs, n,
              "cannot find csharp's dynamic-table zones")
 
@@ -2930,7 +3173,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 11 members")
+    ], "js's prop reader found only 13 members")
     return "\n".join(lines)
 
 

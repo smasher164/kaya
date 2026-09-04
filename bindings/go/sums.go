@@ -397,6 +397,14 @@ func (sc SumCase[K, V]) BindA11yHint(n Node, sel func(*V) *string) {
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }
 
+// Draggable begins the drag declaration every copy of this arm is born
+// with (Tpl.Draggable); a copy's own payload is Tx.DraggableAt.
+func (sc SumCase[K, V]) Draggable(n Node) TplDragRef { return sc.t.Draggable(n) }
+
+// SetDropTarget declares that every copy of this arm receives drops with
+// these operations, taking what SetAccepts names (Tpl.SetDropTarget).
+func (sc SumCase[K, V]) SetDropTarget(n Node, ops ...Op) { sc.t.SetDropTarget(n, ops...) }
+
 // SetRole declares what a copy of this arm MEANS; const only, since an
 // arm is the shape its rows share (Tpl.SetRole).
 func (sc SumCase[K, V]) SetRole(n Node, role int64) { sc.t.SetRole(n, role) }

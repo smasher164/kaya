@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x4f5c2121bd4d241a
+let kayaSpecHash: UInt64 = 0xa3cb4cff19aad964
 
 struct KayaTx {
     var bytes = Data()
@@ -525,8 +525,8 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
-    mutating func setDragSource(_ widget: UInt64, _ present: UInt32, _ fileCount: UInt32, _ customCount: UInt32, _ operations: UInt32, _ pathLen: UInt32, _ reps: [KayaValue]) {
+    /// DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds.
+    mutating func setDragSource(_ widget: UInt64, _ present: UInt32, _ fileCount: UInt32, _ customCount: UInt32, _ operations: UInt32, _ pathLen: UInt32, _ bound: UInt32, _ reps: [KayaValue]) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_DRAG_SOURCE))
         self.u64(widget)
         self.u32(present)
@@ -534,7 +534,7 @@ struct KayaTx {
         self.u32(customCount)
         self.u32(operations)
         self.u32(pathLen)
-        self.u32(0)
+        self.u32(bound)
         self.values(reps)
         self.end(kayaAt)
     }

@@ -467,3 +467,28 @@ func readSource(t *testing.T, path string) string {
 	}
 	return string(src)
 }
+
+// A REGISTRATION IS ADDITIVE ACROSS OCCURRENCE KINDS (docs/traps.md): a
+// widget is legitimately a drag source AND a drop target, and a stamped
+// row answers its drop and its drag_ended through two registrations on
+// one template node. A map from id to ONE closure loses the first.
+func TestADropAndADragEndedRegistrationCoexistOnOneID(t *testing.T) {
+	app := NewApp()
+	w := Widget{id: 7}
+	n := Node{id: 7}
+	app.OnDrop(w, func(*Tx, Dropped) {})
+	app.OnDragEnded(w, func(*Tx, Op) {})
+	app.OnDropNode(n, func(*Tx, []any, Dropped) {})
+	app.OnDragEndedNode(n, func(*Tx, []any, Op) {})
+	for what, present := range map[string]bool{
+		"widget drop":   app.widgetDrops[w.id] != nil,
+		"widget end":    app.dragEnded[w.id] != nil,
+		"node drop":     app.nodeDrops[n.id] != nil,
+		"node drag end": app.nodeDragEnded[n.id] != nil,
+	} {
+		if !present {
+			t.Errorf("the %s registration was lost — a second registration on "+
+				"one id replaced the first (docs/traps.md)", what)
+		}
+	}
+}

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x4f5c2121bd4d241a
+	SpecHash uint64 = 0xa3cb4cff19aad964
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -802,8 +802,8 @@ func TxCreateBreakpoint(window uint64, sizeClass any, count uint32, setters []an
 	return endRecord(b)
 }
 
-// TxSetDragSource: DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address a stamped copy the way set_column_headers' do; the template zone lands with the bindings sweep and a keyed record is refused until then.
-func TxSetDragSource(widget uint64, present uint32, fileCount uint32, customCount uint32, operations uint32, pathLen uint32, reps []any) []byte {
+// TxSetDragSource: DECLARE that `widget` can be dragged, and what it hands over (docs/dnd-plan.md D1): the copy record's body — a clip in several representations, descending clip value, `present` a mask over the single-valued kinds and the two plural ones counted — plus `operations`, a mask over the drag_op enum naming what the source allows (copy 1, move 2). App-updated state: a widget whose payload changes re-declares, and a `present` of zero with no files and no custom ids withdraws the declaration. The core answers every hover from this and the destination's own declaration with no app round trip (D2). `path_len` keys after the header address ONE stamped copy the way set_column_headers' do. INSIDE A FOR'S BODY the widget is a template node and `bound` is a mask over the reps' slot indices (canonical order: custom id and bytes per pair, then files, image, html, text): a bound slot carries an i64 `level << 32 | field` — set_property's element source — and every stamped copy resolves it from its own row, re-declaring when that field changes (docs/dnd-plan.md §4). A live widget refuses a bound slot by name; a file slot never binds.
+func TxSetDragSource(widget uint64, present uint32, fileCount uint32, customCount uint32, operations uint32, pathLen uint32, bound uint32, reps []any) []byte {
 	b := beginRecord(txSetDragSource)
 	b = binary.LittleEndian.AppendUint64(b, widget)
 	b = binary.LittleEndian.AppendUint32(b, present)
@@ -811,7 +811,7 @@ func TxSetDragSource(widget uint64, present uint32, fileCount uint32, customCoun
 	b = binary.LittleEndian.AppendUint32(b, customCount)
 	b = binary.LittleEndian.AppendUint32(b, operations)
 	b = binary.LittleEndian.AppendUint32(b, pathLen)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, bound)
 	b = encodeValues(b, reps)
 	return endRecord(b)
 }

@@ -149,8 +149,10 @@ FLAGS = {
 # Script modifiers, keyed by SCENE and shared by every suite that runs it
 # — the two mobile lanes take the same list and grammar, since two
 # answers to one question is how lanes drift. `cut` is
-# (verb, keep, extra-for-validation); `append` rides after the cut's
-# prefix. The reasons live at the runner's sites and the plans.
+# (verb, keep, extra-for-validation); `drop` is (step specs, keep,
+# reason), each spec a leading run of words naming exactly one step and
+# the specs together one contiguous block; `append` rides after the
+# cut's prefix. The reasons live at the runner's sites and the plans.
 MODS = {
     "sections": {"cut": ("expect_windows",
                          "expect_section expect_section_symbol", "")},
@@ -164,7 +166,16 @@ MODS = {
     "dirty": {"cut": ("close_window", "expect_dirty", ""),
               "append": 'expect_title "dirty"'},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
-    "identity": {"drop": ("expect_title", "window#1", "expect_app_icon")},
+    "identity": {"drop": (("expect_title window#1",), "expect_app_icon",
+                          "no auxiliary windows")},
+    # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),
+    # so the file drop and the one assertion it feeds do not run here;
+    # every drag between this app's own widgets does.
+    "dnd": {"drop": (("drag_file",
+                      'expect label#4 "files target got dropped.txt '
+                      'dropped bytes (copy)"'),
+                     "expect_order expect=label#5 expect=label#0",
+                     "no foreign drag source reaches a phone app")},
 }
 
 # Machine-derived by tools/lib/android-leg-order.py from the shared
