@@ -55,7 +55,7 @@ LEGS = {
         "a11yrows-compose", "styling-compose", "typeface-compose",
         "assets-compose", "clipboard-compose", "background-compose",
         "undo-compose", "dirty-compose", "ranges-compose",
-        "dnd-compose", "pickers-compose",
+        "dnd-compose", "pickers-compose", "sliders-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

@@ -10727,6 +10727,9 @@ guests/rust/sliders.rs.
 OPEN, the breadth slice — each backend refuses the two props by name until
 its arm lands, and a lane carries sliders legs once its backend has them:
 
+OPEN, the breadth slice — each backend refuses the two props by name until
+its arm lands, and a lane carries sliders legs once its backend has them:
+
 - ~~DEPTH STUB: sliders on gtk~~ (FIXED 2026-09-04: the arm landed, the
   linux lane carries the rust leg on both pools) — the step snapped in the
   commit path (GTK quantizes no drag), `add_mark` per tick,
@@ -10752,8 +10755,23 @@ its arm lands, and a lane carries sliders legs once its backend has them:
   SwiftUI arm's NSApp.currentEvent. `tools/check-slider-commit.py` is the
   guard the class earned, since `set_value` is one gesture by
   construction and an arm committing per movement passes the scene.)
-- DEPTH STUB: sliders on compose — `steps` from the step, `onValueChangeFinished`
-  as the commit, the track drawing kaya's ticks when the spacing is coarser
-  than the step, the `expect_slider` verb, the `emitValueCommitted` native.
+- ~~DEPTH STUB: sliders on compose~~ (FIXED 2026-09-04: the arm landed, the
+  sliders-compose leg green on the emulator) — material3's Slider over ONE
+  commit path, `steps` from the step, `onValueChangeFinished` as the commit,
+  `set_value` driven through that same path, `emitValueCommitted` declared in
+  KayaPresent and registered in android.rs. KAYA DRAWS EVERY TICK, in all four
+  shapes rather than only the coarse one: Material's indicators are reachable
+  only through `steps`, so they can say nothing about a spacing coarser than
+  the step or about a continuous slider with marks, and one painter beats two
+  looks — `drawTick` is suppressed and the arm paints one tick per spacing
+  inside the Track's own draw scope, which is the span Material lerps its own
+  ticks across (read out of `drawTrack`'s bytecode: `Offset(0f, center.y)` to
+  `Offset(size.width, center.y)`). NO KEYBOARD ARM, measured: material3 1.3.1
+  (compose-bom 2024.10.01, not the 1.3.2 the plan guessed) declares nothing
+  key-shaped in `SliderKt`, and on the held scene TAB walked focus while
+  thirteen arrow presses moved no slider at all, so S7 has no affordance to
+  ride here (docs/slider-plan.md §1). The stops count
+  and the tick positions are pixels no leg can read, so KayaSliderTest holds
+  them, on check-compose's own unit-test task.
 - The eight other bindings' `step`/`tick_spacing`/`on_commit` in both zones;
   tools/check-sugar-surface.py's slider clause; the five rosters; the matrix.

@@ -340,6 +340,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "([BD)V".into(),
                 fn_ptr: present_emit_value_changed as *mut _,
             },
+            NativeMethod {
+                name: "emitValueCommitted".into(),
+                sig: "([BD)V".into(),
+                fn_ptr: present_emit_value_committed as *mut _,
+            },
             // The pickers' committed values (docs/datetime-plan.md D7),
             // packed decimal on a jlong.
             NativeMethod {
@@ -939,6 +944,18 @@ extern "system" fn present_emit_value_changed(
         .convert_byte_array(&tag)
         .expect("kaya: reading the slider tag failed");
     unsafe { crate::capi::kaya_emit_value_changed(bytes.as_ptr(), bytes.len(), value) };
+}
+
+extern "system" fn present_emit_value_committed(
+    env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    value: jni::sys::jdouble,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the slider tag failed");
+    unsafe { crate::capi::kaya_emit_value_committed(bytes.as_ptr(), bytes.len(), value) };
 }
 
 /// KayaPresent.emitAlertResult: the jint choice reinterprets as the wire

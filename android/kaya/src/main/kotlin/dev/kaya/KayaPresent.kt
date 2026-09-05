@@ -50,6 +50,11 @@ object KayaPresent {
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
+    /** The slider's SETTLED value (docs/slider-plan.md S2), once per
+     * finished gesture and only when it moved.
+     * kaya_emit_value_committed's JNI spelling. */
+    @JvmStatic external fun emitValueCommitted(tag: ByteArray, value: Double)
+
     /** The picker's COMMITTED value (docs/datetime-plan.md D7), packed
      * decimal — YYYYMMDD for a date, HHMM for a time. A value that is
      * not one panics at the backend, never in the app.
