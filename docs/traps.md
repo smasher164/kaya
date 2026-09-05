@@ -9257,3 +9257,11 @@ runningboardd's exit context before hunting a crash report.
   misses ("no such target" / "has no picker control after Nms") are told
   apart. A pushed screen inside a SECTIONED window renders only when the
   push lands on the section's stack (`push_entry_in`), never the window's.
+- **A section's pushed entry needs the WINDOW's back button on GTK**
+  (2026-09-05, tools/scenes/tasks.steps' first matrix). GTK sections are
+  pages in one window whose header bar owns the one back button, and its
+  visibility was computed from the window's own stack, so an entry pushed
+  onto a section's stack had no back affordance and the harness `back`
+  (which refuses a hidden button) popped nothing. `refresh_section_back`
+  follows the ACTIVE section's stack; WinUI's harness back had the twin
+  fault one level down and routes through the selected section now.

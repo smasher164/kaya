@@ -4245,6 +4245,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
                 core.selected_sections.insert(window, sid);
                 core.scene
                     .user_selected_section(WindowId(window), WindowId(sid));
+                refresh_section_back(core, window);
                 changed = true;
             });
             if changed {
@@ -4390,8 +4391,26 @@ fn refresh_section_symbols(core: &CoreState, window: u64) {
 /// Reconcile a section page's visible child: its stack's top entry
 /// root while covered (stacks are per-surface), its own mounted root
 /// otherwise.
+/// The window's back button over a section host shows exactly when the
+/// ACTIVE section's stack is non-empty: stacks are per surface and the
+/// header's one button routes to the active section (user_back), so it
+/// follows that stack, not the window's own (tools/scenes/tasks.steps,
+/// 2026-09-05 — a pushed entry inside a section had no back affordance).
+fn refresh_section_back(core: &CoreState, window: u64) {
+    use gtk4::prelude::WidgetExt;
+    let Some(active) = core.selected_sections.get(&window).copied() else { return };
+    let covers = core.nav_stacks.get(&active).is_some_and(|s| !s.is_empty());
+    if let Some(back) = core.back_buttons.get(&window) {
+        back.set_visible(covers);
+    }
+}
+
 fn refresh_section_pane(core: &mut CoreState, sid: u64) {
     use gtk4::prelude::{BoxExt, WidgetExt};
+    let owner = core.sections.iter().find(|(_, secs)| secs.contains(&sid)).map(|(w, _)| *w);
+    if let Some(owner) = owner {
+        refresh_section_back(core, owner);
+    }
     let Some(record) = core.section_pages.get(&sid) else { return };
     let top = core.nav_stacks.get(&sid).and_then(|s| s.last()).copied();
     let desired = top
@@ -8389,6 +8408,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.apply_quiet.set(false);
                 let _ = stack; // chrome stays as-is
             }
+            refresh_section_back(core, window.0);
         }
         ApplyOp::SetSectionProp { section, prop, value } => {
             use crate::protocol::SectionProp;

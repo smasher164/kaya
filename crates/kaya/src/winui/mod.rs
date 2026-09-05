@@ -16944,7 +16944,14 @@ impl crate::harness::Stage for WinUiStage {
             // through its automation peer — the click pipeline a
             // user's press runs. Deferred one dispatcher tick: the
             // click handler re-borrows CORE, which this closure
-            // holds.
+            // holds. With sections present the stack is the ACTIVE
+            // section's, exactly as user_back routes (DESIGN.md,
+            // Sections; tools/scenes/tasks.steps).
+            let window = if core.sections.contains_key(&window) {
+                core.selected_sections.get(&window).copied().unwrap_or(window)
+            } else {
+                window
+            };
             let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
                 return Ok(());
             };

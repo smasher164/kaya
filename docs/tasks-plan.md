@@ -164,6 +164,16 @@ the gate or trap it became.
   control (`kayaAwaitOnMain`, the step's own ceiling below it) and the
   two misses are two sentences. GTK and WinUI materialize synchronously
   on their UI thread; Compose's verbs already await.
+- **2026-09-05, the first matrix — GTK and WinUI could not go back out of a
+  section's pushed entry.** Both lanes read `entries 1, wanted 0` after
+  `back`, then died pushing the same entry id again. GTK's window back
+  button showed only over the WINDOW's stack, so a section's pushed entry
+  had no back affordance at all — a real backend gap, not a harness one —
+  and the WinUI harness verb looked for the top entry on the window's
+  stack. GTK's button now follows the active section's stack
+  (`refresh_section_back`, on every section reconcile and select) and the
+  WinUI verb routes as its own user back does. Both legs green alone
+  the same hour.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through

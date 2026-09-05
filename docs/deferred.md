@@ -10608,6 +10608,16 @@ each a stub the runner reads (tools/check-stubs.py):
     `Gdk.ContentProvider.new_typed` is not introspectable, with the
     AttributeError swallowed inside `prepare` so the drag silently offers
     nothing and reads as a refusal.
+    WATCH, FIRST SIGHTING 2026-09-05 (the task manager's first matrix,
+    d9346958, host load 3.8 at launch): `dndwitness-in-x11` red with the
+    witness reporting `handed over copy` then `handed over none` while
+    kaya's label#5 kept "no drag yet" for the whole 40s — the xdotool
+    drag from the witness's window into kaya's files target never
+    registered a drag end in kaya. Green in every earlier matrix; nothing
+    in that tree touched the leg or the GTK drop arms. On the next
+    sighting read the `KAYA_DIAG dragdrive` geometry beside the witness's
+    handover, since a press at (760, 54) released at (73, 161) crosses
+    two windows on a pool slot other legs share.
   - ~~**DEPTH STUB: dnd on winui**~~ — LANDED 2026-09-03: BOTH routes, as
     probes 1 and 2 ruled. XAML `CanDrag`/`DragStarting`/`DropCompleted` and
     `AllowDrop`/`DragEnter`/`DragOver`/`Drop` carry every WinRT drag with
@@ -10791,6 +10801,15 @@ compare the injected endpoint against the settled box in the same log
 line (the runner prints the injection beside these already) and consider a
 longer `input draganddrop` duration under load, since (a) is consistent
 with the system compressing the gesture's moves past a tiny target.
+
+SEVENTH SIGHTING, 2026-09-05, the task manager's first matrix
+(d9346958), on `tasks-compose` — the first scene besides dnd to drag on
+Android: shape (b) exactly, `started=1 entered=1 dropped=1 ended=false`
+after 20s, the drop TAKEN (the reorder is the one step the scene failed;
+every other step of the new app's scene passed on Compose). Same matrix:
+`dnd-go` red with the recorded label#4/label#1 shape above. Host load at
+launch 3.8; the android lane's own four emulators were the contention.
+Nothing new to read; the named next step stands.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
