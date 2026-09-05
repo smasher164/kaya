@@ -172,17 +172,17 @@ sealed class TaskRow
 
     public Node ProgressIndeterminate() => t.ProgressIndeterminate();
 
-    public Node Slider(double min, double max, double value,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
-        t.Slider(min, max, value, onChange);
+    public Node Slider(double min, double max, double value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+        t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
-    public Node Slider(double min, double max, Signal value,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
-        t.Slider(min, max, value, onChange);
+    public Node Slider(double min, double max, Signal value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+        t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
-    public Node Slider(double min, double max, Field<double> value,
-        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
-        t.Slider(min, max, value, onChange);
+    public Node Slider(double min, double max, Field<double> value, double? step = null, double? tickSpacing = null, System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onCommit = null) =>
+        t.Slider(min, max, value, step, tickSpacing, onChange, onCommit);
 
     public Node Select(string[] options, int selected,
         System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>

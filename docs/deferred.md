@@ -10738,5 +10738,23 @@ its arm lands, and the lanes carry no sliders legs until then:
 - DEPTH STUB: sliders on compose — `steps` from the step, `onValueChangeFinished`
   as the commit, the track drawing kaya's ticks when the spacing is coarser
   than the step, the `expect_slider` verb, the `emitValueCommitted` native.
-- The eight other bindings' `step`/`tick_spacing`/`on_commit` in both zones;
-  tools/check-sugar-surface.py's slider clause; the five rosters; the matrix.
+- LANDED 2026-09-04 — the eight other bindings' `step`/`tick_spacing`/
+  `on_commit` in both zones, each in its own idiom: keywords on Python's and
+  JS's one constructor, chained `Step`/`TickSpacing` on Go's and Java's
+  widgets with `SetStep`/`setStep` on the template node, optional arguments
+  on C#'s and Swift's constructors in both zones, labelled `?step`
+  `?tick_spacing` `?on_commit` on OCaml's, and `Step`/`TickSpacing` /
+  `TplStep`/`TplTickSpacing` attributes plus one `onValueCommitted` class
+  method on Haskell's. The commit handler is app-registered in the registry
+  family (`OnValueCommitted`/`OnValueCommittedNode`,
+  `on_value_committed(_node)`) and co-located on the constructor where the
+  binding's `on_change` is. A `sliders` guest in all nine languages, the mac
+  and iOS rosters carry the scene, and tools/check-sugar-surface.py's slider
+  clause holds 31 patterns (`step` and `tick_spacing` in both zones of all
+  nine, the commit handler in both) with a fake-name negative firing 16/16
+  and 15/15 on every run. Three GENERATORS moved with the spellings, since
+  the typed row façades are generated: cmd/kaya-gen (Go's row had no slider
+  at all), tools/kaya-csgen (its positional `Slider` forward would have bound
+  `onChange` to the new `step`) and tools/kaya-swift-gen. STILL OPEN: the
+  three backend arms above, and the linux/windows/android rosters that wait
+  on them.

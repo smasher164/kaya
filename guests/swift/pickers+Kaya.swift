@@ -63,6 +63,17 @@ struct TaskRow {
         t.timePicker(f, onTime: onTime)
     }
 
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
+        step: Double? = nil, tickSpacing: Double? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.slider(
+            min: min, max: max, value: f, step: step, tickSpacing: tickSpacing,
+            onChange: onChange, onCommit: onCommit)
+    }
+
     func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         t.row(children)
     }

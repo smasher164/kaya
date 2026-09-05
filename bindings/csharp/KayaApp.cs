@@ -643,6 +643,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeValues = new();
+    readonly Dictionary<ulong, Action<Tx, double>> widgetCommits = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeCommits = new();
     readonly Dictionary<ulong, Action<Tx, DateOnly>> widgetDates = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, DateOnly>> nodeDates = new();
     readonly Dictionary<ulong, Action<Tx, TimeOnly>> widgetTimes = new();
@@ -934,6 +936,16 @@ sealed class KayaApp
     public void OnValueChanged(Node n, Action<Tx, List<object>, double> handler) =>
         nodeValues[n.Id] = handler;
 
+    /// The value a live slider's gesture SETTLED ON — once per release
+    /// or key move, after that gesture's moves (docs/slider-plan.md S2).
+    public void OnValueCommitted(Widget w, Action<Tx, double> handler) =>
+        widgetCommits[w.Id] = handler;
+
+    /// A template slider's settled value; the handler also receives the
+    /// stamped copy's keys, outermost first.
+    public void OnValueCommitted(Node n, Action<Tx, List<object>, double> handler) =>
+        nodeCommits[n.Id] = handler;
+
     /// A live date picker's COMMITTED picks (docs/datetime-plan.md D7):
     /// the control owns its value and a programmatic write never echoes.
     public void OnDate(Widget w, Action<Tx, DateOnly> handler) => widgetDates[w.Id] = handler;
@@ -1151,6 +1163,16 @@ sealed class KayaApp
             else if (kind == KayaWire.OccKindValueChanged)
             {
                 if (nodeValues.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
+            }
+            else if (kind == KayaWire.OccKindValueCommitted && keys.Count == 0)
+            {
+                if (widgetCommits.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
+            }
+            else if (kind == KayaWire.OccKindValueCommitted)
+            {
+                if (nodeCommits.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
             }
             else if (kind == KayaWire.OccKindDateChanged && keys.Count == 0)
@@ -1890,14 +1912,19 @@ sealed class Tx
     /// of a constant; property writes never echo an occurrence, so a
     /// handler's own writes cannot loop back at it.
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
-        Action<Tx, double> onChange = null, double? grow = null, Signal? bind = null)
+        double? step = null, double? tickSpacing = null,
+        Action<Tx, double> onChange = null, Action<Tx, double> onCommit = null,
+        double? grow = null, Signal? bind = null)
     {
         var w = Widget(KayaWire.KindSlider);
         Records.Add(KayaWire.TxSetMin(w.Id, min));
         Records.Add(KayaWire.TxSetMax(w.Id, max));
+        if (step is double st) Records.Add(KayaWire.TxSetStep(w.Id, st));
+        if (tickSpacing is double ts) Records.Add(KayaWire.TxSetTickSpacing(w.Id, ts));
         if (bind is Signal s) Records.Add(KayaWire.TxBindValue(w.Id, s.Id));
         else Records.Add(KayaWire.TxSetValue(w.Id, value));
         if (onChange != null) App.OnValueChanged(w, onChange);
+        if (onCommit != null) App.OnValueCommitted(w, onCommit);
         if (grow is double g) SetGrow(w, g);
         return w;
     }
@@ -3565,35 +3592,46 @@ sealed class Tpl
     /// THE RANGE IS CONSTANT AND THE POSITION IS THE SOURCE: min and max
     /// describe the prototype, so every copy shares them.
     public Node Slider(double min, double max, double value,
-        Action<Tx, List<object>, double> onChange = null)
+        double? step = null, double? tickSpacing = null,
+        Action<Tx, List<object>, double> onChange = null,
+        Action<Tx, List<object>, double> onCommit = null)
     {
-        var n = SliderOf(min, max, onChange);
+        var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         tx.Records.Add(KayaWire.TxSetValue(n.Id, value));
         return n;
     }
 
     public Node Slider(double min, double max, Signal value,
-        Action<Tx, List<object>, double> onChange = null)
+        double? step = null, double? tickSpacing = null,
+        Action<Tx, List<object>, double> onChange = null,
+        Action<Tx, List<object>, double> onCommit = null)
     {
-        var n = SliderOf(min, max, onChange);
+        var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         tx.Records.Add(KayaWire.TxBindValue(n.Id, value.Id));
         return n;
     }
 
     public Node Slider(double min, double max, Field<double> value,
-        Action<Tx, List<object>, double> onChange = null)
+        double? step = null, double? tickSpacing = null,
+        Action<Tx, List<object>, double> onChange = null,
+        Action<Tx, List<object>, double> onCommit = null)
     {
-        var n = SliderOf(min, max, onChange);
+        var n = SliderOf(min, max, step, tickSpacing, onChange, onCommit);
         BindValueField(n, 0, value);
         return n;
     }
 
-    Node SliderOf(double min, double max, Action<Tx, List<object>, double> onChange)
+    Node SliderOf(double min, double max, double? step, double? tickSpacing,
+        Action<Tx, List<object>, double> onChange,
+        Action<Tx, List<object>, double> onCommit)
     {
         var n = Widget(KayaWire.KindSlider);
         tx.Records.Add(KayaWire.TxSetMin(n.Id, min));
         tx.Records.Add(KayaWire.TxSetMax(n.Id, max));
+        if (step is double st) tx.Records.Add(KayaWire.TxSetStep(n.Id, st));
+        if (tickSpacing is double ts) tx.Records.Add(KayaWire.TxSetTickSpacing(n.Id, ts));
         if (onChange != null) tx.App.OnValueChanged(n, onChange);
+        if (onCommit != null) tx.App.OnValueCommitted(n, onCommit);
         return n;
     }
 

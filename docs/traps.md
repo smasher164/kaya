@@ -8992,6 +8992,77 @@ and a capture are the witnesses, and the moment to take one is the moment
 a new hosted control lands on a platform.
 
 
+## Rust's `{}` for an f64 is the SHORTEST ROUND-TRIP form, and a shared scene that reads a float back needs the same spelling in eight other languages (2026-09-04)
+
+`tools/scenes/sliders.steps` compares `value: 35`, `volume: 0.37` and
+`row b: 40` byte for byte across all nine guests (invariant 6). The Rust
+guest writes them with `format!("value: {v}")`, and Rust's Display for
+`f64` prints the shortest decimal that round-trips — `35`, not `35.0`,
+and `0.37`, not `0.37000000000000005`. NO OTHER LANGUAGE'S DEFAULT
+AGREES: Python's f-string gives `35.0`, Go's `%v` gives `35`, Java's
+`Double.toString` gives `35.0`, JS's template literal gives `35`, and
+OCaml's `%f` gives `35.000000`. A port that reaches for its own default
+is red on its first run, with a diff nobody reads as a formatting
+question.
+
+THE RULE THE GUESTS TAKE, and it is the harness's own so the label and
+`expect_slider` cannot disagree: `spelled_slider`
+(crates/kaya/src/harness.rs) — six decimals, trailing zeros dropped, then
+a trailing point dropped. Every sliders guest carries that in one
+`spelled()` helper with a pointer to harness.rs; it agrees with Rust's
+Display on every value a scene names. The gallery scene had dodged this
+by printing an integer percent instead
+(`volume: {round(value * 100)}%`), which is the other way out when a
+scene can choose its own text.
+
+## UISlider stores a Float, so a driven 0.37 comes back to the app as 0.3700000047683716 — and `expect_slider` cannot see it (measured 2026-09-04, the iOS sliders leg)
+
+The mac's NSSlider is Double-backed: `set_value slider#1 0.37` sets
+`doubleValue = 0.37`, the read-back is 0.37, and the app's handler writes
+`volume: 0.37`. UIKit's `UISlider.value` is a **Float**. The iOS arm set
+`Float(0.37)` and read `Double(control.slider.value)` back into the
+commit path, so the occurrence carried 0.37000000476837158 and the guest's
+label read `volume: 0.3700000047683716` — a DIFFERENT VALUE handed to the
+app on one of the two Apple platforms (invariant 1).
+
+`expect_slider` IS BLIND TO IT: `spelled_slider`
+(crates/kaya/src/harness.rs) rounds to six decimals, so the CONTROL read
+spells `0.37` either way. Only the guest's own label — the app's copy of
+what it was told — showed the divergence, and only because
+tools/scenes/sliders.steps compares it byte for byte across nine guests
+(invariant 6). A scene that read the control alone would have been green.
+
+THE FIX, in `kayaDriveSlider`'s iOS arm: pass the DRIVEN Double into
+`kayaSliderCommitted`, not the Float read back. The control was just
+handed that value and has not moved off it, so the Double the verb named
+is the same position stated exactly, and `set_value` means one thing on
+both Apple platforms (docs/slider-plan.md S8). The clamp and the snap are
+unaffected — `kayaSnappedSlider` does both in Double from the raw value —
+and a REAL gesture still reports the thumb's own Float, which is where it
+actually is.
+
+## A UIView wrapping a UIKit control publishes NO traits, and the role reads `unknown` however good the control inside it is (measured 2026-09-04, the iOS sliders leg)
+
+UIKit draws no tick marks, so kaya's iOS slider is `KayaTickedSlider`, a
+UIView that hosts a UISlider over a strip of its own (docs/slider-plan.md
+S5). `expect_ax slider#0` read `unknown/Level` with the instrument saying
+`class=KayaTickedSlider traits=0 elements=0`: the reader finds the
+WRAPPER, a bare UIView publishes no traits and no elements, and the
+UISlider's own `.adjustable` sits one level down where nothing looks. The
+LABEL was right the whole time — SwiftUI's `.accessibilityLabel` lands on
+the wrapper — which is what makes this read as a role-mapping bug rather
+than a composition one.
+
+THE FIX is the composition's own: the strip is the view's drawing, so the
+view publishes ITSELF (`isAccessibilityElement = true`,
+`accessibilityTraits = .adjustable`) and the hosted UISlider stops being
+an element (`slider.isAccessibilityElement = false`). An element claiming
+`.adjustable` has to adjust, so the wrapper forwards
+`accessibilityIncrement`/`Decrement` through kaya's own nudge (S7) and the
+one commit path. The same shape is waiting for any future composed
+control on this backend: GTK's composed pickers needed the mirror-image
+fix one platform over (`composed_picker_role`).
+
 ## `xvfb-run -a` can wait forever for an Xvfb that is already up, when several start at once on a loaded host (measured 2026-09-04)
 
 Three `docker run … xvfb-run -a … bash -c '<guest> & …; import -window root …'`

@@ -124,6 +124,8 @@ type App struct {
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
 	nodeValues     map[uint64]func(*Tx, []any, float64)
+	widgetCommits  map[uint64]func(*Tx, float64)
+	nodeCommits    map[uint64]func(*Tx, []any, float64)
 	widgetDates    map[uint64]func(*Tx, Date)
 	nodeDates      map[uint64]func(*Tx, []any, Date)
 	widgetTimes    map[uint64]func(*Tx, Time)
@@ -227,6 +229,8 @@ func NewApp() *App {
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeValues:     make(map[uint64]func(*Tx, []any, float64)),
+		widgetCommits:  make(map[uint64]func(*Tx, float64)),
+		nodeCommits:    make(map[uint64]func(*Tx, []any, float64)),
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		widgetDates:    make(map[uint64]func(*Tx, Date)),
 		nodeDates:      make(map[uint64]func(*Tx, []any, Date)),
@@ -1384,6 +1388,22 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 	if onChange != nil {
 		tx.app.OnValueChanged(w, onChange)
 	}
+	return w
+}
+
+// Step is the granularity a slider's thumb rests on: min + k * step
+// (docs/slider-plan.md S1). It divides the range evenly; 0 is
+// continuous, the default.
+func (w Widget) Step(step float64) Widget {
+	w.tx.emit(TxSetStep(w.id, step))
+	return w
+}
+
+// TickSpacing is the distance between a slider's drawn ticks, in value
+// units (docs/slider-plan.md S5): it divides the range evenly and is a
+// multiple of the step when one is declared; 0 draws none.
+func (w Widget) TickSpacing(spacing float64) Widget {
+	w.tx.emit(TxSetTickSpacing(w.id, spacing))
 	return w
 }
 
@@ -3400,6 +3420,18 @@ func (t *Tpl) SetGrow(n Node, weight float64) {
 	t.tx.emit(TxSetGrow(n.id, weight))
 }
 
+// SetStep is a stamped slider's granularity (docs/slider-plan.md S1):
+// constant across the copies, like the range.
+func (t *Tpl) SetStep(n Node, step float64) {
+	t.tx.emit(TxSetStep(n.id, step))
+}
+
+// SetTickSpacing is a stamped slider's tick spacing
+// (docs/slider-plan.md S5), constant for SetStep's reason.
+func (t *Tpl) SetTickSpacing(n Node, spacing float64) {
+	t.tx.emit(TxSetTickSpacing(n.id, spacing))
+}
+
 // SetA11yID gives every stamped copy THE SAME accessibility identifier.
 // A CONSTANT IS OFTEN THE WRONG HALF HERE: an identifier is an
 // automation KEY, so N copies sharing one leave a harness with N
@@ -4360,6 +4392,20 @@ func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
 	a.nodeValues[n.id] = fn
 }
 
+// OnValueCommitted registers a handler for the value a live slider's
+// gesture SETTLED ON — once per release or key move, after that
+// gesture's OnValueChanged moves (docs/slider-plan.md S2).
+func (a *App) OnValueCommitted(w Widget, fn func(*Tx, float64)) {
+	a.widgetCommits[w.id] = fn
+}
+
+// OnValueCommittedNode registers a settled-value handler for a template
+// slider; the handler also receives the stamped copy's keys, outermost
+// first.
+func (a *App) OnValueCommittedNode(n Node, fn func(*Tx, []any, float64)) {
+	a.nodeCommits[n.id] = fn
+}
+
 // OnDate registers a handler for a live date picker's COMMITTED picks
 // (docs/datetime-plan.md D7): the control owns its value and reports each
 // pick here; a programmatic write never echoes.
@@ -4524,6 +4570,14 @@ func (a *App) Serve() {
 			}
 		case kind == occValueChanged:
 			if fn := a.nodeValues[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, value) })
+			}
+		case kind == occValueCommitted && len(keys) == 0:
+			if fn := a.widgetCommits[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, value) })
+			}
+		case kind == occValueCommitted:
+			if fn := a.nodeCommits[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, value) })
 			}
 		case kind == occDateChanged && len(keys) == 0:

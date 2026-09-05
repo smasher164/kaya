@@ -71,10 +71,18 @@ func (r taskRow) TimePicker(f kaya.Field[kaya.Time], onTime func(*kaya.Tx, strin
 	return r.c.TimePicker(r.t, f, onTime)
 }
 
+func (r taskRow) Slider(min, max float64, f kaya.Field[float64], onChange func(*kaya.Tx, string, float64)) kaya.Node {
+	return r.c.Slider(r.t, min, max, f, onChange)
+}
+
 // The template props: the const flavors write through the recorder,
 // the sourced ones through the typed collection, as the constructors
 // above do.
 func (r taskRow) SetGrow(n kaya.Node, weight float64) { r.t.SetGrow(n, weight) }
+
+func (r taskRow) SetStep(n kaya.Node, step float64) { r.t.SetStep(n, step) }
+
+func (r taskRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetTickSpacing(n, spacing) }
 
 func (r taskRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }
 

@@ -367,6 +367,16 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 // SetGrow weights this arm's node within its stamped row or column.
 func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight) }
 
+// SetStep is the granularity a slider this arm stamps rests on; const
+// only, like the range (Tpl.SetStep).
+func (sc SumCase[K, V]) SetStep(n Node, step float64) { sc.t.SetStep(n, step) }
+
+// SetTickSpacing is the distance between that slider's drawn ticks
+// (Tpl.SetTickSpacing).
+func (sc SumCase[K, V]) SetTickSpacing(n Node, spacing float64) {
+	sc.t.SetTickSpacing(n, spacing)
+}
+
 // SetA11yID gives every stamped copy of this arm the same identifier.
 func (sc SumCase[K, V]) SetA11yID(n Node, id string) { sc.t.SetA11yID(n, id) }
 

@@ -1439,6 +1439,8 @@ final class KayaApp {
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     private var nodeValues: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
+    private var widgetCommits: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
+    private var nodeCommits: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
     private var widgetDates: [UInt64: (KayaAppTx, KayaDate) throws -> Void] = [:]
     private var nodeDates: [UInt64: (KayaAppTx, [KayaValue], KayaDate) throws -> Void] = [:]
     private var widgetTimes: [UInt64: (KayaAppTx, KayaTime) throws -> Void] = [:]
@@ -1836,6 +1838,19 @@ final class KayaApp {
         nodeValues[n.id] = handler
     }
 
+    /// The value a live slider's gesture SETTLED ON — once per release or
+    /// key move, after that gesture's moves (docs/slider-plan.md S2).
+    func onValueCommitted(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double) throws -> Void) {
+        widgetCommits[w.id] = handler
+    }
+
+    /// A template slider's settled value, the stamped copy's keys first.
+    func onValueCommitted(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Double) throws -> Void
+    ) {
+        nodeCommits[n.id] = handler
+    }
+
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     func onToggle(
@@ -2140,6 +2155,14 @@ final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), false):
                 if let handler = nodeValues[id] {
+                    dispatch { try build { tx in try handler(tx, keys, value) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED), true):
+                if let handler = widgetCommits[id] {
+                    dispatch { try build { tx in try handler(tx, value) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED), false):
+                if let handler = nodeCommits[id] {
                     dispatch { try build { tx in try handler(tx, keys, value) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_DATE_CHANGED), true):
@@ -2847,22 +2870,30 @@ final class KayaAppTx {
             UInt32(path.count), path + d.ops)
     }
 
-    /// A slider over min...max at value, with its change handler co-located.
+    /// A slider over min...max at value, with its change and commit
+    /// handlers co-located. `step` is the granularity the thumb rests on
+    /// and `tickSpacing` the distance between drawn ticks, in value units
+    /// (docs/slider-plan.md S1, S5).
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
+        step: Double? = nil, tickSpacing: Double? = nil,
         bind: KayaSignal? = nil,
         onChange: ((KayaAppTx, Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, Double) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SLIDER))
         tx.setMin(w.id, min)
         tx.setMax(w.id, max)
+        if let step { tx.setStep(w.id, step) }
+        if let tickSpacing { tx.setTickSpacing(w.id, tickSpacing) }
         if let bind {
             tx.bindValue(w.id, bind.id)
         } else {
             tx.setValue(w.id, value)
         }
         if let onChange { app.onValueChanged(w, onChange) }
+        if let onCommit { app.onValueCommitted(w, onCommit) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -4373,39 +4404,49 @@ final class KayaTpl {
     /// decides whether the model follows.
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double,
-        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+        step: Double? = nil, tickSpacing: Double? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = sliderOf(min, max, onChange)
+        let n = sliderOf(min, max, step, tickSpacing, onChange, onCommit)
         tx.tx.setValue(n.id, value)
         return n
     }
 
     func slider(
         min: Double = 0.0, max: Double = 1.0, value s: KayaSignal,
-        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+        step: Double? = nil, tickSpacing: Double? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = sliderOf(min, max, onChange)
+        let n = sliderOf(min, max, step, tickSpacing, onChange, onCommit)
         tx.tx.bindValue(n.id, s.id)
         return n
     }
 
     func slider(
         min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
-        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+        step: Double? = nil, tickSpacing: Double? = nil,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil,
+        onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
     ) -> KayaNodeHandle {
-        let n = sliderOf(min, max, onChange)
+        let n = sliderOf(min, max, step, tickSpacing, onChange, onCommit)
         bindValueField(n, f)
         return n
     }
 
     private func sliderOf(
-        _ min: Double, _ max: Double,
-        _ onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)?
+        _ min: Double, _ max: Double, _ step: Double?, _ tickSpacing: Double?,
+        _ onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)?,
+        _ onCommit: ((KayaAppTx, [KayaValue], Double) throws -> Void)?
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_SLIDER))
         tx.tx.setMin(n.id, min)
         tx.tx.setMax(n.id, max)
+        if let step { tx.tx.setStep(n.id, step) }
+        if let tickSpacing { tx.tx.setTickSpacing(n.id, tickSpacing) }
         if let onChange { tx.app.onValueChanged(n, onChange) }
+        if let onCommit { tx.app.onValueCommitted(n, onCommit) }
         return n
     }
 

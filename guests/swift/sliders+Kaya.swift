@@ -3,36 +3,36 @@
 
 import Foundation
 
-extension Todo: KayaRecord {
+extension Track: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at
     /// its zero value.
-    static let prototype = Todo(title: "", done: false)
+    static let prototype = Track(name: "", level: 0)
 
     init(values: [KayaValue]) {
-        guard case .str(let title) = values[0], case .bool(let done) = values[1] else {
-            preconditionFailure("kaya: Todo fields out of order")
+        guard case .str(let name) = values[0], case .f64(let level) = values[1] else {
+            preconditionFailure("kaya: Track fields out of order")
         }
-        self.init(title: title, done: done)
+        self.init(name: name, level: level)
     }
 }
 
-/// Todo's typed field tokens.
-enum TodoFields {
-    static let title = KayaField<String>(index: 0)
-    static let done = KayaField<Bool>(index: 1)
+/// Track's typed field tokens.
+enum TrackFields {
+    static let name = KayaField<String>(index: 0)
+    static let level = KayaField<Double>(index: 1)
 }
 
 /// The collection factory; the struct is the schema.
-func todoCollection(_ tx: KayaAppTx) -> KayaRecordCollection<Todo> {
-    tx.collection(of: Todo.self)
+func trackCollection(_ tx: KayaAppTx) -> KayaRecordCollection<Track> {
+    tx.collection(of: Track.self)
 }
 
 /// The row surface: the template handle plus one token per wire
 /// field, and the constructors that consume them.
-struct TodoRow {
+struct TrackRow {
     let t: KayaTpl
-    let title = TodoFields.title
-    let done = TodoFields.done
+    let name = TrackFields.name
+    let level = TrackFields.level
 
     func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
@@ -83,21 +83,21 @@ struct TodoRow {
     }
 }
 
-extension KayaRecordCollection where T == Todo {
-    /// The for-statement form: `for row in todos.rows { … }`
+extension KayaRecordCollection where T == Track {
+    /// The for-statement form: `for row in tracks.rows { … }`
     /// traces the record template — the body runs once, and the
     /// tracer plants the For in the enclosing container builder.
-    var rows: KayaRowTrace<TodoRow> {
-        KayaRowTrace(collection: collection) { TodoRow(t: $0) }
+    var rows: KayaRowTrace<TrackRow> {
+        KayaRowTrace(collection: collection) { TrackRow(t: $0) }
     }
 }
 
 /// The record template, expression form: the body runs once,
 /// authoring the blueprint with the typed row surface; stamping is
 /// the core's replay.
-func todoEach(
-    _ tx: KayaAppTx, _ c: KayaRecordCollection<Todo>,
-    _ body: @escaping (TodoRow) -> Void
+func trackEach(
+    _ tx: KayaAppTx, _ c: KayaRecordCollection<Track>,
+    _ body: @escaping (TrackRow) -> Void
 ) -> KayaWidget {
-    tx.each(c.collection) { t in body(TodoRow(t: t)) }
+    tx.each(c.collection) { t in body(TrackRow(t: t)) }
 }

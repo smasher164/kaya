@@ -620,6 +620,46 @@ if (isMainThread) {
     });
   });
 
+  // ------------------------------------ the slider's numbers and commit
+  // (docs/slider-plan.md S1, S2, S5.) The two props must pack as the
+  // generated setters do, and value_committed must reach `onCommit`
+  // ALONE — one occurrence kind per handler, live and stamped, or a
+  // scrub writes the model on every pixel.
+  const Track = kaya.record({ name: String, level: Number }, "Track");
+  let sliderTracks!: K.Collection<K.Fields<typeof Track.schema>, K.Row<typeof Track.schema>>;
+  let bar!: K.Widget;
+  let stampedBar!: K.Widget;
+  const sliderMoves: number[] = [];
+  const sliderCommits: number[] = [];
+  const sliderRowCommits: [K.Key, number][] = [];
+  shipped.length = 0;
+  app.window(() => {
+    sliderTracks = kaya.collection(Track);
+    kaya.column(() => {
+      bar = kaya.slider({
+        value: 50, min: 0, max: 100, step: 5, tickSpacing: 25,
+        onChange: (v: number) => sliderMoves.push(v),
+        onCommit: (v: number) => sliderCommits.push(v),
+      });
+      for (const track of sliderTracks) {
+        stampedBar = kaya.slider({
+          value: track.level, min: 0, max: 100, step: 10,
+          onCommit: (row: K.RowHandle<K.Fields<typeof Track.schema>>, v: number) => sliderRowCommits.push([row.key, v]),
+        });
+      }
+    });
+  });
+  const sliderRecords = shipped[0]!.map((r) => JSON.stringify([...r]));
+  check("a slider's step packs as the generated setter does", sliderRecords.includes(JSON.stringify([...wire.tx_set_step(bar.id, 5)])));
+  check("a slider's tickSpacing packs as the generated setter does", sliderRecords.includes(JSON.stringify([...wire.tx_set_tick_spacing(bar.id, 25)])));
+  check("a stamped slider's step packs as the generated setter does", sliderRecords.includes(JSON.stringify([...wire.tx_set_step(stampedBar.id, 10)])));
+  app.build(() => { sliderTracks.insert("b", Track({ name: "b", level: 20 })); });
+  fire(wire.parse_occurrence(packStamped(wire.OCC_VALUE_COMMITTED, bar.id, [], 35)));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_VALUE_CHANGED, bar.id, [], 40)));
+  fire(wire.parse_occurrence(packStamped(wire.OCC_VALUE_COMMITTED, stampedBar.id, ["b"], 40)));
+  check("a value_committed occurrence reaches onCommit and NOT onChange", JSON.stringify(sliderCommits) === "[35]" && JSON.stringify(sliderMoves) === "[40]");
+  check("a stamped value_committed hands the row over first", JSON.stringify(sliderRowCommits) === JSON.stringify([["b", 40]]));
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

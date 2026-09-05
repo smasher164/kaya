@@ -2933,20 +2933,26 @@ export function radio(options: readonly string[], opts: ChoiceOptions = {}): Wid
   return choice(wire.KIND_RADIO, options, opts);
 }
 
-export type SliderOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; onChange?: Handler };
+export type SliderOptions = GrowOption & { value?: number | Signal<number> | FieldRef; min?: number; max?: number; step?: number; tickSpacing?: number; onChange?: Handler; onCommit?: Handler };
 
 /** A slider over a numeric range. UNCONTROLLED: the widget owns its
- * position and reports each change to onChange. `min`/`max` default to 0..1. */
+ * position and reports each change to onChange and each settled gesture
+ * to onCommit. `min`/`max` default to 0..1; `step` is the granularity the
+ * thumb rests on and `tickSpacing` the distance between drawn ticks, in
+ * value units (docs/slider-plan.md S1, S5). */
 export function slider(opts: SliderOptions = {}): Widget {
   const handle = widget(wire.KIND_SLIDER);
   if (opts.min !== undefined) records().push(wire.tx_set_min(handle.id, Number(opts.min)));
   if (opts.max !== undefined) records().push(wire.tx_set_max(handle.id, Number(opts.max)));
+  if (opts.step !== undefined) records().push(wire.tx_set_step(handle.id, Number(opts.step)));
+  if (opts.tickSpacing !== undefined) records().push(wire.tx_set_tick_spacing(handle.id, Number(opts.tickSpacing)));
   if (opts.value !== undefined) {
     if (opts.value instanceof Signal) records().push(wire.tx_bind_value(handle.id, opts.value.id));
     else if (opts.value instanceof FieldRef) records().push(wire.tx_bind_value_element(handle.id, opts.value._level(), opts.value._index));
     else records().push(wire.tx_set_value(handle.id, Number(opts.value)));
   }
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_VALUE_CHANGED, opts.onChange);
+  if (opts.onCommit !== undefined) app()._register(handle, wire.OCC_VALUE_COMMITTED, opts.onCommit);
   setGrow(handle, opts);
   return handle;
 }

@@ -370,13 +370,21 @@ static class Program
         Fwd("Progress", ["Signal value"], "value");
         Fwd("Progress", ["Field<double> value"], "value");
         Fwd("ProgressIndeterminate", [], "");
-        Fwd("Slider", ["double min", "double max", "double value", $"{onValue} onChange = null"],
-            "min, max, value, onChange");
-        Fwd("Slider", ["double min", "double max", "Signal value", $"{onValue} onChange = null"],
-            "min, max, value, onChange");
         Fwd("Slider",
-            ["double min", "double max", "Field<double> value", $"{onValue} onChange = null"],
-            "min, max, value, onChange");
+            ["double min", "double max", "double value", "double? step = null",
+             "double? tickSpacing = null", $"{onValue} onChange = null",
+             $"{onValue} onCommit = null"],
+            "min, max, value, step, tickSpacing, onChange, onCommit");
+        Fwd("Slider",
+            ["double min", "double max", "Signal value", "double? step = null",
+             "double? tickSpacing = null", $"{onValue} onChange = null",
+             $"{onValue} onCommit = null"],
+            "min, max, value, step, tickSpacing, onChange, onCommit");
+        Fwd("Slider",
+            ["double min", "double max", "Field<double> value", "double? step = null",
+             "double? tickSpacing = null", $"{onValue} onChange = null",
+             $"{onValue} onCommit = null"],
+            "min, max, value, step, tickSpacing, onChange, onCommit");
         Fwd("Select", ["string[] options", "int selected", $"{onSelect} onSelect = null"],
             "options, selected, onSelect");
         Fwd("Select", ["string[] options", "Signal selected", $"{onSelect} onSelect = null"],

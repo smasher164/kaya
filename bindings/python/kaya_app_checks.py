@@ -2646,4 +2646,72 @@ check("the model holds the record's own date and time",
       picker_coll.items()[0][1].due == datetime.date(2026, 10, 1)
       and picker_coll.items()[0][1].at == datetime.time(8, 30))
 
+# --- THE SLIDER'S TWO NUMBERS AND ITS COMMITTED VALUE -----------------
+# (docs/slider-plan.md S1, S2, S5.) The two props must pack as the
+# generated setters do, and value_committed must reach `on_commit` ALONE:
+# one occurrence kind per handler, live and stamped, or a scrub writes the
+# model on every pixel.
+app_slider = kaya.App()
+slider_moves = []
+slider_commits = []
+slider_row_commits = []
+
+
+@dataclass
+class SliderTrack:
+    name: str
+    level: float
+
+
+slider_bar = None
+slider_node = None
+slider_records = []
+with app_slider.window():
+    with kaya.column():
+        before_s = len(kaya._tx)
+        slider_bar = kaya.slider(
+            value=50.0, min=0.0, max=100.0, step=5.0, tick_spacing=25.0,
+            on_change=lambda v: slider_moves.append(v),
+            on_commit=lambda v: slider_commits.append(v))
+        slider_records = kaya._tx[before_s:]
+        slider_tracks = kaya.collection(SliderTrack)
+        for slider_track in slider_tracks:
+            kaya.label(bind=slider_track.name)
+            slider_node = kaya.slider(
+                value=slider_track.level, min=0.0, max=100.0, step=10.0,
+                on_commit=lambda *args: slider_row_commits.append(args))
+
+check("a slider's step packs as the generated setter does",
+      kaya.wire.tx_set_step(slider_bar.id, 5.0) in slider_records)
+check("a slider's tick_spacing packs as the generated setter does",
+      kaya.wire.tx_set_tick_spacing(slider_bar.id, 25.0) in slider_records)
+check("on_commit registers under value_committed and on_change does not",
+      (kaya.wire.OCC_VALUE_COMMITTED, slider_bar.id)
+      in app_slider._widget_handlers
+      and (kaya.wire.OCC_VALUE_CHANGED, slider_bar.id)
+      in app_slider._widget_handlers)
+check("a stamped on_commit registers in the node table only",
+      (kaya.wire.OCC_VALUE_COMMITTED, slider_node.id)
+      in app_slider._node_handlers
+      and (kaya.wire.OCC_VALUE_COMMITTED, slider_node.id)
+      not in app_slider._widget_handlers)
+
+slider_occs = [
+    (kaya.wire.OCC_VALUE_COMMITTED, slider_bar.id, [], 35.0),
+    (kaya.wire.OCC_VALUE_CHANGED, slider_bar.id, [], 40.0),
+    (kaya.wire.OCC_VALUE_COMMITTED, slider_node.id, ["b"], 40.0),
+]
+real_next_slider = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: slider_occs.pop(0) if slider_occs else None)
+try:
+    app_slider._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_slider
+
+check("a value_committed occurrence reaches on_commit and NOT on_change",
+      slider_commits == [35.0] and slider_moves == [40.0])
+check("a stamped value_committed passes the copy's keys first",
+      slider_row_commits == [("b", 40.0)])
+
 sys.exit(1 if failures else 0)

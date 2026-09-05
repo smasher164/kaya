@@ -2149,6 +2149,13 @@ data Attr (c :: WClass) where
   MaxDate :: Day -> Attr 'LeafW
   -- | A time picker's minute granularity: 1, 5, 10, 15 or 30 (D3).
   MinuteStep :: Int -> Attr 'LeafW
+  -- | The granularity a slider's thumb rests on: min + k * step
+  -- (docs\/slider-plan.md S1). Divides the range evenly; 0 is continuous.
+  Step :: Double -> Attr 'LeafW
+  -- | The distance between a slider's drawn ticks, in value units
+  -- (docs\/slider-plan.md S5): divides the range evenly, a multiple of the
+  -- step when one is declared; 0 draws none.
+  TickSpacing :: Double -> Attr 'LeafW
   -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
   -- never appearance.
   Role :: Role -> Attr 'LeafW
@@ -2179,6 +2186,8 @@ applyAttr (MaxDate d) (Widget n) =
    in emitB (W.txSetMaxDate n (fromIntegral y) m dd)
 applyAttr (MinuteStep minutes) (Widget n) =
   emitB (W.txSetMinuteStep n (fromIntegral minutes))
+applyAttr (Step step) (Widget n) = emitB (W.txSetStep n step)
+applyAttr (TickSpacing spacing) (Widget n) = emitB (W.txSetTickSpacing n spacing)
 applyAttr (Role r) w = setRole w r
 applyAttr (Accepts kinds) w = setAccepts w kinds
 applyAttr (Draggable clip ops) w = setDragSource w clip ops
@@ -2848,6 +2857,12 @@ data TplAttr where
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
   TplRole :: Role -> TplAttr
+  -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
+  -- across the copies, like the range.
+  TplStep :: Double -> TplAttr
+  -- | A stamped slider's tick spacing (docs\/slider-plan.md S5), constant
+  -- for 'TplStep''s reason.
+  TplTickSpacing :: Double -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name plus any custom format ids. A CONSTANT LIST AND NOT A SOURCE.
   -- Every backend gates the paste occurrence on the focused widget's
@@ -2872,6 +2887,8 @@ applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
+applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
+applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 applyTplAttr (TplDraggable clip ops) n = setNodeDragSource n clip ops
 applyTplAttr (TplDropTarget ops) n = setNodeDropTarget n ops
@@ -3566,6 +3583,8 @@ data App = App
     -- Occurrence::InstanceValueChanged matches nothing and is dropped
     -- with no error anywhere.
     appNodeValues :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
+    appWidgetCommits :: IORef (Map.Map Word64 (Double -> IO ())),
+    appNodeCommits :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
     -- The pickers' committed values (docs/datetime-plan.md D7).
     appWidgetDates :: IORef (Map.Map Word64 (Day -> IO ())),
     appNodeDates :: IORef (Map.Map Word64 ([W.Value] -> Day -> IO ())),
@@ -3782,6 +3801,11 @@ class HandlerTarget e where
   -- the entry's uncontrolled contract, with a Double.
   onValueChanged :: App -> e -> Keyed e (Double -> IO ()) -> IO ()
 
+  -- | The value a slider gesture SETTLED ON — once per release or key
+  -- move, after that gesture's 'onValueChanged' moves
+  -- (docs\/slider-plan.md S2).
+  onValueCommitted :: App -> e -> Keyed e (Double -> IO ()) -> IO ()
+
   -- | Take pasted content. COSTS NOTHING ON ANY PLATFORM, unlike
   -- 'readClipboard': a paste is a user gesture, so it is its own
   -- authorisation.
@@ -3814,6 +3838,8 @@ instance HandlerTarget Widget where
     modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   onValueChanged app (Widget n) handler =
     modifyIORef' (appWidgetValues app) (Map.insert n handler)
+  onValueCommitted app (Widget n) handler =
+    modifyIORef' (appWidgetCommits app) (Map.insert n handler)
   onPaste app (Widget n) handler =
     modifyIORef' (appWidgetPastes app) (Map.insert n handler)
   onSort app (Widget n) handler =
@@ -3833,6 +3859,8 @@ instance HandlerTarget Node where
     modifyIORef' (appNodeToggles app) (Map.insert n handler)
   onValueChanged app (Node n) handler =
     modifyIORef' (appNodeValues app) (Map.insert n handler)
+  onValueCommitted app (Node n) handler =
+    modifyIORef' (appNodeCommits app) (Map.insert n handler)
   onPaste app (Node n) handler =
     modifyIORef' (appNodePastes app) (Map.insert n handler)
   onSort app (Node n) handler =
@@ -3891,6 +3919,8 @@ newApp =
     <*> newIORef Map.empty -- appNodeToggles
     <*> newIORef Map.empty -- appWidgetValues
     <*> newIORef Map.empty -- appNodeValues
+    <*> newIORef Map.empty -- appWidgetCommits
+    <*> newIORef Map.empty -- appNodeCommits
     <*> newIORef Map.empty -- appWidgetDates
     <*> newIORef Map.empty -- appNodeDates
     <*> newIORef Map.empty -- appWidgetTimes
@@ -4032,6 +4062,16 @@ dispatchLoop app = do
               dispatch (mapM_ ($ v) (Map.lookup ident handlers))
             _ -> do
               handlers <- readIORef (appNodeValues app)
+              dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindValueCommitted -> do
+          let v = case payload of Just (W.VF64 x) -> x; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetCommits app)
+              dispatch (mapM_ ($ v) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appNodeCommits app)
               dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindDateChanged -> do
