@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
             "dnd" -> Dnd::app
             "pickers" -> Pickers::app
             "sliders" -> Sliders::app
+            "tooltips" -> Tooltips::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

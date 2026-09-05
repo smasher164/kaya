@@ -26,7 +26,7 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
-    "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders",
+    "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
 ]
 
 # Depth-slice scenes: a rust example + steps exist, the language
@@ -34,7 +34,7 @@ SCENES = [
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
-DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tooltips"]
+DEPTH_SCENES = ["windowed", "canvas", "sizepolicy"]
 
 
 def depth_scenes():
@@ -103,7 +103,7 @@ ORDER = [
      # the exe and no .py or .ts; the other five legs join this line with
      # their guests.
      "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp", "sliders_java",
-    "tooltips_rust",
+    "tooltips_rust", "tooltips_python", "tooltips_js", "tooltips_go", "tooltips_csharp", "tooltips_java",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from
