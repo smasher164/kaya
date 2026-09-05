@@ -70,7 +70,7 @@ LEGS = {
         "background-jvm", "undo-jvm", "filedialog-jvm",
         "table-jvm", "save-jvm", "dirty-jvm",
         "ranges-jvm", "styling-jvm", "typeface-jvm",
-        "assets-jvm", "dnd-jvm", "pickers-jvm",
+        "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -86,7 +86,7 @@ LEGS = {
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
         "dirty-go", "ranges-go", "editor-go",
-        "dnd-go", "pickers-go",
+        "dnd-go", "pickers-go", "sliders-go",
     ],
     "python": [
         "varied-python", "portfolio-python",

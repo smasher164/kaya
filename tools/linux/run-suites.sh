@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -39,7 +39,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
 # (docs/slider-plan.md §4, docs/deferred.md's sliders entry).
-DEPTH_SCENES="windowed canvas sizepolicy dnd sliders"
+DEPTH_SCENES="windowed canvas sizepolicy dnd"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1137,6 +1137,20 @@ for proto in x11 wayland; do
     # that rule.
     run "$proto" sliders-rust env KAYA_SELFTEST=sliders \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sliders"
+    run "$proto" sliders-python env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/sliders.py
+    run "$proto" sliders-js env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/sliders.ts
+    run "$proto" sliders-go env KAYA_SELFTEST=sliders \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" sliders-csharp env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" sliders-ocaml env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/sliders.exe
+    run "$proto" sliders-haskell env KAYA_SELFTEST=sliders \
+        tools/linux/a11y-leg.sh "$(hs_bin sliders)"
+    run "$proto" sliders-java env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
