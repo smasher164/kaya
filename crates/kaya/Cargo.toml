@@ -221,6 +221,10 @@ name = "todos"
 path = "../../guests/rust/todos.rs"
 
 [[example]]
+name = "tasks"
+path = "../../guests/rust/tasks.rs"
+
+[[example]]
 name = "reorder"
 path = "../../guests/rust/reorder.rs"
 

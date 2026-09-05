@@ -33,7 +33,7 @@ SCENES = [
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -134,6 +134,9 @@ ORDER = [
     ("varied", ("python",)),
     ("drain",),
     ("windowed", ("rust",)),
+    ("drain",),
+    # The task manager: a RUST app by design (docs/tasks-plan.md §0).
+    ("tasks", ("rust",)),
     ("drain",),
     ("adaptive", LANGS),
     ("drain",),

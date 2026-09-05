@@ -1,0 +1,109 @@
+# The task manager (docs/tasks-plan.md §2), one scene for every screen.
+# Rows are addressed by authored id and key: a task lives in exactly one
+# list at a time, so `label@title[t3]` names its current copy wherever it
+# sits. The clock is fixed at Monday 2026-09-07 under the harness.
+expect_title "tasks"
+expect_sections 7
+expect_section "Inbox"
+expect label@inbox_count "2 in inbox"
+expect label@title[t1] "Buy milk"
+expect label@title[t2] "Call the plumber"
+expect label@caption[t2] ""
+
+# Quick-add lands in Inbox; the field clears and keeps focus (todos.steps).
+set_text entry@quick "Buy oat milk"
+click button@add
+expect label@inbox_count "3 in inbox"
+expect label@title[t10] "Buy oat milk"
+expect entry@quick ""
+expect_focused entry@quick
+
+# Today: the routed rows, and a completion that moves one to the Logbook.
+select_section 1
+expect_section "Today"
+expect label@today_count "2 today"
+expect label@title[t3] "Draft chapter 3"
+expect label@caption[t3] "Mon 7 Sep, Thesis"
+expect label@caption[t4] "Mon 7 Sep"
+toggle checkbox@done[t3] on
+expect label@today_count "1 today"
+select_section 4
+expect_section "Logbook"
+expect label@logbook_count "2 done"
+expect label@title[t3] "Draft chapter 3"
+toggle checkbox@done[t3] off
+expect label@logbook_count "1 done"
+select_section 1
+expect label@today_count "2 today"
+
+# Upcoming and Anytime read the seed's routing.
+select_section 2
+expect_section "Upcoming"
+expect label@upcoming_count "2 upcoming"
+expect label@caption[t5] "Wed 9 Sep, Trip"
+expect label@caption[t8] "Sat 12 Sep, Thesis"
+select_section 3
+expect_section "Anytime"
+expect label@anytime_count "2 anytime"
+expect label@caption[t6] "due Wed 30 Sep, Trip"
+expect label@caption[t7] "Kitchen"
+
+# Details: a when-date set on the pushed screen re-routes the task.
+select_section 0
+click button@details[t2]
+expect_entries 1
+expect textarea@notes ""
+expect label@when_text "When: none"
+set_date date_picker@when 2026-09-08
+expect label@when_text "When: Tue 8 Sep"
+back
+expect_entries 0
+expect label@inbox_count "2 in inbox"
+select_section 2
+expect label@upcoming_count "3 upcoming"
+expect label@caption[t2] "Tue 8 Sep"
+
+# The project screen: keyed Open, its own quick-add, and reorder by drag.
+select_section 5
+expect_section "Projects"
+expect label@name[trip] "Trip"
+expect label@pcount[trip] "2 tasks"
+click button@open[trip]
+expect_entries 1
+expect_order column@rows "Book the flights|Renew passport"
+drag label@ptitle[t6] to label@ptitle[t5] before
+expect_order column@rows "Renew passport|Book the flights"
+set_text entry@pquick "Pack chargers"
+click button@padd
+expect_order column@rows "Renew passport|Book the flights|Pack chargers"
+back
+expect_entries 0
+expect label@pcount[trip] "3 tasks"
+select_section 3
+expect label@anytime_count "3 anytime"
+expect label@caption[t11] "Trip"
+
+# Delete from the details screen, then Edit>Undo brings the row back.
+select_section 0
+click button@details[t1]
+expect_entries 1
+click button@delete
+expect_entries 0
+expect label@inbox_count "1 in inbox"
+expect_menu "Edit>Undo" enabled
+menu_activate "Edit>Undo"
+expect label@inbox_count "2 in inbox"
+expect label@title[t1] "Buy milk"
+
+# Settings: the select and the two checkboxes, read back as one line.
+select_section 6
+expect_section "Settings"
+expect label@settings "Week starts Monday; badge shown; completed move to Logbook"
+choose select@week 1
+toggle checkbox@hide_badge on
+expect label@settings "Week starts Sunday; badge hidden; completed move to Logbook"
+toggle checkbox@keep_done on
+expect label@settings "Week starts Sunday; badge hidden; completed stay in place"
+select_section 3
+expect label@anytime_count "4 anytime"
+expect label@caption[t9] "Kitchen"

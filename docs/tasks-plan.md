@@ -1,7 +1,9 @@
 # The task manager — the design pass
 
 Status: RULED 2026-09-05 (maintainer: "let's build a task manager"), the
-THIRD forcing artifact, in RUST. Nothing built yet; §6 is the sequencing.
+THIRD forcing artifact, in RUST. S0 IS BUILT — guests/rust/tasks.rs and
+tools/scenes/tasks.steps, green on the mac the same day and wired on all
+five lanes; §5 holds what the first run taught. §6 is the sequencing.
 The editor (docs/editor-plan.md) and the portfolio
 (docs/portfolio-plan.md) are the precedents this file follows; the
 prioritization it serves is docs/probes/roadmap-app-needs-2026-09-05.md
@@ -59,7 +61,7 @@ THE MODEL:
 
 `when`, `deadline` and `reminder` are optional in the app's own struct;
 the pickers are always-valued (docs/datetime-plan.md D5), so the detail
-screen shows "No date" beside a picker and a "Clear" button, and a
+screen shows "When: none" beside a picker and a "Clear" button, and a
 cleared date is the absence. Dates and times ride kaya's `Date`/`Time`.
 
 WHICH LIST A TASK IS IN is a function of the task: done -> Logbook;
@@ -95,7 +97,7 @@ Deliberate v0 stops, each a recorded stop short of a forced feature:
 ## §2 — the scene (tools/scenes/tasks.steps)
 
 Byte-frozen on all five lanes, one scene for every screen. It reads the
-seed (each list's rows through `expect_rows`, the count labels), adds a
+seed (each list's rows by authored id and key, the count labels), adds a
 task through the quick-add row and reads it in Inbox, checks a Today
 task off and reads it in Logbook with Today's count moved, opens a
 task's details, sets its when-date to tomorrow and reads it in Upcoming
@@ -137,6 +139,41 @@ pass, not this one's.
 
 Filled as the stages land: every measured surprise with its date and
 the gate or trap it became.
+
+- **2026-09-05, S0 on the mac — a keyed target resolved only in the first
+  list.** Five lists' templates share the ids `title`, `caption`, `done`
+  and `details`, and every harness read the template node off the FIRST
+  copy carrying the id, then matched keys among that template's copies
+  alone: `label@title[t3]` in Today was "no such target" with no
+  diagnostic, since the guard that prints one had passed. All four
+  backends now match each copy under its own tag's node
+  (`harness::table_tag_keys_match`; two copies answering is refused by
+  name), tools/check-verbs.py forbids the first-copy read coming back
+  in any of the four, and this scene is the runtime proof.
+- **2026-09-05 — pushes inside a sectioned window.** A sectioned window
+  presents each section's own stack and no window stack on macOS, so
+  `push_entry` on the window rendered nothing (the model had the entry;
+  pickers and drag surfaces never materialized). The app pushes onto the
+  section the row came from, and the three harnesses' implicit
+  `expect_entries` and `back` follow the ACTIVE surface (DESIGN.md,
+  Sections).
+- **2026-09-05 — a control read racing its materialization.** `set_date`
+  and `drag` read an AppKit control or surface once, immediately after a
+  model-level expect passed on the freshly pushed screen, and said "no
+  such target" for a node that existed. The SwiftUI verbs wait for the
+  control (`kayaAwaitOnMain`, the step's own ceiling below it) and the
+  two misses are two sentences. GTK and WinUI materialize synchronously
+  on their UI thread; Compose's verbs already await.
+- **2026-09-05 — there is no checkbox-state observation.** `expect
+  checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
+  ever asserted a checkbox's state. The scene proves completion through
+  the counts and the row's list instead; a `checked` read is a harness
+  slice of its own if a stage needs it.
+- **Open question for the maintainer — seven sections on a phone.** The
+  iPhone tab bar folds sections past five under More; kaya renders what
+  the platform does. Whether the app should fold Logbook and Settings
+  into fewer surfaces is a product call, taken after the iOS lane shows
+  the shape.
 
 ## §6 — sequencing (the evidence's order, one forced feature per stage)
 

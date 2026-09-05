@@ -5904,30 +5904,36 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
         // stamped copy that left the band would answer with the empty children
         // its teardown left behind (docs/virtualization-plan.md §1).
         guard let keys else {
-            return registry.first { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }
+            if let hit = registry.first(where: { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }) {
+                return hit
+            }
+            let liveIds = registry.filter { kayaScene.nodes[$0.id] === $0 }.map { $0.a11yId }
+            kayaDiag(
+                "target \(text) unresolved: \(liveIds.count) live \(kind)s; ids "
+                    + Set(liveIds).sorted().joined(separator: ","))
+            return nil
         }
         // A stamped copy of ANY tagged kind resolves by key: the table's
         // sort tag and a widget's occurrence tag carry the same node-and-
         // keys encoding (the keyed-target entry, 2026-09-01).
         let stampOf: (KayaNode) -> KayaTableStamp? = { kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag) }
         let live = registry.filter { kayaScene.nodes[$0.id] === $0 }
-        guard
-            let node = live.lazy.filter({ $0.a11yId == id })
-                .compactMap({ stampOf($0)?.node }).first
-        else {
+        // EVERY copy carrying the id is a candidate, whichever template
+        // stamped it: the key path names the copy, so five lists' templates
+        // may share one id (tools/scenes/tasks.steps). Two answering is a
+        // refusal, said as such.
+        let hits = live.filter { $0.a11yId == id && stampOf($0)?.keys == keys }
+        guard hits.count == 1 else {
             // The miss says what the registry held: a keyed target that
             // resolves nothing is otherwise one sentence for every cause.
             let withId = live.filter { $0.a11yId == id }
             kayaDiag(
-                "keyed target \(text) unresolved: \(live.count) live \(kind)s, \(withId.count) carrying id \(id), tags "
+                "keyed target \(text) \(hits.isEmpty ? "unresolved" : "ambiguous (\(hits.count) copies)"): \(live.count) live \(kind)s, \(withId.count) carrying id \(id), tags "
                     + withId.map { "\($0.tag.count)b" }.joined(separator: ",") + "; ids "
                     + Set(live.map { $0.a11yId }).sorted().joined(separator: ","))
             return nil
         }
-        return live.first {
-            guard let stamp = stampOf($0) else { return false }
-            return stamp.node == node && stamp.keys == keys
-        }
+        return hits[0]
     }
     guard text.filter({ $0 == "#" }).count == 1 else { return nil }
     let bits = text.split(separator: "#", omittingEmptySubsequences: false)
@@ -5935,6 +5941,19 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
     if bits[1] == "last" { return registry.last }
     guard let i = Int(bits[1]), registry.indices.contains(i) else { return nil }
     return registry[i]
+}
+
+/// Retry a main-thread read until it answers or the wait runs out: the AppKit
+/// and UIKit surfaces behind a pushed screen materialize a frame after the
+/// model does, and a drive verb that read them once lost that race
+/// (tools/scenes/tasks.steps, 2026-09-05).
+func kayaAwaitOnMain<T>(timeoutMs: Int = 5000, _ read: () -> T?) -> T? {
+    let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000)
+    while true {
+        if let hit = DispatchQueue.main.sync(execute: read) { return hit }
+        if Date() >= deadline { return nil }
+        Thread.sleep(forTimeInterval: 0.02)
+    }
 }
 
 /// An optional leading `window#N` token for the window verbs; the remainder is
@@ -6386,31 +6405,42 @@ private func kayaRunScript(_ script: String) {
                         "\(parts[0]) wants \(isTime ? "HH:MM" : "YYYY-MM-DD"), got \(spelled)")
                     break
                 }
-                let ok = DispatchQueue.main.sync { () -> Bool in
-                    let node = isTime
+                let pickerNode = DispatchQueue.main.sync {
+                    isTime
                         ? kayaTarget(parts[1], "time_picker", kayaScene.timePickers)
                         : kayaTarget(parts[1], "date_picker", kayaScene.datePickers)
-                    guard let node, let control = kayaPickerControls[node.id] else { return false }
+                }
+                guard let pickerNode else {
+                    failures.append("no such target \(parts[1])")
+                    break
+                }
+                // The control materializes after the node (kayaAwaitOnMain),
+                // and the two misses are two sentences.
+                guard let control = kayaAwaitOnMain({ kayaPickerControls[pickerNode.id] }) else {
+                    failures.append("\(parts[1]) has no picker control after 5000ms")
+                    break
+                }
+                DispatchQueue.main.sync {
                     kayaDrivePicker(
                         control, to: isTime ? kayaDateFromPackedTime(packed) : kayaDateFromPackedDate(packed))
-                    return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
             case "expect_picker":
                 // The CONTROL's value, never the node's: the one observation
                 // for the silent cases (docs/datetime-plan.md D8).
                 let want = kayaQuoted(Array(parts[2...]))
-                let got = DispatchQueue.main.sync { () -> String? in
-                    if parts[1].hasPrefix("time_picker") {
-                        guard let node = kayaTarget(parts[1], "time_picker", kayaScene.timePickers),
-                            let control = kayaPickerControls[node.id]
-                        else { return nil }
-                        return kayaSpelledTime(kayaPackedTime(kayaControlDate(control)))
+                let isTimePicker = parts[1].hasPrefix("time_picker")
+                let pickerNode = DispatchQueue.main.sync {
+                    isTimePicker
+                        ? kayaTarget(parts[1], "time_picker", kayaScene.timePickers)
+                        : kayaTarget(parts[1], "date_picker", kayaScene.datePickers)
+                }
+                let got: String? = pickerNode.flatMap { node in
+                    guard let control = kayaAwaitOnMain({ kayaPickerControls[node.id] }) else { return nil }
+                    return DispatchQueue.main.sync {
+                        isTimePicker
+                            ? kayaSpelledTime(kayaPackedTime(kayaControlDate(control)))
+                            : kayaSpelledDate(kayaPackedDate(kayaControlDate(control)))
                     }
-                    guard let node = kayaTarget(parts[1], "date_picker", kayaScene.datePickers),
-                        let control = kayaPickerControls[node.id]
-                    else { return nil }
-                    return kayaSpelledDate(kayaPackedDate(kayaControlDate(control)))
                 }
                 if let got, got == want {
                     observed.append(got)
@@ -6794,12 +6824,24 @@ private func kayaRunScript(_ script: String) {
                     failures.append("drag wants `<source> to <destination> [before|onto]`")
                     break
                 }
-                let off = DispatchQueue.main.sync { () -> String? in
-                    guard let src = kayaAnyTarget(words[0]) else { return "no such source \(words[0])" }
-                    guard let dst = kayaAnyTarget(words[2]) else { return "no such destination \(words[2])" }
-                    return kayaDriveDrag(source: src, destination: dst, reorder: reorder)
+                let ends: (KayaNode, KayaNode)? = DispatchQueue.main.sync {
+                    guard let src = kayaAnyTarget(words[0]), let dst = kayaAnyTarget(words[2]) else { return nil }
+                    return (src, dst)
                 }
-                if let off { failures.append("drag: \(off)") }
+                guard let ends else {
+                    let which = DispatchQueue.main.sync {
+                        kayaAnyTarget(words[0]) == nil ? "source \(words[0])" : "destination \(words[2])"
+                    }
+                    failures.append("drag: no such \(which)")
+                    break
+                }
+                let (src, dst) = ends
+                // The destination's surface materializes a frame after its node
+                // (kayaAwaitOnMain); the drive itself stays one shot.
+                _ = kayaAwaitOnMain { kayaDragSurfaces[dst.id] != nil ? true : nil }
+                if let off = DispatchQueue.main.sync(execute: { kayaDriveDrag(source: src, destination: dst, reorder: reorder) }) {
+                    failures.append("drag: \(off)")
+                }
             case "drag_file":
                 // drag_file "<path>" to <destination> — a foreign file drop
                 // (docs/dnd-plan.md D6); the path is quoted and $TMP/$PID
@@ -7120,7 +7162,7 @@ private func kayaRunScript(_ script: String) {
                 let prefix = explicit ? "window#\(wid) " : ""
                 let want = Int(rest[0]) ?? -1
                 let got = DispatchQueue.main.sync {
-                    kayaScene.windows[wid]?.entries.count ?? -1
+                    kayaStackDepth(explicit ? wid : kayaActiveSurface(wid))
                 }
                 if got == want {
                     observed.append("\(prefix)entries \(want)")
@@ -7138,8 +7180,9 @@ private func kayaRunScript(_ script: String) {
                     // column beside its sidebar, so driving the pop would let
                     // the harness do what the screen does not offer.
                     guard !kayaSplitArm(wid) else { return }
-                    let depth = kayaScene.windows[wid]?.entries.count ?? 0
-                    kayaUserPops(wid, to: max(0, depth - 1))
+                    let surface = kayaActiveSurface(wid)
+                    let depth = max(0, kayaStackDepth(surface))
+                    kayaUserPops(surface, to: max(0, depth - 1))
                 }
             case "expect_grid_columns":
                 let want = Int(parts[2])!
@@ -13467,6 +13510,22 @@ private func kayaStackEntries(_ sid: UInt64) -> [KayaEntryModel] {
 /// each reconciling the core-owned stack post-fact through emitEntryPopped —
 /// and STOP at an intercept_back-armed entry: nothing pops there,
 /// back_requested fires instead, and the derived path snaps the view back.
+/// The surface whose stack the implicit stack verbs read and drive: the
+/// window's selected section when it has sections, else the window —
+/// stacks are per surface and the platform's back routes to the active
+/// section's (scene.rs, PushEntry).
+func kayaActiveSurface(_ wid: UInt64) -> UInt64 {
+    guard let window = kayaScene.windows[wid], !window.sections.isEmpty,
+        let sid = window.selectedSection
+    else { return wid }
+    return sid
+}
+
+/// A surface's stack depth, window or section; -1 for no such surface.
+func kayaStackDepth(_ surface: UInt64) -> Int {
+    (kayaScene.sectionsById[surface]?.entries ?? kayaScene.windows[surface]?.entries)?.count ?? -1
+}
+
 func kayaUserPops(_ sid: UInt64, to depth: Int) {
     while kayaStackEntries(sid).count > depth, let top = kayaStackEntries(sid).last {
         if top.interceptBack {

@@ -39,7 +39,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
 # (docs/slider-plan.md §4, docs/deferred.md's sliders entry).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1045,6 +1045,9 @@ for proto in x11 wayland; do
     # mobile lanes can run too.
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
+    # THE TASK MANAGER, a RUST app by design (docs/tasks-plan.md §0).
+    run "$proto" tasks-rust env KAYA_SELFTEST=tasks \
+        "$CARGO_TARGET_DIR/debug/examples/tasks"
     # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2).
     run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
         "$CARGO_TARGET_DIR/debug/examples/adaptive"

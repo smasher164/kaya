@@ -12455,23 +12455,20 @@ impl crate::harness::Stage for GtkStage {
             }
             if let Some(keys) = keys.as_deref() {
                 if kind == K::Column {
-                    let node = core
+                    let hits: Vec<usize> = core
                         .columns
                         .iter()
                         .zip(&core.column_ids)
-                        .filter(|(column, _)| column.widget_name() == id)
-                        .find_map(|(_, widget)| table_tag(core, *widget))
-                        .and_then(|tag| crate::harness::table_tag_node(&tag))?;
-                    return core
-                        .columns
-                        .iter()
-                        .zip(&core.column_ids)
-                        .position(|(_, widget)| {
-                            table_tag(core, *widget).is_some_and(|tag| {
-                                crate::harness::table_tag_matches_keys(&tag, node, keys)
-                            })
+                        .enumerate()
+                        .filter(|(_, (column, widget))| {
+                            column.widget_name() == id
+                                && table_tag(core, **widget).is_some_and(|tag| {
+                                    crate::harness::table_tag_keys_match(&tag, keys)
+                                })
                         })
-                        .map(|i| i as isize);
+                        .map(|(i, _)| i)
+                        .collect();
+                    return (hits.len() == 1).then(|| hits[0] as isize);
                 }
                 // EVERY OTHER TAGGED KIND resolves through its occurrence
                 // tag, the same node-and-keys encoding the table's sort
@@ -12486,31 +12483,31 @@ impl crate::harness::Stage for GtkStage {
                         .find(|(_, native)| native.widget() == *w)
                         .and_then(|(wid, _)| core.widget_tags.get(&wid.0).cloned())
                 };
-                let Some(node) = candidates
+                // EVERY copy carrying the id is a candidate, whichever
+                // template stamped it (harness::table_tag_keys_match).
+                let hits: Vec<usize> = candidates
                     .iter()
-                    .filter(|w| w.widget_name() == id)
-                    .find_map(|w| tag_of(w))
-                    .and_then(|tag| crate::harness::table_tag_node(&tag))
-                else {
+                    .enumerate()
+                    .filter(|(_, w)| w.widget_name() == id)
+                    .filter(|(_, w)| {
+                        tag_of(w).is_some_and(|tag| crate::harness::table_tag_keys_match(&tag, keys))
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                if hits.len() != 1 {
                     // The miss says what the registry held: one sentence
                     // for every cause is what cost a stale-interpreter run
                     // on the mac (docs/traps.md, 2026-09-01).
                     let with_id = candidates.iter().filter(|w| w.widget_name() == id).count();
                     let tagged = candidates.iter().filter(|w| tag_of(w).is_some()).count();
                     eprintln!(
-                        "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] unresolved: {} live, {with_id} carrying the id, {tagged} tagged",
+                        "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] {}: {} live, {with_id} carrying the id, {tagged} tagged",
+                        if hits.is_empty() { "unresolved" } else { "ambiguous" },
                         candidates.len()
                     );
                     return None;
-                };
-                return candidates
-                    .iter()
-                    .position(|w| {
-                        tag_of(w).is_some_and(|tag| {
-                            crate::harness::table_tag_matches_keys(&tag, node, keys)
-                        })
-                    })
-                    .map(|i| i as isize);
+                }
+                return Some(hits[0] as isize);
             }
             // A DESTROYED WIDGET MAY NOT ANSWER A TARGET. These registries
             // are push-only, so a stamped copy that left the band is still
@@ -13130,6 +13127,10 @@ impl crate::harness::Stage for GtkStage {
             );
             std::thread::sleep(crate::harness::POLL_INTERVAL);
         }
+    }
+
+    fn active_surface(&self, window: u64) -> u64 {
+        Self::on_main(move |core| core.selected_sections.get(&window).copied().unwrap_or(window))
     }
 
     fn entry_count(&self, window: u64) -> usize {

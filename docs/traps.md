@@ -9240,3 +9240,20 @@ twice, and read as a crash until the exit was found voluntary in the device
 log) — spell a long hold as a chain of `settle 25000` steps; and the
 device's unified log holds no crash for a voluntary exit, so read
 runningboardd's exit context before hunting a crash report.
+
+- **A keyed harness target names ANY copy carrying the id, and the copy's
+  own tag supplies the template node** (2026-09-05, tools/scenes/tasks.steps).
+  Every backend's keyed arm used to take the node off the first copy
+  carrying the id and match keys among that one template's copies, so a
+  second template sharing the id (one row template per list) resolved to
+  "no such target" with no diagnostic. Match each copy under its own
+  tag (`harness::table_tag_keys_match`); tools/check-verbs.py refuses the
+  first-copy read.
+- **A verb that drives a native control must WAIT for it** (2026-09-05).
+  On the SwiftUI interpreter a pushed screen's model exists a frame before
+  its AppKit controls and drag surfaces do; `set_date` and `drag` read
+  once and failed a node that was there, and the sentence blamed the
+  target. `kayaAwaitOnMain` polls under the step ceiling and the two
+  misses ("no such target" / "has no picker control after Nms") are told
+  apart. A pushed screen inside a SECTIONED window renders only when the
+  push lands on the section's stack (`push_entry_in`), never the window's.

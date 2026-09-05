@@ -56,6 +56,8 @@ LEGS = {
         "assets-compose", "clipboard-compose", "background-compose",
         "undo-compose", "dirty-compose", "ranges-compose",
         "dnd-compose", "pickers-compose", "sliders-compose",
+        # The task manager: a RUST app by design (docs/tasks-plan.md §0).
+        "tasks-compose",
         "tooltips-compose",
     ],
     "jvm": [

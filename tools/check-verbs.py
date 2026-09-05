@@ -1276,6 +1276,18 @@ KEYED_ARMS = [
      'tableStamp(if (kind == "column") n.sortTag else n.tag)',
      "tableStamp(n.sortTag)"),
 ]
+# The first-copy read: the template node taken off the first copy carrying
+# the id resolved only the first template's rows when five templates shared
+# one id (tools/scenes/tasks.steps, 2026-09-05); every arm matches each copy
+# under its own tag's node now (harness::table_tag_keys_match).
+FIRST_COPY = [
+    ("crates/kaya/src/gtk.rs", ".and_then(|tag| crate::harness::table_tag_node(&tag))"),
+    ("crates/kaya/src/winui/mod.rs", ".and_then(|tag| crate::harness::table_tag_node(tag))"),
+    ("crates/kaya/src/winui/mod.rs",
+     ".and_then(|table| crate::harness::table_tag_node(&table.tag))"),
+    ("swift/KayaSwiftUI.swift", ".compactMap({ stampOf($0)?.node }).first"),
+    ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt", ".mapNotNull { stampOf(it)?.node }"),
+]
 COLUMN_ONLY = [
     ("crates/kaya/src/gtk.rs",
      "if kind != K::Column {\n                    return None;"),
@@ -1298,6 +1310,11 @@ def keyed_problems(texts):
         if guard in texts[rel]:
             bad.append(f"{rel}: the column-only guard `{guard.strip()}` "
                        f"is back in the keyed target arm")
+    for rel, read in FIRST_COPY:
+        if read in texts[rel]:
+            bad.append(f"{rel}: the first-copy read `{read}` is back in the "
+                       f"keyed target arm — only the first template sharing "
+                       f"an id would resolve")
     return bad
 
 
@@ -1311,19 +1328,19 @@ for rel, marker, broken in KEYED_ARMS:
     if not keyed_problems(doctored):
         fail(f"check-verbs SELF-TEST: {rel}'s keyed arm passed with "
              f"`{marker}` doctored to `{broken}`")
-for rel, guard in COLUMN_ONLY:
+for rel, guard in COLUMN_ONLY + FIRST_COPY:
     doctored = dict(keyed_texts)
     doctored[rel] = keyed_texts[rel] + "\n" + guard + "\n"
     if not keyed_problems(doctored):
-        fail(f"check-verbs SELF-TEST: {rel}'s column-only guard "
-             f"restored passed")
+        fail(f"check-verbs SELF-TEST: {rel}'s forbidden spelling "
+             f"`{guard.strip()}` restored passed")
 if keyed_out:
     print("check-verbs: the keyed harness target must reach every "
           "tagged kind on every backend:", file=sys.stderr)
     print("\n".join(keyed_out), file=sys.stderr)
 keyed_status = 1 if keyed_out else 0
 print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers pinned, "
-      f"{len(KEYED_ARMS) + len(COLUMN_ONLY)} watched negatives refused",
+      f"{len(KEYED_ARMS) + len(COLUMN_ONLY) + len(FIRST_COPY)} watched negatives refused",
       file=sys.stderr)
 
 # --- THE REORDER'S INSERTION INDICATOR, ON THE ONE BACKEND THAT DRAWS

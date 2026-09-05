@@ -16213,60 +16213,51 @@ impl crate::harness::Stage for WinUiStage {
                     let carries = |widget: &u64| {
                         automation_id_of(core, *widget).is_some_and(|got| got == id)
                     };
-                    let node = candidates
+                    // EVERY copy carrying the id is a candidate, whichever
+                    // template stamped it (harness::table_tag_keys_match).
+                    let hits: Vec<usize> = candidates
                         .iter()
-                        .filter(|widget| carries(widget))
-                        .find_map(tag_of)
-                        .and_then(|tag| crate::harness::table_tag_node(tag));
-                    let Some(node) = node else {
+                        .enumerate()
+                        .filter(|(_, widget)| carries(widget))
+                        .filter(|(_, widget)| {
+                            tag_of(widget).is_some_and(|tag| crate::harness::table_tag_keys_match(tag, keys))
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    if hits.len() != 1 {
                         // The miss says what the registry held: one
                         // sentence for every cause is what cost a
                         // stale-interpreter run on the mac (docs/traps.md).
                         let with_id = candidates.iter().filter(|w| carries(w)).count();
                         let tagged = candidates.iter().filter(|w| tag_of(w).is_some()).count();
                         eprintln!(
-                            "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] unresolved: {} live, {with_id} carrying the id, {tagged} tagged",
+                            "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] {}: {} live, {with_id} carrying the id, {tagged} tagged",
+                            if hits.is_empty() { "unresolved" } else { "ambiguous" },
                             candidates.len()
                         );
                         return Ok(None);
-                    };
-                    return Ok(candidates
-                        .iter()
-                        .position(|widget| {
-                            tag_of(widget).is_some_and(|tag| {
-                                crate::harness::table_tag_matches_keys(tag, node, keys)
-                            })
-                        })
-                        .map(|i| i as isize));
+                    }
+                    return Ok(Some(hits[0] as isize));
                 }
                 // A COLUMN'S TAG IS ITS TABLE'S SORT TAG: a stamped
                 // container's Create carries none, so this one kind reads
                 // the declaration instead of `widget_tags`.
                 return TABLES.with_borrow(|tables| {
-                    let node = core
+                    let hits: Vec<usize> = core
                         .columns
                         .iter()
                         .zip(&core.column_ids)
-                        .find_map(|(column, widget)| {
-                            (core.widgets.contains_key(widget) && carries_id(column, &id))
-                                .then(|| tables.get(&widget.0))
-                                .flatten()
-                                .and_then(|table| crate::harness::table_tag_node(&table.tag))
-                        });
-                    let Some(node) = node else {
-                        return Ok(None);
-                    };
-                    Ok(core
-                        .columns
-                        .iter()
-                        .zip(&core.column_ids)
-                        .position(|(_, widget)| {
-                            core.widgets.contains_key(widget)
+                        .enumerate()
+                        .filter(|(_, (column, widget))| {
+                            core.widgets.contains_key(*widget)
+                                && carries_id(*column, &id)
                                 && tables.get(&widget.0).is_some_and(|table| {
-                                    crate::harness::table_tag_matches_keys(&table.tag, node, keys)
+                                    crate::harness::table_tag_keys_match(&table.tag, keys)
                                 })
                         })
-                        .map(|i| i as isize))
+                        .map(|(i, _)| i)
+                        .collect();
+                    Ok((hits.len() == 1).then(|| hits[0] as isize))
                 });
             }
             // A DESTROYED WIDGET MAY NOT ANSWER A TARGET — see gtk.rs's
@@ -16934,6 +16925,10 @@ impl crate::harness::Stage for WinUiStage {
             );
             std::thread::sleep(crate::harness::POLL_INTERVAL);
         }
+    }
+
+    fn active_surface(&self, window: u64) -> u64 {
+        Self::on_ui(move |core| Ok(core.selected_sections.get(&window).copied().unwrap_or(window)))
     }
 
     fn entry_count(&self, window: u64) -> usize {

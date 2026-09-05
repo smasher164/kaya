@@ -64,6 +64,8 @@ RUST_SCENES = [
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
     "dirty", "dnd", "pickers", "sliders", "tooltips",
+    # The task manager: a RUST app by design (docs/tasks-plan.md §0).
+    "tasks",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is

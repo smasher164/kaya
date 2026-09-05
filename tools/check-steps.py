@@ -345,8 +345,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         '!path.contains(where: { $0.isEmpty })',
         '!authored.contains(where: { $0 == "]" || $0 == "@" })',
         'guard !id.isEmpty else { return nil }',
-        'return registry.first { kayaScene.nodes[$0.id] === $0 && '
-        '$0.a11yId == id }',
+        'registry.first(where: { kayaScene.nodes[$0.id] === $0 && '
+        '$0.a11yId == id })',
     ]):
         fail("swift/KayaSwiftUI.swift target grammar is not "
              "kind@id[key.path] with bare @ preserved")
@@ -368,9 +368,10 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
     if (stable is not None and starget is not None) and not (
         "type == valueStr" in stable
         and 'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)' in starget
-        and "guard let stamp = stampOf($0) else"
-        in starget
-        and "stamp.node == node && stamp.keys == keys" in starget
+        # Each copy matches under ITS OWN tag's node (2026-09-05, the
+        # first-copy read resolved one template of five sharing an id).
+        and "$0.a11yId == id && stampOf($0)?.keys == keys" in starget
+        and "guard hits.count == 1 else" in starget
     ):
         fail("swift/KayaSwiftUI.swift keyed targets do not resolve "
              "through the table sortTag")
@@ -596,9 +597,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         # The stamp comes off the table's sortTag OR a widget's own
         # occurrence tag (one layout; the keyed-target entry, 2026-09-01).
         and 'tableStamp(if (kind == "column") n.sortTag else n.tag)' in ktarget
-        and "stampOf(it)?.node" in ktarget
-        and "stampOf(it)?.let { stamp ->" in ktarget
-        and "stamp.node == node && stamp.keys == keys" in ktarget
+        and "it.a11yId == id && stampOf(it)?.keys == keys" in ktarget
+        and "if (hits.size != 1)" in ktarget
     ):
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt "
              "keyed targets do not resolve through the table sortTag")

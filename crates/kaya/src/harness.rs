@@ -1019,7 +1019,14 @@ pub trait Stage: Send + 'static {
     /// the basenames for files, the decoded size for an image, or "".
     fn clipboard_seed(&self, kind: &str, argument: &str);
     fn clipboard_read(&self, kind: &str) -> String;
-    /// The window's navigation-stack depth — the observation expect_entries
+    /// The surface whose stack the implicit expect_entries reads: the
+    /// window's SELECTED SECTION when it has sections, else the window —
+    /// stacks are per surface and back routes to the active section's
+    /// (scene.rs, PushEntry; tools/scenes/tasks.steps pushes inside one).
+    fn active_surface(&self, window: u64) -> u64 {
+        window
+    }
+    /// A surface's navigation-stack depth — the observation expect_entries
     /// verifies.
     fn entry_count(&self, window: u64) -> usize;
     /// Drive the window's REAL back affordance.
@@ -3553,7 +3560,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             })),
             Step::ExpectEntries(window, n) => {
-                let id = window.unwrap_or(0);
+                let id = window.unwrap_or_else(|| stage.active_surface(0));
                 let prefix = match window {
                     Some(w) => format!("window#{w} "),
                     None => String::new(),
@@ -4075,6 +4082,15 @@ fn table_tag_identity(tag: &[u8]) -> Option<(u64, Vec<Option<&str>>)> {
 
 pub(crate) fn table_tag_node(tag: &[u8]) -> Option<u64> {
     table_tag_identity(tag).map(|(node, _)| node)
+}
+
+/// A keyed target names any copy carrying the id whose key path is `keys`,
+/// WHICHEVER TEMPLATE STAMPED IT: the copy's own tag supplies the node the
+/// keys are matched under (tools/scenes/tasks.steps has five lists' templates
+/// sharing one id; reading the node off the first copy resolved only the
+/// first list's rows, 2026-09-05).
+pub(crate) fn table_tag_keys_match(tag: &[u8], keys: &str) -> bool {
+    table_tag_node(tag).is_some_and(|node| table_tag_matches_keys(tag, node, keys))
 }
 
 /// `kind@id[key.path]` is string-key-only (docs/tables-plan.md).
@@ -6319,6 +6335,18 @@ mod tests {
         let pathless = crate::wire::click_tag(41, &[]);
         assert_eq!(table_tag_node(&pathless), None);
         assert!(!table_tag_matches_keys(&pathless, 41, "brokerage"));
+
+        // The self-matching form reads the node off the tag itself, so two
+        // templates' copies each answer under their own node.
+        assert!(table_tag_keys_match(&exact, "brokerage.taxable"));
+        assert!(!table_tag_keys_match(&exact, "brokerage"));
+        assert!(!table_tag_keys_match(&numeric, "3"));
+        assert!(!table_tag_keys_match(&pathless, "brokerage"));
+        let other = crate::wire::click_tag(
+            42,
+            &[Value::Str("brokerage".into()), Value::Str("taxable".into())],
+        );
+        assert!(table_tag_keys_match(&other, "brokerage.taxable"));
 
         assert_eq!(table_tag_node(&exact[..exact.len() - 1]), None);
         assert!(!table_tag_matches_keys(&exact[..16], 41, "brokerage.taxable"));

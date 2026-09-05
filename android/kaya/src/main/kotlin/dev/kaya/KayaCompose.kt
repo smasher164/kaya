@@ -3036,15 +3036,17 @@ object KayaCompose {
             // node-and-keys encoding (the keyed-target entry, 2026-09-01).
             val stampOf = { n: KayaNode -> tableStamp(if (kind == "column") n.sortTag else n.tag) }
             val live = registry.filter { KayaSceneModel.nodes[it.id] === it }
-            val node = live.asSequence()
-                .filter { it.a11yId == id }
-                .mapNotNull { stampOf(it)?.node }
-                .firstOrNull() ?: return null
-            return live.firstOrNull {
-                stampOf(it)?.let { stamp ->
-                    stamp.node == node && stamp.keys == keys
-                } == true
+            // EVERY copy carrying the id is a candidate, whichever template
+            // stamped it: the key path names the copy (tools/scenes/tasks.steps).
+            val hits = live.filter { it.a11yId == id && stampOf(it)?.keys == keys }
+            if (hits.size != 1) {
+                Log.i(
+                    "kaya",
+                    "KAYA_DIAG keyed target $spec ${if (hits.isEmpty()) "unresolved" else "ambiguous"}: " +
+                        "${live.size} live ${kind}s, ${live.count { it.a11yId == id }} carrying id $id")
+                return null
             }
+            return hits[0]
         }
         val hash = spec.indexOf('#')
         if (hash < 0 || hash != spec.lastIndexOf('#') || spec.substring(0, hash) != kind) {
@@ -6665,7 +6667,17 @@ object KayaCompose {
                         val prefix = if (explicit) "$target " else ""
                         val arg = if (explicit) parts.getOrNull(2) else parts.getOrNull(1)
                         val want = arg?.toIntOrNull() ?: -1
-                        val got = onUi(activity) { KayaSceneModel.navEntries.size }
+                        // The implicit stack is the ACTIVE surface's: the
+                        // selected section's when sections are present
+                        // (kayaUserBack routes the same way); window#N
+                        // names a surface, window or section.
+                        val got = onUi(activity) {
+                            val explicitId = target.removePrefix("window#").toLongOrNull()
+                            val sid =
+                                if (explicit) explicitId
+                                else KayaSceneModel.selectedSection?.takeIf { KayaSceneModel.sections.isNotEmpty() }
+                            (sid?.let { KayaSceneModel.sectionIndex[it] }?.entries ?: KayaSceneModel.navEntries).size
+                        }
                         if (got == want) {
                             observed.add("${prefix}entries $want")
                         } else {

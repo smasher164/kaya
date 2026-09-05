@@ -1982,8 +1982,16 @@ The ratified shape:
   control), `expect_section "title"` (the ACTIVE section's title from
   the platform's own selection state), `select_section` driven
   through the real switcher, and a retention assertion (write to a
-  covered section, switch, observe). No capability gate — every
-  platform has a sections idiom.
+  covered section, switch, observe). THE STACK VERBS FOLLOW THE ACTIVE
+  SURFACE (2026-09-05, tools/scenes/tasks.steps, the first scene to push
+  inside a section): the implicit `expect_entries` and `back` read and
+  drive the selected section's stack when the window has sections —
+  the stack the platform's own back routes to — and `window#N` names a
+  surface, window or section, explicitly. A window-level push in a
+  sectioned window is presented nowhere on macOS (the sidebar body has
+  no window stack), so an app pushes onto the section the row came
+  from (`push_entry_in`). No capability gate — every platform has a
+  sections idiom.
 
 Deliberately excluded, reaffirmed: DOCUMENT tabs (browser/editor
 user-created, closable, reorderable tabs). Those are window
