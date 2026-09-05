@@ -72,7 +72,10 @@ pointer at all — Apple's documentation for both UIToolTipInteraction and
 SwiftUI's help says the bubble appears in macOS or visionOS, and the
 iPadOS API exists so an iPad app shows tooltips when it runs on a Mac —
 which kaya's `.help` already covers there (§6). The survey's first draft
-had the iPad wrong. No kaya-drawn bubble on long press there, since
+had the iPad wrong. RATIFIED by the maintainer 2026-09-05 after the
+measurement: no kaya-drawn tooltip on iOS or iPadOS — "most apps on
+ios/ipados aren't trying to draw tooltips, so probably not worth it to try
+to draw it ourselves." No kaya-drawn bubble on long press there, since
 long press is the context menu's.
 
 ### T3 — Help and the accessibility hint are distinct; an authored hint wins
