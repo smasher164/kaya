@@ -2647,6 +2647,19 @@ final class KayaAppTx {
         tx.bindA11yHint(w.id, s.id)
     }
 
+    /// A widget's HELP TEXT: one short sentence saying what the control
+    /// is or does (docs/tooltip-plan.md T1). The platform picks the
+    /// surface — a tooltip on the desktops, nothing visible on the
+    /// iPhone — and hands the text to its assistive reader; an authored
+    /// hint wins the hint slot (T3).
+    func setHelp(_ w: KayaWidget, _ text: String) {
+        tx.setHelp(w.id, text)
+    }
+
+    func setHelp(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindHelp(w.id, s.id)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }
@@ -4035,6 +4048,21 @@ final class KayaTpl {
 
     func setA11yLabel(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
         tx.tx.bindA11yLabelElement(n.id, level: level, field: f.index)
+    }
+
+    /// A stamped copy's HELP TEXT (KayaTx.setHelp). THE ROW'S OWN
+    /// FIELD is the source that makes two copies explain themselves
+    /// differently.
+    func setHelp(_ n: KayaNodeHandle, _ text: String) {
+        tx.tx.setHelp(n.id, text)
+    }
+
+    func setHelp(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindHelp(n.id, s.id)
+    }
+
+    func setHelp(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindHelpElement(n.id, level: level, field: f.index)
     }
 
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.

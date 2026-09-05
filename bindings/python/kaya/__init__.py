@@ -461,6 +461,18 @@ class _Handle:
             wire.tx_bind_a11y_label, wire.tx_bind_a11y_label_element))
         return self
 
+    def help(self, text):
+        """Set this widget's HELP TEXT: one short sentence saying what it
+        is or does. The platform decides the surface — a tooltip on the
+        desktops, nothing visible on the iPhone — and hands it to the
+        assistive reader (docs/tooltip-plan.md T1/T2). Distinct from
+        `a11y_hint`, which says what ACTIVATION does and wins the hint
+        slot where both are authored. Returns the handle."""
+        _records().append(_prop_source(
+            "help", self, text, wire.tx_set_help,
+            wire.tx_bind_help, wire.tx_bind_help_element))
+        return self
+
     def accepts(self, *kinds):
         """Declare what this widget takes from a paste — the closed kinds
         by name plus any custom format ids.

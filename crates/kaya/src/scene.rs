@@ -7829,6 +7829,47 @@ mod tests {
         ]);
     }
 
+    /// The a11y label's rule one prop over (docs/tooltip-plan.md T1): the
+    /// refusal shipped with the depth slice and nothing ran it.
+    #[test]
+    #[should_panic(expected = "declares empty help text")]
+    fn empty_help_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Help,
+                value: PropValue::Const(Value::Str(String::new())),
+            },
+        ]);
+    }
+
+    /// Its positive control, so the negative is not passing against a
+    /// wall that refuses every help there is.
+    #[test]
+    fn help_that_says_something_records() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Help,
+                value: PropValue::Const(v("Saves the draft to disk")),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        assert_eq!(
+            ops.iter()
+                .filter(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Help, .. }))
+                .count(),
+            1,
+            "the help text should reach the backend"
+        );
+    }
+
     /// The positive control: a label that says something records, by
     /// both carriers. Without this the two negatives above would pass
     /// against a wall that refused every a11y label there is.

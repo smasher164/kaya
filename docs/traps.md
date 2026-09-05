@@ -2052,6 +2052,14 @@ add_child for a For/When must land AFTER its
 template_end (inside the scope it reads as blueprint content and the
 scene rejects it).
 
+AND INSIDE AN `each` BODY THE OMISSION IS SILENT: the body's result is
+discarded, so `each c (fun () -> Tpl.(label ~bind_field:f))` typechecks,
+builds, runs — and declares nothing. There is no expected type to make
+the partial application an error, unlike the list-literal case above.
+Measured 2026-09-05 on the tooltips OCaml guest: the two stamped labels
+read `help "<no such target>"` while every other leg of the same scene
+was green.
+
 ## ffmpeg in a `while read` loop eats the loop's input
 
 `grep … | while IFS= read -r line; do … ffmpeg …; done` — ffmpeg reads

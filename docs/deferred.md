@@ -10808,17 +10808,25 @@ guests/rust/tooltips.rs. Measured: GTK 4 shows no tooltip on keyboard focus
 
 OPEN, the breadth slice:
 
-- ~~DEPTH STUB: tooltips on compose~~ (FIXED 2026-09-05: the arm landed —
-  `KayaRenderHelped`, one wrapper every render path goes through, drawing
-  material3's PlainTooltip over the node's `help` (composition state) with
-  the toolkit's own long press and mouse hover; the `expect_help` verb; the
-  android lane's `tooltips-compose` leg, the lane ALL PASS). A TooltipBox
-  cannot ride the per-kind `a11y` modifier — a tooltip is a COMPOSABLE — so
-  tools/check-universal-props.py grew the wrapper's own clauses, five
-  watched negatives. AND COMPOSE PUBLISHES NO TOOLTIP TEXT TO
-  ACCESSIBILITY AT ALL (measured; docs/tooltip-plan.md §6), so the arm
-  publishes the help as the LONG-PRESS ACTION'S LABEL, on the widget's own
-  node AND on material's anchor, which merges a plain leaf into itself.
-- The eight other bindings' `help` in both zones (the a11y label's spelling
-  in each), nine guests, tools/check-sugar-surface.py's clause, the iOS and
-  android rosters, the matrix.
+OPEN, the breadth slice — each backend refuses the two props by name until
+its arm lands, and a lane carries sliders legs once its backend has them:
+
+- ~~The eight other bindings' `help` in both zones~~ DONE 2026-09-05: all
+  eight DO, no can't and no defer — `.help()` chained on python's and JS's
+  shared handle, `Tx.SetHelp`/`Widget.Help`/`Tpl.SetHelp`/`Tpl.BindHelp` plus
+  the generated Go row façade and `SumCase`, C#'s three `SetHelp` overloads
+  per zone plus the csgen forwards, Java's `setHelp`/`help` with `RowSurface`
+  and `bindHelpField`, Swift's three `setHelp` overloads per zone,
+  `?help`/`?help_bind` on every live OCaml constructor and
+  `?help`/`?help_bind`/`?help_field` on every template one, and Haskell's
+  `Help`/`TplHelp` over a new `helpProp`. Nine `tooltips` guests, the mac
+  roster at nine languages (tooltips left DEPTH_SCENES) and the iOS roster's
+  three suites (UNWIRED_SCENES is empty again). The census is
+  tools/check-sugar-surface.py's `check_help_prop` (nine live patterns, its
+  fake-name negative 9/9 on every run) and tools/tpl-surfaces.py's TPL_PROPS
+  plus all eight PROP_MEMBERS rows, with tools/checks/py-node-props.py's WANT
+  for python's zone — all nine watched red one binding at a time. The empty
+  help had NO test at the core and has two now (`empty_help_dies_at_declare`
+  and its positive control); the python and JS negatives compare `help`'s
+  bytes to the generated setters' in both zones. The ANDROID roster waits on
+  the Compose arm above.

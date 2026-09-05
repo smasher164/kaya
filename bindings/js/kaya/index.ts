@@ -546,6 +546,16 @@ export class Handle {
     return this;
   }
 
+  /** HELP TEXT: one short sentence saying what this control is or does.
+   * The platform picks the surface — a tooltip on the desktops, nothing
+   * visible on the iPhone — and hands it to the assistive reader
+   * (docs/tooltip-plan.md T1/T2). An authored `a11yHint` wins the hint
+   * slot. Chains. */
+  help(text: Bindable | string): this {
+    records().push(propSource("help", this, text, wire.tx_set_help, wire.tx_bind_help, wire.tx_bind_help_element));
+    return this;
+  }
+
   /** Declare what this widget takes from a paste — the closed kinds by
    * name plus any custom format ids. Constant in a template: an accept
    * list describes the prototype, not the row. Chains. */

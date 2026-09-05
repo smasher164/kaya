@@ -1702,6 +1702,17 @@ sealed class Tx
     public void SetA11yHint(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindA11yHint(w.Id, s.Id));
 
+    /// A widget's HELP TEXT: one short sentence saying what the control
+    /// is or does (docs/tooltip-plan.md T1). Universal. The platform
+    /// picks the surface — a tooltip on the desktops, nothing visible on
+    /// the iPhone — and hands the text to its assistive reader; an
+    /// authored a11y hint wins the hint slot (T3).
+    public void SetHelp(Widget w, string text) =>
+        Records.Add(KayaWire.TxSetHelp(w.Id, text));
+
+    public void SetHelp(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindHelp(w.Id, s.Id));
+
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
     /// looks. Destructive and Prominent are button emphasis, Heading and
     /// Caption are label hierarchy, and the root refuses a role on a kind
@@ -3258,6 +3269,18 @@ sealed class Tpl
 
     public void SetA11yLabel(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindA11yLabelElement(n.Id, level, f.Index));
+
+    /// A stamped copy's HELP TEXT (Tx.SetHelp). THE FIELD ARM IS THE
+    /// CASE THIS ZONE EXISTS FOR: one sentence per copy, sourced from the
+    /// row's own field.
+    public void SetHelp(Node n, string text) =>
+        tx.Records.Add(KayaWire.TxSetHelp(n.Id, text));
+
+    public void SetHelp(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindHelp(n.Id, s.Id));
+
+    public void SetHelp(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindHelpElement(n.Id, level, f.Index));
 
     /// What ACTIVATING a stamped copy does — write a verb phrase.
     /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the

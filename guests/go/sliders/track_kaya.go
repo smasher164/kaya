@@ -96,6 +96,10 @@ func (r trackRow) SetA11yHint(n kaya.Node, hint string) { r.t.SetA11yHint(n, hin
 
 func (r trackRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t, n, f) }
 
+func (r trackRow) SetHelp(n kaya.Node, text string) { r.t.SetHelp(n, text) }
+
+func (r trackRow) Help(n kaya.Node, f kaya.Field[string]) { r.c.Help(r.t, n, f) }
+
 func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
 func (r trackRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }

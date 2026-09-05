@@ -684,6 +684,29 @@ with app.build():
             and int.from_bytes(empty_label[0][28:32], "little") == 0,
         )
 
+# AND AN EMPTY HELP, the same rule one prop over
+# (crates/kaya/src/scene.rs, empty_help_dies_at_declare;
+# docs/tooltip-plan.md T1): a binding that dropped it as a no-op would
+# leave the root nothing to refuse.
+with app.build():
+    if True:
+        before = len(kaya._tx)
+        with kaya.column():
+            kaya.label("x").help("")
+        queued = kaya._tx[before:]
+        empty_help = [
+            r for r in queued
+            if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+            and int.from_bytes(r[16:20], "little") == kaya.wire.PROP_HELP
+            and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+            and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_STR
+        ]
+        check(
+            "an empty help reaches the records for the ROOT to refuse",
+            len(empty_help) == 1
+            and int.from_bytes(empty_help[0][28:32], "little") == 0,
+        )
+
 # The generated shortcut canonicalizer (DESIGN.md, Menus): spelling is
 # canonicalized here, POLICY dies at the core on the canonical form.
 for spelling, want in (
@@ -1408,6 +1431,21 @@ def _const_num_prop(fn, prop, value_type):
     return None
 
 
+def _one_record(fn):
+    """The ONE record a call queued, or None if it queued any other
+    number — which is the half a byte comparison cannot see."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception as exc:
+        print(f"       (raised {type(exc).__name__}: {exc})")
+        _rewind(before)
+        return None
+    queued = kaya._tx[before:]
+    _rewind(before)
+    return queued[0] if len(queued) == 1 else None
+
+
 app_tpl = kaya.App()
 with app_tpl.window():
     rows5 = kaya.collection(Row3)
@@ -1427,6 +1465,22 @@ with app_tpl.window():
         _signal_prop(lambda: live5.a11y_label(live_sig5),
                      kaya.wire.PROP_A11Y_LABEL) == live_sig5.id,
     )
+    # HELP PACKS THE GENERATED SETTER'S OWN BYTES, both zones
+    # (docs/tooltip-plan.md T1). Compared against wire.py rather than a
+    # field-by-field read: a hand-rolled expectation drifts the moment
+    # the prop number or the source word moves, and agrees with the
+    # binding it was copied from.
+    help5 = kaya.entry()
+    check(
+        "a live help packs tx_set_help's own bytes",
+        _one_record(lambda: help5.help("Saves the draft to disk"))
+        == kaya.wire.tx_set_help(help5.id, "Saves the draft to disk"),
+    )
+    check(
+        "and a live help from a Signal packs tx_bind_help's",
+        _one_record(lambda: help5.help(live_sig5))
+        == kaya.wire.tx_bind_help(help5.id, live_sig5.id),
+    )
     with kaya.column():
         with kaya.for_each(rows5) as row5:
             check(
@@ -1443,11 +1497,25 @@ with app_tpl.window():
                  kaya.wire.PROP_A11Y_ID, 0),
                 ("a11y_hint", lambda: kaya.checkbox().a11y_hint(row5.title),
                  kaya.wire.PROP_A11Y_HINT, 0),
+                ("help", lambda: kaya.entry().help(row5.title),
+                 kaya.wire.PROP_HELP, 0),
             ):
                 check(
                     f"a template node's {what} binds the row's own field",
                     _elem_bind(fn) == {"prop": prop, "level": 0, "field": index},
                 )
+            help_node = kaya.entry()
+            check(
+                "a stamped help packs tx_bind_help_element's own bytes",
+                _one_record(lambda: help_node.help(row5.title))
+                == kaya.wire.tx_bind_help_element(help_node.id, level=0,
+                                                  field=0),
+            )
+            check(
+                "and a constant stamped help packs tx_set_help's",
+                _one_record(lambda: help_node.help("Opened in March"))
+                == kaya.wire.tx_set_help(help_node.id, "Opened in March"),
+            )
             check(
                 "and a Signal source reaches the wire as a signal bind",
                 _signal_prop(lambda: kaya.entry().a11y_label(name5),
@@ -1468,6 +1536,8 @@ with app_tpl.window():
                  kaya.wire.PROP_A11Y_LABEL),
                 ("a11y_hint", lambda: kaya.checkbox().a11y_hint(row5),
                  kaya.wire.PROP_A11Y_HINT),
+                ("help", lambda: kaya.entry().help(row5),
+                 kaya.wire.PROP_HELP),
             ):
                 check(
                     f"{what} never writes a constant from a tracer",

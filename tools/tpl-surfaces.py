@@ -254,7 +254,8 @@ ZONES = [
 # `set_grow`, `setGrow` and `SetGrow` each name two different surfaces in
 # the same file, so every name is read out of the zone's own block
 # (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
-TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset"]
+TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
+             "help"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -263,39 +264,39 @@ PROP_MEMBERS = {
     "rust": {
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
-        "inset": "inset",
+        "inset": "inset", "help": "help",
     },
     "go": {
         "grow": "SetGrow", "a11y_id": "SetA11yID", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
-        "inset": "SetInset",
+        "inset": "SetInset", "help": "SetHelp",
     },
     "csharp": {
         "grow": "SetGrow", "a11y_id": "SetA11yId", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
-        "inset": "SetInset",
+        "inset": "SetInset", "help": "SetHelp",
     },
     "java": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
-        "inset": "setInset",
+        "inset": "setInset", "help": "setHelp",
     },
     "swift": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
-        "inset": "setInset",
+        "inset": "setInset", "help": "setHelp",
     },
     "ocaml": {
         "grow": "set_grow", "a11y_id": "set_a11y_id", "a11y_label": "set_a11y_label",
         "a11y_hint": "set_a11y_hint", "accepts": "set_accepts", "role": "set_role",
-        "inset": "set_inset",
+        "inset": "set_inset", "help": "set_help",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
     "haskell": {
         "grow": "TplGrow", "a11y_id": "TplA11yId", "a11y_label": "TplA11yLabel",
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
-        "inset": "TplInset",
+        "inset": "TplInset", "help": "TplHelp",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -303,7 +304,7 @@ PROP_MEMBERS = {
     "js": {
         "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
         "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
-        "inset": "inset",
+        "inset": "inset", "help": "help",
     },
 }
 
@@ -395,7 +396,7 @@ PROP_ZONES = [
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
     ("js", members_js,
      "class Handle plus the zone-blind option writers "
-     "(bindings/js/kaya/index.ts)", 14),
+     "(bindings/js/kaya/index.ts)", 15),
 ]
 
 
@@ -1874,10 +1875,10 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 6
+CSHARP_TWIN_FLOOR = 7
 
 
-JAVA_TWIN_FLOOR = 7
+JAVA_TWIN_FLOOR = 8
 
 
 def twins_java():

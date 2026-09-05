@@ -13,7 +13,8 @@ import ast
 import sys
 
 path = sys.argv[1] if len(sys.argv) > 1 else "bindings/python/kaya/__init__.py"
-WANT = ("a11y_id", "a11y_label", "a11y_hint", "accepts", "on_paste", "role")
+WANT = ("a11y_id", "a11y_label", "a11y_hint", "help", "accepts",
+        "on_paste", "role")
 # Every container kind — the kinds `inset` is legal on at the root.
 CONTAINERS = ("row", "column", "grid")
 

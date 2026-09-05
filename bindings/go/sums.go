@@ -403,6 +403,15 @@ func (sc SumCase[K, V]) BindA11yHint(n Node, sel func(*V) *string) {
 	sc.t.BindA11yHint(n, FieldBy(sel))
 }
 
+// SetHelp gives every stamped copy of this arm the same help text
+// (Tpl.SetHelp).
+func (sc SumCase[K, V]) SetHelp(n Node, text string) { sc.t.SetHelp(n, text) }
+
+// BindHelp takes the help text from the field the selector names.
+func (sc SumCase[K, V]) BindHelp(n Node, sel func(*V) *string) {
+	sc.t.BindHelp(n, FieldBy(sel))
+}
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

@@ -94,6 +94,10 @@ func (r todoRow) SetA11yHint(n kaya.Node, hint string) { r.t.SetA11yHint(n, hint
 
 func (r todoRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t, n, f) }
 
+func (r todoRow) SetHelp(n kaya.Node, text string) { r.t.SetHelp(n, text) }
+
+func (r todoRow) Help(n kaya.Node, f kaya.Field[string]) { r.c.Help(r.t, n, f) }
+
 func (r todoRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
 func (r todoRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
