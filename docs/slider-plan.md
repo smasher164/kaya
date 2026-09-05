@@ -284,3 +284,82 @@ twin unchanged, read-back on both). Breadth: Compose (`steps`,
 increments), WinUI (StepFrequency, SnapsTo, PointerCaptureLost,
 Small/LargeChange), the eight other bindings, the five rosters, the
 matrix.
+
+## §6 — The WinUI arm, measured on the guest (2026-09-04)
+
+The breadth slice's Windows half. Everything here was measured on the VM
+against a real drag and real keystrokes, because NO LANE CAN: `set_value`
+is the only slider drive any scene has, and it is one finished gesture by
+construction. The first draft of this arm committed on every ValueChanged
+and `tools/scenes/sliders.steps` passed byte for byte —
+`tools/check-slider-commit.py` is the wall that class earned.
+
+**The probe, so it can be run again.** The sliders guest held open with
+no `KAYA_SELFTEST` under `KAYA_SLIDER_TRACE=1` (the arm's own trace,
+`winui_slider_trace`, one line per event); the window photographed with
+tools/guest/shot-window.ps1 (which prints `946x536 at 137,130`, so a
+pixel measured off the picture is a screen point); a drag injected with
+`mouse_event` from the thumb's screen point across the track and
+released; then VK_RIGHT and VK_PRIOR with KEYEVENTF_EXTENDEDKEY. Each
+piece ran through `schtasks /create … /sc once /st 00:00 /it /rl highest
+/f` + `schtasks /run` + `wscript run-hidden-args.vbs`, the lane's own
+route. The labels the guest writes (`value: 90`, `commits: 1`) are the
+end-to-end reading; the trace is the mechanism behind it.
+
+**What a real drag raises on a WinUI 3 Slider.**
+
+| Event | Fires? |
+|---|---|
+| `ValueChanged` | once per movement, ALREADY SNAPPED to `StepFrequency` (55, 60, … 90 on a step of 5), with `IntermediateValue` carrying the pre-snap pointer position |
+| `PointerPressed` | **never** — the control marks its own press handled, and `slider.PointerPressed(…)` registers with handledEventsToo = false |
+| `PointerReleased` | **never**, same reason |
+| `PointerCaptureLost` | **once, on the release**, with the settled value — the one gesture end this control has |
+| `PointerCaptures()` | unreadable (the call answered `Err` on the UI thread) |
+
+`UIElement.AddHandler(PointerPressedEvent, handler, true)` is the
+platform's own answer to a handled press and is OUT OF REACH from these
+bindings: `AddHandler`'s handler parameter is `IInspectable` and a
+windows-rs WinRT delegate implements `IUnknown` alone, so the call does
+not typecheck (`PointerEventHandler: Param<IInspectable>` unsatisfied)
+and forcing it would hand XAML a pointer that fails the QI it makes.
+
+**So the drag/keyboard split is `GetKeyState(VK_LBUTTON)`**, read inside
+the ValueChanged handler — which runs on the UI thread while that thread
+is processing the very input message that raised it, so the answer is
+that message's. It is the twin of the SwiftUI arm's
+`NSApp.currentEvent?.type` test, and it gives the same answers: a drag's
+movements are not final, a key's and a wheel's are, a driven `set_value`
+is. Measured: eight movements with `button=true` and `committed`
+unmoved, then `pointer_capture_lost` with `button=false` publishing once
+— `value: 90`, `commits: 1` on the guest's own labels after an
+eight-movement drag.
+
+**Keyboard (S7).** `SmallChange` = the step is live: VK_RIGHT moved the
+slider 90 -> 95 and committed at once (`commits: 2`). VK_PRIOR raised
+NOTHING, with and without KEYEVENTF_EXTENDEDKEY, so WinUI 3's Slider does
+not spend `LargeChange` on Page Up here; the arm sets it to ten steps per
+S7 and the platform decides which key spends it.
+
+**Ticks (S5) and the step (S1, S9).** `TickFrequency` = the spacing with
+`TickPlacement::Outside`, which is what WinUI Gallery's own ticked slider
+declares (WinUIGallery/Samples/Slider/SliderTicks.txt), and
+`TickPlacement::None` when the spacing is 0. `StepFrequency` = the step,
+or `(max − min) / 1000` for a continuous slider, with
+`SnapsTo(StepValues)`: the measured drag on the 0..1 continuous slider
+moved in thousandths (0.866, 0.887, 0.908 …) where the retired constant
+0.01 had quantized it to hundredths.
+
+**Order-independence.** The props arrive as separate `SetProp` writes in
+the sugar's order (min, max, value, then the chained step and spacing)
+and WinUI COERCES a value against the range and the step it holds at the
+time, so each of the four shape props moves its slot in the arm's cell
+and re-applies the whole shape (`winui_slider_shape`), quiet throughout
+because Minimum and Maximum raise `ValueChanged` when they coerce.
+
+**The bindgen rows this needed** (tools/winui-bindgen/src/main.rs):
+`Primitives.SliderSnapsTo`, `Primitives.TickPlacement`,
+`Input.PointerEventHandler` and `Input.PointerRoutedEventArgs`. Without
+them `SetSnapsTo`, `SetTickPlacement` and every pointer event were
+`usize` vtable pads while `SetStepFrequency` and `SetTickFrequency`
+beside them were real methods — windows-bindgen pulls no referenced type
+transitively.

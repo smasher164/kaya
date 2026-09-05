@@ -380,6 +380,29 @@ in docs/deferred.md.
    walk, which the routing makes unreachable, and each was broken with
    the lane watched staying green. The scene cannot be fixed to reach
    them, so static pairing is the only wall available),
+   `tools/check-slider-commit.py` (A SLIDER COMMITS ONCE PER GESTURE, and
+   no lane can see whether it does. `set_value` is the only slider drive
+   any scene has and it is one finished gesture by construction, so a
+   backend that published `value_committed` on EVERY movement of a real
+   drag passes tools/scenes/sliders.steps byte for byte — measured
+   2026-09-04, when the WinUI arm's first draft did exactly that and the
+   whole windows lane stayed green. A drag is pixels and a pointer; the
+   shared scenes have neither, so this is the native-undo pair's shape
+   one feature over. The rule, one sentence per backend: the
+   per-movement event carries the LIVE value and is final only when no
+   pointer is driving, and the gesture's own end publishes the committed
+   one. On WinUI that end is `PointerCaptureLost` and nothing else — the
+   Slider marks its own PointerPressed AND PointerReleased handled, and
+   `UIElement.AddHandler`'s handled-events-too registration is out of
+   reach because a WinRT delegate is no `IInspectable` (all three
+   measured, docs/slider-plan.md §6) — so the drag/keyboard split is
+   `GetKeyState(VK_LBUTTON)`, the twin of the SwiftUI arm's
+   `NSApp.currentEvent`. THE TABLE GROWS BY ITSELF: a backend still
+   refusing the two props through `depth_stub("sliders")` has no arm to
+   hold, and the moment its stub goes the gate demands a row naming that
+   backend's own two events. Five watched negatives, counts printed —
+   the per-movement commit, the missing end, an end that is not final,
+   the pointer read renamed away, and a landed arm with no row),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

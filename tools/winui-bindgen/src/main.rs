@@ -169,6 +169,18 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Slider".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs".to_string(),
+        // THE SLIDER'S STEP AND TICKS (docs/slider-plan.md S1, S5, S9): the
+        // two enums `SetSnapsTo`/`SetTickPlacement` take. Without them those
+        // four members are `usize` vtable pads while `SetStepFrequency` and
+        // `SetTickFrequency` beside them are real methods.
+        "Microsoft.UI.Xaml.Controls.Primitives.SliderSnapsTo".to_string(),
+        "Microsoft.UI.Xaml.Controls.Primitives.TickPlacement".to_string(),
+        // The gesture's end (S2): WinUI raises no "finished" event, so the
+        // arm watches the pointer leave the control. Both `PointerPressed`
+        // and `PointerCaptureLost` are `PointerEventHandler` slots, and the
+        // args type comes with the handler.
+        "Microsoft.UI.Xaml.Input.PointerEventHandler".to_string(),
+        "Microsoft.UI.Xaml.Input.PointerRoutedEventArgs".to_string(),
         // THE PICKERS (docs/datetime-plan.md §0's WinUI row, P3).
         // CalendarDatePicker, NOT DatePicker: the three-spinner control
         // bounds by MinYear/MaxYear alone and D4's range is a DATE at each

@@ -86,6 +86,11 @@ GATES = [
     # The native undo tier's two guards, which NO shared scene can
     # reach: static pairing is the only wall available.
     ("check-native-undo", ["tools/check-native-undo.py"], True, ""),
+    # A slider commits ONCE per gesture, and `set_value` is the only
+    # slider drive any scene has: an arm that published value_committed
+    # on every movement of a real drag passes sliders.steps byte for
+    # byte (measured 2026-09-04).
+    ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),

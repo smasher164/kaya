@@ -81,6 +81,10 @@ use bindings::Microsoft::UI::Xaml::Media::{
 // explicit size. See `canvas_track_of`.
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::LayoutInformation;
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::Popup;
+use bindings::Microsoft::UI::Xaml::Controls::Primitives::{
+    RangeBaseValueChangedEventArgs, RangeBaseValueChangedEventHandler, SliderSnapsTo, TickPlacement,
+};
+use bindings::Microsoft::UI::Xaml::Input::{PointerEventHandler, PointerRoutedEventArgs};
 use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -376,6 +380,11 @@ struct CoreState {
     entry_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     entry_tags: HashMap<u64, Vec<u8>>,
     sliders: Vec<Slider>,
+    /// The sliders' widget ids beside them, and one `SliderCell` per widget:
+    /// the declared shape and the two mirrors the commit path compares
+    /// against, in the form its own handlers can reach (docs/slider-plan.md).
+    slider_ids: Vec<u64>,
+    slider_cells: HashMap<u64, std::sync::Arc<SliderCell>>,
     /// The pickers, with their widget ids beside them (the keyed reads go
     /// through `registry_ids`) and one `PickerCell` per widget — the shape
     /// a picker's own change handler reads, since it may not reach CORE
@@ -6542,6 +6551,19 @@ fn modifier_down(vkey: i32) -> bool {
     (unsafe { GetKeyState(vkey) }) < 0
 }
 
+/// VK_LBUTTON as of the message this thread is processing — which is the
+/// message that raised the event asking. A Slider MARKS ITS OWN PointerPressed
+/// AND PointerReleased HANDLED, so an instance handler hears neither and
+/// `UIElement.AddHandler`'s handled-events-too registration cannot be reached
+/// from these bindings (a WinRT delegate is no `IInspectable`); both measured
+/// 2026-09-04, docs/slider-plan.md §6. So this is how the slider's arm tells a
+/// drag's own movements from a key's or a wheel's — the twin of the SwiftUI
+/// arm's `NSApp.currentEvent?.type` test.
+fn pointer_button_down() -> bool {
+    const VK_LBUTTON: i32 = 0x01;
+    modifier_down(VK_LBUTTON)
+}
+
 /// The canonical key name for a virtual-key code — the reverse of
 /// [`virtual_key`], over the same closed floor.
 fn key_name(code: u32) -> Option<String> {
@@ -10745,28 +10767,74 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Slider => {
                     // WinUI raises ValueChanged for programmatic
                     // SetValue too, which is what lets the selftest drag
-                    // like a user.
+                    // like a user; the USER/programmatic split rides
+                    // apply_quiet and the shape rides the cell.
                     let slider = Slider::new()?;
-                    slider.SetMinimum(0.0)?;
-                    slider.SetMaximum(1.0)?;
-                    slider.SetStepFrequency(0.01)?;
                     slider.SetMinWidth(160.0)?;
+                    let cell = std::sync::Arc::new(SliderCell::new(
+                        tag.expect("sliders carry a tag").to_vec(),
+                    ));
+                    core.slider_cells.insert(id.0, cell.clone());
+                    winui_slider_shape(&slider, &cell, &core.apply_quiet)?;
                     let sink = core.occurrences.clone();
-                    let tag = tag.expect("sliders carry a tag");
                     let quiet = core.apply_quiet.clone();
-                    let handler = bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventHandler::new(
-                        move |_, args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs>| {
-                            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                    let moved = cell.clone();
+                    let moved_quiet = quiet.clone();
+                    let handler = RangeBaseValueChangedEventHandler::new(
+                        move |sender,
+                              _: windows_core::Ref<'_, RangeBaseValueChangedEventArgs>| {
+                            if moved_quiet.load(std::sync::atomic::Ordering::Relaxed) {
                                 return Ok(());
                             }
-                            if let Some(args) = args.as_ref() {
-                                sink.send_value_tag(&tag, args.NewValue()?);
+                            if let Some(sender) = sender.as_ref() {
+                                let slider: Slider = windows_core::Interface::cast(sender)?;
+                                winui_slider_trace("value_changed", &slider, &moved);
+                                // A drag's own movements are not the end of
+                                // the gesture; a key's and a wheel's are
+                                // (S2, S7) — the SwiftUI arm's rule, whose
+                                // NSApp.currentEvent this is the twin of.
+                                winui_slider_committed(
+                                    &slider,
+                                    &moved,
+                                    &moved_quiet,
+                                    &sink,
+                                    !pointer_button_down(),
+                                )?;
                             }
                             Ok(())
                         },
                     );
                     slider.ValueChanged(&handler)?;
+                    // THE GESTURE'S END (S2): WinUI raises no finished event,
+                    // and a real drag on the guest raises NEITHER
+                    // PointerPressed NOR PointerReleased here — the control
+                    // marks both handled — while PointerCaptureLost arrives
+                    // once, on the release, with the settled value (measured
+                    // 2026-09-04, docs/slider-plan.md §6).
+                    let released = cell.clone();
+                    let released_quiet = quiet.clone();
+                    let released_sink = core.occurrences.clone();
+                    slider.PointerCaptureLost(&PointerEventHandler::new(
+                        move |sender, _: windows_core::Ref<'_, PointerRoutedEventArgs>| {
+                            if released_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                return Ok(());
+                            }
+                            if let Some(sender) = sender.as_ref() {
+                                let slider: Slider = windows_core::Interface::cast(sender)?;
+                                winui_slider_trace("pointer_capture_lost", &slider, &released);
+                                winui_slider_committed(
+                                    &slider,
+                                    &released,
+                                    &released_quiet,
+                                    &released_sink,
+                                    true,
+                                )?;
+                            }
+                            Ok(())
+                        },
+                    ))?;
                     core.sliders.push(slider.clone());
+                    core.slider_ids.push(id.0);
                     NativeWidget::Slider(slider)
                 }
                 WidgetKind::Button => {
@@ -11872,6 +11940,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     write?;
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
+                    // The mirrors move with the control: what the app was
+                    // last told is what the next gesture compares against,
+                    // committed included (the SwiftUI arm's own apply).
+                    if let Some(cell) = core.slider_cells.get(&id.0) {
+                        SliderCell::set(&cell.held, v);
+                        SliderCell::set(&cell.committed, v);
+                    }
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     let write = slider.SetValue(v);
@@ -12008,17 +12083,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.aligns.insert(id, mode);
                     core.child_order.mark(id);
                 }
-                (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
-                    slider.SetMinimum(v)?;
-                }
-                (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
-                    slider.SetMaximum(v)?;
-                }
-                // The breadth slice's arms (docs/slider-plan.md §5): a step or
-                // tick spacing declared against this backend fails HERE, by
-                // name, never as a slider that quietly stays continuous.
-                (NativeWidget::Slider(_), Prop::Step | Prop::TickSpacing, _) => {
-                    crate::depth_stub("sliders")
+                // THE SLIDER'S FOUR SHAPE PROPS (docs/slider-plan.md S1, S5,
+                // S7, S9). Each moves its slot in the cell and re-applies the
+                // whole shape, since WinUI coerces a value against the range
+                // and the step it holds at the time.
+                (NativeWidget::Slider(slider), Prop::Min, Value::F64(v))
+                | (NativeWidget::Slider(slider), Prop::Max, Value::F64(v))
+                | (NativeWidget::Slider(slider), Prop::Step, Value::F64(v))
+                | (NativeWidget::Slider(slider), Prop::TickSpacing, Value::F64(v)) => {
+                    if let Some(cell) = core.slider_cells.get(&id.0) {
+                        SliderCell::set(
+                            match prop {
+                                Prop::Min => &cell.min,
+                                Prop::Max => &cell.max,
+                                Prop::Step => &cell.step,
+                                _ => &cell.tick_spacing,
+                            },
+                            v,
+                        );
+                        winui_slider_shape(slider, cell, &core.apply_quiet)?;
+                    }
                 }
                 // THE PICKERS' FIVE PROPS (docs/datetime-plan.md §3). Each
                 // interactive write is quiet — DateChanged and
@@ -13695,6 +13779,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             entry_swallow: HashMap::new(),
             entry_tags: HashMap::new(),
             sliders: Vec::new(),
+            slider_ids: Vec::new(),
+            slider_cells: HashMap::new(),
             date_pickers: Vec::new(),
             date_picker_ids: Vec::new(),
             time_pickers: Vec::new(),
@@ -15362,7 +15448,17 @@ impl crate::harness::Stage for WinUiStage {
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());
-            core.sliders[i].SetValue(value)?;
+            let slider = &core.sliders[i];
+            slider.SetValue(value)?;
+            // ONE FINISHED GESTURE (docs/slider-plan.md S8): the write above
+            // raises the control's own ValueChanged, and this ends the
+            // gesture the way a released thumb does — the snap, the clamp,
+            // the live emit and the committed one. Running it here rather
+            // than leaning on the raise is what makes the verb answer the
+            // same on a value WinUI decides has not changed.
+            if let Some(cell) = core.slider_ids.get(i).and_then(|id| core.slider_cells.get(id)) {
+                winui_slider_committed(slider, cell, &core.apply_quiet, &core.occurrences, true)?;
+            }
             Ok(())
         });
     }
@@ -18072,6 +18168,175 @@ fn winui_span_of_packed(packed: i64) -> bindings::Windows::Foundation::TimeSpan 
 fn winui_packed_of_span(span: bindings::Windows::Foundation::TimeSpan) -> i64 {
     let minutes = span.Duration / 10_000_000 / 60;
     ((minutes / 60) % 24) * 100 + minutes % 60
+}
+
+/// One slider's declared shape and its two mirrors, shared with the control's
+/// own handlers — `PickerCell`'s reason exactly: the handlers run on the UI
+/// thread INSIDE the apply borrow, so they may not reach `CoreState`.
+/// Every number is an `f64` in its bits.
+struct SliderCell {
+    tag: Vec<u8>,
+    min: std::sync::atomic::AtomicU64,
+    max: std::sync::atomic::AtomicU64,
+    /// 0 = continuous, 0 = no ticks (docs/slider-plan.md S1, S5).
+    step: std::sync::atomic::AtomicU64,
+    tick_spacing: std::sync::atomic::AtomicU64,
+    /// What the app last heard or was told, and what the last gesture settled
+    /// on: the live emit and the committed one compare against these.
+    held: std::sync::atomic::AtomicU64,
+    committed: std::sync::atomic::AtomicU64,
+}
+
+impl SliderCell {
+    fn new(tag: Vec<u8>) -> Self {
+        let cell = Self {
+            tag,
+            min: std::sync::atomic::AtomicU64::new(0),
+            max: std::sync::atomic::AtomicU64::new(0),
+            step: std::sync::atomic::AtomicU64::new(0),
+            tick_spacing: std::sync::atomic::AtomicU64::new(0),
+            held: std::sync::atomic::AtomicU64::new(0),
+            committed: std::sync::atomic::AtomicU64::new(0),
+        };
+        // The control's own defaults, so a slider that declares no range is
+        // shaped like the one WinUI hands back.
+        Self::set(&cell.max, 1.0);
+        cell
+    }
+
+    fn get(slot: &std::sync::atomic::AtomicU64) -> f64 {
+        f64::from_bits(slot.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn set(slot: &std::sync::atomic::AtomicU64, value: f64) {
+        slot.store(value.to_bits(), std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Where the thumb may rest: on the step's lattice from the minimum,
+    /// inside the range — `kayaSnappedSlider`'s arithmetic (S1, S8).
+    fn snapped(&self, raw: f64) -> f64 {
+        let (min, max) = (Self::get(&self.min), Self::get(&self.max));
+        let step = Self::get(&self.step);
+        let mut v = raw;
+        if step > 0.0 {
+            v = min + ((raw - min) / step).round() * step;
+        }
+        v.clamp(min, max)
+    }
+
+    /// A PROGRAMMATIC write is clamped and NOT snapped, the SwiftUI arm's own
+    /// apply: only a gesture lands on the lattice.
+    fn clamped(&self, raw: f64) -> f64 {
+        raw.clamp(Self::get(&self.min), Self::get(&self.max))
+    }
+}
+
+/// The control's declared shape, re-applied whenever any of the five numbers
+/// arrives: the props reach this backend as separate writes in the sugar's
+/// order (min, max, value, step, tick_spacing) and WinUI COERCES a value
+/// against the range it holds at the time, so a per-prop write would leave
+/// the answer depending on that order. Quiet throughout, since Minimum and
+/// Maximum raise ValueChanged when they coerce.
+fn winui_slider_shape(
+    slider: &Slider,
+    cell: &SliderCell,
+    quiet: &std::sync::atomic::AtomicBool,
+) -> windows_core::Result<()> {
+    let (min, max) = (SliderCell::get(&cell.min), SliderCell::get(&cell.max));
+    let span = max - min;
+    let step = SliderCell::get(&cell.step);
+    // S9, the silent quantization retired: the DECLARED step, or a thousandth
+    // of the range so a continuous drag moves at pixel resolution on any
+    // range. The old constant 0.01 snapped every drag to hundredths of
+    // whatever the guest declared while the other four platforms were
+    // continuous.
+    let frequency = if step > 0.0 { step } else { span / 1000.0 };
+    // S7: one step by arrow, ten by page; a hundredth of the range when the
+    // slider is continuous.
+    let small = if step > 0.0 { step } else { span / 100.0 };
+    let spacing = SliderCell::get(&cell.tick_spacing);
+    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    let write = (|| {
+        slider.SetMinimum(min)?;
+        slider.SetMaximum(max)?;
+        if frequency > 0.0 {
+            slider.SetStepFrequency(frequency)?;
+        }
+        slider.SetSnapsTo(SliderSnapsTo::StepValues)?;
+        slider.SetTickFrequency(spacing)?;
+        slider.SetTickPlacement(if spacing > 0.0 {
+            // The platform's own look for a ticked slider (WinUI Gallery's
+            // Samples/Slider/SliderTicks.txt).
+            TickPlacement::Outside
+        } else {
+            TickPlacement::None
+        })?;
+        if small > 0.0 {
+            slider.SetSmallChange(small)?;
+            slider.SetLargeChange(small * 10.0)?;
+        }
+        // Last, because Minimum and Maximum coerce whatever the control holds.
+        slider.SetValue(cell.clamped(SliderCell::get(&cell.held)))
+    })();
+    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    write
+}
+
+/// THE ONLY WITNESS A REAL GESTURE HAS on this backend, under
+/// `KAYA_SLIDER_TRACE` (docs/slider-plan.md §6): no lane drives a pointer at
+/// a slider, so the drag path is measured by hand or not at all, and the
+/// first draft of this arm committed on EVERY movement with the whole scene
+/// green.
+fn winui_slider_trace(what: &str, slider: &Slider, cell: &SliderCell) {
+    if std::env::var_os("KAYA_SLIDER_TRACE").is_none() {
+        return;
+    }
+    eprintln!(
+        "KAYA_SLIDER_TRACE {what} value={:?} intermediate={:?} button={} held={} committed={}",
+        slider.Value(),
+        slider.IntermediateValue(),
+        pointer_button_down(),
+        SliderCell::get(&cell.held),
+        SliderCell::get(&cell.committed),
+    );
+}
+
+/// THE ONE COMMIT PATH, user or driven (S1, S2, S8): snap the control's value
+/// to the step's lattice, clamp it to the range, mirror it, emit the live
+/// move, and — when the gesture is over — the committed value, once, only when
+/// it differs from the last committed one. WinUI's own snapping should leave
+/// the snap a no-op; it stays because the declared step is the contract and
+/// the platform's arithmetic is not (the pickers' arm snaps the minute step
+/// for the same reason). The mirrors are stored before the write-back, so the
+/// re-raise that write-back provokes finds nothing left to do.
+fn winui_slider_committed(
+    slider: &Slider,
+    cell: &SliderCell,
+    quiet: &std::sync::atomic::AtomicBool,
+    sink: &OccSink,
+    final_: bool,
+) -> windows_core::Result<()> {
+    let raw = slider.Value()?;
+    let v = cell.snapped(raw);
+    let moved = v != SliderCell::get(&cell.held);
+    let settled = final_ && v != SliderCell::get(&cell.committed);
+    SliderCell::set(&cell.held, v);
+    if settled {
+        SliderCell::set(&cell.committed, v);
+    }
+    if v != raw {
+        quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = slider.SetValue(v);
+        quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+    }
+    if moved {
+        sink.send_value_tag(&cell.tag, v);
+    }
+    if settled {
+        sink.send_value_committed_tag(&cell.tag, v);
+    }
+    Ok(())
 }
 
 /// One picker's declared shape, shared with its own change handler. The
