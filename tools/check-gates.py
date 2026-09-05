@@ -39,7 +39,7 @@ def fail(msg):
 # Every gate is python but tools/swift-typecheck.sh, which stays shell
 # (an in-toolchain launcher shape).
 SHELL_GATE = (r"tools/(?:(?:check-[a-z0-9-]+|gen-(?:header|bindings|guests)"
-              r"|java-typecheck|js-typecheck)\.py|swift-typecheck\.sh)")
+              r"|java-typecheck|js-typecheck|go-typecheck)\.py|swift-typecheck\.sh)")
 PY_GATE = r"bindings/(?:python/[a-z0-9_]+\.py|js/[a-z0-9_]+\.ts)"
 TOKEN = re.compile(f"{SHELL_GATE}|{PY_GATE}")
 

@@ -216,6 +216,7 @@ GATES = [
     ("swift-typecheck", ["tools/swift-typecheck.sh"], True, ""),
     ("java-typecheck", ["tools/java-typecheck.py"], True, ""),
     ("js-typecheck", ["tools/js-typecheck.py"], True, ""),
+    ("go-typecheck", ["tools/go-typecheck.py"], True, ""),
 ]
 
 # Gate scripts on disk that are deliberately NOT in the sweep. The

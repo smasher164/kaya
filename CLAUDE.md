@@ -1008,7 +1008,14 @@ in docs/deferred.md.
    `node bindings/js/kaya_app_checks.ts` (the JS surface's negatives,
    the python checks' twin, run in a worker because importing the
    binding on the main thread surrenders it to kaya_run;
-   docs/js-plan.md §5).
+   docs/js-plan.md §5),
+   `tools/go-typecheck.py` (`go vet` over the one Go module — the
+   binding, every Go guest, the generator — the java and JS gates' Go
+   twin, which did not exist until 2026-09-04: a scene row duplicated in
+   guests/go/cmd/scenes.go compiled in no gate, every lane's guest build
+   died on it, and a whole matrix was spent learning what `go vet` says
+   in seconds. Its negative doctors a COPY of the module with the shipped
+   defect itself and demands the duplicate-key refusal, count printed).
    One gate sits outside the sweep because it needs docker — gates.py
    carries it in EXCLUDED, with that reason, so it is excluded on the
    record rather than merely absent:
