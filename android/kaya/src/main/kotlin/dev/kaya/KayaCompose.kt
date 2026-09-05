@@ -118,6 +118,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
@@ -169,6 +170,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -387,6 +390,16 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
     var maxValue by mutableStateOf(1.0)
+
+    /**
+     * THE SLIDER'S granularity and drawn ticks (0 = none), and the value
+     * the last gesture SETTLED ON — what value_committed compares against
+     * (docs/slider-plan.md S1, S2, S5). Composition state: the arm draws
+     * its stops and its ticks from the first two.
+     */
+    var step by mutableStateOf(0.0)
+    var tickSpacing by mutableStateOf(0.0)
+    var committed by mutableStateOf(0.0)
 
     /**
      * THE PICKERS' SLOTS (docs/datetime-plan.md D2), packed decimal:
@@ -1773,7 +1786,15 @@ object KayaCompose {
                         PROP_TEXT ->
                             kayaWriteText(KayaSceneModel.nodes[id]!!, kayaLf(readString(b)))
                         PROP_CHECKED -> KayaSceneModel.nodes[id]!!.checked = readBool(b)
-                        PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
+                        PROP_VALUE -> {
+                            // A PROGRAMMATIC WRITE IS ALSO THE SETTLED
+                            // VALUE (docs/slider-plan.md S2): it echoes
+                            // nothing, and the next gesture's commit
+                            // compares against what the app just wrote.
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.value = readF64(b)
+                            node.committed = node.value
+                        }
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
                         PROP_GROW -> KayaSceneModel.nodes[id]!!.grow = readF64(b)
@@ -1811,11 +1832,9 @@ object KayaCompose {
                         PROP_MAX_DATE -> KayaSceneModel.nodes[id]!!.maxDate = readI64(b)
                         PROP_MINUTE_STEP ->
                             KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
-                        // The breadth slice's arms (docs/slider-plan.md §5): a
-                        // step or tick spacing declared against this backend
-                        // fails HERE, by name, never as a slider that quietly
-                        // stays continuous.
-                        PROP_STEP, PROP_TICK_SPACING -> depthStub("sliders")
+                        PROP_STEP -> KayaSceneModel.nodes[id]!!.step = readF64(b)
+                        PROP_TICK_SPACING ->
+                            KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
                         PROP_SOURCE -> {
                             // A null bitmap is the PLACEHOLDER class,
                             // never a crash — imageSize stays "0x0".
@@ -5596,10 +5615,13 @@ object KayaCompose {
                         if (!ok) failures.add("no such target ${parts[1]}")
                     }
                     "set_value" -> {
+                        // THROUGH THE COMMIT PATH a user's gesture takes
+                        // (docs/slider-plan.md S8), as one finished
+                        // gesture: the step's snap, the range's clamp,
+                        // the live emit and the committed one all run.
                         val ok = onUi(activity) {
                             target(parts[1], "slider", KayaSceneModel.sliders)?.also { node ->
-                                node.value = parts[2].toDouble()
-                                KayaPresent.emitValueChanged(node.tag, node.value)
+                                kayaSliderCommitted(node, parts[2].toDouble(), final = true)
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -5763,8 +5785,7 @@ object KayaCompose {
                         if (!ok) failures.add("no such section ${parts[1]}")
                     }
                     "choose" -> {
-                        // Mirrors the item's onClick as set_value
-                        // mirrors the slider's binding: write the state
+                        // Mirrors the item's own onClick: write the state
                         // the control reads, emit with the identity tag.
                         val ok = onUi(activity) {
                             val node =
@@ -9935,19 +9956,7 @@ private fun KayaRenderCore(
                 Checkbox(checked = node.checked, onCheckedChange = null)
                 Text(node.text)
             }
-        KayaCompose.KIND_SLIDER ->
-            // Uncontrolled toward the app, the entry's shape: the node
-            // mirrors the slider's position (Compose needs the state),
-            // and every move is emitted with the slider's identity tag.
-            Slider(
-                modifier = boxFill.then(a11y),
-                value = node.value.toFloat(),
-                onValueChange = { newValue ->
-                    node.value = newValue.toDouble()
-                    KayaPresent.emitValueChanged(node.tag, newValue.toDouble())
-                },
-                valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
-            )
+        KayaCompose.KIND_SLIDER -> KayaSliderSurface(node, boxFill.then(a11y))
         KayaCompose.KIND_IMAGE -> {
             // Fixed to the decoded bitmap's intrinsic size. The one kind
             // whose NAME does not ride the shared modifier: Image's own
@@ -12028,12 +12037,6 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaPresent.emitAlertResult(alert, choice)
 }
 
-// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
-// docs/traps.md); an unused private function fails check-detekt, so this
-// exists only while some arm stubs.
-private fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on android")
-
 /** THE ONE SPELLING every harness reads a slider back in (harness.rs
  * spelled_slider): six decimals, trailing zeros and point dropped. */
 fun kayaSpelledSlider(value: Double): String {
@@ -12041,6 +12044,112 @@ fun kayaSpelledSlider(value: Double): String {
     var s = String.format(java.util.Locale.ROOT, "%.6f", rounded).trimEnd('0').trimEnd('.')
     if (s.isEmpty() || s == "-" || s == "-0") s = "0"
     return s
+}
+
+// ---- the slider (docs/slider-plan.md) ---------------------------------------
+
+/** Where the thumb may rest: on the step's lattice from the minimum,
+ * inside the range. */
+internal fun kayaSnappedSlider(
+    raw: Double,
+    min: Double,
+    max: Double,
+    step: Double,
+): Double {
+    val v = if (step > 0) min + Math.round((raw - min) / step) * step else raw
+    return v.coerceIn(min, max)
+}
+
+/** Material counts the INTERIOR stops, so a step that divides the range
+ * into n intervals is n − 1 (the core has already refused a step that
+ * does not divide it). */
+internal fun kayaSliderSteps(min: Double, max: Double, step: Double): Int =
+    if (step > 0 && max > min) (Math.round((max - min) / step).toInt() - 1).coerceAtLeast(0) else 0
+
+/** Where kaya draws a tick, as a fraction of the track: every spacing
+ * from the minimum, both ends included; none when the spacing is 0 (S5 —
+ * ticks are EXPLICIT, so a stepped slider without a spacing has none). */
+internal fun kayaSliderTickFractions(
+    min: Double,
+    max: Double,
+    tickSpacing: Double,
+): List<Float> {
+    val span = max - min
+    if (tickSpacing <= 0 || span <= 0) return emptyList()
+    val count = Math.round(span / tickSpacing).toInt()
+    return (0..count).map { (it * tickSpacing / span).toFloat().coerceIn(0f, 1f) }
+}
+
+/**
+ * THE ONE COMMIT PATH, a user's gesture and a driven `set_value` alike
+ * (docs/slider-plan.md S1, S2, S8): snap to the step's lattice, clamp to
+ * the range, mirror the node the Slider draws from, emit the live move,
+ * and when the gesture is over the committed value — once, and only when
+ * it differs from the last committed one.
+ */
+internal fun kayaSliderCommitted(node: KayaNode, raw: Double, final: Boolean) {
+    val v = kayaSnappedSlider(raw, node.minValue, node.maxValue, node.step)
+    if (v != node.value) {
+        node.value = v
+        KayaPresent.emitValueChanged(node.tag, v)
+    }
+    if (final && v != node.committed) {
+        node.committed = v
+        KayaPresent.emitValueCommitted(node.tag, v)
+    }
+}
+
+/**
+ * The platform's own slider, uncontrolled toward the app (the entry's
+ * shape) over the commit path above: `steps` puts Material's stops on
+ * the declared step, the drag emits live and the lift commits.
+ *
+ * KAYA DRAWS THE TICKS. Material's indicators sit only on stops and are
+ * reachable only through `steps`, so they can say nothing about a
+ * spacing coarser than the step or about a continuous slider with marks
+ * (docs/slider-plan.md S5) — one painter for all four shapes, in the
+ * Track's own draw scope, whose width is the span Material lerps its own
+ * ticks across, so a kaya tick lands where a Material tick would.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaSliderSurface(node: KayaNode, modifier: Modifier) {
+    val colors = SliderDefaults.colors()
+    val tickSize = SliderDefaults.TickSize
+    Slider(
+        modifier = modifier,
+        value = node.value.toFloat(),
+        onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = false) },
+        // The end of the gesture carries no value: the last move already
+        // mirrored the settled one.
+        onValueChangeFinished = { kayaSliderCommitted(node, node.value, final = true) },
+        steps = kayaSliderSteps(node.minValue, node.maxValue, node.step),
+        valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
+        colors = colors,
+        track = { state ->
+            val fractions =
+                kayaSliderTickFractions(node.minValue, node.maxValue, node.tickSpacing)
+            SliderDefaults.Track(
+                sliderState = state,
+                colors = colors,
+                drawTick = { _, _ -> },
+                modifier = Modifier.drawWithContent {
+                    drawContent()
+                    val span = node.maxValue - node.minValue
+                    val reached =
+                        if (span > 0) ((node.value - node.minValue) / span).toFloat() else 0f
+                    for (fraction in fractions) {
+                        drawCircle(
+                            color = if (fraction <= reached) colors.activeTickColor
+                            else colors.inactiveTickColor,
+                            radius = tickSize.toPx() / 2f,
+                            center = Offset(size.width * fraction, size.height / 2f),
+                        )
+                    }
+                },
+            )
+        },
+    )
 }
 
 // ---- the pickers (docs/datetime-plan.md) ------------------------------------

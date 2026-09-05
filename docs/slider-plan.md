@@ -73,9 +73,24 @@ Toolkit RangeSelector page, GtkScale's reference, the GNOME HIG).
 | tick marks | drawn on macOS when `step:` is set | `numberOfTickMarks`, `tickMarkPosition` | none | drawn from `steps` | `TickFrequency`, `TickPlacement`, `SnapsTo.Ticks` | `add_mark(value, pos, markup)` — ticks WITH LABELS |
 | value shown | none (guest labels) | none | none | value indicator on drag (M3) | `IsThumbToolTipEnabled` (default on) + `ThumbToolTipValueConverter`, `Header` | `draw-value`, `value-pos`, `set_format_value_func` |
 | end labels | `minimumValueLabel:`/`maximumValueLabel:` | none | `minimumValueImage`/`maximumValueImage` | none | none (design page: label both ends) | none (marks serve) |
-| keyboard | arrows on a focused mac slider | arrows (Left/Down −, Right/Up +) | none | not verified here; the `setProgress` semantics action is the certain route | `SmallChange`/`LargeChange` (arrows, PageUp/Down) | arrows/+/− by step, PgUp/PgDn by page, Home/End |
+| keyboard | arrows on a focused mac slider | arrows (Left/Down −, Right/Up +) | none | **none at 1.3.1**, measured 2026-09-04 (below); the `setProgress` semantics action is the only route | `SmallChange`/`LargeChange` (arrows, PageUp/Down) | arrows/+/− by step, PgUp/PgDn by page, Home/End |
 | direction | none | none | none | none | `IsDirectionReversed` | `inverted`, `has-origin` (fill from an origin) |
 | a11y role today | AXSlider / `.adjustable` | AXSlider | `.adjustable` | `SeekBar` class | RangeValue pattern | `slider` — all five read back as `slider` already (tools/scenes/a11y.steps) |
+
+**COMPOSE'S KEYBOARD CELL, measured 2026-09-04** (the breadth slice's
+android arm; the row above said "not verified here"). The pin is material3
+**1.3.1**, which is what compose-bom 2024.10.01 resolves — not the 1.3.2 the
+first draft of this table assumed. Statically, `SliderKt` in that aar declares
+`sliderSemantics`, `sliderTapModifier`, `snapValueToTick`, `stepsToTickFractions`
+and nothing key-shaped: no key modifier of any spelling, so no key can reach a
+slider through Material. Live, on emulator-5554 with the sliders scene held
+open: TAB walks focus (the reset button lights up on the second press), and
+thirteen DPAD_LEFT/RIGHT/DOWN presses plus PLUS, PAGE_UP and MOVE_END left
+every reading where it started — `value: 50`, `commits: 0`, slider#0 at 50,
+slider#1 at 0.5 — with the first round's screenshot byte-identical to the one
+before it. So S7 has no affordance to ride on this platform, and the arm
+derives no increment; when the 1.4 line brings key handling, the step is the
+number to give it.
 
 What the guidelines say, in one line each. Apple: a slider is for a
 range where relative adjustment matters; supplement with a text field or
