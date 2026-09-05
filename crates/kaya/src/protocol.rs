@@ -1301,6 +1301,7 @@ pub enum Prop {
     MinuteStep,
     Step,
     TickSpacing,
+    Help,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

@@ -117,7 +117,7 @@ def census(files):
     # silently scope the props to one kind.
     for path in (gtk, winui):
         text = read(path)
-        for prop in ("A11yId", "A11yLabel"):
+        for prop in ("A11yId", "A11yLabel", "Help"):
             arms = re.findall(rf"^\s*\(([^,]+), Prop::{prop}\b", text, re.M)
             if not arms:
                 bad.append(f"{path}: no apply arm for Prop::{prop}")

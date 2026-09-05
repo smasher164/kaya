@@ -10790,3 +10790,27 @@ the bindings, as they landed:
   `onChange` to the new `step`) and tools/kaya-swift-gen. The three backend arms
   landed in their own worktrees the same day, and the linux, windows and
   android rosters took the other languages' legs at the merge.
+
+## TOOLTIPS — the depth slice is on the mac, linux and windows (2026-09-05); the Compose arm, iOS's legs and eight bindings' sugar are the breadth slice (docs/tooltip-plan.md §5)
+KEY: help, PROP_HELP, expect_help, help_text, tooltips.steps, ToolTipService, depthStub("tooltips")
+
+THE DEPTH SLICE (2026-09-05, the maintainer's rulings T1–T5 taken the same
+day): PROPS `help` 26 (Str, UNIVERSAL like the two a11y props, the empty
+string refused at the root), the Rust sugar (`.help()` chained, `Tx::help`,
+the template zone's sourced `help`), the harness verb `expect_help` reading
+the PLATFORM's help (AXHelp / the accessibility hint on Apple, the control's
+tooltip on GTK and WinUI), the SwiftUI arm (`.help` in the universal
+wrapper, on before the hint so an authored hint wins — T3), the GTK arm
+(`set_tooltip_text` on the control) and the WinUI arm (`ToolTipService`,
+admitted to the bindgen filter), and tools/scenes/tooltips.steps with
+guests/rust/tooltips.rs. Measured: GTK 4 shows no tooltip on keyboard focus
+(docs/tooltip-plan.md §0).
+
+OPEN, the breadth slice:
+
+- DEPTH STUB: tooltips on compose — a TooltipBox with a PlainTooltip around
+  every kind's composable, the node's `help` as composition state, the
+  `expect_help` verb reading it, the android roster.
+- The eight other bindings' `help` in both zones (the a11y label's spelling
+  in each), nine guests, tools/check-sugar-surface.py's clause, the iOS and
+  android rosters, the matrix.

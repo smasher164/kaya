@@ -169,6 +169,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // all domain-checked at the root.
     ("step", 24, PropKind::F64),
     ("tick_spacing", 25, PropKind::F64),
+    // HELP TEXT (docs/tooltip-plan.md T1): one short sentence saying what
+    // the control is or does, UNIVERSAL like the a11y props. Each platform
+    // offers it in its own way — a tooltip on hover and keyboard focus on
+    // the desktops and the iPad's pointer, on long press where the toolkit
+    // does that (Android, Windows), nothing visible on the iPhone — and
+    // hands it to its assistive reader itself (T2, T3). kaya draws none.
+    ("help", 26, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2715,6 +2722,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("minute_step", 23),
                 ("step", 24),
                 ("tick_spacing", 25),
+                ("help", 26),
             ],
         },
         EnumSpec {
@@ -3389,6 +3397,7 @@ mod tests {
                     ("prop", "minute_step") => wire::PROP_MINUTE_STEP,
                     ("prop", "step") => wire::PROP_STEP,
                     ("prop", "tick_spacing") => wire::PROP_TICK_SPACING,
+                    ("prop", "help") => wire::PROP_HELP,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

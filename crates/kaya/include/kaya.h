@@ -718,6 +718,8 @@
 
 #define KAYA_PROP_TICK_SPACING 25
 
+#define KAYA_PROP_HELP 26
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.

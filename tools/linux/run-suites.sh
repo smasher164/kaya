@@ -39,7 +39,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
 # (docs/slider-plan.md §4, docs/deferred.md's sliders entry).
-DEPTH_SCENES="windowed canvas sizepolicy dnd"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1151,6 +1151,8 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin sliders)"
     run "$proto" sliders-java env KAYA_SELFTEST=sliders KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" tooltips-rust env KAYA_SELFTEST=tooltips \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tooltips"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

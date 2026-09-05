@@ -434,6 +434,8 @@ pub enum Step {
     /// because expect_ax's `<role>/<label>` spelling is byte-frozen in
     /// every scene; see the parse arm.
     ExpectAxHint(Target, String),
+    /// The control's HELP TEXT as the platform offers it (docs/tooltip-plan.md T5).
+    ExpectHelp(Target, String),
     ExpectMenus(usize),
     /// How the window catalog is CURRENTLY presented, spelled
     /// `<size class>/<presentation>`. THE PAIR is the assertion on purpose:
@@ -549,6 +551,7 @@ impl Step {
             | Step::ExpectGridColumns(t, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
+            | Step::ExpectHelp(t, _)
             | Step::ExpectHighlights(t, _)
             | Step::ExpectSelection(t, _)
             | Step::ExpectDrawingHash(t, _)
@@ -701,6 +704,7 @@ impl Step {
             Step::ExpectMenuSymbol { .. } => true,
             Step::ExpectAx { .. } => true,
             Step::ExpectAxHint { .. } => true,
+            Step::ExpectHelp { .. } => true,
             Step::ExpectMenus { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
             Step::ExpectToolbar => true,
@@ -1092,6 +1096,10 @@ pub trait Stage: Send + 'static {
     /// The control's HINT as the platform publishes it — what activating
     /// it does. Read from the same tree as `ax`, never from kaya's model.
     fn ax_hint(&self, target: Target) -> String;
+    /// The control's HELP TEXT as the platform offers it — the tooltip a
+    /// desktop shows, read off the control or the accessibility tree, never
+    /// kaya's model (docs/tooltip-plan.md T5).
+    fn help_text(&self, target: Target) -> String;
     /// The window catalog's live presentation,
     /// `<size class>/<presentation>` — see Step::ExpectMenuPresentation.
     /// Both halves must come FROM THE PLATFORM: the failure being gated is
@@ -1813,6 +1821,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             // The hint is its own verb rather than a third field on
             // expect_ax: the `<role>/<label>` spelling is byte-frozen in
             // every scene.
+            "expect_help" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_help wants a target and a help string: {line:?}")
+                })?;
+                Step::ExpectHelp(parse_target(target)?, parse_string(text)?)
+            }
             "expect_ax_hint" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_ax_hint wants a target and a hint string: {line:?}")
@@ -3787,6 +3801,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("ax {got:?}, wanted {want:?}"))
                 }
             })),
+            Step::ExpectHelp(target, want) => Some(poll(|| {
+                let got = stage.help_text(*target);
+                if got == *want {
+                    Ok(format!("help {want:?}"))
+                } else {
+                    Err(format!("help {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectAxHint(target, want) => Some(poll(|| {
                 let got = stage.ax_hint(*target);
                 if got == *want {
@@ -5004,6 +5026,9 @@ mod tests {
         fn ax_hint(&self, _: Target) -> String {
             "save the draft".to_owned()
         }
+        fn help_text(&self, _: Target) -> String {
+            "Saves the draft".to_string()
+        }
         // The range reads answer NOTHING here on purpose: these mocks
         // exist for the parse/flow tests, and a mock that invented a
         // highlight would be a fixture pretending to be a platform.
@@ -5782,6 +5807,9 @@ mod tests {
         fn ax_hint(&self, _: Target) -> String {
             String::new()
         }
+        fn help_text(&self, _: Target) -> String {
+            String::new()
+        }
         // The range reads answer NOTHING here on purpose: these mocks
         // exist for the parse/flow tests, and a mock that invented a
         // highlight would be a fixture pretending to be a platform.
@@ -6027,6 +6055,9 @@ mod tests {
             "unknown/".to_owned()
         }
         fn ax_hint(&self, _: Target) -> String {
+            String::new()
+        }
+        fn help_text(&self, _: Target) -> String {
             String::new()
         }
         // The range reads answer NOTHING here on purpose: these mocks

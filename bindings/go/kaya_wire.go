@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xd256e8d390e32c4c
+	SpecHash uint64 = 0x07f8f30026825b06
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -96,6 +96,7 @@ const (
 	PropMinuteStep = 23
 	PropStep = 24
 	PropTickSpacing = 25
+	PropHelp = 26
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -1661,6 +1662,38 @@ func TxBindTickSpacingElement(widgetID uint64, level uint32, field uint32) []byt
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropTickSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetHelp: set_property with a constant help value.
+func TxSetHelp(widgetID uint64, help string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHelp)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, help)
+	return endRecord(b)
+}
+
+// TxBindHelp: set_property with a signal-bound help value.
+func TxBindHelp(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHelp)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindHelpElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindHelpElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHelp)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

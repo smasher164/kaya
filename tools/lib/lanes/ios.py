@@ -84,7 +84,7 @@ DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes); sliders joined the
 # three suites with the breadth slice (docs/slider-plan.md §5).
-UNWIRED_SCENES = []
+UNWIRED_SCENES = ["tooltips"]
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names

@@ -1,0 +1,22 @@
+# Help text (docs/tooltip-plan.md): the third universal prop, read back from
+# the PLATFORM — the tooltip GTK and WinUI hold on the control, the
+# accessibility help Apple's `.help` lands on — never from kaya's model.
+expect_help button#0 "Saves the draft to disk"
+expect_help entry#0 "Your full name as it appears on the card"
+expect_help slider#0 "How loud the preview plays"
+# The column carries help too (the prop is universal), but a SwiftUI
+# contained group publishes no help attribute on the Mac (measured
+# 2026-09-05, docs/tooltip-plan.md §6), so its bubble is a capture's to
+# witness, not this verb's.
+# An authored hint wins the hint slot where a platform has one (T3): this
+# button declares both, and the reader hears the hint.
+expect_ax_hint button#1 "discard every change"
+# A BOUND help follows its signal: button#0's handler rewrites entry#0's.
+click button#0
+expect_help entry#0 "Your name, as saved"
+# The template zone: a stamped label's help is the row's own field. Copies
+# are addressed by INDEX with SOURCED ids, as a11yrows does: the Apple read
+# goes through the accessibility identifier, and copies sharing one id
+# cannot be told apart there.
+expect_help label#0 "The first account, opened in March"
+expect_help label#last "The second account, opened in May"

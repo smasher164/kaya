@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xd256e8d390e32c4c
+let kayaSpecHash: UInt64 = 0x07f8f30026825b06
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -131,6 +131,8 @@ private let propColumns: UInt32 = 11
 private let propA11yId: UInt32 = 12
 private let propA11yLabel: UInt32 = 13
 private let propA11yHint: UInt32 = 14
+/// Help text (docs/tooltip-plan.md T1): the tooltip on the Mac and the iPad's pointer, the hint everywhere.
+private let propHelp: UInt32 = 26
 /// Which clip representations this widget accepts: a space-separated string
 /// of closed kind names and custom format ids. Not a mask.
 private let propAccepts: UInt32 = 15
@@ -302,6 +304,7 @@ final class KayaNode: Identifiable {
     var a11yId = ""
     var a11yLabel = ""
     var a11yHint = ""
+    var help = ""
     /// Semantic emphasis (docs/styling-plan.md D4), 0 = none — never a raw
     /// color.
     var role: Int64 = 0
@@ -4634,6 +4637,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propA11yHint, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.a11yHint = String(decoding: bytes, as: UTF8.self)
+                case (propHelp, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.help = String(decoding: bytes, as: UTF8.self)
                 case (propAccepts, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.accepts = String(decoding: bytes, as: UTF8.self)
@@ -5100,13 +5106,19 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     let labelled =
         node.a11yLabel.isEmpty
         ? identified : AnyView(identified.accessibilityLabel(node.a11yLabel))
+    // HELP TEXT (docs/tooltip-plan.md): `.help` is the Mac's tooltip and the
+    // iPad's pointer tooltip, and Apple's own mapping makes it the
+    // accessibility hint too. It goes on BEFORE the hint so an authored
+    // hint wins the hint slot (T3).
+    let helped =
+        node.help.isEmpty ? labelled : AnyView(labelled.help(node.help))
     // The HINT: what activating this control does. Apple speaks it after the
     // label and forbids naming the gesture, which is why the authored text is
     // a verb phrase.
     if node.a11yHint.isEmpty {
-        labelled
+        helped
     } else {
-        labelled.accessibilityHint(node.a11yHint)
+        helped.accessibilityHint(node.a11yHint)
     }
 }
 
@@ -8299,6 +8311,28 @@ private func kayaRunScript(_ script: String) {
                         failures.append("compose: \(trouble)")
                     }
                 #endif
+            case "expect_help":
+                // Help as the platform offers it to its assistive reader —
+                // AXHelp on the Mac, the accessibility hint on iOS, both where
+                // `.help` lands (docs/tooltip-plan.md T5) — never the model.
+                let wantHelp = kayaQuoted(Array(parts[2...]))
+                let helpIdentifier = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return node.a11yId
+                }
+                let gotHelp: String
+                switch helpIdentifier {
+                case .none: gotHelp = "<no such target>"
+                case .some(let ident) where ident.isEmpty:
+                    gotHelp = "<no a11y_id authored on this widget>"
+                case .some(let ident):
+                    gotHelp = kayaAxHintRead(ident) ?? "<not in the accessibility tree>"
+                }
+                if gotHelp == wantHelp {
+                    observed.append("help \"\(wantHelp)\"")
+                } else {
+                    failures.append("help \"\(gotHelp)\", wanted \"\(wantHelp)\"")
+                }
             case "expect_ax_hint":
                 // The hint's own verb (harness.rs is the norm): what
                 // activating this control does, read from the platform,

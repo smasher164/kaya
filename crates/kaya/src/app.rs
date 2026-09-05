@@ -1072,6 +1072,16 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This widget's HELP TEXT (docs/tooltip-plan.md): one short sentence
+    /// saying what the control is or does, offered by each platform in its
+    /// own way — a tooltip on hover and keyboard focus on the desktops,
+    /// on long press where the toolkit does that, and to the assistive
+    /// reader everywhere. An authored `a11y_hint` still wins the hint slot.
+    pub fn help(self, text: impl Into<LiveSource<StrKind>>) -> Self {
+        self.tx.help(self.id, text);
+        self
+    }
+
     /// This widget's spoken accessibility label — [`Tx::a11y_label`]
     /// chained.
     pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
@@ -2011,6 +2021,10 @@ impl<'a> Tx<'a> {
     /// for it, separate from [`Tx::a11y_id`]. Unset keeps whatever the
     /// platform derives from the control's own content; setting it
     /// OVERRIDES that.
+    pub fn help(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::Help, text.into());
+    }
+
     pub fn a11y_label(&mut self, widget: WidgetId, label: impl Into<LiveSource<StrKind>>) {
         self.set_live(widget, Prop::A11yLabel, label.into());
     }
@@ -3456,6 +3470,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn a11y_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.tpl().a11y_label(node, src)
+    }
+
+    pub fn help(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().help(node, src)
     }
 
     pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
@@ -6218,6 +6236,12 @@ impl<'b> Tpl<'_, 'b> {
     /// (docs/tpl-props-plan.md P3).
     pub fn a11y_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.apply_source(node, Prop::A11yLabel, src.into().inner);
+    }
+
+    /// A stamped copy's help text, from any addressable source — the row's
+    /// own field being the point (docs/tooltip-plan.md T1).
+    pub fn help(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::Help, src.into().inner);
     }
 
     /// What activating a stamped copy does. The root admits this on the

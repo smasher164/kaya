@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xd256e8d390e32c4c
+SPEC_HASH = 0x07f8f30026825b06
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -92,6 +92,7 @@ PROP_MAX_DATE = 22
 PROP_MINUTE_STEP = 23
 PROP_STEP = 24
 PROP_TICK_SPACING = 25
+PROP_HELP = 26
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -943,6 +944,21 @@ def tx_bind_tick_spacing(widget_id, signal_id):
 def tx_bind_tick_spacing_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TICK_SPACING, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_help(widget_id, help):
+    """set_property with a constant help value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HELP, SOURCE_CONST) + _enc.value(help))
+
+
+def tx_bind_help(widget_id, signal_id):
+    """set_property with a signal-bound help value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HELP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_help_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HELP, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

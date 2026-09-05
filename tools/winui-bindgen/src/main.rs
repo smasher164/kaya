@@ -186,6 +186,9 @@ fn main() {
         // bounds by MinYear/MaxYear alone and D4's range is a DATE at each
         // end. Both event args carry the committed value; both events ride
         // the already-filtered TypedEventHandler.
+        // Help text (docs/tooltip-plan.md): the attached tooltip property.
+        "Microsoft.UI.Xaml.Controls.ToolTipService".to_string(),
+        "Microsoft.UI.Xaml.Controls.ToolTip".to_string(),
         "Microsoft.UI.Xaml.Controls.CalendarDatePicker".to_string(),
         "Microsoft.UI.Xaml.Controls.CalendarDatePickerDateChangedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.TimePicker".to_string(),

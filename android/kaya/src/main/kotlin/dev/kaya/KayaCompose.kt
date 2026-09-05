@@ -1127,7 +1127,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xd256e8d390e32c4cuL
+    private const val SPEC_HASH: ULong = 0x07f8f30026825b06uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1359,6 +1359,8 @@ object KayaCompose {
     // The slider's step and tick spacing (docs/slider-plan.md S1, S5).
     private const val PROP_STEP = 24
     private const val PROP_TICK_SPACING = 25
+    // Help text (docs/tooltip-plan.md T1), universal like the a11y props.
+    private const val PROP_HELP = 26
     // The role enum's wire values (spec enum "role"). Long, because the
     // prop rides as an i64 and the render arms compare against the
     // node's own field.
@@ -1832,6 +1834,10 @@ object KayaCompose {
                         PROP_MAX_DATE -> KayaSceneModel.nodes[id]!!.maxDate = readI64(b)
                         PROP_MINUTE_STEP ->
                             KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
+                        // The breadth slice's arm (docs/tooltip-plan.md §5): help declared
+                        // against this backend fails HERE, by name, never as a tooltip that
+                        // quietly is not there.
+                        PROP_HELP -> depthStub("tooltips")
                         PROP_STEP -> KayaSceneModel.nodes[id]!!.step = readF64(b)
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
@@ -12036,6 +12042,12 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
 }
+
+// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
+// docs/traps.md); an unused private function fails check-detekt, so this
+// exists only while some arm stubs.
+private fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on android")
 
 /** THE ONE SPELLING every harness reads a slider back in (harness.rs
  * spelled_slider): six decimals, trailing zeros and point dropped. */

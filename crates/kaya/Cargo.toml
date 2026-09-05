@@ -285,6 +285,10 @@ name = "sliders"
 path = "../../guests/rust/sliders.rs"
 
 [[example]]
+name = "tooltips"
+path = "../../guests/rust/tooltips.rs"
+
+[[example]]
 name = "progress"
 path = "../../guests/rust/progress.rs"
 

@@ -34,7 +34,7 @@ SCENES = [
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
-DEPTH_SCENES = ["windowed", "canvas", "sizepolicy"]
+DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tooltips"]
 
 
 def depth_scenes():
@@ -103,6 +103,7 @@ ORDER = [
      # the exe and no .py or .ts; the other five legs join this line with
      # their guests.
      "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp", "sliders_java",
+    "tooltips_rust",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from

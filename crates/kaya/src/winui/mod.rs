@@ -12001,6 +12001,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         )?;
                     }
                 }
+                // HELP TEXT (docs/tooltip-plan.md T1, T2): WinUI's own
+                // tooltip — hover, keyboard focus and press-and-hold — which
+                // UIA publishes as HelpText itself. Universal, like the arms
+                // above.
+                (w, Prop::Help, Value::Str(text)) => {
+                    if !text.is_empty() {
+                        let element = w.element()?;
+                        bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
+                            &element,
+                            &PropertyValue::CreateString(&HSTRING::from(text.as_str()))?,
+                        )?;
+                    }
+                }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the
                 // list drives the paste split and Paste's enablement.
                 // Kind-agnostic like the universal props; empty means
@@ -14926,6 +14939,22 @@ impl crate::harness::Stage for WinUiStage {
              TextCompositionStarted within 1s — D4's refusal keys on that event, so a \
              select_range arriving now would be HONOURED"
         );
+    }
+
+    /// The control's tooltip as ToolTipService holds it (docs/tooltip-plan.md T5).
+    fn help_text(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, target)? else {
+                return Ok("<no such target>".to_owned());
+            };
+            let tip = bindings::Microsoft::UI::Xaml::Controls::ToolTipService::GetToolTip(&element)?;
+            let text: windows_core::HSTRING = tip
+                .cast::<bindings::Windows::Foundation::IPropertyValue>()
+                .and_then(|v| v.GetString())
+                .unwrap_or_default();
+            Ok(if text.is_empty() { "<no help on this widget>".to_owned() } else { text.to_string() })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn ax_hint(&self, target: crate::harness::Target) -> String {

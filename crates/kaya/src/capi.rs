@@ -729,6 +729,7 @@ pub const KAYA_PROP_MAX_DATE: u32 = 22;
 pub const KAYA_PROP_MINUTE_STEP: u32 = 23;
 pub const KAYA_PROP_STEP: u32 = 24;
 pub const KAYA_PROP_TICK_SPACING: u32 = 25;
+pub const KAYA_PROP_HELP: u32 = 26;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -907,6 +908,7 @@ const _: () = assert!(
         && KAYA_PROP_MINUTE_STEP == wire::PROP_MINUTE_STEP
         && KAYA_PROP_STEP == wire::PROP_STEP
         && KAYA_PROP_TICK_SPACING == wire::PROP_TICK_SPACING
+        && KAYA_PROP_HELP == wire::PROP_HELP
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1075,7 +1077,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 25,
+    crate::spec::PROPS.len() == 26,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

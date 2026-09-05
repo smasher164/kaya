@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xd256e8d390e32c4cn;
+export const SPEC_HASH = 0x07f8f30026825b06n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -89,6 +89,7 @@ export const PROP_MAX_DATE = 22;
 export const PROP_MINUTE_STEP = 23;
 export const PROP_STEP = 24;
 export const PROP_TICK_SPACING = 25;
+export const PROP_HELP = 26;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1046,6 +1047,21 @@ export function tx_bind_tick_spacing(widget_id: number, signal_id: number): Uint
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_tick_spacing_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant help value. */
+export function tx_set_help(widget_id: number, help: string): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_CONST), enc.value(help)));
+}
+
+/** set_property with a signal-bound help value. */
+export function tx_bind_help(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_help_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */

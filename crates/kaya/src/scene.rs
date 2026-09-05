@@ -769,6 +769,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // identity and a spoken name. Containers included, deliberately —
         // a column is a labelled group to an assistive client.
         Prop::A11yId | Prop::A11yLabel => true,
+        // Help text is the third universal prop (docs/tooltip-plan.md T1).
+        Prop::Help => true,
         // Acceptance is scoped to what can RECEIVE a paste: the text
         // kinds, which are the ones with native paste behaviour to
         // override.
@@ -915,7 +917,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Role => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
-        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint => ValueType::Str,
+        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help => ValueType::Str,
         // An ACCEPT LIST: the closed kinds by name plus any custom
         // format ids, space separated. Not a mask and not an enum slot
         // — a widget accepts a SET, and half that set is open-ended.
@@ -1357,6 +1359,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: {kind:?} declares an empty a11y label — an accessible \
              name must say something (bind the text you meant, or leave \
              the label off and let the platform derive the name)"
+        );
+    }
+    // Help text says something or is left off: an empty tooltip is a blank
+    // bubble on three platforms and a silent hint on the other two.
+    if let (Prop::Help, Value::Str(help)) = (prop, value) {
+        assert!(
+            !help.is_empty(),
+            "kaya: {kind:?} declares empty help text — say what the control is, or leave help off"
         );
     }
     // A packed date that is not a date, or a time that is not a time,

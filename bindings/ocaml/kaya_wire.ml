@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xd256e8d390e32c4cL
+let spec_hash = 0x07f8f30026825b06L
 
 let value_bool = 1
 let value_i64 = 2
@@ -112,6 +112,7 @@ let prop_max_date = 22
 let prop_minute_step = 23
 let prop_step = 24
 let prop_tick_spacing = 25
+let prop_help = 26
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -1397,6 +1398,32 @@ let tx_bind_tick_spacing_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_tick_spacing);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant help value. *)
+let tx_set_help widget_id help =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_help);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str help))
+
+(* set_property with a signal-bound help value. *)
+let tx_bind_help widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_help);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_help_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_help);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

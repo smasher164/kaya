@@ -9307,6 +9307,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     use gtk4::prelude::WidgetExt;
                     w.control().set_widget_name(id.as_str());
                 }
+                // HELP TEXT (docs/tooltip-plan.md T1, T2): GTK's own tooltip,
+                // on the control, which GTK also publishes as the AT-SPI
+                // description. Universal, like the a11y props above.
+                (w, Prop::Help, Value::Str(text)) => {
+                    use gtk4::prelude::WidgetExt;
+                    w.control()
+                        .set_tooltip_text((!text.is_empty()).then_some(text.as_str()));
+                }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the list
                 // drives the paste split and Paste's enablement, both read
                 // off the hub. Empty means unset, the universal prop rule.
@@ -10935,6 +10943,29 @@ impl crate::harness::Stage for GtkStage {
                  controller published no GtkIMMulticontext."
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// The control's tooltip text, off the widget GTK would show it for
+    /// (docs/tooltip-plan.md T5).
+    fn help_text(&self, target: crate::harness::Target) -> String {
+        #[cfg(feature = "harness")]
+        {
+            return Self::on_main(move |core| {
+                use gtk4::prelude::WidgetExt;
+                match target_widget(core, target) {
+                    None => "<no such target>".to_owned(),
+                    Some(widget) => widget
+                        .tooltip_text()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "<no help on this widget>".to_owned()),
+                }
+            });
+        }
+        #[cfg(not(feature = "harness"))]
+        {
+            let _ = target;
+            String::new()
         }
     }
 
