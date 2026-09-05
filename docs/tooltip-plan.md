@@ -123,6 +123,11 @@ carrying it; a `tooltips` scene in all nine guests on five rosters.
 
 ## §5 — Build order
 
+**LANDED 2026-09-05** in that order: the depth slice on the mac, linux and
+windows (5f789d5), the breadth slice as two worktrees merged (Compose; the
+eight bindings with the mac and iOS lanes), the remaining rosters at the
+merge, and the fifth matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,691 legs (mac 427, linux 737, windows 265, ios 127, android 135) in 734s, launched detached at a one-minute load of 4.7 — the four before it each green on every lane but android's one contended leg (dnd-compose twice, save-jvm once, dnd-jvm once) or linux's wayland JS clipboard leg once, every one of them a pre-existing WATCH class green alone the same hour, every tooltips leg green on every lane in all five, and two of those WATCHes took their instruments on the way (the wayland clipboard's focus premise; the Compose drag verb's settled-box wait, which closed the stale-arrangement cause and left the emulator's drag session under contention as the open remainder)
+
 Depth: spec, core, Rust sugar, `expect_help`, the SwiftUI arm, the GTK and
 WinUI one-line arms with their readers, tools/scenes/tooltips.steps with
 guests/rust/tooltips.rs green on the mac, linux and windows. Breadth: the

@@ -10830,7 +10830,7 @@ the bindings, as they landed:
   landed in their own worktrees the same day, and the linux, windows and
   android rosters took the other languages' legs at the merge.
 
-## TOOLTIPS — the depth slice is on the mac, linux and windows (2026-09-05); the Compose arm, iOS's legs and eight bindings' sugar are the breadth slice (docs/tooltip-plan.md §5)
+## ~~TOOLTIPS — the depth slice is on the mac, linux and windows (2026-09-05); the Compose arm, iOS's legs and eight bindings' sugar are the breadth slice (docs/tooltip-plan.md §5)~~ — LANDED on every lane in every language 2026-09-05: the breadth slice merged (the Compose arm publishing the help as the long-press label; the eight bindings' `help` in both zones; nine guests; five rosters), the fifth matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,691 legs (mac 427, linux 737, windows 265, ios 127, android 135) in 734s, launched detached at a one-minute load of 4.7 — the four before it each green on every lane but android's one contended leg (dnd-compose twice, save-jvm once, dnd-jvm once) or linux's wayland JS clipboard leg once, every one of them a pre-existing WATCH class green alone the same hour, every tooltips leg green on every lane in all five, and two of those WATCHes took their instruments on the way (the wayland clipboard's focus premise; the Compose drag verb's settled-box wait, which closed the stale-arrangement cause and left the emulator's drag session under contention as the open remainder)
 KEY: help, PROP_HELP, expect_help, help_text, tooltips.steps, ToolTipService, depthStub("tooltips")
 
 THE DEPTH SLICE (2026-09-05, the maintainer's rulings T1–T5 taken the same
@@ -10845,7 +10845,7 @@ admitted to the bindgen filter), and tools/scenes/tooltips.steps with
 guests/rust/tooltips.rs. Measured: GTK 4 shows no tooltip on keyboard focus
 (docs/tooltip-plan.md §0).
 
-OPEN, the breadth slice:
+THE BREADTH SLICE, two worktrees merged 2026-09-05:
 
 - ~~DEPTH STUB: tooltips on compose~~ (FIXED 2026-09-05: the arm landed —
   `KayaRenderHelped`, one wrapper every render path goes through, drawing
