@@ -1,9 +1,12 @@
 # The task manager — the design pass
 
 Status: RULED 2026-09-05 (maintainer: "let's build a task manager"), the
-THIRD forcing artifact, in RUST. S0 IS BUILT — guests/rust/tasks.rs and
-tools/scenes/tasks.steps, green on the mac the same day and wired on all
-five lanes; §5 holds what the first run taught. §6 is the sequencing.
+THIRD forcing artifact, in RUST. S0 IS BUILT AND GREEN ON ALL FIVE LANES
+(d9346958, fixed forward in 4e3f74fa): guests/rust/tasks.rs and
+tools/scenes/tasks.steps, the second matrix ALL PASS on mac, linux,
+windows and iOS and the tasks leg green on android beside one recorded
+drag WATCH red on dnd-go; §5 holds what the first runs taught. §6 is the
+sequencing; S1 (the search field) is next.
 The editor (docs/editor-plan.md) and the portfolio
 (docs/portfolio-plan.md) are the precedents this file follows; the
 prioritization it serves is docs/probes/roadmap-app-needs-2026-09-05.md

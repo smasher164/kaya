@@ -10811,6 +10811,14 @@ every other step of the new app's scene passed on Compose). Same matrix:
 launch 3.8; the android lane's own four emulators were the contention.
 Nothing new to read; the named next step stands.
 
+EIGHTH SIGHTING, 2026-09-05, the task manager's second matrix
+(4e3f74fa, host load 4.5 at launch): `dnd-go` alone, shape (a) — `drag
+label#0 to label@item[x]` ended `drag ended none` with the text target
+untouched — while `tasks-compose`'s own reorder drag went through in
+1.5s (`draganddrop … rc=0 in 1535ms`) and the other four lanes were
+green. The sighting count is the argument for the named next step (a
+longer `input draganddrop` duration under load); nothing else is new.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 
