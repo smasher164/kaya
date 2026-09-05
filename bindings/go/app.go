@@ -849,6 +849,39 @@ func (w Widget) A11yHint(hint string) Widget {
 	return w
 }
 
+// SetHelp sets a widget's HELP TEXT: one short sentence saying what the
+// control is or does (docs/tooltip-plan.md T1). Universal. The platform
+// picks the surface — a tooltip on the desktops, nothing visible on the
+// iPhone — and hands the text to its assistive reader; an authored
+// a11y hint wins the hint slot (T3).
+func (tx *Tx) SetHelp(w Widget, text string) {
+	tx.emit(TxSetHelp(w.id, text))
+}
+
+// BindHelp binds a widget's help text to a signal.
+func (tx *Tx) BindHelp(w Widget, s Signal[string]) {
+	tx.emit(TxBindHelp(w.id, s.id))
+}
+
+// Help sets this widget's help text at construction. Same transaction
+// discipline as Grow.
+func (w Widget) Help(text string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Help on a widget outside its build transaction — use Tx.SetHelp inside a live transaction")
+	}
+	w.tx.SetHelp(w, text)
+	return w
+}
+
+// BindHelp binds this widget's help text to a signal at construction.
+func (w Widget) BindHelp(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindHelp on a widget outside its build transaction — use Tx.BindHelp inside a live transaction")
+	}
+	w.tx.BindHelp(w, s)
+	return w
+}
+
 // SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
 // it looks (docs/styling-plan.md D4). The vocabulary is closed and the
 // root refuses a misfit at declare time. (The Role* STRING constants
@@ -3484,6 +3517,19 @@ func (t *Tpl) BindA11yHint[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
 	t.applyStrProp(n, src, TxBindA11yHint, TxBindA11yHintElement)
+}
+
+// SetHelp gives every stamped copy the same help text (Tx.SetHelp).
+func (t *Tpl) SetHelp(n Node, text string) {
+	t.tx.emit(TxSetHelp(n.id, text))
+}
+
+// BindHelp sources each stamped copy's help from a varying source — the
+// row's own field being the case it exists for.
+func (t *Tpl) BindHelp[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindHelp, TxBindHelpElement)
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry

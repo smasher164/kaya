@@ -149,6 +149,9 @@ public final class Main {
             case "sliders":
                 app = Sliders::app;
                 break;
+            case "tooltips":
+                app = Tooltips::app;
+                break;
             case "adaptive":
                 app = Adaptive::app;
                 break;

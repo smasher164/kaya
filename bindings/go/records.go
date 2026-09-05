@@ -886,3 +886,11 @@ func (c RecordCollection[K, T]) A11yHint[S interface {
 }](t *Tpl, n Node, src S) {
 	t.applyRecordStrProp[T](n, src, TxSetA11yHint, TxBindA11yHint, TxBindA11yHintElement)
 }
+
+// Help explains each stamped copy from any addressable source — the
+// row's own field being the case it exists for (Tpl.SetHelp).
+func (c RecordCollection[K, T]) Help[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetHelp, TxBindHelp, TxBindHelpElement)
+}

@@ -2431,6 +2431,26 @@ public final class KayaApp {
             return this;
         }
 
+        public Widget help(String text) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: help on a widget outside its build transaction"
+                    + " — use Tx.setHelp inside a live transaction");
+            }
+            tx.setHelp(this, text);
+            return this;
+        }
+
+        public Widget help(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: help on a widget outside its build transaction"
+                    + " — use Tx.setHelp inside a live transaction");
+            }
+            tx.setHelp(this, s);
+            return this;
+        }
+
         public Widget a11yHint(Signal<String> s) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -3037,6 +3057,25 @@ public final class KayaApp {
 
         public void bindA11yLabelField(Node n, int level, KayaRecords.Field<String> f) {
             t.bindA11yLabelField(n, level, f);
+        }
+
+        /** This row's copy of that node's HELP TEXT
+         * ({@link Tpl#setHelp(Node, KayaRecords.Field)} is the overload
+         * this surface exists for: the row's own field). */
+        public void setHelp(Node n, String text) {
+            t.setHelp(n, text);
+        }
+
+        public void setHelp(Node n, Signal<String> s) {
+            t.setHelp(n, s);
+        }
+
+        public void setHelp(Node n, KayaRecords.Field<String> f) {
+            t.setHelp(n, f);
+        }
+
+        public void bindHelpField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindHelpField(n, level, f);
         }
 
         /** What activating this row's copy of that node does —
@@ -3681,6 +3720,21 @@ public final class KayaApp {
 
         public void setA11yHint(Widget w, Signal<String> s) {
             emit(KayaWire.txBindA11yHint(w.id, s.id));
+        }
+
+        /**
+         * A widget's HELP TEXT: one short sentence saying what the
+         * control is or does (docs/tooltip-plan.md T1). Universal. The
+         * platform picks the surface — a tooltip on the desktops, nothing
+         * visible on the iPhone — and hands the text to its assistive
+         * reader; an authored hint wins the hint slot (T3).
+         */
+        public void setHelp(Widget w, String text) {
+            emit(KayaWire.txSetHelp(w.id, text));
+        }
+
+        public void setHelp(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindHelp(w.id, s.id));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {
@@ -5043,6 +5097,25 @@ public final class KayaApp {
 
         public void bindA11yLabelField(Node n, int level, KayaRecords.Field<String> f) {
             tx.emit(KayaWire.txBindA11yLabelElement(n.id, level, f.index));
+        }
+
+        /** A stamped copy's HELP TEXT, the blueprint twin of
+         * {@link Tx#setHelp(Widget, String)}; the field arm is the case
+         * the zone exists for. */
+        public void setHelp(Node n, String text) {
+            tx.emit(KayaWire.txSetHelp(n.id, text));
+        }
+
+        public void setHelp(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindHelp(n.id, s.id));
+        }
+
+        public void setHelp(Node n, KayaRecords.Field<String> f) {
+            bindHelpField(n, 0, f);
+        }
+
+        public void bindHelpField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindHelpElement(n.id, level, f.index));
         }
 
         /**

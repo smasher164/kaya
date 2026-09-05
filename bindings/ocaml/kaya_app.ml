@@ -636,14 +636,24 @@ let bind_a11y_id (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a1
 let bind_a11y_label (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
 let bind_a11y_hint (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s)
 
-(* The two universal props as they ride every constructor: applied
+(* A widget's HELP TEXT: one short sentence saying what the control is or
+   does (docs/tooltip-plan.md T1). Universal. The platform picks the
+   surface — a tooltip on the desktops, nothing visible on the iPhone —
+   and hands the text to its assistive reader; an authored hint wins the
+   hint slot (T3). *)
+let set_help (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_help id value)
+let bind_help (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s)
+
+(* The three universal props as they ride every constructor: applied
    together, in one place, so a new constructor cannot pick up [~grow]
    and quietly miss these. *)
-let set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w =
+let set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w =
   Option.iter (fun v -> set_a11y_id w v) a11y_id;
   Option.iter (fun s -> bind_a11y_id w s) a11y_id_bind;
   Option.iter (fun v -> set_a11y_label w v) a11y_label;
-  Option.iter (fun s -> bind_a11y_label w s) a11y_label_bind
+  Option.iter (fun s -> bind_a11y_label w s) a11y_label_bind;
+  Option.iter (fun v -> set_help w v) help;
+  Option.iter (fun s -> bind_help w s) help_bind
 
 (* A container's inter-child gap (main axis, DIP; the normalized default is
    8). *)
@@ -833,11 +843,11 @@ let add_child (Widget parent) (Widget child) =
   emit tx (Kaya_wire.tx_add_child parent child)
 
 
-let button ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?role ?text ?on_click () =
+let button ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   (* [Destructive] or [Prominent]; a [Heading] or [Caption] button dies
      at the root. *)
@@ -852,11 +862,11 @@ let button ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint 
 
 (* A multi-line text editor: the entry's uncontrolled contract over
    the platform's real multi-line editor. *)
-let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?on_change () =
+let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -864,10 +874,10 @@ let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?on_chang
   | None -> ());
   w
 
-let label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?role ?text ?bind () =
+let label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   (* [Heading] and [Caption] are the label's roles; the two button
      emphases die here. *)
   Option.iter (fun r -> set_role w r) role;
@@ -878,19 +888,19 @@ let label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?role ?text 
 (* A label wearing [Heading], in one word (the h1 tradition): the
    platform's heading text style AND the trait assistive users skim by,
    and on a grouped screen the section-header seat. *)
-let heading ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?text ?bind () =
-  label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ~role:Heading ?text ?bind ()
+let heading ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
+  label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Heading ?text ?bind ()
 
 (* The heading's counterpart in one word: the platform's footnote tier
    under the content it explains, and the section-footer seat. *)
-let caption ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?text ?bind () =
-  label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ~role:Caption ?text ?bind ()
+let caption ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
+  label ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?text ?bind ()
 
-let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?on_change () =
+let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -901,11 +911,11 @@ let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?on_change (
 (* A progress bar: display-only, like label and image. [~value] is
    the determinate fraction (0..=1); [~indeterminate:true] switches
    to the platform's activity mode. *)
-let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(value = 0.0) ?indeterminate () =
+let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(value = 0.0) ?indeterminate () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_progress in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_value id value);
   Option.iter (fun i -> emit tx (Kaya_wire.tx_set_indeterminate id i)) indeterminate;
@@ -914,12 +924,12 @@ let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(value =
 (* A slider over min..max at value. Uncontrolled, like the entry: the bar
    owns its position and reports each change to [on_change] (the new value
    as a float). *)
-let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?step ?tick_spacing ?bind
+let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?step ?tick_spacing ?bind
     ?on_change ?on_commit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_slider in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
   emit tx (Kaya_wire.tx_set_max id max);
@@ -940,11 +950,11 @@ let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0
    child (labels only, scene-checked) — at [~selected], the initial
    0-based index (domain-checked at the root). [~on_select] receives each
    USER pick's new index; programmatic writes never echo. *)
-let select ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?(selected = 0) ?on_select options () =
+let select ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_select in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   List.iter
     (fun option_text ->
@@ -964,11 +974,11 @@ let select ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint 
 (* A radio group over fixed [options] — the choice contract
    ([select]) in its inline presentation: same option children, same
    0-based [~selected] index, same [~on_select] pick handler. *)
-let radio ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?(selected = 0) ?on_select options () =
+let radio ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_radio in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   List.iter
     (fun option_text ->
@@ -985,11 +995,11 @@ let radio ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?
   | None -> ());
   w
 
-let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hint ?text ?checked ?on_toggle () =
+let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?text ?checked ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_checkbox in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun c -> set_checked w c) checked;
@@ -1006,11 +1016,11 @@ let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?a11y_hin
    [~value] is a constant, [~bind] a signal; [~min]/[~max] are the
    inclusive range, and a pick past a bound lands on the bound. *)
 let date_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
-    ?a11y_hint ?value ?bind ?min ?max ?on_change () =
+    ?help ?help_bind ?a11y_hint ?value ?bind ?min ?max ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_date_picker in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   let (Widget id) = w in
   Option.iter
@@ -1040,11 +1050,11 @@ let date_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    [~step] is the minute granularity (1, 5, 10, 15 or 30) and a pick
    snaps to it. *)
 let time_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
-    ?a11y_hint ?value ?bind ?step ?on_change () =
+    ?help ?help_bind ?a11y_hint ?value ?bind ?step ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_time_picker in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   let (Widget id) = w in
   Option.iter
@@ -1067,10 +1077,10 @@ let time_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    renders the placeholder, never a crash. [~source] ships the bytes and
    [~source_asset] names the picture instead (the bytes never enter the
    OCaml heap). The two are EXCLUSIVE. *)
-let image ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?source ?source_asset ?bind () =
+let image ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   (match (source, source_asset) with
    | Some _, Some _ ->
      invalid_arg
@@ -1200,13 +1210,13 @@ let declare_size_policy tx id policy =
    THE THREE SIZE-POLICY DECLARATIONS RIDE HERE (§3.2.1, ruling 1):
    [~fixed:true] refuses coercion, [~on_draw] and [~on_tick] take the
    assigned size, and REGISTERING IS DECLARING. Writing none is `scale`. *)
-let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ~viewbox ?draw ?(fixed = false)
+let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~viewbox ?draw ?(fixed = false)
     ?(on_draw : (draw -> viewbox -> unit) option)
     ?(on_tick : (draw -> viewbox -> float -> unit) option) () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_canvas in
   Option.iter (fun g -> set_grow w g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind w;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
   let (Widget id) = w in
   (* The viewbox rides the DRAWING on the wire, not a prop; the guest
      side remembers it so a later redraw need not repeat it. *)
@@ -1254,10 +1264,10 @@ let draw_at (Node id) keys ~viewbox ~f =
    child list literal only allocates closures and the container realizes
    them left to right ([List.iter]'s specified order IS document order).
    Props are labeled optional arguments, the lablgtk idiom. *)
-let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset kind children () =
+let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind parent;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
   Option.iter (fun a -> set_align parent a) align;
   Option.iter (fun p -> set_inset parent p) inset;
@@ -1268,13 +1278,13 @@ let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing
    each column takes its NATURAL width, aligned across rows (the thing
    nested rows cannot express). The columns record lands BEFORE the
    add_childs (backends re-flow either way). *)
-let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?inset children () =
+let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset children () =
   let tx = the_tx () in
   let parent = widget Kaya_wire.kind_grid in
   let (Widget id) = parent in
   emit tx (Kaya_wire.tx_set_columns id (float_of_int columns));
   Option.iter (fun g -> set_grow parent g) grow;
-  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind parent;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
   Option.iter (fun p -> set_inset parent p) inset;
   List.iter (fun child -> add_child parent (child ())) children;
@@ -1287,25 +1297,25 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset children =
-  container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset Kaya_wire.kind_column
+let column ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset children =
+  container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset Kaya_wire.kind_column
     children
 
 (* A vertical scroll viewport over EXACTLY ONE child (the signature
    says so; the scene enforces it too). Pass [~grow] so the enclosing
    track CONSTRAINS it — an unconstrained viewport hugs its content
    and nothing overflows. *)
-let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind children =
-  container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind Kaya_wire.kind_scroll children
+let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind children =
+  container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind Kaya_wire.kind_scroll children
 
 (* [~stack_when] stacks this row's children vertically while the window's
    SIZE CLASS is the named one, reverting on leaving it — a
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset ?stack_when children () =
+let row ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?stack_when children () =
   let parent =
-    container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?spacing ?align ?inset Kaya_wire.kind_row
+    container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset Kaya_wire.kind_row
       children ()
   in
   Option.iter
@@ -2609,6 +2619,15 @@ module Tpl = struct
     let bind_a11y_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label_element ~level ~field:fd.fd_index id)
 
+    let set_help (Node id) value = emit (the_tx ()) (Kaya_wire.tx_set_help id value)
+
+    let bind_help (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s)
+
+    (* The row's own field as the copy's help — the source the zone
+       exists for. *)
+    let bind_help_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_help_element ~level ~field:fd.fd_index id)
+
     (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. It cannot
        be a type here ([node] is not typed by kind), so the wall is the
        constructors and the root's own refusal at DECLARE time. *)
@@ -2627,13 +2646,16 @@ module Tpl = struct
        purpose: ONE SHARED LEVEL would have moved the label's source out
        one For as well, silently. *)
     let set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-        ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) n =
+        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) n =
       Option.iter (fun v -> set_a11y_id n v) a11y_id;
       Option.iter (fun s -> bind_a11y_id n s) a11y_id_bind;
       Option.iter (fun fd -> bind_a11y_id_field ~level:a11y_level n fd) a11y_id_field;
       Option.iter (fun v -> set_a11y_label n v) a11y_label;
       Option.iter (fun s -> bind_a11y_label n s) a11y_label_bind;
-      Option.iter (fun fd -> bind_a11y_label_field ~level:a11y_level n fd) a11y_label_field
+      Option.iter (fun fd -> bind_a11y_label_field ~level:a11y_level n fd) a11y_label_field;
+      Option.iter (fun v -> set_help n v) help;
+      Option.iter (fun s -> bind_help n s) help_bind;
+      Option.iter (fun fd -> bind_help_field ~level:a11y_level n fd) help_field
 
     (* What a stamped copy takes from a paste — and the prop that lets a
        copy's paste hook fire at all: every backend gates the paste
@@ -2835,13 +2857,13 @@ module Tpl = struct
 
 
   let button ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?role ?text ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_click () =
     let n = Floor.widget Kaya_wire.kind_button in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     (* [Destructive] or [Prominent] — the stamped row's own delete
        button, which is what this prop reaching the zone is for; a
@@ -2863,12 +2885,12 @@ module Tpl = struct
   (* A multi-line editor per stamped copy: the entry's uncontrolled contract
      over the platform's real multi-line control. *)
   let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_textarea in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -2881,12 +2903,12 @@ module Tpl = struct
     n
 
   let label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?role ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?role ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_label in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     (* [Heading] and [Caption] are the label's roles; the two button
        emphases die at the root. *)
     Option.iter (fun r -> Floor.set_role n r) role;
@@ -2898,31 +2920,31 @@ module Tpl = struct
   (* A stamped label wearing [Heading], in one word: the section title of
      a row, styled and announced as a heading. *)
   let heading ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?level
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?text ?bind ?bind_field ?level
       ?a11y_level () =
     label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~role:Heading ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Heading ?text ?bind ?bind_field
       ?level ?a11y_level ()
 
   (* Its counterpart: the stamped row's footnote, under the content it
      explains. *)
   let caption ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?level
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?text ?bind ?bind_field ?level
       ?a11y_level () =
     label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~role:Caption ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Caption ?text ?bind ?bind_field
       ?level ?a11y_level ()
 
   (* A single-line text field per stamped copy. UNCONTROLLED as its live
      twin is: the copy owns its text and every edit arrives at
      [~on_change] with that copy's keys first. *)
   let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_entry in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -2936,12 +2958,12 @@ module Tpl = struct
 
   (* A progress bar per stamped copy: display-only, like label and image. *)
   let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?value ?bind ?bind_field ?(level = 0)
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?value ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?indeterminate () =
     let n = Floor.widget Kaya_wire.kind_progress in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_value n v) value;
     Option.iter (fun s -> Floor.bind_value n s) bind;
     Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
@@ -2951,13 +2973,13 @@ module Tpl = struct
   (* A slider per stamped copy, over [~min]..[~max] at a position from any
      of the three sources. *)
   let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(min = 0.0) ?(max = 1.0) ?value ?step
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(min = 0.0) ?(max = 1.0) ?value ?step
       ?tick_spacing ?bind ?bind_field ?(level = 0) ?(a11y_level = level)
       ?on_change ?on_commit () =
     let n = Floor.widget Kaya_wire.kind_slider in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Floor.set_min n min;
     Floor.set_max n max;
     Option.iter (fun v -> Floor.set_step n v) step;
@@ -2981,13 +3003,13 @@ module Tpl = struct
      option becomes a label child. The SELECTED INDEX varies per row;
      [~bind_field] wants a (_, float) field (see [bind_value_field]). *)
   let select ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_select options () =
     let n = Floor.widget Kaya_wire.kind_select in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
     Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
@@ -3013,13 +3035,13 @@ module Tpl = struct
      its inline presentation: same option children, same 0-based index
      from the same three sources, same pick handler. *)
   let radio ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_select options () =
     let n = Floor.widget Kaya_wire.kind_radio in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
     Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
@@ -3042,13 +3064,13 @@ module Tpl = struct
     n
 
   let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?checked ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_toggle () =
     let n = Floor.widget Kaya_wire.kind_checkbox in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
     Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
@@ -3068,12 +3090,12 @@ module Tpl = struct
      per row" shape (docs/datetime-plan.md D10). Picks carry the copy's
      keys first. *)
   let date_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?value ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?value ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_date_picker in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     let (Node id) = n in
     Option.iter
@@ -3096,12 +3118,12 @@ module Tpl = struct
   (* A time picker per stamped copy — the date picker's three sources,
      hours and minutes. *)
   let time_picker ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?value ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?value ?bind ?bind_field
       ?step ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_time_picker in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
     let (Node id) = n in
     Option.iter
@@ -3128,12 +3150,12 @@ module Tpl = struct
      [~bind] a Blob signal, [~bind_field] each row's own (_, bytes)
      field — the per-row thumbnail. *)
   let image ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?source ?bind ?bind_field ?(level = 0)
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?source ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_image in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun data -> Floor.set_source n data) source;
     Option.iter (fun s -> Floor.bind_source n s) bind;
     Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
@@ -3143,11 +3165,11 @@ module Tpl = struct
      (docs/canvas-plan.md §3.1). The drawing is declared with the node, so
      every copy is born with it; [draw_at] re-declares one copy's. *)
   let canvas ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ~viewbox ~draw () =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ~viewbox ~draw () =
     let n = Floor.widget Kaya_wire.kind_canvas in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     let (Node id) = n in
     emit (the_tx ()) (drawing_record id [] viewbox draw);
     n
@@ -3156,12 +3178,12 @@ module Tpl = struct
      applied creators ([unit -> node] thunks), realized left to
      right; [()] realizes, omitting it nominates a child. *)
   let container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ?inset kind children ()
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?inset kind children ()
       =
     let parent = Floor.widget kind in
     Option.iter (fun g -> Floor.set_grow parent g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level parent;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level parent;
     (* Every stamped copy's own padding. [~spacing] and [~align] stay
        floor-only on template containers, in every binding alike. *)
     Option.iter (fun p -> Floor.set_inset parent p) inset;
@@ -3172,12 +3194,12 @@ module Tpl = struct
      each column takes its NATURAL width. The count describes the
      prototype, so it stays a required constant. *)
   let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ?inset children () =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?inset children () =
     let n = Floor.widget Kaya_wire.kind_grid in
     Floor.set_columns n columns;
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
     Option.iter (fun p -> Floor.set_inset n p) inset;
     List.iter (fun child -> Floor.add_child n (child ())) children;
     n
@@ -3195,9 +3217,9 @@ module Tpl = struct
      supplied, so [container kind_column] would have defaulted every prop
      and swallowed the caller's. *)
   let column ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset
       Kaya_wire.kind_column children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE child.
@@ -3206,18 +3228,18 @@ module Tpl = struct
      declare arm does not check it yet, so a second child here is accepted
      in silence until that gap closes. *)
   let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_scroll
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level Kaya_wire.kind_scroll
       children
 
   (* [~inset] rides the two flex containers and the grid and stops there,
      exactly as it does live: the root admits the prop on Column, Row and
      Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset Kaya_wire.kind_row
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset Kaya_wire.kind_row
       children
 
   (* Attach a live-built context catalog to a template node: each

@@ -529,7 +529,7 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               findings)
     want_role("ocaml-live", "bindings/ocaml/kaya_app.ml", snake,
               f"^let {snake} \\?grow \\?a11y_id \\?a11y_id_bind \\?a11y_label "
-              f"\\?a11y_label_bind \\?text "
+              f"\\?a11y_label_bind \\?help \\?help_bind \\?text "
               f"\\?bind \\(\\)", findings)
     want_role("ocaml-tpl", "bindings/ocaml/kaya_app.ml", snake,
               f"^  let {snake} \\?grow \\?a11y_id \\?a11y_id_bind",
@@ -3023,7 +3023,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 5")
+        if n == 1 else src, n, "typed-row reader found only 6")
     return "\n".join(lines)
 
 
@@ -3366,7 +3366,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 13 members")
+    ], "js's prop reader found only 14 members")
     return "\n".join(lines)
 
 
@@ -3769,7 +3769,8 @@ check("swift", "bindings/swift/KayaApp.swift", "spacing",
 check("haskell", "bindings/haskell/KayaApp.hs", "spacing",
       r"Spacing :: Double -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "spacing",
-      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind \?spacing ")
+      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind "
+      r"\?help \?help_bind \?spacing ")
 check("js", "bindings/js/kaya/index.ts", "spacing", r"^  spacing\(gap: number\)")
 
 # The align prop's layer-3 spelling, same rule again.
@@ -3787,7 +3788,8 @@ check("swift", "bindings/swift/KayaApp.swift", "align",
 check("haskell", "bindings/haskell/KayaApp.hs", "align",
       r"Align :: Align -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "align",
-      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind \?spacing \?align ")
+      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind "
+      r"\?help \?help_bind \?spacing \?align ")
 check("js", "bindings/js/kaya/index.ts", "align", r"^  align\(mode: AlignValue")
 
 # THE UNIVERSAL ACCESSIBILITY PROPS, same rule as grow/spacing/align.
@@ -3832,6 +3834,46 @@ check("ocaml", "bindings/ocaml/kaya_app.ml", "a11y_label",
       r"let set_a11y_label \(Widget id\)")
 check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
 
+# HELP, the THIRD universal prop (docs/tooltip-plan.md T1): one short
+# sentence saying what the control is or does, on every kind. Same rule
+# as the a11y pair — a binding that shipped it wire-only would leave
+# apps unable to author a tooltip at all, on five platforms at once.
+# WRITTEN AS A FUNCTION so the fake name below can be driven through the
+# same nine patterns: a pattern loose enough to match a prop no binding
+# has is a clause that can only pass.
+def check_help_prop(snake, pascal, camel, findings=None):
+    check("rust", "crates/kaya/src/app.rs", snake,
+          rf"fn {snake}\(self", findings)
+    check("python", "bindings/python/kaya/__init__.py", snake,
+          rf"def {snake}\(self, text\)", findings)
+    check("go", "bindings/go/app.go", snake,
+          rf"func \(w Widget\) {pascal}\(", findings)
+    check("csharp", "bindings/csharp/KayaApp.cs", snake,
+          rf"public void Set{pascal}\(", findings)
+    check("java", "bindings/java/dev/kaya/KayaApp.java", snake,
+          rf"public Widget {camel}\(", findings)
+    check("swift", "bindings/swift/KayaApp.swift", snake,
+          rf"func set{pascal}\(", findings)
+    check("haskell", "bindings/haskell/KayaApp.hs", snake,
+          rf"{pascal} :: LiveStrSource s => s -> Attr", findings)
+    check("ocaml", "bindings/ocaml/kaya_app.ml", snake,
+          rf"let set_{snake} \(Widget id\)", findings)
+    check("js", "bindings/js/kaya/index.ts", snake,
+          rf"^  {camel}\(text:", findings)
+
+
+check_help_prop("help", "Help", "help")
+
+fake = []
+check_help_prop("kaya_fake_help", "KayaFakeHelp", "kayaFakeHelp",
+                findings=fake)
+help_fake = sum(1 for m in fake if "has no live-zone constructor" in m)
+if help_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({help_fake}/9 help patterns fired for a prop no "
+                  f"binding has)")
+print(f"check-sugar-surface: help fake-name negatives {help_fake}/9")
+
 # The HINT prop, same rule as the two universal ones — but note it is
 # ACTIVATION-KINDS-ONLY by the root's own check (a hint needs
 # something to activate; Android carries it as an action's label). The
@@ -3867,7 +3909,9 @@ for prop, rust, go, cs, java, swift, hs, ml in (
         ("a11y_label", "a11y_label", "BindA11yLabel", "SetA11yLabel",
          "setA11yLabel", "setA11yLabel", "bindA11yLabel", "bind_a11y_label"),
         ("a11y_hint", "a11y_hint", "BindA11yHint", "SetA11yHint",
-         "setA11yHint", "setA11yHint", "bindA11yHint", "bind_a11y_hint")):
+         "setA11yHint", "setA11yHint", "bindA11yHint", "bind_a11y_hint"),
+        ("help", "help", "BindHelp", "SetHelp",
+         "setHelp", "setHelp", "bindHelp", "bind_help")):
     check("rust", "crates/kaya/src/app.rs", f"live {prop} (sourced)",
           rf"pub fn {rust}\(self, \w+: impl Into<LiveSource<StrKind>>\)")
     check("go", "bindings/go/app.go", f"live {prop} (sourced)",

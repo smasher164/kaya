@@ -428,6 +428,9 @@ static class Program
         Set("SetA11yHint", ["Node n", "string hint"], "n, hint");
         Set("SetA11yHint", ["Node n", "Signal s"], "n, s");
         Set("SetA11yHint", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetHelp", ["Node n", "string text"], "n, text");
+        Set("SetHelp", ["Node n", "Signal s"], "n, s");
+        Set("SetHelp", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetAccepts", ["Node n", "params string[] kinds"], "n, kinds");
         FwdAs("TplDragRef", "Draggable", ["Node n"], "n");
         Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");

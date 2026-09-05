@@ -250,6 +250,13 @@ sealed class ItemRow
     public void SetA11yHint(Node n, Field<string> f, uint level = 0) =>
         t.SetA11yHint(n, f, level);
 
+    public void SetHelp(Node n, string text) => t.SetHelp(n, text);
+
+    public void SetHelp(Node n, Signal s) => t.SetHelp(n, s);
+
+    public void SetHelp(Node n, Field<string> f, uint level = 0) =>
+        t.SetHelp(n, f, level);
+
     public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
 
     public TplDragRef Draggable(Node n) => t.Draggable(n);

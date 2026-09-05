@@ -331,6 +331,43 @@ if (isMainThread) {
     return recs.length === 1 && new DataView(recs[0]!.buffer, recs[0]!.byteOffset).getUint16(4, true) === wire.TX_SET_PROPERTY;
   })());
 
+  // ----------------------------------------------------------- help
+  // HELP PACKS THE GENERATED SETTER'S OWN BYTES, in BOTH zones
+  // (docs/tooltip-plan.md T1) — compared against wire.ts rather than
+  // read field by field, because an expectation copied out of the
+  // binding agrees with the binding whatever the prop number does.
+  const asBytes = (r: Uint8Array | undefined): string => (r === undefined ? "<absent>" : JSON.stringify([...r]));
+  let helpSig!: K.Signal<string>;
+  shipped.length = 0;
+  app.build(() => {
+    helpSig = kaya.signal("Your full name as it appears on the card");
+    field.help("Saves the draft to disk");
+    field.help(helpSig);
+    field.help("");
+  });
+  const helpRecs = shipped.pop()!;
+  check("a live help packs tx_set_help's own bytes", helpRecs.length === 4 && asBytes(helpRecs[1]) === asBytes(wire.tx_set_help(field.id, "Saves the draft to disk")));
+  check("and a live help from a Signal packs tx_bind_help's", asBytes(helpRecs[2]) === asBytes(wire.tx_bind_help(field.id, helpSig.id)));
+  // The root's wall is the one that refuses it (crates/kaya/src/scene.rs,
+  // empty_help_dies_at_declare): a binding that dropped it as a no-op
+  // would leave the root nothing to refuse.
+  check("an empty help passes through for the root's wall", asBytes(helpRecs[3]) === asBytes(wire.tx_set_help(field.id, "")));
+
+  let sourcedHelp!: K.Widget;
+  let constHelp!: K.Widget;
+  shipped.length = 0;
+  app.window(() => {
+    kaya.column(() => {
+      for (const todo of todos) {
+        sourcedHelp = kaya.label({ bind: todo.title }).help(todo.title);
+        constHelp = kaya.label({ bind: todo.title }).help("Opened in March");
+      }
+    });
+  });
+  const tplRecs = shipped.pop()!;
+  check("a stamped help packs tx_bind_help_element's own bytes", tplRecs.some((r) => asBytes(r) === asBytes(wire.tx_bind_help_element(sourcedHelp.id, 0, 0))));
+  check("and a constant stamped help packs tx_set_help's", tplRecs.some((r) => asBytes(r) === asBytes(wire.tx_set_help(constHelp.id, "Opened in March"))));
+
   // ------------------------------------------------- shortcut spelling
   const accept: [string, string][] = [
     ["primary+s", "primary+s"],

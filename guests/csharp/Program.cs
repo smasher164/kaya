@@ -56,6 +56,7 @@ static class Program
             case "layout": LayoutScene.Run(); break;
             case "styling": StylingScene.Run(); break;
             case "toolbar": ToolbarScene.Run(); break;
+            case "tooltips": TooltipsScene.Run(); break;
             case "typeface": TypefaceScene.Run(); break;
             case "identity": IdentityScene.Run(); break;
             case "assets": AssetsScene.Run(); break;

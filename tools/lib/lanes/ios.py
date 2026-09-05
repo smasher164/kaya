@@ -30,6 +30,7 @@ SWIFT_ENTRIES = [
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
     "table", "canvas", "sizepolicy", "dnd", "pickers", "sliders",
+    "tooltips",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -43,7 +44,7 @@ GO_SCENES = [
     "menus", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "dnd", "pickers", "sliders",
+    "table", "dnd", "pickers", "sliders", "tooltips",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -62,7 +63,7 @@ RUST_SCENES = [
     "a11y", "a11yrows", "styling", "ranges", "progress",
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
-    "dirty", "dnd", "pickers", "sliders",
+    "dirty", "dnd", "pickers", "sliders", "tooltips",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -83,8 +84,11 @@ PAD_EXTRAS = {
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes); sliders joined the
-# three suites with the breadth slice (docs/slider-plan.md §5).
-UNWIRED_SCENES = ["tooltips"]
+# three suites with the breadth slice (docs/slider-plan.md §5), and
+# tooltips with its own (docs/tooltip-plan.md §5) — the iOS arm is the
+# shared interpreter's `.help`, which lands on the accessibility hint,
+# and expect_help reads it there.
+UNWIRED_SCENES = []
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names

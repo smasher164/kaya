@@ -49,10 +49,16 @@ reserves long press for context menus, which kaya already uses).
 Plain text, one short sentence saying what the control is or does. Every
 widget kind carries it, containers included, exactly as the two a11y props
 do. Wire: PROPS `help` 26, `PropKind::Str`; the root refuses an empty one.
-Sugar: `.help("…")` chained on Rust's widget, `help=` on Python's and JS's,
-`?help` on OCaml's, the binding's own spelling elsewhere; in the template
-zone a SOURCED prop (a row's help can be the row's own field), like the
-a11y label.
+Sugar: THE A11Y LABEL'S SPELLING IN EACH BINDING, since the three
+universal props must not be spelled three ways inside one binding —
+`.help("…")` chained on Rust's widget and on python's and JS's shared
+handle (the design pass guessed `help=` there; python and JS spell
+`a11y_label` as a chained method, so a constructor keyword would have made
+the third universal prop the odd one out in the two bindings where the
+other two are most alike), `?help`/`?help_bind` on OCaml's constructors
+beside `set_help`, and the binding's own spelling elsewhere; in the
+template zone a SOURCED prop (a row's help can be the row's own field),
+like the a11y label.
 
 ### T2 — kaya draws no tooltip of its own
 
@@ -140,3 +146,21 @@ android rosters, the matrix.
   own field and addresses them by index, the a11yrows scene's shape.
 - The authored hint wins over `.help` on the Mac when `.help` is applied
   first (measured on button#1 the same day: T3's ordering holds).
+- ON THE IPHONE, MEASURED 2026-09-05 on kaya-sim-0 with the tooltips
+  scene HELD (the shared steps plus `settle 25000`), the rust-swiftui
+  bundle: **the help text reaches the accessibility tree as the hint, and
+  a long press shows nothing.** The hint half is the app's own read —
+  iOS's `expect_help` is `kayaAxHintRead`, which walks the real
+  UIWindow accessibility tree and answers with the element's
+  `accessibilityHint` — and all seven reads passed before the settle
+  (`expect_help button#0/entry#0/slider#0`, the rewritten `entry#0`, both
+  stamped labels, and `expect_ax_hint button#1`). XCUITEST CANNOT ANSWER
+  THE HINT HALF AT ALL: its element tree publishes label, identifier,
+  value, frame and type and no hint, which is why the console of the held
+  run is the reading. The long-press half IS an outside read: the XCUITest
+  driver pressed the real Save button (found by label at 16,166,61,34) for
+  1500ms, and the element tree taken 2s later was IDENTICAL to the one
+  before it — 31 elements both times, zero added with the pointer
+  addresses normalized. No tooltip, and no context menu either, since kaya
+  declares none. T2's "nothing visible on the iPhone" is measured, not
+  assumed.

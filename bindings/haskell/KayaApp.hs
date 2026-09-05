@@ -115,6 +115,7 @@ module KayaApp
     bindA11yId,
     bindA11yLabel,
     bindA11yHint,
+    bindHelp,
     LiveStrSource (..),
     bindChecked,
     bindValue,
@@ -127,6 +128,7 @@ module KayaApp
     setA11yId,
     setA11yLabel,
     setA11yHint,
+    setHelp,
     setRole,
     Align (..),
     Axis (..),
@@ -2102,6 +2104,17 @@ bindA11yId (Widget w) (Signal s) = emitB (W.txBindA11yId w s)
 bindA11yLabel (Widget w) (Signal s) = emitB (W.txBindA11yLabel w s)
 bindA11yHint (Widget w) (Signal s) = emitB (W.txBindA11yHint w s)
 
+-- | A widget's HELP TEXT: one short sentence saying what the control is
+-- or does (docs/tooltip-plan.md T1). Universal. The platform picks the
+-- surface — a tooltip on the desktops, nothing visible on the iPhone —
+-- and hands the text to its assistive reader; an authored hint wins the
+-- hint slot (T3).
+setHelp :: Widget -> String -> Build ()
+setHelp (Widget w) h = emitB (W.txSetHelp w h)
+
+bindHelp :: Widget -> Signal -> Build ()
+bindHelp (Widget w) (Signal s) = emitB (W.txBindHelp w s)
+
 -- | What a LIVE widget's Str a11y prop can take: a constant or a signal —
 -- the attr picks the setter by the argument's type, as the template
 -- zone's 'TplStrSource' does with the row field arm left out.
@@ -2142,6 +2155,10 @@ data Attr (c :: WClass) where
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
   A11yHint :: LiveStrSource s => s -> Attr 'LeafW
+  -- | This widget's HELP TEXT — any widget class, as the two a11y props
+  -- are: one short sentence saying what the control is or does. A
+  -- 'String' or a 'Signal'.
+  Help :: LiveStrSource s => s -> Attr c
   -- | A date picker's inclusive lower bound (docs/datetime-plan.md D4);
   -- a pick past it lands on the bound.
   MinDate :: Day -> Attr 'LeafW
@@ -2178,6 +2195,7 @@ applyAttr (StackWhen when) w = stackWhen w when
 applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
 applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
+applyAttr (Help h) w = liveStr setHelp bindHelp w h
 applyAttr (MinDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMinDate n (fromIntegral y) m dd)
@@ -2726,11 +2744,12 @@ data StrProp = StrProp
     strElement :: Word64 -> Word32 -> Word32 -> Builder
   }
 
-textProp, a11yIdProp, a11yLabelProp, a11yHintProp :: StrProp
+textProp, a11yIdProp, a11yLabelProp, a11yHintProp, helpProp :: StrProp
 textProp = StrProp W.txSetText W.txBindText W.txBindTextElement
 a11yIdProp = StrProp W.txSetA11yId W.txBindA11yId W.txBindA11yIdElement
 a11yLabelProp = StrProp W.txSetA11yLabel W.txBindA11yLabel W.txBindA11yLabelElement
 a11yHintProp = StrProp W.txSetA11yHint W.txBindA11yHint W.txBindA11yHintElement
+helpProp = StrProp W.txSetHelp W.txBindHelp W.txBindHelpElement
 
 -- | What a template Str prop can bind to: a constant, a signal, or the
 -- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
@@ -2853,6 +2872,10 @@ data TplAttr where
   -- ACTIVATION KINDS ONLY (button, checkbox, select, radio); the refusal
   -- is the ROOT'S, at declare time, naming the kind it refused.
   TplA11yHint :: TplStrSource s => s -> TplAttr
+  -- | This stamped copy's HELP TEXT. THE ROW-FIELD CASE IS WHY THIS PROP
+  -- REACHES THE ZONE: @TplHelp (field \@"note" \@Account)@ explains every
+  -- copy in its own words.
+  TplHelp :: TplStrSource s => s -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
@@ -2886,6 +2909,7 @@ applyTplAttr (TplInset pad) n = setNodeInset n pad
 applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
+applyTplAttr (TplHelp src) n = bindStrSource helpProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
