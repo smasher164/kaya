@@ -63,7 +63,7 @@ UISlider's and NSSlider's pages, Compose's slider guide and material3
 release notes, the WinUI Slider class and design page, the Community
 Toolkit RangeSelector page, GtkScale's reference, the GNOME HIG).
 
-| Capability | SwiftUI `Slider` (mac + iOS) | AppKit `NSSlider` | UIKit `UISlider` | Compose material3 1.3.2 | WinUI 3 `Slider` | GTK 4 `GtkScale` |
+| Capability | SwiftUI `Slider` (mac + iOS) | AppKit `NSSlider` | UIKit `UISlider` | Compose material3 1.3.1 (the BOM pin, measured) | WinUI 3 `Slider` | GTK 4 `GtkScale` |
 |---|---|---|---|---|---|---|
 | min/max | `in:` range | `minValue`/`maxValue` | `minimumValue`/`maximumValue` | `valueRange` | `Minimum`/`Maximum` | adjustment lower/upper |
 | step (discrete) | `step:` | `numberOfTickMarks` + `allowsTickMarkValuesOnly` | **none** (apps round) | `steps` = count of INTERIOR stops (range must divide evenly) | `StepFrequency` + `SnapsTo.StepValues` | **none for drags**; `set_increments(step, page)` is keyboard only |
@@ -173,7 +173,7 @@ control is the design and this row is where it starts.
 ### S4 — Vertical (RECOMMEND: defer)
 
 Native on GTK, WinUI and AppKit; absent from SwiftUI's `Slider`, UISlider
-and Compose at 1.3.2 (each is a rotation hack there, which breaks the
+and Compose at 1.3.1 (each is a rotation hack there, which breaks the
 accessibility geometry and the hit box). A video editor's mixer would
 want vertical faders; the timeline editor ruled as the first artifact
 does not. Defer; when it comes, the Apple arm hosts `NSSlider.isVertical`

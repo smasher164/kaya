@@ -400,9 +400,15 @@ in docs/deferred.md.
    `NSApp.currentEvent`. THE TABLE GROWS BY ITSELF: a backend still
    refusing the two props through `depth_stub("sliders")` has no arm to
    hold, and the moment its stub goes the gate demands a row naming that
-   backend's own two events. Five watched negatives, counts printed —
-   the per-movement commit, the missing end, an end that is not final,
-   the pointer read renamed away, and a landed arm with no row),
+   backend's own two events — which happened twice the same day: the GTK
+   row (value-changed settles only while no pointer button is down; the
+   capture-phase ButtonRelease arm commits) and the Compose row
+   (onValueChange with final = false, onValueChangeFinished with true)
+   joined at the breadth merge, and the landed-arm negative now perturbs
+   the TABLE, a census run with a row withheld. Ten watched negatives,
+   counts printed — per backend the per-movement commit, the missing end
+   and an end that is not final, WinUI's pointer read renamed away, and
+   the withheld row),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer
