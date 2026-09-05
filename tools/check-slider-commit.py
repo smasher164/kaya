@@ -125,17 +125,104 @@ def winui_findings(source):
     return out
 
 
-ROWS = {WINUI: winui_findings}
+def call_args(inner):
+    """A call's arguments, the trailing comma rustfmt leaves dropped."""
+    return [a.strip() for a in inner.rstrip().rstrip(",").split(",") if a.strip()]
 
 
-def census(sources):
+def gtk_findings(source):
+    """The GTK arm: value-changed is live while a pointer button is down,
+    and the release — read off the raw event stream, since GtkRange's own
+    gesture claims the sequence (docs/traps.md) — is the commit."""
+    out = []
+    calls = len(re.findall(r"\bslider_committed\(", source))
+    if calls != 3:  # one definition + the value-changed handler + the release
+        out.append(
+            f"{GTK}: slider_committed appears {calls} time(s); the arm is one "
+            f"definition plus exactly two calls — the value-changed handler "
+            f"and the pointer release (set_value drives the scale and lets "
+            f"value-changed run)")
+    moved = block_after(source, "scale.connect_value_changed(move |sc| {")
+    if not moved:
+        out.append(f"{GTK}: no value-changed handler on the scale — the "
+                   f"per-movement arm this gate reads is gone or renamed")
+    else:
+        settled = re.search(r"let settled = (.+?);", moved)
+        call = re.search(r"slider_committed\((.*?)\);", moved, re.S)
+        args = call_args(call.group(1)) if call else []
+        if settled is None or settled.group(1).strip() != "!committed.state.get().dragging":
+            got = settled.group(1).strip() if settled else "no `settled` at all"
+            out.append(
+                f"{GTK}: the value-changed handler settles with `{got}` — a "
+                f"per-movement event is final ONLY when no pointer is driving "
+                f"(!committed.state.get().dragging), or a real drag publishes "
+                f"one value_committed per pixel and no lane can see it")
+        elif not args or args[-1] != "settled":
+            out.append(f"{GTK}: the value-changed handler does not pass "
+                       f"`settled` to slider_committed")
+    release = block_after(source, "pointer.connect_event(move |_, event| {")
+    if not release or "EventType::ButtonRelease" not in release:
+        out.append(
+            f"{GTK}: the scale's capture-phase EventControllerLegacy has no "
+            f"ButtonRelease arm — a GestureClick never sees a scale's release "
+            f"(measured 2026-09-04), so this is the ONLY end a drag has")
+    else:
+        arm = release[release.index("EventType::ButtonRelease"):]
+        call = re.search(r"slider_committed\((.*?)\);", arm, re.S)
+        args = call_args(call.group(1)) if call else []
+        if not args or args[-1] != "true":
+            got = args[-1] if args else "no call at all"
+            out.append(f"{GTK}: the release arm ends the gesture with `{got}` "
+                       f"— the released thumb IS the commit")
+    if "state.dragging = true" not in (release or ""):
+        out.append(f"{GTK}: nothing marks the pointer DOWN on the scale, so "
+                   f"every movement would read as settled")
+    return out
+
+
+def compose_findings(source):
+    """The Compose arm: Material's onValueChange is the live event and
+    onValueChangeFinished the gesture's end; no pointer read is needed,
+    since the toolkit itself tells the two apart."""
+    out = []
+    calls = len(re.findall(r"\bkayaSliderCommitted\(", source))
+    if calls != 4:  # one definition + onValueChange + onValueChangeFinished + set_value
+        out.append(
+            f"{COMPOSE}: kayaSliderCommitted appears {calls} time(s); the arm "
+            f"is one definition plus exactly three calls — onValueChange, "
+            f"onValueChangeFinished and the set_value verb")
+    surface = block_after(source, "private fun KayaSliderSurface(")
+    if not surface:
+        out.append(f"{COMPOSE}: no KayaSliderSurface — the arm this gate "
+                   f"reads is gone or renamed")
+        return out
+    moved = re.search(r"onValueChange = \{ kayaSliderCommitted\((.*?)\) \}", surface, re.S)
+    if moved is None or not moved.group(1).rstrip().endswith("final = false"):
+        got = moved.group(1).strip() if moved else "no call at all"
+        out.append(
+            f"{COMPOSE}: onValueChange commits with `{got}` — a per-movement "
+            f"event is final ONLY when the gesture is over (final = false "
+            f"here), or a real drag publishes one value_committed per pixel")
+    finished = re.search(
+        r"onValueChangeFinished = \{ kayaSliderCommitted\((.*?)\) \}", surface, re.S)
+    if finished is None or not finished.group(1).rstrip().endswith("final = true"):
+        got = finished.group(1).strip() if finished else "no onValueChangeFinished at all"
+        out.append(f"{COMPOSE}: the gesture's end is `{got}` — Material's "
+                   f"onValueChangeFinished IS the commit (final = true)")
+    return out
+
+
+ROWS = {WINUI: winui_findings, GTK: gtk_findings, COMPOSE: compose_findings}
+
+
+def census(sources, rows=ROWS):
     """Every backend with a landed arm answers for its commit rule."""
     out = []
     for path, stub in BACKENDS:
         source = sources[path]
         if re.search(stub, source):
             continue
-        reader = ROWS.get(path)
+        reader = rows.get(path)
         if reader is None:
             out.append(
                 f"{path}: the slider arm has landed (no {stub} left) and this "
@@ -151,9 +238,9 @@ REAL = {path: gate.read(path) for path, _ in BACKENDS}
 gate.counted("backend arms read", len(REAL), floor=3)
 
 
-def watched(label, sources, fragment):
+def watched(label, sources, fragment, rows=ROWS):
     """The negative: the gate's OWN census over doctored input, red demanded."""
-    if not gate.negative(label, lambda: census(sources), want=fragment):
+    if not gate.negative(label, lambda: census(sources, rows), want=fragment):
         return
     print(f"check-slider-commit: watched refusing: {label}")
 
@@ -192,13 +279,46 @@ watched("a WinUI arm whose pointer read was renamed away",
         {**REAL, WINUI: no_reader}, "pointer_button_down() is gone")
 
 # 5. A BACKEND THAT LANDED ITS ARM AND NEVER JOINED THIS TABLE — the
-#    self-maintaining half, watched on the backend whose arm is the next
-#    to land.
-landed = gate.doctor(
-    "the gtk stub removal", REAL[GTK],
-    r'crate::depth_stub\("sliders"\)', "()")
-watched("a GTK slider arm with no row in this gate",
-        {**REAL, GTK: landed}, "this gate has no row for it")
+#    self-maintaining half: every stub is gone now, so the table itself is
+#    the thing perturbed.
+watched("a GTK slider arm with no row in this gate", REAL,
+        "this gate has no row for it", rows={WINUI: winui_findings, COMPOSE: compose_findings})
+
+# 6. GTK: EVERY MOVEMENT SETTLES — the pointer read replaced by a constant.
+gtk_always = gate.doctor(
+    "the gtk per-movement settle", REAL[GTK],
+    r"let settled = !committed\.state\.get\(\)\.dragging;", "let settled = true;")
+watched("a GTK arm settling on every drag movement",
+        {**REAL, GTK: gtk_always}, "final ONLY when no pointer is driving")
+
+# 7. GTK: THE RELEASE STOPS ENDING.
+gtk_soft = gate.doctor(
+    "the gtk non-final release", REAL[GTK],
+    r"committed\.scale\.value\(\),\n(\s+)true,", r"committed.scale.value(),\n\1false,")
+watched("a GTK release that publishes nothing",
+        {**REAL, GTK: gtk_soft}, "ends the gesture with `false`")
+
+# 8. GTK: NO RELEASE ARM AT ALL.
+gtk_no_release = gate.doctor(
+    "the gtk release arm removal", REAL[GTK],
+    r"gdk::EventType::ButtonRelease\n", "gdk::EventType::Scroll\n")
+watched("a GTK scale whose controller never sees the release",
+        {**REAL, GTK: gtk_no_release}, "no\nButtonRelease arm".replace("\n", " "))
+
+# 9. COMPOSE: THE MOVEMENT COMMITS.
+compose_always = gate.doctor(
+    "the compose per-movement commit", REAL[COMPOSE],
+    r"onValueChange = \{ kayaSliderCommitted\(node, it\.toDouble\(\), final = false\) \}",
+    "onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = true) }")
+watched("a Compose arm committing on every drag movement",
+        {**REAL, COMPOSE: compose_always}, "final ONLY when the gesture is over")
+
+# 10. COMPOSE: THE GESTURE HAS NO END.
+compose_no_end = gate.doctor(
+    "the compose finished-callback removal", REAL[COMPOSE],
+    r"onValueChangeFinished = \{", "onValueChangeStarted = {")
+watched("a Compose slider with no onValueChangeFinished",
+        {**REAL, COMPOSE: compose_no_end}, "no onValueChangeFinished at all")
 
 for line in census(REAL):
     gate.finding(line)
