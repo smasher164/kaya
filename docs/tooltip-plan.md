@@ -140,3 +140,11 @@ android rosters, the matrix.
   own field and addresses them by index, the a11yrows scene's shape.
 - The authored hint wins over `.help` on the Mac when `.help` is applied
   first (measured on button#1 the same day: T3's ordering holds).
+- WinUI's tooltip drew above the pointer on the VM (2026-09-05) only when
+  the pointer MOVED through the input queue (`mouse_event` relative moves
+  onto the Save button): a bare `SetCursorPos` teleport gave the Slider no
+  PointerEntered and no bubble came. Centred above the pointer and not
+  constrained by the window, the bubble ran past the window's left edge on
+  a window parked at the screen's edge, exactly as the WinUI design page
+  says it may. The Mac's bubble is not captured: a hover there drives the
+  maintainer's live pointer, which only the walled drag driver may do.
