@@ -520,8 +520,13 @@ own trigger (the bookmark/persistence bullet's RECENT FILES trigger,
 docs/editor-plan.md §3, is now one the shipped editor can fire).
 The SECOND forcing artifact was the PORTFOLIO (guests/python/
 portfolio.py), which drove tables, canvas, adaptive layout and the
-grouped iOS tier through 2026-08-30. The section remains the roadmap
-list, in rough priority order; chat / todo / media stay unpicked.
+grouped iOS tier through 2026-08-30. The THIRD is the VIDEO EDITOR
+(Akhil, 2026-09-02, in Rust; design pass docs/video-editor-plan.md),
+named to force drag and drop and sliders — both shipped, 2026-09-03
+and 2026-09-04, with the pickers and tooltips beside them — and still
+forcing its own build and the `video` kind. The section remains the
+roadmap list, in rough priority order; chat / todo / media stay
+unpicked.
 
 - ~~**Clipboard**~~ — COMPLETE 2026-08-04: all five backends, all
   eight bindings, every lane green in the full matrix (mac 232, linux
@@ -1192,8 +1197,9 @@ list, in rough priority order; chat / todo / media stay unpicked.
   shape expires when the platform moves; triggers naming a platform
   capability need a re-read date, not just an artifact.
 
-- **The iPad menu bar's gate is OWED, and the accessibility milestone
-  pays it** (2026-07-25). The lowering LANDED and is confirmed working
+- **The iPad menu bar's gate is OWED, ~~and the accessibility milestone
+  pays it~~ — and nothing can pay it yet: a RE-READ ITEM, not scheduled
+  work (see WHAT IS ACTUALLY LEFT below)** (2026-07-25). The lowering LANDED and is confirmed working
   — visually, on an iPad Pro simulator: swipe down and the kaya catalog
   is there in the system menu bar. What is missing is an automated
   observation, and the reason is structural, measured, not assumed:
@@ -1436,8 +1442,11 @@ list, in rough priority order; chat / todo / media stay unpicked.
     which every platform already exposes and expects apps to fill.
     Slots may take per-platform VALUES; the vocabulary stays uniform.
     What remains open under this heading, each a design pass:
-    - The exact slot list and the four lowerings per slot. Carry the
-      WinUI trap into the lowering: `SystemAccentColor` is NOT
+        - ~~The exact slot list and the four lowerings per slot.~~ — LANDED
+      as docs/styling-plan.md's slices: the accent 2026-08-12
+      (`55f1873`), icons 2026-08-16 (`c94da13`), the typeface in slice
+      2b, and the WinUI trap below became tools/check-accent.py. As
+      filed: carry the WinUI trap into the lowering: `SystemAccentColor` is NOT
       overridable (microsoft-ui-xaml#6394) — override the derived
       `AccentFillColorDefaultBrush` family in `ThemeDictionaries`.
       A lowering that sets `SystemAccentColor` compiles, runs, and is
@@ -1497,7 +1506,10 @@ list, in rough priority order; chat / todo / media stay unpicked.
     both ways. Still open, trigger-gated: hints on the adjustable and
     editable kinds (slider, entry, textarea), whose Android route is a
     different action's label.
-  - **Video widget**: unexamined — DESIGN has the surface-handle
+    - **Video widget**: designed 2026-09-03 in docs/video-editor-plan.md
+    (the `video` kind, each platform's headless player decoding while
+    kaya presents the frames; §7's nine rulings), unbuilt. As filed:
+    unexamined — DESIGN has the surface-handle
     transport (~~the Canvas zero-copy arm~~ the pixel-handoff arm; the
     canvas widget stopped being that on 2026-08-26, docs/canvas-plan.md
     §1.4) but no media-playback
@@ -1742,11 +1754,12 @@ list, in rough priority order; chat / todo / media stay unpicked.
 - **The system-integration floor** (from the survey; the editor
   triggers the first three). Four surfaces, native on every platform,
   none previously in this ledger, and collectively what separates a
-  demo from an app. HALF OF IT IS BUILT: file dialogs landed open
-  2026-07-31 and save 2026-08-10, and the clipboard is checked off at
-  the top of this file — so what this entry still holds open is
-  NOTIFICATIONS and DRAG AND DROP, neither of which the spec mentions
-  today, plus printing behind them. The survey's framing follows
+  demo from an app. THREE OF THE FOUR ARE BUILT: file dialogs landed open
+  2026-07-31 and save 2026-08-10, the clipboard is checked off at the
+  top of this file, and drag and drop shipped 2026-09-03 (`0ed93441`;
+  the record is at the end of this entry and in docs/dnd-plan.md) — so
+  what this entry still holds open is NOTIFICATIONS, which the spec
+  does not mention today, plus printing behind it. The survey's framing follows
   unchanged, because the ordering argument is what the entry is for.
   In the order real apps need them: **file dialogs**
   — NOT a widget, a presentation context returning a result. RATIFIED
@@ -1928,9 +1941,18 @@ list, in rough priority order; chat / todo / media stay unpicked.
   the element proxy) — flagged, undesigned; wait for a motivating
   scene.
 - Portal (platform overlays; protocol + backend work).
-- OCaml effect-handler ambience (true Python-style ambient
+- ~~OCaml effect-handler ambience (true Python-style ambient
   transactions; runtime-only scoping errors — OCaml has no effect
-  typing).
+  typing).~~ — CLOSED, NOT NEEDED (ruled with the 2026-07-22 ambient
+  spelling; written down 2026-09-05, when the maintainer noticed the
+  headline still standing): OCaml's transaction is already ambient —
+  bindings/ocaml/kaya_app.ml's `ambient_tx` is a global ref set for the
+  extent of `build` and of every handler, refused outside it by
+  sentence and refused off the app thread by the rule the handle
+  bindings check at their chokepoint — so an effect handler would carry
+  the same ref through a second mechanism, and OCaml 5's effects are
+  untyped, so the scoping error it was hoped to move to compile time
+  would stay a runtime one either way.
 - Binding-maintained mirrors (todos-iterable style shadow state).
 - Navigation sugar remainder from the nav breadth slice: (1)
   pop_to_root/pop(n) sugar + the binding stack mirrors it needs;
@@ -2272,12 +2294,16 @@ reach.
   a 180s stop at step one is a startup deadlock, not a slow scene.
 
 
-- **Undo follow-ups carried out of the depth slice (2026-08-04).**
+- ~~**Undo follow-ups carried out of the depth slice (2026-08-04).**~~
   CLOSED 2026-08-05 by the completion pass, which took all of them in
   one slice rather than accumulating stages. One is a ratification the
   maintainer owns and is stated as a proposal, not a change; the rest
   are done or answered from evidence. Commit forthcoming; the working
-  record is docs/probes/undo-completion.md.
+  record is docs/probes/undo-completion.md. Two items below keep their
+  own standing and are not this entry's work: the core never prunes
+  `self.widgets` (a harmless leak whose trigger is a long-running app
+  that opens and closes windows) and the tier question's one gate
+  clause.
   - ~~**A fully-undone episode is not redoable.**~~ **FIXED.** A walk
     that reaches the run's start now CLOSES the episode and pushes it
     onto the redo side (`Scene::note_native_undo`), so it redoes through
@@ -2814,7 +2840,13 @@ reach.
   load. The class fix is structural; the missing gate is a scene (or
   an entry-scene opening step) that focuses at mount and asserts
   expect_focused, proving the deferral on all platforms.
-- resize_window harness verb — the VERB LANDED with the form-factor
+- ~~resize_window harness verb~~ — CLOSED 2026-09-05 on a re-read: the
+  geometry half this entry held open is a matrix fact now —
+  tools/scenes/portfolio.steps re-asserts `expect_fills` after
+  `resize_window`, panes.steps `expect_panes` and adaptive.steps
+  `expect_axis`, each across a real resize on every desktop lane.
+  WinUI's interactive-resize flicker stays a platform note: keep
+  WinAppSDK current. As filed: the VERB LANDED with the form-factor
   milestone: `split.steps` drives three REAL resizes and re-asserts the
   presentation on the far side, on all three desktop lanes. WHAT IS
   STILL OWED is narrower than this entry used to claim (corrected
@@ -2859,7 +2891,14 @@ reach.
   separate kind); signal-bound OPTION LABELS work today (label text
   binding fans out to the rows), but signal-bound option LISTS
   (dynamic add) are append-only via add_child with no remove.
-- Canvas widget (Akhil, 2026-07-22; post-style-guide, before webview):
+- ~~Canvas widget (Akhil, 2026-07-22; post-style-guide, before webview)~~
+  — LANDED 2026-08-27 (`e3db8fee`, the depth slice: the spec's fifteenth
+  kind, kaya's own op vocabulary on the wire and a tiny-skia raster in
+  the core that every backend BLITS — not the display-list replay filed
+  below; docs/canvas-plan.md §1.1 and tools/check-canvas-blit.py hold
+  the rule), every backend the same day (`ee7bc41d`), the size policy
+  and the eight-binding wave 2026-08-28 (`514b6d19`); the `canvas-*`
+  and `canvasdark-*` legs run on all five lanes. As filed:
   a drawing surface. The viable shape is a DISPLAY LIST — the guest
   transmits drawing commands (paths, fills, strokes, transforms, text
   runs) as data; core retains it as a prop; ~~backends replay it into
@@ -3415,9 +3454,15 @@ reach.
   by hand — and no other member of that vocabulary means 1:1 either, so
   the canvas widget is kaya's own `KayaCanvas` now (docs/canvas-plan.md
   §3.2.1's GTK note).
-- **THE SIZE POLICY IS A DEPTH SLICE (2026-08-27)** — spec, core, the
-  Rust binding, the SwiftUI mac arm, the GTK arm (2026-08-28) and
-  tools/scenes/sizepolicy.steps are in; nothing else is.
+- ~~**THE SIZE POLICY IS A DEPTH SLICE (2026-08-27)**~~ — LANDED
+  2026-08-28 on every backend and in all eight bindings (`514b6d19`;
+  every stub and the java leg are struck below). Two items survive on
+  their own standing, each stated below with its trigger: the
+  template-zone canvas stays refused by name, and the non-harness frame
+  drive waits for its ruled artifact, a real 60fps animation. As filed:
+  spec, core, the Rust binding, the SwiftUI mac arm, the GTK arm
+  (2026-08-28) and tools/scenes/sizepolicy.steps are in; nothing else
+  is.
   THE BINDINGS WAVE LANDED 2026-08-28 and closes the seven-binding half:
   every binding spells the three declarations in its own idiom (Rust,
   Go, C#, Java, Swift chain them; Python takes keywords on `canvas`,
@@ -3659,7 +3704,12 @@ reach.
   two Apple targets plus 25 live mac legs and the iOS suite. The
   value would be backend×language matrix breadth, not new surface
   proof; take it only if a real swift-on-linux/windows user appears.
-- Node.js guest (the roster's first async surface): Node first;
+- ~~Node.js guest (the roster's first async surface)~~ — LANDED
+  2026-09-01 as the ninth binding (`913512aa`; its four sugar shapes
+  `6a8b340e`, the Windows lane `f9946a54`), in this bullet's own shape:
+  an N-API addon, the main thread in kaya_run, the app in a worker;
+  desktop only by the 2026-09-03 ruling (docs/js-plan.md §5). As filed:
+  Node first;
   function-floor tier via N-API (V8 pointer compression forbids
   external ArrayBuffers over native memory — no direct ring);
   main thread blocks in kaya_run, app logic in a worker; layer 3 wants
