@@ -10700,6 +10700,23 @@ drag box reads the same on two consecutive frames (`kayaAwaitSettledBox`,
 10s, the box and the frame count printed) before it plans the gesture. The
 next matrix reads that remedy. Green alone the same hour, twice.
 
+SIXTH SIGHTING, 2026-09-05, the tooltips tree's fourth matrix, on the JVM
+host (`dnd-jvm`), and the remedy above is READ: every destination box
+printed `settled after 1 frame(s)` — the stale-arrangement cause is closed.
+What was left is the platform drag itself under a loaded emulator, in two
+shapes the instrument now separates: (a) `drag label#0 to label@item[x]`
+with a settled 7-px-wide box (`[32, 64, 7, 16]`) ended `op=0 entered=0` —
+the injected gesture entered NO target at all; and (b) a drag whose drop
+was TAKEN (`drop node=7 … taken=true`) ended with `dropped=1 ended=false`
+after 20s — the system's ACTION_DRAG_ENDED never reached the app. Neither
+is a box the verb aimed wrong; both are the emulator's drag session under
+host contention (five lanes, the android lane's own pool of four). Green
+alone the same hour (ALL PASS 135). Left open: on the next sighting,
+compare the injected endpoint against the settled box in the same log
+line (the runner prints the injection beside these already) and consider a
+longer `input draganddrop` duration under load, since (a) is consistent
+with the system compressing the gesture's moves past a tiny target.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 
