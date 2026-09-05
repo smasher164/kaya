@@ -243,6 +243,11 @@ executable pickers
   main-is: pickers.hs
   build-depends: kaya-guests, time
 
+executable sliders
+  import: shared
+  main-is: sliders.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

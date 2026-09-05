@@ -387,6 +387,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.TimePicker(r.t, f, onTime)")
 	w("}")
 	w("")
+	w("func (r %sRow) Slider(min, max float64, f kaya.Field[float64], onChange func(*kaya.Tx, %s, float64)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.Slider(r.t, min, max, f, onChange)")
+	w("}")
+	w("")
 	// THE PROPS, on the same surface as the constructors that hand out
 	// the nodes they take. Without them this surface — the one a record
 	// guest actually writes — could give a stamped copy no a11y name and
@@ -398,6 +402,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("// the sourced ones through the typed collection, as the constructors")
 	w("// above do.")
 	w("func (r %sRow) SetGrow(n kaya.Node, weight float64) { r.t.SetGrow(n, weight) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetStep(n kaya.Node, step float64) { r.t.SetStep(n, step) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetTickSpacing(n kaya.Node, spacing float64) { r.t.SetTickSpacing(n, spacing) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
 	w("")

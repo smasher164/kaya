@@ -27,12 +27,12 @@ SCENES = [
     "select", "radio", "grid", "textarea", "sections", "menus",
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
-    "assets", "sizepolicy", "adaptive", "pickers",
+    "assets", "sizepolicy", "adaptive", "pickers", "sliders",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "sliders"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -147,7 +147,7 @@ ORDER = [
     ("drain",),
     ("dnd", LANGS),
     ("pickers", LANGS),
-    ("sliders", ("rust",)),
+    ("sliders", LANGS),
     ("drain",),
     ("dark_leg",),
     ("drain",),

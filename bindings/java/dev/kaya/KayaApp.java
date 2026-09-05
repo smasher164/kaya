@@ -270,6 +270,8 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     private final Map<Long, ValueHandler> nodeValues = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Double>> widgetCommits = new HashMap<>();
+    private final Map<Long, ValueHandler> nodeCommits = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, LocalDate>> widgetDates = new HashMap<>();
     private final Map<Long, DateHandler> nodeDates = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, LocalTime>> widgetTimes = new HashMap<>();
@@ -2457,6 +2459,36 @@ public final class KayaApp {
         }
 
         /**
+         * The granularity this slider's thumb rests on: min + k * step
+         * (docs/slider-plan.md S1). It divides the range evenly; 0 is
+         * continuous, the default.
+         */
+        public Widget step(double step) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: step on a widget outside its build transaction"
+                    + " — a slider's step is declared where the slider is built");
+            }
+            tx.emit(KayaWire.txSetStep(id, step));
+            return this;
+        }
+
+        /**
+         * The distance between this slider's drawn ticks, in value units
+         * (docs/slider-plan.md S5): it divides the range evenly and is a
+         * multiple of the step when one is declared; 0 draws none.
+         */
+        public Widget tickSpacing(double spacing) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: tickSpacing on a widget outside its build transaction"
+                    + " — a slider's ticks are declared where the slider is built");
+            }
+            tx.emit(KayaWire.txSetTickSpacing(id, spacing));
+            return this;
+        }
+
+        /**
          * THIS CANVAS'S DRAWING IS A FUNCTION OF ITS SIZE: the core
          * hands it the size layout assigned and takes back what
          * {@code f} draws for it, which becomes its viewbox
@@ -2944,6 +2976,17 @@ public final class KayaApp {
          * rather than a chain ({@link Tpl#setGrow}). */
         public void setGrow(Node n, double weight) {
             t.setGrow(n, weight);
+        }
+
+        /** This row's copy of that slider's granularity (Tpl.setStep). */
+        public void setStep(Node n, double step) {
+            t.setStep(n, step);
+        }
+
+        /** This row's copy of that slider's tick spacing
+         * (Tpl.setTickSpacing). */
+        public void setTickSpacing(Node n, double spacing) {
+            t.setTickSpacing(n, spacing);
         }
 
         /** What this row's copy of that node MEANS — semantic emphasis,
@@ -4922,6 +4965,18 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetGrow(n.id, weight));
         }
 
+        /** A stamped slider's granularity (docs/slider-plan.md S1):
+         * constant across the copies, like the range. */
+        public void setStep(Node n, double step) {
+            tx.emit(KayaWire.txSetStep(n.id, step));
+        }
+
+        /** A stamped slider's tick spacing (docs/slider-plan.md S5),
+         * constant for setStep's reason. */
+        public void setTickSpacing(Node n, double spacing) {
+            tx.emit(KayaWire.txSetTickSpacing(n.id, spacing));
+        }
+
         /**
          * What a stamped copy MEANS — semantic emphasis, never
          * appearance. A CONSTANT, not a source, for
@@ -5868,6 +5923,23 @@ public final class KayaApp {
     }
 
     /**
+     * Register a handler for the value a live slider's gesture SETTLED
+     * ON — once per release or key move, after that gesture's
+     * onValueChanged moves (docs/slider-plan.md S2).
+     */
+    public void onValueCommitted(Widget w, BiConsumer<Tx, Double> handler) {
+        widgetCommits.put(w.id, handler);
+    }
+
+    /**
+     * Register a settled-value handler for a template slider; it also
+     * receives the stamped copy's keys, outermost first.
+     */
+    public void onValueCommitted(Node n, ValueHandler handler) {
+        nodeCommits.put(n.id, handler);
+    }
+
+    /**
      * Register a pick handler for a live date picker: the control owns
      * its value and reports each COMMITTED pick here; a programmatic
      * write never echoes (docs/datetime-plan.md D7).
@@ -6142,6 +6214,20 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_VALUE_CHANGED) {
                 ValueHandler handler = nodeValues.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, (Double) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_VALUE_COMMITTED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Double> handler = widgetCommits.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, (Double) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_VALUE_COMMITTED) {
+                ValueHandler handler = nodeCommits.get(occ.id);
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, (Double) occ.payload);

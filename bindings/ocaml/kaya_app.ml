@@ -219,6 +219,10 @@ type app = {
   (* A stamped slider's move and a stamped choice's pick, the node flavor of
      [widget_values]. *)
   node_values : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
+  (* A slider gesture's SETTLED value, live and stamped
+     (docs/slider-plan.md S2). *)
+  widget_commits : (int64, float -> unit) Hashtbl.t;
+  node_commits : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
   model : (int64, instance list) Hashtbl.t;
   (* The minter's counters, keyed by path the way [model] is. Kept on the
      app and NOT in the transaction's rollback journal, on purpose: the
@@ -337,6 +341,8 @@ let create () =
     redone_handlers = Hashtbl.create 4;
     node_toggles = Hashtbl.create 8;
     node_values = Hashtbl.create 8;
+    widget_commits = Hashtbl.create 8;
+    node_commits = Hashtbl.create 8;
     model = Hashtbl.create 8;
     fresh = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -908,8 +914,8 @@ let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(value =
 (* A slider over min..max at value. Uncontrolled, like the entry: the bar
    owns its position and reports each change to [on_change] (the new value
    as a float). *)
-let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind
-    ?on_change () =
+let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?step ?tick_spacing ?bind
+    ?on_change ?on_commit () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_slider in
   Option.iter (fun g -> set_grow w g) grow;
@@ -917,11 +923,16 @@ let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?(min = 0.0
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
   emit tx (Kaya_wire.tx_set_max id max);
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_step id v)) step;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_tick_spacing id v)) tick_spacing;
   (match bind with
   | Some (Signal s) -> emit tx (Kaya_wire.tx_bind_value id s)
   | None -> emit tx (Kaya_wire.tx_set_value id value));
   (match on_change with
   | Some handler -> Hashtbl.replace tx.app.widget_values id handler
+  | None -> ());
+  (match on_commit with
+  | Some handler -> Hashtbl.replace tx.app.widget_commits id handler
   | None -> ());
   w
 
@@ -2547,6 +2558,10 @@ module Tpl = struct
     let set_value (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_value id v)
     let set_min (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_min id v)
     let set_max (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_max id v)
+    let set_step (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_step id v)
+
+    let set_tick_spacing (Node id) v =
+      emit (the_tx ()) (Kaya_wire.tx_set_tick_spacing id v)
 
     let set_indeterminate (Node id) on =
       emit (the_tx ()) (Kaya_wire.tx_set_indeterminate id on)
@@ -2936,14 +2951,17 @@ module Tpl = struct
   (* A slider per stamped copy, over [~min]..[~max] at a position from any
      of the three sources. *)
   let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(min = 0.0) ?(max = 1.0) ?value ?bind
-      ?bind_field ?(level = 0) ?(a11y_level = level) ?on_change () =
+      ?a11y_label_bind ?a11y_label_field ?(min = 0.0) ?(max = 1.0) ?value ?step
+      ?tick_spacing ?bind ?bind_field ?(level = 0) ?(a11y_level = level)
+      ?on_change ?on_commit () =
     let n = Floor.widget Kaya_wire.kind_slider in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
     Floor.set_min n min;
     Floor.set_max n max;
+    Option.iter (fun v -> Floor.set_step n v) step;
+    Option.iter (fun v -> Floor.set_tick_spacing n v) tick_spacing;
     Option.iter (fun v -> Floor.set_value n v) value;
     Option.iter (fun s -> Floor.bind_value n s) bind;
     Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
@@ -2951,6 +2969,11 @@ module Tpl = struct
     | Some handler ->
         let (Node id) = n in
         Hashtbl.replace (the_tx ()).app.node_values id handler
+    | None -> ());
+    (match on_commit with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_commits id handler
     | None -> ());
     n
 
@@ -3289,6 +3312,16 @@ let on_value_changed_node app (Node id)
     (handler : Kaya_wire.value list -> float -> unit) =
   Hashtbl.replace app.node_values id handler
 
+(* The value a live slider's gesture SETTLED ON — once per release or key
+   move, after that gesture's moves (docs/slider-plan.md S2). *)
+let on_value_committed app (Widget id) (handler : float -> unit) =
+  Hashtbl.replace app.widget_commits id handler
+
+(* A stamped slider's settled value, the copy's keys first. *)
+let on_value_committed_node app (Node id)
+    (handler : Kaya_wire.value list -> float -> unit) =
+  Hashtbl.replace app.node_commits id handler
+
 (* Register a pick handler for a live date picker: the control owns its
    value and reports each COMMITTED pick here; a programmatic write never
    echoes (docs/datetime-plan.md D7). *)
@@ -3573,6 +3606,17 @@ let dispatch_loop app =
                | None -> ())
            | Some (Kaya_wire.F64 v), keys ->
                (match Hashtbl.find_opt app.node_values id with
+               | Some handler -> dispatch app (fun () -> handler keys v)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_value_committed then
+           match (payload, keys) with
+           | Some (Kaya_wire.F64 v), [] ->
+               (match Hashtbl.find_opt app.widget_commits id with
+               | Some handler -> dispatch app (fun () -> handler v)
+               | None -> ())
+           | Some (Kaya_wire.F64 v), keys ->
+               (match Hashtbl.find_opt app.node_commits id with
                | Some handler -> dispatch app (fun () -> handler keys v)
                | None -> ())
            | _ -> ()

@@ -752,6 +752,167 @@ if policy_fake != 9:
                   f"({policy_fake}/9 size-policy handler patterns "
                   f"fired for a handler that exists nowhere)")
 
+# --- THE SLIDER SURFACE, all nine (docs/slider-plan.md S1, S2, S5) ---
+# The kind sweep sees the CONSTRUCTOR and the window-prop sweep sees
+# neither of these, so both are blind to what props 24/25 and occurrence
+# 26 reach every binding with through the generator: TWO NUMBERS in BOTH
+# ZONES — `step`, the lattice the thumb rests on, and `tick_spacing`,
+# what is drawn — and the COMMITTED value beside the live one. A binding
+# with the props and no commit handler writes the model on every pixel of
+# a drag, which is the thing S2 exists to stop, and no scene can see the
+# difference on a backend whose gesture emits both.
+#
+# Each rides where the binding's OWN convention rides (the 2026-08-24
+# ruling): the props chained on Go's and Java's widgets, optional
+# arguments on C#'s and Swift's constructors, keywords on Python's and
+# JS's, labelled on OCaml's, GADT attributes on Haskell's; the commit
+# handler co-located where the binding's `on_change` is and registered in
+# the registry family. THE ZONES ARE READ APART: C#'s and Swift's
+# template overloads are told from the live one by their handler's key
+# list and by `KayaField`, OCaml's template `slider` by its two-space
+# indent inside `module Tpl`, and Python's and JS's ONE constructor
+# answers for both zones as it does for every other kind.
+def want_slider(lang, rel, what, pattern, findings=None):
+    global status
+    if not grep_file(pattern, rel):
+        msg = (f"check-sugar-surface: {lang} has no sugar for the "
+               f"slider's '{what}' (wanted /{pattern}/ in {rel})")
+        if findings is None:
+            print(msg)
+            status = 1
+        else:
+            findings.append(msg)
+
+
+SLIDER_FILES = {
+    "rust": "crates/kaya/src/app.rs",
+    "python": "bindings/python/kaya/__init__.py",
+    "go": "bindings/go/app.go",
+    "csharp": "bindings/csharp/KayaApp.cs",
+    "java": "bindings/java/dev/kaya/KayaApp.java",
+    "swift": "bindings/swift/KayaApp.swift",
+    "haskell": "bindings/haskell/KayaApp.hs",
+    "ocaml": "bindings/ocaml/kaya_app.ml",
+    "js": "bindings/js/kaya/index.ts",
+}
+
+
+def check_slider_prop(snake, pascal, camel, findings=None):
+    F = SLIDER_FILES
+    want_slider("rust-live", F["rust"], snake,
+                rf"pub fn {snake}\(self, [a-z_]+: f64\) -> Self", findings)
+    want_slider("rust-tpl", F["rust"], snake,
+                rf"pub fn {snake}\(&mut self, node: TemplateNodeId, "
+                rf"[a-z_]+: f64\)", findings)
+    # ONE constructor, both zones — the ambient bindings' shape. Keyed on
+    # the keyword INSIDE the signature, which `[^)]*` reaches across the
+    # line break python wraps it at.
+    want_slider("python", F["python"], snake,
+                rf"def slider\([^)]*{snake}=None", findings)
+    want_slider("go-live", F["go"], snake,
+                rf"func \(w Widget\) {pascal}\([a-z]+ float64\) Widget",
+                findings)
+    want_slider("go-tpl", F["go"], snake,
+                rf"func \(t \*Tpl\) Set{pascal}\(n Node, [a-z]+ float64\)",
+                findings)
+    want_slider("csharp-live", F["csharp"], snake,
+                rf"public Widget Slider\([^)]*{camel} = null", findings)
+    want_slider("csharp-tpl", F["csharp"], snake,
+                rf"public Node Slider\([^)]*{camel} = null", findings)
+    want_slider("java-live", F["java"], snake,
+                rf"public Widget {camel}\(double [a-z]+\)", findings)
+    want_slider("java-tpl", F["java"], snake,
+                rf"public void set{pascal}\(Node n, double [a-z]+\)",
+                findings)
+    # THE ZONE IS THE VALUE'S TYPE in Swift: only the live constructor
+    # defaults `value` and only the template zone binds a KayaField.
+    want_slider("swift-live", F["swift"], snake,
+                rf"value: Double = 0\.0,\n *[^\n]*{camel}: Double\? = nil",
+                findings)
+    want_slider("swift-tpl", F["swift"], snake,
+                rf"value f: KayaField<Double>,\n *[^\n]*{camel}: "
+                rf"Double\? = nil", findings)
+    want_slider("ocaml-live", F["ocaml"], snake,
+                rf"^let slider [^\n]*\?{snake}\b", findings)
+    # The template zone's is `module Tpl`'s, two spaces in; the bound
+    # window is the signature's own, so a body cannot answer for it.
+    want_slider("ocaml-tpl", F["ocaml"], snake,
+                rf"^  let slider [\s\S]{{0,400}}?\?{snake}\b", findings)
+    want_slider("haskell-live", F["haskell"], snake,
+                rf"^  {pascal} :: Double -> Attr 'LeafW", findings)
+    want_slider("haskell-tpl", F["haskell"], snake,
+                rf"^  Tpl{pascal} :: Double -> TplAttr", findings)
+    want_slider("js", F["js"], snake,
+                rf"SliderOptions = .*{camel}\?:", findings)
+
+
+check_slider_prop("step", "Step", "step")
+check_slider_prop("tick_spacing", "TickSpacing", "tickSpacing")
+
+
+def check_slider_commit(snake, pascal, camel, ml, findings=None):
+    F = SLIDER_FILES
+    js_camel = kind_case(snake)[2]
+    want_slider("rust-live", F["rust"], snake,
+                rf"pub fn {snake}\(&self, w: WidgetId", findings)
+    want_slider("rust-tpl", F["rust"], snake,
+                rf"pub fn {snake}_node\(&self, n: TemplateNodeId", findings)
+    want_slider("python", F["python"], snake,
+                rf"def slider\([^)]*{snake}=None", findings)
+    want_slider("go-live", F["go"], snake,
+                rf"func \(a \*App\) {pascal}\(w Widget", findings)
+    want_slider("go-tpl", F["go"], snake,
+                rf"func \(a \*App\) {pascal}Node\(n Node", findings)
+    want_slider("csharp-live", F["csharp"], snake,
+                rf"public void {pascal}\(Widget w", findings)
+    want_slider("csharp-tpl", F["csharp"], snake,
+                rf"public void {pascal}\(Node n", findings)
+    want_slider("java-live", F["java"], snake,
+                rf"public void {camel}\(Widget w", findings)
+    want_slider("java-tpl", F["java"], snake,
+                rf"public void {camel}\(Node n", findings)
+    want_slider("swift-live", F["swift"], snake,
+                rf"func {camel}\(_ w: KayaWidget", findings)
+    want_slider("swift-tpl", F["swift"], snake,
+                rf"func {camel}\(\n *_ n: KayaNodeHandle", findings)
+    want_slider("ocaml-live", F["ocaml"], snake,
+                rf"^let {ml} app \(Widget id\)", findings)
+    want_slider("ocaml-tpl", F["ocaml"], snake,
+                rf"^let {ml}_node app \(Node id\)", findings)
+    # ONE class method spanning both zones, the table clause's shape:
+    # `Keyed e` is what makes the Node instance hand the keys over.
+    want_slider("haskell", F["haskell"], snake,
+                rf"^  {camel} :: App -> e -> Keyed e \(Double -> IO "
+                rf"\(\)\) -> IO \(\)", findings)
+    want_slider("js", F["js"], snake,
+                rf"SliderOptions = .*{js_camel}\?:", findings)
+
+
+check_slider_commit("on_commit", "OnValueCommitted", "onValueCommitted",
+                    "on_value_committed")
+
+# THEIR BUILT-IN NEGATIVE TESTS, the table and size-policy discipline: a
+# pattern that can only pass is a pattern nobody notices has rotted.
+fake = []
+check_slider_prop("kaya_fake_knob", "KayaFakeKnob", "kayaFakeKnob",
+                  findings=fake)
+slider_fake = sum(1 for m in fake if "has no sugar for the slider's" in m)
+if slider_fake != 16:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({slider_fake}/16 slider-prop patterns fired for a "
+                  f"prop that exists nowhere)")
+fake = []
+check_slider_commit("on_kaya_fake", "OnKayaFake", "onKayaFake",
+                    "on_kaya_fake", findings=fake)
+slider_commit_fake = sum(1 for m in fake
+                         if "has no sugar for the slider's" in m)
+if slider_commit_fake != 15:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({slider_commit_fake}/15 slider-commit patterns fired "
+                  f"for a handler that exists nowhere)")
+print(f"check-sugar-surface: slider surface watched: prop fake "
+      f"{slider_fake}/16, commit fake {slider_commit_fake}/15")
+
 # --- (c2f) THE DND SURFACE, all nine (docs/dnd-plan.md §4) ----------
 # Neither a KIND nor a WINDOW PROP, so both sweeps above are blind to it
 # while TX 49/50/51 and occurrences 22/23 reach every binding through the
@@ -2862,7 +3023,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 4")
+        if n == 1 else src, n, "typed-row reader found only 5")
     return "\n".join(lines)
 
 

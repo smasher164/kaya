@@ -3105,15 +3105,25 @@ def radio(options, selected=0, on_select=None, grow=None):
     return handle
 
 
-def slider(value=None, min=None, max=None, on_change=None, grow=None):
+def slider(value=None, min=None, max=None, step=None, tick_spacing=None,
+           on_change=None, on_commit=None, grow=None):
     """A slider over a numeric range. UNCONTROLLED: the widget owns its
-    position and reports each change to `on_change`, template copies
-    getting the stamped keys first. `min`/`max` default to 0..1."""
+    position and reports each change to `on_change` and each settled
+    gesture to `on_commit`, template copies getting the stamped keys
+    first. `min`/`max` default to 0..1. `step` is the granularity the
+    thumb rests on and `tick_spacing` the distance between drawn ticks,
+    in value units (docs/slider-plan.md S1, S5); each divides the range
+    evenly and the spacing is a multiple of the step."""
     handle = _widget(wire.KIND_SLIDER)
     if min is not None:
         _records().append(wire.tx_set_min(handle.id, min))
     if max is not None:
         _records().append(wire.tx_set_max(handle.id, max))
+    if step is not None:
+        _records().append(wire.tx_set_step(handle.id, float(step)))
+    if tick_spacing is not None:
+        _records().append(
+            wire.tx_set_tick_spacing(handle.id, float(tick_spacing)))
     if value is not None:
         if isinstance(value, Signal):
             _records().append(wire.tx_bind_value(handle.id, value.id))
@@ -3126,6 +3136,8 @@ def slider(value=None, min=None, max=None, on_change=None, grow=None):
             _records().append(wire.tx_set_value(handle.id, value))
     if on_change is not None:
         _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
+    if on_commit is not None:
+        _app._register(handle, wire.OCC_VALUE_COMMITTED, on_commit)
     _set_grow(handle, grow)
     return handle
 

@@ -9199,9 +9199,15 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
 
     func kayaControlSliderValue(_ control: KayaTickedSlider) -> Double { Double(control.slider.value) }
 
+    /// THE DRIVEN VALUE AND NOT THE READ-BACK: UISlider's store is a Float,
+    /// so a driven 0.37 reads back as 0.3700000047683716 and the app would
+    /// hear that where the mac's Double-backed NSSlider hands it 0.37
+    /// (docs/traps.md). The control has not moved off what it was just
+    /// given, so the Double the verb named is the same position said
+    /// exactly; a real gesture still reports the thumb's own Float.
     func kayaDriveSlider(_ control: KayaTickedSlider, node: KayaNode, to value: Double) {
         control.slider.setValue(Float(value), animated: false)
-        kayaSliderCommitted(node, Double(control.slider.value), final: true) {
+        kayaSliderCommitted(node, value, final: true) {
             control.slider.setValue(Float($0), animated: false)
         }
     }
@@ -9212,6 +9218,7 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
     /// thumb rests on that value.
     final class KayaTickedSlider: UIView {
         let slider = UISlider()
+        var node: KayaNode?
         var tickValues: [Double] = [] {
             didSet { setNeedsDisplay(); invalidateIntrinsicContentSize() }
         }
@@ -9221,9 +9228,35 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
             isOpaque = false
             backgroundColor = .clear
             slider.isContinuous = true
+            // ONE CONTROL, NOT TWO: the strip is this view's own drawing, so
+            // the composition publishes ITSELF and the hosted UISlider is not
+            // a second element. A bare UIView publishes no traits, and the
+            // reader finds this wrapper — the role read `unknown/Level` until
+            // the trait was declared here (docs/traps.md).
+            slider.isAccessibilityElement = false
+            isAccessibilityElement = true
+            accessibilityTraits = .adjustable
             addSubview(slider)
         }
         required init?(coder: NSCoder) { fatalError("kaya: not from a storyboard") }
+
+        override var accessibilityValue: String? {
+            get { slider.accessibilityValue }
+            set { super.accessibilityValue = newValue }
+        }
+
+        // An element that claims `.adjustable` has to adjust: VoiceOver's
+        // swipes move by kaya's own nudge (S7) through the one commit path.
+        override func accessibilityIncrement() { nudge(by: 1) }
+        override func accessibilityDecrement() { nudge(by: -1) }
+
+        private func nudge(by direction: Double) {
+            guard let node else { return }
+            let want = Double(slider.value) + direction * kayaSliderNudge(node)
+            kayaSliderCommitted(node, want, final: true) {
+                slider.setValue(Float($0), animated: false)
+            }
+        }
 
         override var intrinsicContentSize: CGSize {
             let base = slider.intrinsicContentSize
@@ -9306,6 +9339,7 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
         }
 
         private func apply(_ view: KayaTickedSlider) {
+            view.node = node
             view.slider.minimumValue = Float(node.minValue)
             view.slider.maximumValue = Float(node.maxValue)
             view.slider.setValue(Float(node.value), animated: false)

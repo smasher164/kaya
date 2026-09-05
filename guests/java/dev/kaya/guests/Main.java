@@ -146,6 +146,9 @@ public final class Main {
             case "sizepolicy":
                 app = SizePolicy::app;
                 break;
+            case "sliders":
+                app = Sliders::app;
+                break;
             case "adaptive":
                 app = Adaptive::app;
                 break;
