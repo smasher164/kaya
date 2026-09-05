@@ -9217,3 +9217,26 @@ the TooltipBox's `modifier`. One consequence no scene asserts: a helped
 LEAF is absorbed, so its `a11y_id` test tag is not in the merged tree and
 an `expect_ax` on it would read "nothing carries test tag"
 (docs/tooltip-plan.md §6).
+
+## iPadOS draws no tooltip at all — the pointer tooltip is an iPad-app-on-Mac affordance (measured 2026-09-05)
+
+The tooltips survey said the iPad shows a tooltip on pointer hover; the
+maintainer's own hovers on kaya-sim-pad with Simulator's pointer sent to the
+device showed nothing on kaya's Save button, nothing on Safari's back
+button, and nothing on any of four controls in tools/ios/tooltipprobe
+(UIControl.toolTip, a UIToolTipInteraction, SwiftUI `.help` on a Button
+and a Text). Apple's documentation, read after the fact, says why:
+UIToolTipInteraction's page — "Tooltips appear when your app runs in macOS
+or visionOS. To show a tooltip in macOS, your app must be an iPhone or iPad
+app running on a Mac with Apple silicon, or built with Mac Catalyst"; and
+SwiftUI's `help(_:)` "configures the view's accessibility hint and its help
+tag (also called a tooltip) in macOS or visionOS". The iPadOS API exists
+for the Mac path. So: do not chase an iPad tooltip on a device or a
+simulator; there is none, and Apple's pages are the first read next time a
+"platform X shows Y" row is written from memory. Two hold recipes learned
+the same day: a `settle` longer than the harness's 60s step
+ceiling ends the guest by design (the app "vanished" a minute after launch,
+twice, and read as a crash until the exit was found voluntary in the device
+log) — spell a long hold as a chain of `settle 25000` steps; and the
+device's unified log holds no crash for a voluntary exit, so read
+runningboardd's exit context before hunting a crash report.

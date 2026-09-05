@@ -172,9 +172,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // HELP TEXT (docs/tooltip-plan.md T1): one short sentence saying what
     // the control is or does, UNIVERSAL like the a11y props. Each platform
     // offers it in its own way — a tooltip on hover and keyboard focus on
-    // the desktops and the iPad's pointer, on long press where the toolkit
-    // does that (Android, Windows), nothing visible on the iPhone — and
-    // hands it to its assistive reader itself (T2, T3). kaya draws none.
+    // the desktops, on long press where the toolkit does that (Android,
+    // Windows), nothing visible on the phones or the iPad (iPadOS draws no
+    // tooltip at all — Apple's documentation, measured to match 2026-09-05)
+    // — and hands it to its assistive reader itself (T2, T3). kaya draws none.
     ("help", 26, PropKind::Str),
 ];
 

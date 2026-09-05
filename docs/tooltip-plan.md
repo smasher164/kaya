@@ -14,7 +14,7 @@ silent, measured (dated below).
 | | Trigger on a desktop | Trigger on touch | Pointer on a tablet or phone | Reaches the assistive reader as |
 |---|---|---|---|---|
 | macOS (SwiftUI `.help`, AppKit tooltips) | hover; keyboard focus through the help tag | — | — | `.help` sets the accessibility hint too (Apple's documented mapping); AXHelp |
-| iPadOS (`.help`, UIToolTipInteraction) | — | none | tooltip on pointer hover (iPadOS 15+) | the accessibility hint |
+| iPadOS (`.help`, UIToolTipInteraction) | — | none | **NONE — iPadOS draws no tooltip at all.** Apple's UIToolTipInteraction page: "Tooltips appear when your app runs in macOS or visionOS"; SwiftUI's `help` page: the help tag appears "in macOS or visionOS". The API exists on iPadOS so an iPad app shows tooltips when it runs on a Mac (Apple silicon or Catalyst). Measured to match 2026-09-05: kaya's Save, Safari's back button, and a four-control probe (UIControl.toolTip, UIToolTipInteraction, SwiftUI `.help` on a Button and a Text) all raised nothing under the simulator's pointer | the accessibility hint |
 | iOS on the iPhone | — | **none — long press is the context menu's** | none, even with a pointer attached | the accessibility hint |
 | Android (`View.setTooltipText`, material3 `TooltipBox`/`PlainTooltip`) | mouse hover | **long press** (plain tooltips dismiss after about a second) | mouse hover | `AccessibilityNodeInfo` tooltip text — but NOT from Compose, which publishes none (measured 2026-09-05, §6); kaya's arm publishes the long-press action's label instead |
 | WinUI 3 (`ToolTipService.ToolTip`) | hover; **keyboard focus** | **press and hold** | — | UIA HelpText |
@@ -62,12 +62,17 @@ like the a11y label.
 
 ### T2 — kaya draws no tooltip of its own
 
-Each platform's own surface, timing and placement: the Mac's help tag, the
-iPad's pointer tooltip, Android's tooltip on hover and long press, WinUI's
-on hover, focus and press-and-hold, GTK's on hover. The iPhone shows nothing
-visible and hands the text to VoiceOver — Apple's own idiom, stated here
-once for every platform without a pointer: help reaches such a platform's
-reader and nothing else. No kaya-drawn bubble on long press there, since
+Each platform's own surface, timing and placement: the Mac's help tag,
+Android's tooltip on hover and long press, WinUI's on hover, focus and
+press-and-hold, GTK's on hover. The iPhone shows nothing visible and hands
+the text to VoiceOver — Apple's own idiom, stated here once for every
+platform without a pointer: help reaches such a platform's reader and
+nothing else. THE iPAD IS SUCH A PLATFORM: iPadOS draws no tooltip for a
+pointer at all — Apple's documentation for both UIToolTipInteraction and
+SwiftUI's help says the bubble appears in macOS or visionOS, and the
+iPadOS API exists so an iPad app shows tooltips when it runs on a Mac —
+which kaya's `.help` already covers there (§6). The survey's first draft
+had the iPad wrong. No kaya-drawn bubble on long press there, since
 long press is the context menu's.
 
 ### T3 — Help and the accessibility hint are distinct; an authored hint wins
@@ -149,6 +154,26 @@ android rosters, the matrix.
   apart there (the first tooltips leg read the entry's help for both rows,
   which shared its id). The scene sources the copies' ids from the row's
   own field and addresses them by index, the a11yrows scene's shape.
+- THE iPAD DRAWS NO TOOLTIP, and the survey had said it did (2026-09-05).
+  The maintainer's own hovers on kaya-sim-pad with Simulator's pointer
+  sent to the device raised nothing on kaya's Save button (guest confirmed
+  alive), nothing on Safari's own back button, and nothing on any of four
+  controls in tools/ios/tooltipprobe (UIControl.toolTip, a
+  UIToolTipInteraction on a label, SwiftUI `.help` on a Button and on a
+  Text). Apple's documentation, read after: UIToolTipInteraction —
+  "Tooltips appear when your app runs in macOS or visionOS. To show a
+  tooltip in macOS, your app must be an iPhone or iPad app running on a Mac
+  with Apple silicon, or built with Mac Catalyst"; SwiftUI `help(_:)` —
+  "configures the view's accessibility hint and its help tag (also called a
+  tooltip) in macOS or visionOS". So iPadOS never shows one, with or without
+  a trackpad; the iPad is a phone for help, the iPhone's rule covers it, and
+  nothing is owed. The simulator was never the limit (Xcode 11.4's release
+  notes: pointer capture forwards HID events; "any system that injects
+  CGEvents directly isn't usable with Simulator's capturing support").
+- The iOS help/hint reader walked the window tree off the main thread and
+  UIKit logged "Unsupported layout off the main thread for UITextField" on
+  every tooltips leg (device log, 2026-09-05); the reader hops to the main
+  thread now, the Mac reader's shape.
 - The authored hint wins over `.help` on the Mac when `.help` is applied
   first (measured on button#1 the same day: T3's ordering holds).
 - WinUI's tooltip drew above the pointer on the VM (2026-09-05) only when

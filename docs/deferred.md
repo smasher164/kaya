@@ -10614,6 +10614,13 @@ placement", is the neighbouring class and not this one). The verb trace
 of the sighting is in the flight recorder: run 20260903T170647Z-004640,
 bundle ios-varied-python (verb-trace.txt, 621 records).
 
+SECOND SIGHTING 2026-09-05, on a standalone iOS lane (not a matrix) run for
+the tooltips help-reader fix: `column@varied windows "98 300"` again, the
+identical reading. The lane was rerun once more the same hour for that fix
+before this entry's instrument went in; the instrument (`scroll_to_row`'s
+settled offset and the measured-versus-estimated heights of the six rows
+above the target) is owed on the next touch of the synthesized tier.
+
 ## ~~DATE AND TIME PICKERS — the depth slice is on the mac (2026-09-04); the other three backends, iOS's legs and eight bindings' sugar are the breadth slice (docs/datetime-plan.md §5 step 6)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (Compose, GTK, WinUI arms; iOS legs; eight bindings' sugar in both zones; Date/Time record fields in every record surface; ten guests; five rosters), and the matrix ALL PASS on all five lanes and 53 gates, 1,631 legs (mac 409, linux 719, windows 253, ios 121, android 129), after three matrices that each reddened ONE pre-existing contended leg — the linux witness leg's ordering and the Compose drag verb's silent frame wait fixed at their cause, the wayland clipboard sighting a WATCH — with every pickers leg green in all four.
 KEY: date_picker, time_picker, PropKind::Date, PropKind::Time, date_changed, time_changed, set_date, set_time, expect_picker, min_date, max_date, minute_step, datetime role, KayaGen date field, pickers scene, docs/datetime-plan.md
 

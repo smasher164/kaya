@@ -131,7 +131,7 @@ private let propColumns: UInt32 = 11
 private let propA11yId: UInt32 = 12
 private let propA11yLabel: UInt32 = 13
 private let propA11yHint: UInt32 = 14
-/// Help text (docs/tooltip-plan.md T1): the tooltip on the Mac and the iPad's pointer, the hint everywhere.
+/// Help text (docs/tooltip-plan.md T1): the Mac's tooltip, the accessibility hint everywhere; iPadOS draws no tooltip at all.
 private let propHelp: UInt32 = 26
 /// Which clip representations this widget accepts: a space-separated string
 /// of closed kind names and custom format ids. Not a mask.
@@ -5106,10 +5106,10 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     let labelled =
         node.a11yLabel.isEmpty
         ? identified : AnyView(identified.accessibilityLabel(node.a11yLabel))
-    // HELP TEXT (docs/tooltip-plan.md): `.help` is the Mac's tooltip and the
-    // iPad's pointer tooltip, and Apple's own mapping makes it the
-    // accessibility hint too. It goes on BEFORE the hint so an authored
-    // hint wins the hint slot (T3).
+    // HELP TEXT (docs/tooltip-plan.md): `.help` is the Mac's tooltip (and
+    // an iPad app's when it runs on a Mac; iPadOS itself draws none), and
+    // Apple's own mapping makes it the accessibility hint too. It goes on
+    // BEFORE the hint so an authored hint wins the hint slot (T3).
     let helped =
         node.help.isEmpty ? labelled : AnyView(labelled.help(node.help))
     // The HINT: what activating this control does. Apple speaks it after the
@@ -5614,16 +5614,22 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     private func kayaAxHintRead(_ identifier: String) -> String? {
         guard !identifier.isEmpty else { return nil }
         kayaAxEnableAutomation()
-        for scene in UIApplication.shared.connectedScenes.compactMap({
-            $0 as? UIWindowScene
-        }) {
-            for window in scene.windows {
-                if let hit = kayaAxFind(window, identifier) {
-                    return hit.accessibilityHint ?? ""
+        // ON THE MAIN THREAD, like the Mac's reader: walking the window tree
+        // from the harness thread laid a UITextField out off-main and UIKit
+        // logged its assertion on every tooltips leg (device log, 2026-09-05);
+        // a main-thread checker traps where the log only complains.
+        return DispatchQueue.main.sync { () -> String? in
+            for scene in UIApplication.shared.connectedScenes.compactMap({
+                $0 as? UIWindowScene
+            }) {
+                for window in scene.windows {
+                    if let hit = kayaAxFind(window, identifier) {
+                        return hit.accessibilityHint ?? ""
+                    }
                 }
             }
+            return nil
         }
-        return nil
     }
 
     /// What [kayaAxRole] weighed, for a MISMATCH. UIKit has no role vocabulary
