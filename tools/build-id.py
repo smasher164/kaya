@@ -70,6 +70,9 @@ GATES = {
     # check-native-undo.
     "check-roles": ["crates", "swift", "android"],
     "check-native-undo": ["crates", "swift", "android"],
+    # The slider commit rule is a lowering: no binding stands between the
+    # occurrence and the four arms.
+    "check-slider-commit": ["crates", "android"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

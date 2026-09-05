@@ -34,7 +34,7 @@ SCENES = [
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
-DEPTH_SCENES = ["windowed", "canvas", "sizepolicy"]
+DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "sliders"]
 
 
 def depth_scenes():
@@ -96,6 +96,13 @@ ORDER = [
      # ships the exe and no .py or .ts; the other five legs join this line
      # with their guests.
      "pickers_rust", "pickers_python", "pickers_js", "pickers_go", "pickers_csharp", "pickers_java",
+     # The sliders pool for the pickers' reason: `set_value` drives the
+     # CONTROL's own property, no real mouse and no OS-global chrome. RUST
+     # ALONE while the eight bindings' sugar is the parallel worktree
+     # (docs/slider-plan.md §5) — hence the DEPTH_SCENES row, which ships
+     # the exe and no .py or .ts; the other five legs join this line with
+     # their guests.
+     "sliders_rust",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from

@@ -10724,9 +10724,8 @@ is a stop) and UISlider over a tick strip of kaya's own (Settings' Larger
 Text shape), and tools/scenes/sliders.steps green on the mac with
 guests/rust/sliders.rs.
 
-OPEN, the breadth slice — each backend below refuses the two props by name
-until its arm lands, and no lane presenting through that backend carries
-sliders legs until then:
+OPEN, the breadth slice — each backend refuses the two props by name until
+its arm lands, and a lane carries sliders legs once its backend has them:
 
 - ~~DEPTH STUB: sliders on gtk~~ (FIXED 2026-09-04: the arm landed, the
   linux lane carries the rust leg on both pools) — the step snapped in the
@@ -10736,11 +10735,23 @@ sliders legs until then:
   event stream rather than the `GestureClick` this entry named: GtkRange's
   own drag gesture claims the sequence, so a click gesture on a scale never
   sees `released` at all (measured 2026-09-04, docs/traps.md).
-- DEPTH STUB: sliders on winui — `StepFrequency` from the step (or
-  (max − min)/1000 for a continuous slider, retiring the silent 0.01),
-  `SnapsTo.StepValues`, `TickFrequency` from the spacing,
-  `SmallChange`/`LargeChange` from the step, `PointerCaptureLost` as the
-  commit; `slider_value` already reads the control.
+- ~~DEPTH STUB: sliders on winui~~ (FIXED 2026-09-04: the arm landed —
+  `StepFrequency` from the step or (max − min)/1000 for a continuous one
+  with `SnapsTo(StepValues)`, retiring the silent 0.01; `TickFrequency`
+  from the spacing with `TickPlacement::Outside`, the Gallery's own look;
+  `SmallChange`/`LargeChange` ten steps apart; one commit path over a
+  `SliderCell` the handlers can reach, re-applied whole on every shape
+  prop since WinUI coerces against the range it holds; `set_value` one
+  finished gesture; `sliders_rust` on the windows roster. THE GESTURE'S
+  END, all measured on the guest (docs/slider-plan.md §6): a real drag
+  raises NEITHER PointerPressed NOR PointerReleased on the Slider — the
+  control marks both handled — and `UIElement.AddHandler`'s
+  handled-events-too registration is unreachable because a WinRT delegate
+  is no `IInspectable`, so `PointerCaptureLost` is the only end and
+  `GetKeyState(VK_LBUTTON)` is the drag/keyboard split, the twin of the
+  SwiftUI arm's NSApp.currentEvent. `tools/check-slider-commit.py` is the
+  guard the class earned, since `set_value` is one gesture by
+  construction and an arm committing per movement passes the scene.)
 - DEPTH STUB: sliders on compose — `steps` from the step, `onValueChangeFinished`
   as the commit, the track drawing kaya's ticks when the spacing is coarser
   than the step, the `expect_slider` verb, the `emitValueCommitted` native.

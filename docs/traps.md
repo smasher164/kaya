@@ -9059,3 +9059,48 @@ keyboard's and the ticks are pixels — tools/check-gtk.py's census holds the
 four links, and the whole-drag proof is a hand capture (the sliders window,
 pressed and walked by xdotool, reads `commits: 3` for one drag where a
 per-move commit reads about ten).
+
+## A WinUI 3 Slider hears none of its own pointer press, so the obvious commit wiring publishes one `value_committed` per drag pixel (measured 2026-09-04)
+
+The slider's committed value fires ONCE per gesture (docs/slider-plan.md
+S2). WinUI raises no finished event, so the WinUI arm's first draft set a
+`dragging` flag from `slider.PointerPressed(…)` and cleared it on
+`PointerCaptureLost`. On the guest, under a real injected drag, the flag
+was NEVER set: the trace read `dragging=false` on all eight movements.
+The Slider (or its Thumb) marks its own `PointerPressed` handled, and
+`slider.PointerPressed(…)` registers with handledEventsToo = false, so
+the instance handler is skipped; `PointerReleased` never fired either,
+for the same reason. `PointerCaptureLost` DID fire, once, on the release,
+with the settled value — it is the only gesture end this control gives.
+`PointerCaptures()` answered `Err` on the UI thread and is no help.
+
+The platform's own remedy, `UIElement.AddHandler(PointerPressedEvent,
+handler, true)`, is out of reach from these bindings: its handler
+parameter is `IInspectable` and a windows-rs WinRT delegate implements
+`IUnknown` alone, so `PointerEventHandler: Param<IInspectable>` is
+unsatisfied and forcing the cast would hand XAML a pointer that fails the
+QI it makes. The arm reads `GetKeyState(VK_LBUTTON)` instead, inside the
+ValueChanged handler, which runs on the UI thread while that thread is
+processing the very input message that raised it — the twin of the
+SwiftUI arm's `NSApp.currentEvent?.type` test.
+
+WHY IT MATTERS BEYOND THE FIX: **no lane could see any of this.**
+`set_value` is the only slider drive any scene has and it is one
+finished gesture by construction, so the per-movement-commit draft passed
+`tools/scenes/sliders.steps` byte for byte and the whole windows lane
+stayed green. `tools/check-slider-commit.py` is the wall that class
+earned, and its table grows by itself: a backend still refusing the two
+props through `depth_stub("sliders")` has no arm to hold, and the moment
+its stub goes the gate demands a row.
+
+Two smaller measurements from the same probe. WinUI's own snapping is
+real — every drag movement reports a value already on the `StepFrequency`
+lattice, with `IntermediateValue` carrying the pre-snap pointer position
+— so the arm's snap is a no-op on a drag and stays only because the
+declared step is the contract. And VK_PRIOR raised nothing on a focused
+Slider, with and without KEYEVENTF_EXTENDEDKEY, while VK_RIGHT moved it
+by `SmallChange`: WinUI 3 does not spend `LargeChange` on Page Up here.
+(A first probe run had injected VK_PRIOR without the extended flag, where
+it is the numeric keypad's 9 and NumLock decides what arrives — a probe's
+own key injection is a premise, and it was re-measured before the finding
+was written down.)

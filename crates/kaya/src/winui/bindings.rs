@@ -8430,6 +8430,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerPressed)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8438,6 +8453,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerMoved)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -8450,6 +8480,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerReleased)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8458,6 +8503,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerEntered)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -8470,6 +8530,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerExited)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8478,6 +8553,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -8490,6 +8580,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerCanceled)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8498,6 +8603,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerWheelChanged(&self, token: i64) -> windows_core::Result<()> {
@@ -10316,28 +10436,68 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub RemoveDrop:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerPressed: usize,
+                pub PointerPressed: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerPressed:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerMoved: usize,
+                pub PointerMoved: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerMoved:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerReleased: usize,
+                pub PointerReleased: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerReleased:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerEntered: usize,
+                pub PointerEntered: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerEntered:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerExited: usize,
+                pub PointerExited: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerExited:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerCaptureLost: usize,
+                pub PointerCaptureLost: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerCaptureLost:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerCanceled: usize,
+                pub PointerCanceled: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerCanceled:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PointerWheelChanged: usize,
+                pub PointerWheelChanged: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePointerWheelChanged:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
                 Tapped: usize,
@@ -12783,6 +12943,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerPressed)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -12791,6 +12966,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerMoved)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -12803,6 +12993,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerReleased)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -12811,6 +13016,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerEntered)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -12823,6 +13043,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerExited)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -12831,6 +13066,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -12843,6 +13093,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerCanceled)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -12851,6 +13116,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::PointerEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePointerWheelChanged(&self, token: i64) -> windows_core::Result<()> {
@@ -24999,6 +25279,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -27210,6 +27594,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27218,6 +27617,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -27230,6 +27644,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27238,6 +27667,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -27250,6 +27694,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27258,6 +27717,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -27270,6 +27744,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27278,6 +27767,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -28440,6 +28944,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -30651,6 +31259,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30659,6 +31282,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -30671,6 +31309,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30679,6 +31332,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -30691,6 +31359,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30699,6 +31382,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -30711,6 +31409,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30719,6 +31432,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -31761,6 +32489,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -33972,6 +34804,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -33980,6 +34827,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -33992,6 +34854,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34000,6 +34877,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -34012,6 +34904,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34020,6 +34927,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -34032,6 +34954,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34040,6 +34977,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -35392,6 +36344,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -37603,6 +38659,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -37611,6 +38682,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -37623,6 +38709,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -37631,6 +38732,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -37643,6 +38759,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -37651,6 +38782,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -37663,6 +38809,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -37671,6 +38832,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -38751,6 +39927,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -41111,6 +42391,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -41119,6 +42414,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -41131,6 +42441,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -41139,6 +42464,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -41151,6 +42491,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -41159,6 +42514,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -41171,6 +42541,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -41179,6 +42564,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -42766,6 +44166,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -45419,6 +46923,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -45427,6 +46946,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -45439,6 +46973,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -45447,6 +46996,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -45459,6 +47023,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -45467,6 +47046,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -45479,6 +47073,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -45487,6 +47096,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -46426,6 +48050,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -48662,6 +50390,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -48670,6 +50413,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -48682,6 +50440,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -48690,6 +50463,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -48702,6 +50490,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -48710,6 +50513,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -48722,6 +50540,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -48730,6 +50563,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -49967,6 +51815,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -52178,6 +54130,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -52186,6 +54153,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -52198,6 +54180,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -52206,6 +54203,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -52218,6 +54230,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -52226,6 +54253,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -52238,6 +54280,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -52246,6 +54303,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -53189,6 +55261,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -55400,6 +57576,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -55408,6 +57599,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -55420,6 +57626,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -55428,6 +57649,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -55440,6 +57676,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -55448,6 +57699,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -55460,6 +57726,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -55468,6 +57749,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -56846,6 +59142,110 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -59057,6 +61457,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -59065,6 +61480,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -59077,6 +61507,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -59085,6 +61530,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -59097,6 +61557,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -59105,6 +61580,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -59117,6 +61607,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -59125,6 +61630,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -60047,6 +62567,110 @@ pub mod Microsoft {
                             )
                             .and_then(|| windows_core::Type::from_abi(result__))
                         })
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
@@ -62319,6 +64943,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -62327,6 +64966,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -62339,6 +64993,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -62347,6 +65016,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -62359,6 +65043,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -62367,6 +65066,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -62379,6 +65093,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -62387,6 +65116,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -65181,6 +67925,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -65189,6 +67948,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -65201,6 +67975,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -65209,6 +67998,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -65221,6 +68025,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -65229,6 +68048,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -65241,6 +68075,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -65249,6 +68098,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -68139,6 +71003,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -68147,6 +71026,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -68159,6 +71053,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -68167,6 +71076,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -68179,6 +71103,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -68187,6 +71126,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -68199,6 +71153,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -68207,6 +71176,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -70537,14 +73521,46 @@ pub mod Microsoft {
                 #[doc(hidden)]
                 pub struct IControlOverrides_Vtbl {
                     pub base__: windows_core::IInspectable_Vtbl,
-                    OnPointerEntered: usize,
-                    OnPointerPressed: usize,
-                    OnPointerMoved: usize,
-                    OnPointerReleased: usize,
-                    OnPointerExited: usize,
-                    OnPointerCaptureLost: usize,
-                    OnPointerCanceled: usize,
-                    OnPointerWheelChanged: usize,
+                    pub OnPointerEntered: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerPressed: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerMoved: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerReleased: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerExited: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerCaptureLost: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerCanceled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPointerWheelChanged: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     OnTapped: usize,
                     OnDoubleTapped: usize,
                     OnHolding: usize,
@@ -74550,8 +77566,16 @@ pub mod Microsoft {
                         f64,
                     )
                         -> windows_core::HRESULT,
-                    SnapsTo: usize,
-                    SetSnapsTo: usize,
+                    pub SnapsTo: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut Primitives::SliderSnapsTo,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSnapsTo: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        Primitives::SliderSnapsTo,
+                    )
+                        -> windows_core::HRESULT,
                     pub TickFrequency: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut f64,
@@ -74562,8 +77586,16 @@ pub mod Microsoft {
                         f64,
                     )
                         -> windows_core::HRESULT,
-                    TickPlacement: usize,
-                    SetTickPlacement: usize,
+                    pub TickPlacement: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut Primitives::TickPlacement,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetTickPlacement: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        Primitives::TickPlacement,
+                    )
+                        -> windows_core::HRESULT,
                     pub Orientation: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut Orientation,
@@ -78310,6 +81342,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -78318,6 +81365,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -78330,6 +81392,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -78338,6 +81415,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -78350,6 +81442,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -78358,6 +81465,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -78370,6 +81492,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -78378,6 +81515,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -81174,6 +84326,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -81182,6 +84349,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -81194,6 +84376,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -81202,6 +84399,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -81214,6 +84426,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -81222,6 +84449,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -81234,6 +84476,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -81242,6 +84499,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -82532,6 +85804,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -85078,6 +88454,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -85086,6 +88477,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -85098,6 +88504,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -85106,6 +88527,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -85118,6 +88554,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -85126,6 +88577,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -85138,6 +88604,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -85146,6 +88627,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -86020,6 +89516,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -88259,6 +91859,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88267,6 +91882,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -88279,6 +91909,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88287,6 +91932,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -88299,6 +91959,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88307,6 +91982,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -88319,6 +92009,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88327,6 +92032,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -89197,6 +92917,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -91460,6 +95284,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91468,6 +95307,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -91480,6 +95334,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91488,6 +95357,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -91500,6 +95384,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91508,6 +95407,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -91520,6 +95434,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91528,6 +95457,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -92864,6 +96808,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -95215,6 +99263,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95223,6 +99286,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -95235,6 +99313,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95243,6 +99336,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -95255,6 +99363,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95263,6 +99386,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -95275,6 +99413,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95283,6 +99436,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -96158,6 +100326,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -98371,6 +102643,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -98379,6 +102666,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -98391,6 +102693,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -98399,6 +102716,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -98411,6 +102743,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -98419,6 +102766,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -98431,6 +102793,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -98439,6 +102816,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -99291,6 +103683,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -101516,6 +106012,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -101524,6 +106035,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -101536,6 +106062,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -101544,6 +106085,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -101556,6 +106112,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -101564,6 +106135,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -101576,6 +106162,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -101584,6 +106185,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -102463,6 +107079,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -104738,6 +109458,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -104746,6 +109481,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -104758,6 +109508,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -104766,6 +109531,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -104778,6 +109558,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -104786,6 +109581,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -104798,6 +109608,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -104806,6 +109631,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -105725,6 +110565,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -108805,6 +113749,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -108813,6 +113772,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -108825,6 +113799,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -108833,6 +113822,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -108845,6 +113849,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -108853,6 +113872,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -108865,6 +113899,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -108873,6 +113922,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -109834,6 +114898,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -112245,6 +117413,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -112253,6 +117436,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -112265,6 +117463,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -112273,6 +117486,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -112285,6 +117513,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -112293,6 +117536,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -112305,6 +117563,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -112313,6 +117586,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -113268,6 +118556,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -115504,6 +120896,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -115512,6 +120919,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -115524,6 +120946,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -115532,6 +120969,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -115544,6 +120996,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -115552,6 +121019,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -115564,6 +121046,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -115572,6 +121069,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -118312,6 +123824,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -118320,6 +123847,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -118332,6 +123874,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -118340,6 +123897,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -118352,6 +123924,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -118360,6 +123947,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -118372,6 +123974,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -118380,6 +123997,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -119245,6 +124877,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -121714,6 +127450,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121722,6 +127473,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -121734,6 +127500,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121742,6 +127523,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -121754,6 +127550,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121762,6 +127573,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -121774,6 +127600,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121782,6 +127623,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -122656,6 +128512,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -125074,6 +131034,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -125082,6 +131057,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -125094,6 +131084,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -125102,6 +131107,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -125114,6 +131134,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -125122,6 +131157,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -125134,6 +131184,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -125142,6 +131207,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -126018,6 +132098,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -128444,6 +134628,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -128452,6 +134651,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -128464,6 +134678,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -128472,6 +134701,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -128484,6 +134728,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -128492,6 +134751,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -128504,6 +134778,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -128512,6 +134801,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -129399,6 +135703,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -132293,6 +138701,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -132301,6 +138724,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -132313,6 +138751,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -132321,6 +138774,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -132333,6 +138801,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -132341,6 +138824,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -132353,6 +138851,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -132361,6 +138874,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -133718,6 +140246,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -137258,6 +143890,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -137266,6 +143913,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -137278,6 +143940,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -137286,6 +143963,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -137298,6 +143990,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -137306,6 +144013,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -137318,6 +144040,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -137326,6 +144063,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -138434,6 +145186,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -139722,6 +146578,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn SnapsTo(&self) -> windows_core::Result<Primitives::SliderSnapsTo> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SnapsTo)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetSnapsTo(
+                        &self,
+                        value: Primitives::SliderSnapsTo,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetSnapsTo)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn TickFrequency(&self) -> windows_core::Result<f64> {
                         let this = self;
                         unsafe {
@@ -139737,6 +146617,30 @@ pub mod Microsoft {
                         let this = self;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetTickFrequency)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn TickPlacement(&self) -> windows_core::Result<Primitives::TickPlacement> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TickPlacement)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetTickPlacement(
+                        &self,
+                        value: Primitives::TickPlacement,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetTickPlacement)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -140993,6 +147897,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -141001,6 +147920,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -141013,6 +147947,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -141021,6 +147970,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -141033,6 +147997,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -141041,6 +148020,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -141053,6 +148047,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -141061,6 +148070,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -143928,6 +150952,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -143936,6 +150975,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -143948,6 +151002,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -143956,6 +151025,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -143968,6 +151052,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -143976,6 +151075,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -143988,6 +151102,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -143996,6 +151125,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -147049,6 +154193,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -147057,6 +154216,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -147069,6 +154243,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -147077,6 +154266,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -147089,6 +154293,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -147097,6 +154316,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -147109,6 +154343,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -147117,6 +154366,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -147979,6 +155243,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -151046,6 +158414,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151054,6 +158437,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -151066,6 +158464,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151074,6 +158487,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -151086,6 +158514,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151094,6 +158537,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -151106,6 +158564,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151114,6 +158587,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -152441,6 +159929,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -154840,6 +162432,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154848,6 +162455,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -154860,6 +162482,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154868,6 +162505,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -154880,6 +162532,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154888,6 +162555,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -154900,6 +162582,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154908,6 +162605,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -155844,6 +163556,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -158412,6 +166228,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -158420,6 +166251,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -158432,6 +166278,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -158440,6 +166301,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -158452,6 +166328,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -158460,6 +166351,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -158472,6 +166378,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -158480,6 +166401,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -159364,6 +167300,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -161736,6 +169776,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -161744,6 +169799,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -161756,6 +169826,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -161764,6 +169849,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -161776,6 +169876,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -161784,6 +169899,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -161796,6 +169926,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -161804,6 +169949,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -162679,6 +170839,110 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::PointerRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -165161,6 +173425,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerPressed)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -165169,6 +173448,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerMoved)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
@@ -165181,6 +173475,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerReleased)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerReleased(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -165189,6 +173498,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerEntered)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
@@ -165201,6 +173525,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerExited)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -165209,6 +173548,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerCaptureLost<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerCaptureLost(&self, token: i64) -> windows_core::Result<()> {
@@ -165221,6 +173575,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerCanceled)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePointerCanceled(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -165229,6 +173598,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PointerWheelChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::PointerEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePointerWheelChanged(
@@ -166892,6 +175276,118 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -169334,6 +177830,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -169345,6 +177857,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -169354,6 +177882,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -169370,6 +177914,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -169381,6 +177941,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -169390,6 +177966,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -169406,6 +178001,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -169418,6 +178029,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -174176,6 +182806,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -174187,6 +182833,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -174196,6 +182858,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -174212,6 +182890,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -174223,6 +182917,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -174232,6 +182942,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -174248,6 +182977,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -174260,6 +183005,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -175215,6 +183979,118 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -177844,6 +186720,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -177855,6 +186747,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -177864,6 +186772,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -177880,6 +186804,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -177891,6 +186831,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -177900,6 +186856,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -177916,6 +186891,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -177928,6 +186919,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -179087,6 +188097,118 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -182050,6 +191172,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -182061,6 +191199,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -182070,6 +191224,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -182086,6 +191256,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -182097,6 +191283,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -182106,6 +191308,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -182122,6 +191343,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -182134,6 +191371,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -183133,6 +192389,118 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -185608,6 +194976,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -185619,6 +195003,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -185628,6 +195028,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -185644,6 +195060,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -185655,6 +195087,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -185664,6 +195112,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -185680,6 +195147,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -185692,6 +195175,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -186225,6 +195727,41 @@ pub mod Microsoft {
                     }
                     unsafe impl Send for SelectorItem {}
                     unsafe impl Sync for SelectorItem {}
+                    #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct SliderSnapsTo(pub i32);
+                    impl SliderSnapsTo {
+                        pub const StepValues: Self = Self(0i32);
+                        pub const Ticks: Self = Self(1i32);
+                    }
+                    impl windows_core::TypeKind for SliderSnapsTo {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for SliderSnapsTo {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::from_slice(
+                                b"enum(Microsoft.UI.Xaml.Controls.Primitives.SliderSnapsTo;i4)",
+                            );
+                    }
+                    #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct TickPlacement(pub i32);
+                    impl TickPlacement {
+                        pub const None: Self = Self(0i32);
+                        pub const TopLeft: Self = Self(1i32);
+                        pub const BottomRight: Self = Self(2i32);
+                        pub const Outside: Self = Self(3i32);
+                        pub const Inline: Self = Self(4i32);
+                    }
+                    impl windows_core::TypeKind for TickPlacement {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for TickPlacement {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::from_slice(
+                                b"enum(Microsoft.UI.Xaml.Controls.Primitives.TickPlacement;i4)",
+                            );
+                    }
                     #[repr(transparent)]
                     #[derive(Clone, Debug, Eq, PartialEq)]
                     pub struct ToggleButton(windows_core::IUnknown);
@@ -186780,6 +196317,118 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn OnPointerEntered<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerPressed<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerMoved<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerReleased<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerExited<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCaptureLost<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerCanceled<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPointerWheelChanged<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
@@ -189374,6 +199023,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerPressed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerPressed)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerPressed(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -189385,6 +199050,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerMoved<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerMoved)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerMoved(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -189394,6 +199075,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerReleased<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerReleased)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerReleased(
@@ -189410,6 +199107,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerEntered<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerEntered)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerEntered(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -189421,6 +199134,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerExited<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerExited)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerExited(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -189430,6 +199159,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerCaptureLost<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCaptureLost)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerCaptureLost(
@@ -189446,6 +199194,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PointerCanceled<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerCanceled)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePointerCanceled(
                             &self,
                             token: i64,
@@ -189458,6 +199222,25 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PointerWheelChanged<P0>(
+                            &self,
+                            handler: P0,
+                        ) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::PointerEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePointerWheelChanged(
@@ -190093,6 +199876,43 @@ pub mod Microsoft {
                     IsEnabledProperty: usize,
                     ScopeOwnerProperty: usize,
                 }
+                windows_core::imp::define_interface!(
+                    IPointerRoutedEventArgs,
+                    IPointerRoutedEventArgs_Vtbl,
+                    0x66e78a9a_1bec_5f92_b1a1_ea6334ee511c
+                );
+                impl windows_core::RuntimeType for IPointerRoutedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IPointerRoutedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    Pointer: usize,
+                    pub KeyModifiers: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::System::VirtualKeyModifiers,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Handled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHandled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub IsGenerated: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    GetCurrentPoint: usize,
+                    GetIntermediatePoints: usize,
+                }
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct KeyboardAccelerator(windows_core::IUnknown);
@@ -190282,6 +200102,228 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for KeyboardAccelerator {}
                 unsafe impl Sync for KeyboardAccelerator {}
+                windows_core::imp::define_interface!(
+                    PointerEventHandler,
+                    PointerEventHandler_Vtbl,
+                    0xa48a71e1_8bb4_5597_9e31_903a3f6a04fb
+                );
+                impl windows_core::RuntimeType for PointerEventHandler {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                impl PointerEventHandler {
+                    pub fn new<
+                        F: FnMut(
+                                windows_core::Ref<'_, windows_core::IInspectable>,
+                                windows_core::Ref<'_, PointerRoutedEventArgs>,
+                            ) -> windows_core::Result<()>
+                            + Send
+                            + 'static,
+                    >(
+                        invoke: F,
+                    ) -> Self {
+                        let com = PointerEventHandlerBox {
+                            vtable: &PointerEventHandlerBox::<F>::VTABLE,
+                            count: windows_core::imp::RefCount::new(1),
+                            invoke,
+                        };
+                        unsafe { core::mem::transmute(windows_core::imp::Box::new(com)) }
+                    }
+                    pub fn Invoke<P0, P1>(&self, sender: P0, e: P1) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                        P1: windows_core::Param<PointerRoutedEventArgs>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Invoke)(
+                                windows_core::Interface::as_raw(this),
+                                sender.param().abi(),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct PointerEventHandler_Vtbl {
+                    base__: windows_core::IUnknown_Vtbl,
+                    Invoke: unsafe extern "system" fn(
+                        this: *mut core::ffi::c_void,
+                        sender: *mut core::ffi::c_void,
+                        e: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+                }
+                #[repr(C)]
+                struct PointerEventHandlerBox<
+                    F: FnMut(
+                            windows_core::Ref<'_, windows_core::IInspectable>,
+                            windows_core::Ref<'_, PointerRoutedEventArgs>,
+                        ) -> windows_core::Result<()>
+                        + Send
+                        + 'static,
+                > {
+                    vtable: *const PointerEventHandler_Vtbl,
+                    invoke: F,
+                    count: windows_core::imp::RefCount,
+                }
+                impl<
+                        F: FnMut(
+                                windows_core::Ref<'_, windows_core::IInspectable>,
+                                windows_core::Ref<'_, PointerRoutedEventArgs>,
+                            ) -> windows_core::Result<()>
+                            + Send
+                            + 'static,
+                    > PointerEventHandlerBox<F>
+                {
+                    const VTABLE: PointerEventHandler_Vtbl = PointerEventHandler_Vtbl {
+                        base__: windows_core::IUnknown_Vtbl {
+                            QueryInterface: Self::QueryInterface,
+                            AddRef: Self::AddRef,
+                            Release: Self::Release,
+                        },
+                        Invoke: Self::Invoke,
+                    };
+                    unsafe extern "system" fn QueryInterface(
+                        this: *mut core::ffi::c_void,
+                        iid: *const windows_core::GUID,
+                        interface: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            if iid.is_null() || interface.is_null() {
+                                return windows_core::HRESULT(-2147467261);
+                            }
+                            * interface = if * iid == < PointerEventHandler as windows_core::Interface >::IID || * iid == < windows_core::IUnknown as windows_core::Interface >::IID || * iid == < windows_core::imp::IAgileObject as windows_core::Interface >::IID { & mut ( * this ) . vtable as * mut _ as _ } else if * iid == < windows_core::imp::IMarshal as windows_core::Interface >::IID { ( * this ) . count . add_ref ( ) ; return windows_core::imp::marshaler ( core::mem::transmute ( & mut ( * this ) . vtable as * mut _ as * mut core::ffi::c_void ) , interface ) ; } else { core::ptr::null_mut ( ) } ;
+                            if (*interface).is_null() {
+                                windows_core::HRESULT(-2147467262)
+                            } else {
+                                (*this).count.add_ref();
+                                windows_core::HRESULT(0)
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn AddRef(this: *mut core::ffi::c_void) -> u32 {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            (*this).count.add_ref()
+                        }
+                    }
+                    unsafe extern "system" fn Release(this: *mut core::ffi::c_void) -> u32 {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            let remaining = (*this).count.release();
+                            if remaining == 0 {
+                                let _ = windows_core::imp::Box::from_raw(this);
+                            }
+                            remaining
+                        }
+                    }
+                    unsafe extern "system" fn Invoke(
+                        this: *mut core::ffi::c_void,
+                        sender: *mut core::ffi::c_void,
+                        e: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this = &mut *(this as *mut *mut core::ffi::c_void as *mut Self);
+                            (this.invoke)(
+                                core::mem::transmute_copy(&sender),
+                                core::mem::transmute_copy(&e),
+                            )
+                            .into()
+                        }
+                    }
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct PointerRoutedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    PointerRoutedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    PointerRoutedEventArgs,
+                    super::RoutedEventArgs
+                );
+                impl PointerRoutedEventArgs {
+                    pub fn KeyModifiers(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::System::VirtualKeyModifiers,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyModifiers)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Handled(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Handled)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHandled)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn IsGenerated(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).IsGenerated)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn OriginalSource(
+                        &self,
+                    ) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<super::IRoutedEventArgs>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).OriginalSource)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for PointerRoutedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IPointerRoutedEventArgs>(
+                        );
+                }
+                unsafe impl windows_core::Interface for PointerRoutedEventArgs {
+                    type Vtable = <IPointerRoutedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IPointerRoutedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for PointerRoutedEventArgs {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Input.PointerRoutedEventArgs";
+                }
+                unsafe impl Send for PointerRoutedEventArgs {}
+                unsafe impl Sync for PointerRoutedEventArgs {}
             }
             pub mod Markup {
                 windows_core::imp::define_interface!(
