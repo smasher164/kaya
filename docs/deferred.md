@@ -520,11 +520,15 @@ own trigger (the bookmark/persistence bullet's RECENT FILES trigger,
 docs/editor-plan.md §3, is now one the shipped editor can fire).
 The SECOND forcing artifact was the PORTFOLIO (guests/python/
 portfolio.py), which drove tables, canvas, adaptive layout and the
-grouped iOS tier through 2026-08-30. The THIRD is the VIDEO EDITOR
-(Akhil, 2026-09-02, in Rust; design pass docs/video-editor-plan.md),
-named to force drag and drop and sliders — both shipped, 2026-09-03
-and 2026-09-04, with the pickers and tooltips beside them — and still
-forcing its own build and the `video` kind. THE ORDER WAS RE-DERIVED
+grouped iOS tier through 2026-08-30. The THIRD is the TASK MANAGER
+(Akhil, 2026-09-05: "let's build a task manager"; in Rust; design pass
+docs/tasks-plan.md), chosen because the needs survey found it the
+archetype kaya is nearest to shipping and because grown in the evidence's
+order it forces ten of the twelve items that order ranks first, the
+mobile table stakes among them. The VIDEO EDITOR (docs/video-editor-plan.md,
+named 2026-09-02 to force drag and drop and sliders, both shipped) is the
+FOURTH; the `video` kind, gestures, the horizontal axis, the number field,
+the colour picker and window styles keep it as their trigger. THE ORDER WAS RE-DERIVED
 2026-09-05 from evidence rather than from the ledger's own sequence:
 docs/probes/roadmap-app-needs-2026-09-05.md (fifteen archetypes, a
 105-app corpus, the vendor catalogues, store and legal obligation, issue
