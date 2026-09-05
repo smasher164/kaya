@@ -296,6 +296,10 @@ pattern expects.
 
 ## §5 — Build order, if ruled
 
+**LANDED 2026-09-04** in that order: the depth slice on the mac (7e57dd0), the
+breadth slice as four worktrees merged (GTK, WinUI, Compose, the eight bindings
+with the mac and iOS lanes), the three remaining rosters at the merge, and the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
+
 Depth: spec (`step` prop, `value_committed` and its template twin),
 core validation (step divides the range; value within it), SwiftUI arm
 (`step:`, `onEditingChanged`, set_value through the binding), Rust sugar,

@@ -10705,7 +10705,7 @@ next, instrument the chokepoint — log `is_active`/focus at the moment of
 each paste and the seed poll's own outcome — before rerunning.
 
 
-## SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)
+## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps
 
 THE DEPTH SLICE (2026-09-04, the maintainer's rulings S1–S10 taken the same
@@ -10724,11 +10724,8 @@ is a stop) and UISlider over a tick strip of kaya's own (Settings' Larger
 Text shape), and tools/scenes/sliders.steps green on the mac with
 guests/rust/sliders.rs.
 
-OPEN, the breadth slice — each backend refuses the two props by name until
-its arm lands, and a lane carries sliders legs once its backend has them:
-
-OPEN, the breadth slice — each backend refuses the two props by name until
-its arm lands, and a lane carries sliders legs once its backend has them:
+THE BREADTH SLICE, four worktrees merged 2026-09-04 — each backend's arm and
+the bindings, as they landed:
 
 - ~~DEPTH STUB: sliders on gtk~~ (FIXED 2026-09-04: the arm landed, the
   linux lane carries the rust leg on both pools) — the step snapped in the
@@ -10790,6 +10787,6 @@ its arm lands, and a lane carries sliders legs once its backend has them:
   and 15/15 on every run. Three GENERATORS moved with the spellings, since
   the typed row façades are generated: cmd/kaya-gen (Go's row had no slider
   at all), tools/kaya-csgen (its positional `Slider` forward would have bound
-  `onChange` to the new `step`) and tools/kaya-swift-gen. STILL OPEN: the
-  three backend arms above, and the linux/windows/android rosters that wait
-  on them.
+  `onChange` to the new `step`) and tools/kaya-swift-gen. The three backend arms
+  landed in their own worktrees the same day, and the linux, windows and
+  android rosters took the other languages' legs at the merge.
