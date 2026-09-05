@@ -16,7 +16,7 @@ silent, measured (dated below).
 | macOS (SwiftUI `.help`, AppKit tooltips) | hover; keyboard focus through the help tag | — | — | `.help` sets the accessibility hint too (Apple's documented mapping); AXHelp |
 | iPadOS (`.help`, UIToolTipInteraction) | — | none | tooltip on pointer hover (iPadOS 15+) | the accessibility hint |
 | iOS on the iPhone | — | **none — long press is the context menu's** | none, even with a pointer attached | the accessibility hint |
-| Android (`View.setTooltipText`, material3 `TooltipBox`/`PlainTooltip`) | mouse hover | **long press** (plain tooltips dismiss after about a second) | mouse hover | `AccessibilityNodeInfo` tooltip text |
+| Android (`View.setTooltipText`, material3 `TooltipBox`/`PlainTooltip`) | mouse hover | **long press** (plain tooltips dismiss after about a second) | mouse hover | `AccessibilityNodeInfo` tooltip text — but NOT from Compose, which publishes none (measured 2026-09-05, §6); kaya's arm publishes the long-press action's label instead |
 | WinUI 3 (`ToolTipService.ToolTip`) | hover; **keyboard focus** | **press and hold** | — | UIA HelpText |
 | GTK 4 (`gtk_widget_set_tooltip_text`) | hover after a delay; **NOT keyboard focus** (measured 2026-09-05 in the lane's container: Tab put the focus ring on a tooltip'd button and no tooltip came in 2.5s; the pointer hovering its neighbour drew one) | not measured — the lane injects no touch | — | the AT-SPI description |
 | the web's `title` (for contrast) | hover | nothing on iOS Safari; Android Chrome shows it on long press | — | the accessible description |
@@ -140,3 +140,40 @@ android rosters, the matrix.
   own field and addresses them by index, the a11yrows scene's shape.
 - The authored hint wins over `.help` on the Mac when `.help` is applied
   first (measured on button#1 the same day: T3's ordering holds).
+- COMPOSE PUBLISHES NO TOOLTIP TEXT TO ACCESSIBILITY AT ALL (2026-09-05,
+  emulator-5554, android 35): §0's Android row is true of
+  `View.setTooltipText` and false of Compose. compose-ui 1.7.5 declares no
+  tooltip semantics key (the 37 in `SemanticsProperties`) and its
+  accessibility delegate never names one, so
+  `AccessibilityNodeInfo.tooltipText` read null on EVERY node of the
+  tooltips scene with material3's TooltipBox around each one. Material's
+  own contribution to the reader is the anchor's long-press action LABEL,
+  the string "show tooltip". So the Compose arm publishes the help itself,
+  in the slot Android has for it: the LONG-PRESS ACTION'S LABEL, the
+  hint's mechanism one key over (`onLongClick(label = help, action =
+  null)`; the delegate adds ACTION_LONG_CLICK with the label whenever the
+  action is present, even with a null action function — read out of the
+  bytecode, then measured). T3 holds there on the platform: button#1
+  carries the authored hint in the CLICK action's label and the help in
+  the LONG-CLICK action's, two slots, neither disturbing the other.
+- THE LABEL RIDES BOTH NODES, because material3's tooltip anchor sets
+  `mergeDescendants = true`: a widget that is a merging root of its own (a
+  Button) stays the node a service focuses, while a plain LABEL is
+  ABSORBED into the anchor — and the anchor's own "show tooltip" then wins
+  the label by the action key's merge policy (the parent's label, the
+  child's action). The first Compose reading had exactly that: the two
+  stamped labels read "show tooltip" and not the row's help. So the help
+  is applied twice, in the `a11y` chain (the widget's own node) and as the
+  TooltipBox's `modifier` (the anchor), and the second reading shows every
+  helped node — leaves, stamped copies and the container — carrying its
+  own help. One consequence, unasserted by any scene: a helped LEAF is
+  absorbed, so its `a11y_id` test tag is not in the merged tree and an
+  `expect_ax` on it would read "nothing carries test tag".
+- A LONG PRESS INSIDE A HELPED CHILD OF A HELPED CONTAINER SHOWS BOTH
+  BUBBLES on Compose (measured 2026-09-05, capture over the Save button:
+  "Saves the draft to disk" with the root column's "The settings for this
+  account" beside it). Material's anchor detects the press on the Initial
+  pass at every level and neither stands down, where GTK, WinUI and AppKit
+  pick the innermost widget under the pointer. Left as the toolkit's:
+  arbitration would be kaya's own invention, and a composition local flows
+  down, so an ancestor cannot learn that a descendant is helped.
