@@ -36,8 +36,10 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
 # §3.2); `sizepolicy` waits on the other bindings' `fixed`/`on_draw`/
 # `on_tick` spelling (docs/deferred.md's size-policy entry); `dnd` waits
-# on the bindings sweep (docs/dnd-plan.md §4, §5 step 6).
-DEPTH_SCENES="windowed canvas sizepolicy dnd"
+# on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
+# on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
+# (docs/slider-plan.md §4, docs/deferred.md's sliders entry).
+DEPTH_SCENES="windowed canvas sizepolicy dnd sliders"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1128,6 +1130,13 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin pickers)"
     run "$proto" pickers-java env KAYA_SELFTEST=pickers KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE SLIDERS SCENE (docs/slider-plan.md). GTK quantizes no drag and
+    # has no drag-finished signal, so the arm snaps in its commit path and
+    # reads the release off the raw event stream (S1, S2). THROUGH
+    # a11y-leg.sh for the closing `expect_ax`; check-steps' ax_bus() holds
+    # that rule.
+    run "$proto" sliders-rust env KAYA_SELFTEST=sliders \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sliders"
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py

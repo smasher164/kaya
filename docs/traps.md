@@ -9007,3 +9007,55 @@ its pool starts `Xvfb` directly (tools/linux/run-suites.sh,
 preflight and recording mode, sit under `timeout 15` and `timeout 180`. A
 hand capture is: wrap every `xvfb-run` in `timeout`, and start them one at
 a time — run sequentially in one container, both retries finished in 20s.
+
+AMENDED 2026-09-04 (the sliders capture), and the amendment names a
+discriminator the day's reading did not have: **the wait hangs when
+`xvfb-run` is the CONTAINER'S PID 1**, alone and on an idle host. `docker
+run … kaya-linux xvfb-run -a -s … bash /probe/capture.sh` hung twice out of
+two, killed at 4 minutes each, with `docker exec … ps -ef` showing exactly
+the `/bin/sh /usr/bin/xvfb-run` and its `Xvfb :99` and the command never
+forked — the same two-process picture as above, and no output file. The
+IDENTICAL xvfb-run line one level down — `docker run … kaya-linux bash
+outer.sh`, where `outer.sh` runs `timeout 120 xvfb-run …` — ran to
+completion three times out of three, including the two captures that had
+just hung. It reads as PID 1's signal rule (a container's init gets no
+signal it has no handler installed for, and xvfb-run's readiness `wait`
+is on Xvfb's USR1), but what is MEASURED is the shape: the three hand
+captures of the entry above were `docker run … xvfb-run …` too, so
+concurrency was at most half the story. A hand capture puts a script of
+its own at PID 1 and calls `xvfb-run` from inside it — which is the shape
+tools/linux/run-suites.sh already has, and why the lane never saw this.
+
+
+## A `GestureClick` on a `GtkScale` never sees its release, and the scroll type cannot tell a drag from a wheel (measured 2026-09-04)
+
+docs/slider-plan.md S2 named `GestureClick`'s `released` as the GTK hook for
+"the drag is over", since GtkRange has no finished signal. It does not fire.
+A stock GTK4 scale under Xvfb with every candidate controller attached, driven
+by a real xdotool press / three motions / release, produced:
+
+    legacy[capture] button-press
+    click[capture] begin / pressed n=1        <- both click gestures
+    click[bubble]  begin / pressed n=1
+    change-value scroll=jump value=53.681
+    value-changed 53.681
+    click[bubble] end                         <- BOTH gestures END here,
+    click[capture] end                           mid-drag, with no `released`
+    change-value scroll=jump …                   and no `cancel`: GtkRange's
+    value-changed …                              own drag gesture has claimed
+    legacy[capture] button-release               the sequence
+
+so the only release the widget sees is the RAW event, and a
+`GtkEventControllerLegacy` in the CAPTURE phase is the hook — which is what
+crates/kaya/src/gtk.rs's slider arm attaches. Two more readings from the same
+probe: the scroll WHEEL emits `change-value` with scroll type `jump`, exactly
+as a pointer drag does and with no button event at all, so the scroll type
+cannot stand in for "a drag is in progress" (the pointer button's own state
+can); and the adjustment's step increment SURVIVES a lower/upper rewrite, so
+before `set_increments` an arrow key on kaya's 0..100 slider moved it by
+`Scale::with_range`'s 0.01 and PageUp by 0.1. No scene can see any of this:
+`set_value` is a finished gesture with no pointer down, the increments are the
+keyboard's and the ticks are pixels — tools/check-gtk.py's census holds the
+four links, and the whole-drag proof is a hand capture (the sliders window,
+pressed and walked by xdotool, reads `commits: 3` for one drag where a
+per-move commit reads about ten).

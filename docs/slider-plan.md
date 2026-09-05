@@ -135,6 +135,13 @@ keyboard change commits at once. A `set_value` step in a scene commits
 (the driven move is one gesture); a new verb is not needed. The sugar
 spelling: `on_commit` beside `on_change` in every binding's own idiom.
 
+AMENDED 2026-09-04 when the GTK arm was built: a `GestureClick` on a
+`GtkScale` never sees `released` at all — GtkRange's own drag gesture
+claims the sequence and the click gesture gets `end` on the first motion
+— so that arm reads the release off a capture-phase
+`GtkEventControllerLegacy`, the only controller the raw button events
+reach (measured, docs/traps.md).
+
 ### S3 — Two thumbs, a range slider (RECOMMEND: defer, record the shape)
 
 Only Compose ships one. WinUI reaches one through the Community Toolkit

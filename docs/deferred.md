@@ -10724,12 +10724,18 @@ is a stop) and UISlider over a tick strip of kaya's own (Settings' Larger
 Text shape), and tools/scenes/sliders.steps green on the mac with
 guests/rust/sliders.rs.
 
-OPEN, the breadth slice — each backend refuses the two props by name until
-its arm lands, and the lanes carry no sliders legs until then:
+OPEN, the breadth slice — each backend below refuses the two props by name
+until its arm lands, and no lane presenting through that backend carries
+sliders legs until then:
 
-- DEPTH STUB: sliders on gtk — the step snapped in the commit path (GTK
-  quantizes no drag), `add_mark` per tick, `set_increments` from the step,
-  the release gesture as the commit; `slider_value` already reads the scale.
+- ~~DEPTH STUB: sliders on gtk~~ (FIXED 2026-09-04: the arm landed, the
+  linux lane carries the rust leg on both pools) — the step snapped in the
+  commit path (GTK quantizes no drag), `add_mark` per tick,
+  `set_increments` from the step (an arrow key on a 0..100 slider had been
+  moving it by `Scale::with_range`'s 0.01), and the RELEASE off the raw
+  event stream rather than the `GestureClick` this entry named: GtkRange's
+  own drag gesture claims the sequence, so a click gesture on a scale never
+  sees `released` at all (measured 2026-09-04, docs/traps.md).
 - DEPTH STUB: sliders on winui — `StepFrequency` from the step (or
   (max − min)/1000 for a continuous slider, retiring the silent 0.01),
   `SnapsTo.StepValues`, `TickFrequency` from the spacing,

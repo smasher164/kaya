@@ -60,6 +60,9 @@ ENTRIES = (
     ("padded-card truth table",
      "fn gtk_table_padded_card_convicts_nothing()",
      "fn gtk_table_padded_card_convicts_nothing_disabled()"),
+    ("slider derivation test",
+     "fn gtk_slider_snaps_clamps_and_derives()",
+     "fn gtk_slider_snaps_clamps_and_derives_disabled()"),
     # THE VIEWPORT'S FLOOR (docs/deferred.md, closed 2026-08-25): a
     # scrollbar's own 58px minimum reaches the scroller through the
     # POLICY, so a policy pinned open silently brings the empty card back.
@@ -130,6 +133,36 @@ ENTRIES = (
     ("bottom spacer sized by the core's arithmetic",
      "let below = (band.extent - band.offset - realized).max(0.0);",
      "let below = 0.0;"),
+    # THE SLIDER'S FIVE LINKS (docs/slider-plan.md S1, S2, S5, S7), THREE
+    # OF WHICH tools/scenes/sliders.steps CANNOT SEE — measured, each
+    # perturbation below applied to a copy of gtk.rs with the REAL leg run
+    # against it (2026-09-04): the pointer's own state stays GREEN, because
+    # the scene drives every move through `set_value`, which is a finished
+    # gesture with no pointer down, so a drag committing on every pixel is
+    # exercised by no leg on any lane; the increments stay GREEN, because
+    # they are the keyboard's; the marks stay GREEN, because they are
+    # pixels. The first two are the scene's own and were watched going RED,
+    # and they stay here as the callsite pins the pure test cannot be.
+    ("the slider's snap in the commit path",
+     "let value = snapped_slider(slider, raw);",
+     "let value = raw;"),
+    ("the committed emit at the end of a gesture",
+     "sink.send_value_committed_tag(tag, value);",
+     "sink.send_value_tag(tag, value);"),
+    # A drag's every move would commit — the model and the undo stack
+    # written on every pixel, which is what S2 exists to prevent.
+    ("the pointer's own state deciding a gesture is over",
+     "let settled = !committed.state.get().dragging;",
+     "let settled = true;"),
+    ("the keyboard's increments derived from the step",
+     "        (step, step * 10.0)",
+     "        (0.01, 0.1)"),
+    # A tick lattice left where the DEFAULT 0..1 range put it: the props
+    # arrive in no guaranteed order, so each of the four re-derives.
+    ("the ticks re-derived when the range moves",
+     "slider.scale.adjustment().set_upper(v);\n                    "
+     "slider_marks(slider);",
+     "slider.scale.adjustment().set_upper(v);"),
 )
 
 
@@ -221,6 +254,7 @@ PY
         && run_exact_test gtk::flex::tests::gtk_flex_allocator_never_negative \\
         && run_exact_test gtk::flex::tests::gtk_table_viewport_rejects_overflow \\
         && run_exact_test gtk::flex::tests::gtk_table_padded_card_convicts_nothing \\
+        && run_exact_test gtk::flex::tests::gtk_slider_snaps_clamps_and_derives \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\
             >/dev/null 2>&1; then
                 echo "check-gtk: zero-test self-test was accepted" >&2

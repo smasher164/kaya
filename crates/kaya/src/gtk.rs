@@ -966,6 +966,39 @@ mod flex {
                 None
             );
         }
+
+        /// THE SLIDER'S THREE DERIVATIONS (docs/slider-plan.md S1, S5, S7),
+        /// which need no widget and therefore run where no display does.
+        /// Only the SNAP is observable from a scene: the increments are the
+        /// keyboard's, and the marks are pixels, so a lane green with either
+        /// wrong is the ordinary case.
+        #[test]
+        fn gtk_slider_snaps_clamps_and_derives() {
+            use super::super::{slider_increment_pair, slider_mark_values, snapped_value};
+            // tools/scenes/sliders.steps' own numbers.
+            assert_eq!(snapped_value(0.0, 100.0, 5.0, 37.0), 35.0);
+            assert_eq!(snapped_value(0.0, 100.0, 5.0, 140.0), 100.0);
+            assert_eq!(snapped_value(0.0, 100.0, 5.0, -3.0), 0.0);
+            assert_eq!(snapped_value(0.0, 1.0, 0.0, 0.37), 0.37);
+            assert_eq!(snapped_value(0.0, 100.0, 10.0, 44.0), 40.0);
+            // The lattice runs from the MINIMUM, never from zero, so a
+            // thermostat's 60..80 rests on 70 and not on 72.
+            assert_eq!(snapped_value(60.0, 80.0, 5.0, 72.0), 70.0);
+            assert_eq!(snapped_value(-1.0, 1.0, 0.5, 0.1), 0.0);
+            // S7. The continuous pair is what GTK's own 0.01 hid.
+            assert_eq!(slider_increment_pair(0.0, 100.0, 5.0), (5.0, 50.0));
+            assert_eq!(slider_increment_pair(0.0, 1.0, 0.0), (0.01, 0.1));
+            assert_eq!(slider_increment_pair(0.0, 100.0, 0.0), (1.0, 10.0));
+            // S5: every multiple of the spacing from the minimum, and none
+            // at all when no spacing was declared.
+            assert_eq!(
+                slider_mark_values(0.0, 100.0, 25.0),
+                vec![0.0, 25.0, 50.0, 75.0, 100.0]
+            );
+            assert_eq!(slider_mark_values(60.0, 80.0, 5.0), vec![60.0, 65.0, 70.0, 75.0, 80.0]);
+            assert!(slider_mark_values(0.0, 100.0, 0.0).is_empty());
+            assert!(slider_mark_values(0.0, 0.0, 25.0).is_empty());
+        }
     }
 
     pub struct FlexLayoutInner {
@@ -1182,6 +1215,29 @@ struct GtkTimeField {
     state: Rc<std::cell::Cell<TimeState>>,
 }
 
+/// A slider's declared granularity and drawn ticks (0 = none, S1/S5), the
+/// value the app last heard, and the value the last gesture SETTLED on —
+/// what `value_committed` compares against (docs/slider-plan.md S2).
+#[derive(Clone, Copy, Default)]
+struct SliderState {
+    step: f64,
+    tick_spacing: f64,
+    held: f64,
+    committed: f64,
+    /// A pointer button is down on the scale. GTK has no drag-finished
+    /// signal and its own gesture claims the sequence, so the release is
+    /// the commit and every move before it is live only (measured
+    /// 2026-09-04; docs/traps.md, "A GestureClick on a GtkScale never
+    /// sees its release").
+    dragging: bool,
+}
+
+#[derive(Clone)]
+struct GtkSlider {
+    scale: gtk4::Scale,
+    state: Rc<std::cell::Cell<SliderState>>,
+}
+
 /// The date the CALENDAR is showing, packed — never a model copy.
 fn calendar_packed(calendar: &gtk4::Calendar) -> i64 {
     // `year`/`month`/`day` are 4.14 getters and this build pins v4_12;
@@ -1374,6 +1430,96 @@ fn time_committed(
     sink.send_time_tag(tag, packed);
 }
 
+/// Where a thumb may rest: on the step's lattice FROM THE MINIMUM, inside
+/// the range (docs/slider-plan.md S1). GTK quantizes no drag, so this is
+/// the whole of the declared step.
+fn snapped_value(min: f64, max: f64, step: f64, raw: f64) -> f64 {
+    let value = if step > 0.0 { min + ((raw - min) / step).round() * step } else { raw };
+    value.clamp(min, max)
+}
+
+fn snapped_slider(slider: &GtkSlider, raw: f64) -> f64 {
+    let adjustment = slider.scale.adjustment();
+    snapped_value(adjustment.lower(), adjustment.upper(), slider.state.get().step, raw)
+}
+
+/// THE ONE COMMIT PATH for a slider (docs/slider-plan.md S1, S2, S8), a
+/// user's gesture and a driven move alike: snap to the step, clamp to the
+/// range, mirror the scale, emit the live move when the value moved, and
+/// when the gesture is over the committed value ONCE, only when it differs
+/// from the last committed one.
+fn slider_committed(
+    slider: &GtkSlider,
+    quiet: &Rc<std::cell::Cell<bool>>,
+    sink: &OccSink,
+    tag: &[u8],
+    raw: f64,
+    settled: bool,
+) {
+    let value = snapped_slider(slider, raw);
+    if value != raw {
+        let was = quiet.replace(true);
+        slider.scale.set_value(value);
+        quiet.set(was);
+    }
+    let mut state = slider.state.get();
+    if value != state.held {
+        state.held = value;
+        slider.state.set(state);
+        sink.send_value_tag(tag, value);
+    }
+    if settled && value != state.committed {
+        state.committed = value;
+        slider.state.set(state);
+        sink.send_value_committed_tag(tag, value);
+    }
+}
+
+/// The ticks (S5): one at every multiple of the spacing from the minimum,
+/// in GTK's own look, none when the spacing is 0. Re-drawn whenever the
+/// range or the spacing moves. The core has already refused a spacing that
+/// does not divide the range.
+fn slider_mark_values(min: f64, max: f64, spacing: f64) -> Vec<f64> {
+    if spacing <= 0.0 || max <= min {
+        return Vec::new();
+    }
+    (0..=((max - min) / spacing).round() as i64)
+        .map(|k| min + k as f64 * spacing)
+        .collect()
+}
+
+fn slider_marks(slider: &GtkSlider) {
+    slider.scale.clear_marks();
+    let adjustment = slider.scale.adjustment();
+    let spacing = slider.state.get().tick_spacing;
+    for value in slider_mark_values(adjustment.lower(), adjustment.upper(), spacing) {
+        slider.scale.add_mark(value, gtk4::PositionType::Bottom, None);
+    }
+}
+
+/// The keyboard's increments (S7): the step and ten of it, or a hundredth
+/// and a tenth of the range when the slider is continuous. Without this a
+/// GTK slider keeps `Scale::with_range`'s 0.01 whatever range it is given,
+/// so an arrow key on a 0..100 slider moves it by a hundredth (measured
+/// 2026-09-04, docs/slider-plan.md S7).
+fn slider_increment_pair(min: f64, max: f64, step: f64) -> (f64, f64) {
+    if step > 0.0 {
+        (step, step * 10.0)
+    } else {
+        ((max - min) / 100.0, (max - min) / 10.0)
+    }
+}
+
+fn slider_increments(slider: &GtkSlider) {
+    let adjustment = slider.scale.adjustment();
+    let (small, page) = slider_increment_pair(
+        adjustment.lower(),
+        adjustment.upper(),
+        slider.state.get().step,
+    );
+    slider.scale.set_increments(small, page);
+}
+
 enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
@@ -1381,7 +1527,7 @@ enum NativeWidget {
     Entry(gtk4::Entry),
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
-    Slider(gtk4::Scale),
+    Slider(GtkSlider),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
@@ -1414,7 +1560,7 @@ impl NativeWidget {
             NativeWidget::Entry(w) => w.clone().upcast(),
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
-            NativeWidget::Slider(w) => w.clone().upcast(),
+            NativeWidget::Slider(w) => w.scale.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
@@ -1896,7 +2042,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
     match kind {
         K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
         K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
-        K::Slider => core.sliders.iter().map(|w| w.clone().upcast()).collect(),
+        K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
@@ -2606,7 +2752,7 @@ struct CoreState {
     /// entry, 2026-09-01).
     widget_tags: HashMap<u64, Vec<u8>>,
     entries: Vec<gtk4::Entry>,
-    sliders: Vec<gtk4::Scale>,
+    sliders: Vec<GtkSlider>,
     /// The composed pickers, in creation order like every other registry;
     /// each entry carries the parts `set_date`/`set_time` drive and
     /// `expect_picker` reads (docs/datetime-plan.md D8).
@@ -5511,7 +5657,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
     let widget: gtk4::Widget = match t.kind {
         K::Button => core.buttons[resolve(t.index, core.buttons.len())].clone().upcast(),
         K::Checkbox => core.checkboxes[resolve(t.index, core.checkboxes.len())].clone().upcast(),
-        K::Slider => core.sliders[resolve(t.index, core.sliders.len())].clone().upcast(),
+        K::Slider => core.sliders[resolve(t.index, core.sliders.len())].scale.clone().upcast(),
         K::Label => core.labels[resolve(t.index, core.labels.len())].clone().upcast(),
         K::Column => core.columns[resolve(t.index, core.columns.len())].clone().upcast(),
         K::Row => core.rows[resolve(t.index, core.rows.len())].clone().upcast(),
@@ -7420,16 +7566,70 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let scale =
                         gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 1.0, 0.01);
                     scale.set_size_request(160, -1);
+                    let slider = GtkSlider {
+                        scale: scale.clone(),
+                        state: Rc::new(std::cell::Cell::new(SliderState::default())),
+                    };
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("sliders carry a tag");
                     let quiet = core.apply_quiet.clone();
-                    scale.connect_value_changed(move |sc| {
-                        if !quiet.get() {
-                            sink.send_value_tag(&tag, sc.value());
-                        }
-                    });
-                    core.sliders.push(scale.clone());
-                    NativeWidget::Slider(scale)
+                    {
+                        let committed = slider.clone();
+                        let quiet = quiet.clone();
+                        let sink = sink.clone();
+                        let tag = tag.clone();
+                        scale.connect_value_changed(move |sc| {
+                            if quiet.get() {
+                                return;
+                            }
+                            // A move with no pointer down IS a finished
+                            // gesture: the keyboard, the wheel, and the
+                            // harness's driven write all commit at once
+                            // (docs/slider-plan.md S7, S8).
+                            let settled = !committed.state.get().dragging;
+                            slider_committed(
+                                &committed, &quiet, &sink, &tag, sc.value(), settled,
+                            );
+                        });
+                    }
+                    // THE RELEASE IS THE COMMIT (S2), off the RAW event
+                    // stream: GtkRange's own drag gesture claims the
+                    // sequence, so a GestureClick on a scale never sees
+                    // `released` at all (measured 2026-09-04,
+                    // docs/traps.md).
+                    let pointer = gtk4::EventControllerLegacy::new();
+                    pointer.set_propagation_phase(gtk4::PropagationPhase::Capture);
+                    {
+                        let committed = slider.clone();
+                        pointer.connect_event(move |_, event| {
+                            let mut state = committed.state.get();
+                            match event.event_type() {
+                                gdk::EventType::ButtonPress | gdk::EventType::TouchBegin => {
+                                    state.dragging = true;
+                                    committed.state.set(state);
+                                }
+                                gdk::EventType::ButtonRelease
+                                | gdk::EventType::TouchEnd
+                                | gdk::EventType::TouchCancel => {
+                                    state.dragging = false;
+                                    committed.state.set(state);
+                                    slider_committed(
+                                        &committed,
+                                        &quiet,
+                                        &sink,
+                                        &tag,
+                                        committed.scale.value(),
+                                        true,
+                                    );
+                                }
+                                _ => {}
+                            }
+                            glib::Propagation::Proceed
+                        });
+                    }
+                    scale.add_controller(pointer);
+                    core.sliders.push(slider.clone());
+                    NativeWidget::Slider(slider)
                 }
                 WidgetKind::Button => {
                     let button = gtk4::Button::new();
@@ -8995,10 +9195,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     check.set_active(b);
                     core.apply_quiet.set(false);
                 }
-                (NativeWidget::Slider(scale), Prop::Value, Value::F64(v)) => {
+                (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet.set(true);
-                    scale.set_value(v);
+                    slider.scale.set_value(v);
                     core.apply_quiet.set(false);
+                    // The write RE-BASES both mirrors, so a later gesture
+                    // landing here says nothing (docs/slider-plan.md S2;
+                    // the SwiftUI arm's propValue does the same).
+                    let mut state = slider.state.get();
+                    state.held = slider.scale.value();
+                    state.committed = state.held;
+                    slider.state.set(state);
                 }
                 // THE PICKERS' SLOTS (docs/datetime-plan.md D2), each a
                 // packed I64. Every one of them is a PROPERTY WRITE and so
@@ -9205,18 +9412,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         bar.set_fraction(bar.fraction());
                     }
                 }
-                (NativeWidget::Slider(scale), Prop::Min, Value::F64(v)) => {
-                    scale.adjustment().set_lower(v);
+                // THE FOUR SLIDER SLOTS. The ticks and the keyboard's
+                // increments are derived from the range AND the two
+                // numbers, so each of the four re-derives both: the props
+                // arrive in no guaranteed order (the core checks their
+                // relations at the END of the transaction).
+                (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
+                    slider.scale.adjustment().set_lower(v);
+                    slider_marks(slider);
+                    slider_increments(slider);
                 }
-                (NativeWidget::Slider(scale), Prop::Max, Value::F64(v)) => {
-                    scale.adjustment().set_upper(v);
+                (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
+                    slider.scale.adjustment().set_upper(v);
+                    slider_marks(slider);
+                    slider_increments(slider);
                 }
-                // The slider's step and ticks are the breadth slice
-                // (docs/slider-plan.md §5): declared against this backend
-                // they fail HERE, by name, never as a slider that quietly
-                // stays continuous.
-                (NativeWidget::Slider(_), Prop::Step | Prop::TickSpacing, _) => {
-                    crate::depth_stub("sliders")
+                (NativeWidget::Slider(slider), Prop::Step, Value::F64(v)) => {
+                    let mut state = slider.state.get();
+                    state.step = v;
+                    slider.state.set(state);
+                    slider_increments(slider);
+                }
+                (NativeWidget::Slider(slider), Prop::TickSpacing, Value::F64(v)) => {
+                    let mut state = slider.state.get();
+                    state.tick_spacing = v;
+                    slider.state.set(state);
+                    slider_marks(slider);
                 }
                 // Kind-agnostic, like the prop itself: the weight rides
                 // on the widget and the parent's flex manager reads it
@@ -11373,16 +11594,26 @@ impl crate::harness::Stage for GtkStage {
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());
-            core.sliders[i].set_value(value);
+            let scale = &core.sliders[i].scale;
+            // THROUGH the control (docs/slider-plan.md S8), as ONE
+            // finished gesture: the scale moves and its own signal runs
+            // the commit path — the step's snap, the range's clamp, the
+            // live emit and the committed one. The signal is emitted
+            // after the write (`set_time`'s shape) because a write that
+            // lands on the value already held fires nothing.
+            scale.set_value(value);
+            scale.emit_by_name::<()>("value-changed", &[]);
         });
     }
 
+    /// The CONTROL's value in the one fixed spelling, never the mirror
+    /// beside it (docs/slider-plan.md S8).
     fn slider_value(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
                 return "<no such target>".to_owned();
             };
-            crate::harness::spelled_slider(core.sliders[i].value())
+            crate::harness::spelled_slider(core.sliders[i].scale.value())
         })
     }
 
@@ -13740,7 +13971,8 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
             .map(|i| core.date_pickers[i].button.clone().upcast()),
         K::TimePicker => try_resolve(target.index, core.time_pickers.len())
             .map(|i| core.time_pickers[i].button.clone().upcast()),
-        K::Slider => nth!(core.sliders),
+        K::Slider => try_resolve(target.index, core.sliders.len())
+            .map(|i| core.sliders[i].scale.clone().upcast()),
         K::Image => nth!(core.images),
         K::Progress => nth!(core.progresses),
         K::Select => nth!(core.selects),
