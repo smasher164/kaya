@@ -42,9 +42,11 @@ and docs/probes/roadmap-framework-parity-2026-09-05.md, read together on
 
 ## §1 — the surface (v0, on today's kaya)
 
-A Things-class subset. ONE WINDOW with SIDEBAR SECTIONS for the smart
-lists — Inbox, Today, Upcoming, Anytime, Logbook — and a sixth section,
-Projects. Each smart list is a column: a quick-add row at the top (an
+A Things-class subset. ONE WINDOW with FIVE SIDEBAR SECTIONS — Inbox,
+Today, Upcoming, Anytime and Projects (R4: a phone's tab bar takes five;
+the Logbook and Settings are View-menu screens pushed onto the active
+section's stack, Settings promoted into the chrome as a gear). Each
+smart list is a column: a quick-add row at the top (an
 entry and an "Add" button, the todos scene's shape) and a For of task
 rows under it. A task row is a checkbox bound to `done`, the title, a
 caption label with the when-date or deadline, and a "Details" button;
@@ -87,9 +89,9 @@ Deliberate v0 stops, each a recorded stop short of a forced feature:
 - **No search.** S1 adds a search entry at the top of each list.
 - **Counts are labels.** "3 today" is a label in Today's column; S2
   moves it onto the Today section as a badge.
-- **Settings is a plain column** under a seventh section: a select for
-  the first day of the week and two checkboxes that S2 turns into
-  switches. Nothing persists (S4).
+- **Settings is a plain column** behind View>Settings: a select for the
+  first day of the week and two checkboxes that S2 turns into switches.
+  Nothing persists (S4).
 - **Reminders are stored, not fired.** The time picker writes the
   field; S3 turns a reminder into a notification.
 - **Quick-add is inline.** S6 moves it into a sheet on the phones.
@@ -132,6 +134,13 @@ pass, not this one's.
   per list, a Details button per row, inline quick-add, a fixed
   harness clock). PROPOSED; the maintainer may amend any of it and
   churn is free.
+- **R4 — five sections, and the phone rule** (TAKEN 2026-09-05, off the
+  iPhone and Android captures of seven sections: UIKit folded two under
+  More, Material squeezed all seven with wrapped labels). The app
+  declares five sections and reaches the Logbook and Settings through
+  the View menu; kaya's rule is that a phone above five sections falls
+  back to its own overflow idiom (DESIGN.md, Sections), with the
+  Android drawer arm and a root-list presentation ledgered.
 - **R3 — each later stage takes its own rulings at its own time**, as
   the pickers, sliders and tooltips did: the search field's spelling
   (a role on entry), the switch's (a role on checkbox, or a kind), the
@@ -177,16 +186,28 @@ the gate or trap it became.
   (`refresh_section_back`, on every section reconcile and select) and the
   WinUI verb routes as its own user back does. Both legs green alone
   the same hour.
+- **2026-09-05 — a popped screen's rows stay alive for keyed targets.**
+  The core emits no `Destroy` for a popped entry's subtree (the ledger's
+  "core never prunes `self.widgets`" leak), so the Logbook screen's
+  stamped copies stayed in the registries after `back` and a keyed read
+  of `caption[t9]` found two copies — the new diagnostic said so by
+  name. The app gives its pushed screens their own ids (`lb_title`)
+  until the core tears a popped entry down; the ledger entry now
+  carries the consumer and the fix.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through
   the counts and the row's list instead; a `checked` read is a harness
   slice of its own if a stage needs it.
-- **Open question for the maintainer — seven sections on a phone.** The
-  iPhone tab bar folds sections past five under More; kaya renders what
-  the platform does. Whether the app should fold Logbook and Settings
-  into fewer surfaces is a product call, taken after the iOS lane shows
-  the shape.
+- **2026-09-05, the phone captures — seven sections, and a greedy
+  switch.** UIKit folded Projects and Settings under More; Material
+  squeezed all seven with the labels wrapping mid-word. Ruled R4. The
+  same captures showed the iPhone's task rows pushed to the right: the
+  SwiftUI arm's checkbox is a UIKit switch with no fixed size, so it
+  took the row's free width where every other platform's checkbox hugs.
+  Fixed (`fixedSize` on iOS, a grower keeping its track); no layout
+  scene asserts a checkbox's hug inside a row, which is why the capture
+  was the first witness.
 
 ## §6 — sequencing (the evidence's order, one forced feature per stage)
 

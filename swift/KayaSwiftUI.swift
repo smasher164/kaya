@@ -13174,6 +13174,12 @@ struct KayaRender: View {
             // its native presentation of an on/off bit.
             #if os(macOS)
                 .toggleStyle(.checkbox)
+            #else
+                // A UIKit switch is greedy on width: unfixed, it took a task
+                // row's whole free width and pushed its neighbours to the
+                // right (tools/scenes/tasks.steps, 2026-09-05). A grower
+                // keeps its track.
+                .fixedSize(horizontal: node.grow == 0, vertical: false)
             #endif
             .alignmentGuide(.top) { d in
                 kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]

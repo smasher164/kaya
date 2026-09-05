@@ -65,6 +65,11 @@ enum Msg {
     WeekStart(usize),
     HideBadge(bool),
     KeepDone(bool),
+    Section(WindowId),
+    OpenLogbook,
+    LogbookPopped,
+    OpenSettings,
+    SettingsPopped,
     Resync,
 }
 
@@ -72,11 +77,11 @@ const INBOX: WindowId = WindowId(10);
 const TODAY: WindowId = WindowId(11);
 const UPCOMING: WindowId = WindowId(12);
 const ANYTIME: WindowId = WindowId(13);
-const LOGBOOK: WindowId = WindowId(14);
 const PROJECTS: WindowId = WindowId(15);
-const SETTINGS: WindowId = WindowId(16);
 const DETAIL: WindowId = WindowId(20);
 const PROJECT: WindowId = WindowId(21);
+const LOGBOOK_SCREEN: WindowId = WindowId(22);
+const SETTINGS_SCREEN: WindowId = WindowId(23);
 
 fn date(year: i32, month: u8, day: u8) -> kaya::Date {
     kaya::Date::new(year, month, day).unwrap()
@@ -153,13 +158,15 @@ fn key_of(path: &kaya::Path) -> String {
     }
 }
 
-fn section_of(list: List) -> WindowId {
+// Five sections on purpose (docs/tasks-plan.md R4): the Logbook is a
+// menu-reached screen, so it has no section of its own.
+fn section_of(list: List) -> Option<WindowId> {
     match list {
-        List::Inbox => INBOX,
-        List::Today => TODAY,
-        List::Upcoming => UPCOMING,
-        List::Anytime => ANYTIME,
-        List::Logbook => LOGBOOK,
+        List::Inbox => Some(INBOX),
+        List::Today => Some(TODAY),
+        List::Upcoming => Some(UPCOMING),
+        List::Anytime => Some(ANYTIME),
+        List::Logbook => None,
     }
 }
 
@@ -184,6 +191,10 @@ struct App {
     next: u32,
     detail: Option<Detail>,
     open_project: Option<(String, kaya::Collection<Line>)>,
+    // The selected section: the surface the menu's screens push onto.
+    active: WindowId,
+    logbook_screen: Option<kaya::Collection<TaskRow>>,
+    settings_open: bool,
     draft: String,
     pdraft: String,
     week_start: usize,
@@ -313,18 +324,28 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 m.item("Redo").role(kaya::MenuRole::Redo).id();
             })
             .id();
+        tx.window(kaya::DEFAULT_WINDOW)
+            .menu("View", |m| {
+            let logbook = m.item("Logbook").symbol(kaya::Symbol::Done).id();
+            msgs.on_menu_item(logbook, Msg::OpenLogbook);
+            // Promoted into the chrome: a gear on the phones' top bar and
+            // the desktops' toolbar (DESIGN.md, chrome promotion).
+            let settings = m.item("Settings").symbol(kaya::Symbol::Settings).primary(true).id();
+            msgs.on_menu_item(settings, Msg::OpenSettings);
+            })
+            .id();
 
         let sections = [
             (List::Inbox, INBOX, "Inbox", kaya::Symbol::Home),
             (List::Today, TODAY, "Today", kaya::Symbol::Star),
             (List::Upcoming, UPCOMING, "Upcoming", kaya::Symbol::Forward),
             (List::Anytime, ANYTIME, "Anytime", kaya::Symbol::More),
-            (List::Logbook, LOGBOOK, "Logbook", kaya::Symbol::Done),
         ];
         let mut lists = Vec::new();
         let mut quick = kaya::WidgetId(0);
         for (list, window, name, symbol) in sections {
             let section = tx.add_section(window).title(name).symbol(symbol).id();
+            msgs.on_section_selected(section, Msg::Section(window));
             let coll = tx.collection::<TaskRow>();
             let count = coll.derive(tx, move |items| {
                 let n = items.len();
@@ -341,7 +362,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 List::Today => "today_count",
                 List::Upcoming => "upcoming_count",
                 List::Anytime => "anytime_count",
-                List::Logbook => "logbook_count",
+                List::Logbook => unreachable!("the logbook has no section"),
             };
             let root = tx
                 .column(|tx| {
@@ -374,8 +395,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.mount_in(section, root);
             lists.push((list, coll));
         }
+        // The logbook's membership lives in the core so undo restores it;
+        // its rows are shown by the View>Logbook screen, stamped on open.
+        lists.push((List::Logbook, tx.collection::<TaskRow>()));
 
         let projects_section = tx.add_section(PROJECTS).title("Projects").symbol(kaya::Symbol::Edit).id();
+        msgs.on_section_selected(projects_section, Msg::Section(PROJECTS));
         let projects_coll = tx.collection::<ProjectRow>();
         let projects_root = tx
             .column(|tx| {
@@ -394,22 +419,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .id();
         tx.mount_in(projects_section, projects_root);
 
-        let settings_section = tx.add_section(SETTINGS).title("Settings").symbol(kaya::Symbol::Settings).id();
         let settings_text = tx.signal("");
-        let week_label = tx.signal("Week starts on");
-        let settings_root = tx
-            .column(|tx| {
-                tx.caption(week_label).id();
-                let week = tx.select(&["Monday", "Sunday"], 0).a11y_id("week").id();
-                msgs.on_select(week, Msg::WeekStart);
-                let hide = tx.checkbox("Hide the Today badge").a11y_id("hide_badge").id();
-                msgs.on_toggle(hide, Msg::HideBadge);
-                let keep = tx.checkbox("Keep completed tasks in their list").a11y_id("keep_done").id();
-                msgs.on_toggle(keep, Msg::KeepDone);
-                tx.caption(settings_text).a11y_id("settings").id();
-            })
-            .id();
-        tx.mount_in(settings_section, settings_root);
         (lists, projects_coll, quick, settings_text)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -425,6 +435,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         next: 1,
         detail: None,
         open_project: None,
+        active: INBOX,
+        logbook_screen: None,
+        settings_open: false,
         draft: String::new(),
         pdraft: String::new(),
         week_start: 0,
@@ -507,19 +520,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Toggle(path, checked) => {
                 let key = key_of(&path);
-                let Some((_, row)) = app.tasks.get(&key).cloned() else { continue };
+                let Some((was, row)) = app.tasks.get(&key).cloned() else { continue };
                 let row = TaskRow { done: checked, ..row };
                 let project = row.project.clone();
                 ctx.apply(|tx| {
                     tx.undoable(if checked { "complete" } else { "reopen" });
                     app.place(tx, &key, row);
                     app.project_count(tx, &project);
+                    // A row reopened from the Logbook screen leaves its list.
+                    if was == List::Logbook {
+                        if let Some(screen) = app.logbook_screen.clone() {
+                            tx.remove(&screen, key.clone());
+                        }
+                    }
                 });
             }
             Msg::Details(path) => {
                 let key = key_of(&path);
                 let Some((list, row)) = app.tasks.get(&key).cloned() else { continue };
-                let section = section_of(list);
+                let Some(section) = section_of(list) else { continue };
                 let names: Vec<String> = app.projects.values().cloned().collect();
                 let mut options = vec!["No project"];
                 options.extend(names.iter().map(String::as_str));
@@ -761,6 +780,82 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                 });
             }
+            Msg::Section(sid) => app.active = sid,
+            Msg::OpenLogbook => {
+                if app.logbook_screen.is_some() {
+                    continue;
+                }
+                let done: Vec<(String, TaskRow)> = app
+                    .tasks
+                    .iter()
+                    .filter(|(_, (list, _))| *list == List::Logbook)
+                    .map(|(k, (_, r))| (k.clone(), r.clone()))
+                    .collect();
+                let active = app.active;
+                let screen = ctx.apply(|tx| {
+                    let entry = tx.push_entry_in(active, LOGBOOK_SCREEN).title("Logbook").id();
+                    let screen = tx.collection::<TaskRow>();
+                    let count = screen.derive(tx, |items| format!("{} done", items.len()));
+                    let root = tx
+                        .column(|tx| {
+                            tx.caption(count).a11y_id("logbook_count").id();
+                            // Ids of this screen's own: a popped entry's copies
+                            // stay in every backend's registry (docs/deferred.md,
+                            // "the core never prunes self.widgets"), so a shared
+                            // id would answer twice on the next keyed read.
+                            for mut row in screen.rows(tx) {
+                                row.row(|t| {
+                                    let done = t.checkbox(TaskRow::done());
+                                    t.a11y_id(done, "lb_done");
+                                    msgs.on_toggle_node(done, Msg::Toggle);
+                                    let title = t.label(TaskRow::title());
+                                    t.a11y_id(title, "lb_title");
+                                    let caption = t.caption(TaskRow::caption());
+                                    t.a11y_id(caption, "lb_caption");
+                                });
+                            }
+                        })
+                        .id();
+                    tx.mount_in(entry, root);
+                    for (key, row) in &done {
+                        tx.insert(&screen, key.clone(), row.clone());
+                    }
+                    msgs.on_entry_popped(entry, Msg::LogbookPopped);
+                    screen
+                });
+                app.logbook_screen = Some(screen);
+            }
+            Msg::LogbookPopped => app.logbook_screen = None,
+            Msg::OpenSettings => {
+                if app.settings_open {
+                    continue;
+                }
+                let active = app.active;
+                let (week_start, hide_badge, keep_done, settings_text) =
+                    (app.week_start, app.hide_badge, app.keep_done, app.settings_text);
+                ctx.apply(|tx| {
+                    let entry = tx.push_entry_in(active, SETTINGS_SCREEN).title("Settings").id();
+                    let week_label = tx.signal("Week starts on");
+                    let root = tx
+                        .column(|tx| {
+                            tx.caption(week_label).id();
+                            let week = tx.select(&["Monday", "Sunday"], week_start).a11y_id("week").id();
+                            msgs.on_select(week, Msg::WeekStart);
+                            let hide = tx.checkbox("Hide the Today badge").a11y_id("hide_badge").id();
+                            tx.set(hide, kaya::Prop::Checked, hide_badge);
+                            msgs.on_toggle(hide, Msg::HideBadge);
+                            let keep = tx.checkbox("Keep completed tasks in their list").a11y_id("keep_done").id();
+                            tx.set(keep, kaya::Prop::Checked, keep_done);
+                            msgs.on_toggle(keep, Msg::KeepDone);
+                            tx.caption(settings_text).a11y_id("settings").id();
+                        })
+                        .id();
+                    tx.mount_in(entry, root);
+                    msgs.on_entry_popped(entry, Msg::SettingsPopped);
+                });
+                app.settings_open = true;
+            }
+            Msg::SettingsPopped => app.settings_open = false,
             Msg::Resync => ctx.apply(|tx| app.resync(tx)),
         }
     }

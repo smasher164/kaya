@@ -1965,6 +1965,14 @@ The ratified shape:
   ADVISORY per the width/height precedent: honored where the platform
   has the idiom, resolved to the nearest thing otherwise, ignored on
   the phones where physics decides (bottom bar regardless).
+  ABOVE FIVE SECTIONS A PHONE FALLS BACK TO ITS OWN OVERFLOW IDIOM
+  (ratified 2026-09-05, off the task manager's seven-section captures):
+  iOS's More tab, which UIKit already supplies, and Android's navigation
+  drawer, which Material prescribes past five destinations and kaya
+  does not yet lower — the drawer arm is on the ledger with its
+  trigger, since the app that found the gap took five sections instead.
+  A root list of lists, the Things and Reminders shape, is the better
+  iPhone answer and a presentation of its own; ledgered, not ruled.
   `auto` resolves to each platform's dominant sections idiom:
   the bottom tab bar on iOS (TabView) and Android (M3 NavigationBar),
   toolbar tabs on macOS (TabView), NavigationView left on Windows,

@@ -1898,6 +1898,26 @@ unpicked.
   silent vanished-target no-op (live-zone commands fail loudly; stamped
   copies legitimately vanish under rebuild). Wants a long-list scene —
   which pairs with row-window virtualization for For.
+- **Sections above five on Android present as a navigation drawer**
+  (ratified 2026-09-05, DESIGN.md Sections; UNBUILT). Material's bottom
+  bar takes three to five destinations and prescribes the drawer past
+  that; kaya's Compose arm squeezes every section in and the labels
+  wrap mid-word (the task manager's seven-section capture). The arm is
+  a second `KayaSectionsScaffold` body stamping its own name, taken
+  when a phone app declares more than five sections — the task manager
+  went to five, so nothing exercises it today. iOS needs no arm: UIKit's
+  More tab is the platform's own answer and kaya passes it through.
+  KEY: sections above five, navigation drawer, ModalNavigationDrawer,
+  More tab, KayaSectionsScaffold, sectionsRendered
+- **A root-list sections presentation for the iPhone** (MAYBE,
+  2026-09-05): Things, Reminders and Notes present many lists as a root
+  screen listing them, each pushing its own stack — not a tab bar at
+  all. A fourth `sections_presentation` value with its own lowering on
+  every backend (the desktops would resolve it to the sidebar). Trigger:
+  an app that outgrows five sections and refuses the More tab; the task
+  manager's Logbook and Settings went behind the View menu instead.
+  KEY: root list presentation, sections_presentation list, lists of
+  lists, More tab
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose
@@ -2502,15 +2522,29 @@ reach.
     buildExpression"). The correction is aadbe9e's: declare each child
     WHERE IT STANDS, inside `tx.row { }`, instead of building it outside
     and naming it within.
-  - **STILL OPEN — the core never prunes `self.widgets`.**
-    `DestroyWindow` (scene.rs) removes the window, its nav stacks, its
-    sections and its shortcuts, and touches `self.widgets` not at all;
-    `PopEntry` is the same. A destroyed tree's live widget ids stay in
-    the map forever. Harmless today and deliberately routed around (the
-    reachability barrier is batch-scoped for exactly this reason, and a
-    test pins that a destroyed window's widgets are not re-accused),
-    but it is a leak in a long-running app that opens and closes
-    windows.
+  - **STILL OPEN — the core never prunes `self.widgets`, AND SINCE
+    2026-09-05 IT HAS A CONSUMER.** `DestroyWindow` (scene.rs) removes
+    the window, its nav stacks, its sections and its shortcuts, and
+    touches `self.widgets` not at all; `PopEntry` is the same. A
+    destroyed tree's live widget ids stay in the map forever, and so do
+    its stamped copies in every backend's registry — no `Destroy` op is
+    emitted for a popped entry's subtree, so the copies read as LIVE.
+    The task manager found the consequence the day it pushed a screen
+    with stamped rows: after `back`, a keyed target sharing the popped
+    screen's id answered TWICE (`label@caption[t9] ambiguous (2 copies)`,
+    the SwiftUI diag), and the app carries per-screen ids (`lb_title`)
+    until this lands. The fix is the row-removal `teardown` one level
+    up: on PopEntry and DestroyWindow, walk the mounted root's subtree
+    (`children_of`), tear down every For site whose container is in it
+    (stamps, `for_sites`, the collection's site registration so later
+    inserts stamp nowhere), drop every WidgetId-keyed map's entries and
+    emit `Destroy` per widget in reverse creation order — with a unit
+    test that a popped entry's For stops stamping and `widgets` shrinks.
+    The reachability barrier is batch-scoped for exactly this reason,
+    and a test pins that a destroyed window's widgets are not
+    re-accused; both stay true under a real teardown.
+    KEY: self.widgets prune, PopEntry teardown, popped entry copies,
+    ambiguous (2 copies), lb_title, children_of, for_sites
   - The Swift binding's template zone never pushed a parenting frame
     for forEach/when bodies (fixed 2026-08-05 in the graduation: an
     inTemplateBody frame at all four combinators, matching Java's

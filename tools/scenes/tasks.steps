@@ -1,9 +1,11 @@
 # The task manager (docs/tasks-plan.md §2), one scene for every screen.
 # Rows are addressed by authored id and key: a task lives in exactly one
 # list at a time, so `label@title[t3]` names its current copy wherever it
-# sits. The clock is fixed at Monday 2026-09-07 under the harness.
+# sits. The clock is fixed at Monday 2026-09-07 under the harness. Five
+# sections (R4): the Logbook and Settings are View-menu screens pushed
+# onto the active section's stack.
 expect_title "tasks"
-expect_sections 7
+expect_sections 5
 expect_section "Inbox"
 expect label@inbox_count "2 in inbox"
 expect label@title[t1] "Buy milk"
@@ -27,13 +29,17 @@ expect label@caption[t3] "Mon 7 Sep, Thesis"
 expect label@caption[t4] "Mon 7 Sep"
 toggle checkbox@done[t3] on
 expect label@today_count "1 today"
-select_section 4
-expect_section "Logbook"
+
+# The Logbook is a View-menu screen on the active section's stack; a
+# task reopened there leaves it and returns to its list.
+menu_activate "View>Logbook"
+expect_entries 1
 expect label@logbook_count "2 done"
-expect label@title[t3] "Draft chapter 3"
-toggle checkbox@done[t3] off
+expect label@lb_title[t3] "Draft chapter 3"
+toggle checkbox@lb_done[t3] off
 expect label@logbook_count "1 done"
-select_section 1
+back
+expect_entries 0
 expect label@today_count "2 today"
 
 # Upcoming and Anytime read the seed's routing.
@@ -64,7 +70,7 @@ expect label@upcoming_count "3 upcoming"
 expect label@caption[t2] "Tue 8 Sep"
 
 # The project screen: keyed Open, its own quick-add, and reorder by drag.
-select_section 5
+select_section 4
 expect_section "Projects"
 expect label@name[trip] "Trip"
 expect label@pcount[trip] "2 tasks"
@@ -95,15 +101,17 @@ menu_activate "Edit>Undo"
 expect label@inbox_count "2 in inbox"
 expect label@title[t1] "Buy milk"
 
-# Settings: the select and the two checkboxes, read back as one line.
-select_section 6
-expect_section "Settings"
+# Settings: promoted into the chrome, pushed onto the active section.
+menu_activate "View>Settings"
+expect_entries 1
 expect label@settings "Week starts Monday; badge shown; completed move to Logbook"
 choose select@week 1
 toggle checkbox@hide_badge on
 expect label@settings "Week starts Sunday; badge hidden; completed move to Logbook"
 toggle checkbox@keep_done on
 expect label@settings "Week starts Sunday; badge hidden; completed stay in place"
+back
+expect_entries 0
 select_section 3
 expect label@anytime_count "4 anytime"
 expect label@caption[t9] "Kitchen"
