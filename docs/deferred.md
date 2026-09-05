@@ -10688,6 +10688,18 @@ lengthened label#4, the column re-laid out, and the verb's two-frame wait
 under host load past 100 can exceed. The wait is for the frame now (10s,
 and a frame that never comes is printed). The next matrix reads the remedy.
 
+SIGHTINGS FOUR AND FIVE, 2026-09-05, the tooltips tree's first and third
+matrices (the second was green here): the same two steps red both times —
+`drag label@item[y] to label#1` after the rename, the pointer `entered
+node=7` (label#2, the neighbour below) and the source `ended … op=0`, so
+label#4 kept "item x got text hello (copy)" and label#1 kept "y" — with the
+ten-second frame wait in place and no "never came" line printed: the frames
+CAME and the box was still the previous arrangement's. So the remedy moved
+from frames to the box itself: the verb now waits until the destination's
+drag box reads the same on two consecutive frames (`kayaAwaitSettledBox`,
+10s, the box and the frame count printed) before it plans the gesture. The
+next matrix reads that remedy. Green alone the same hour, twice.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 

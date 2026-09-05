@@ -2726,6 +2726,28 @@ object KayaCompose {
     }
 
     /**
+     * Wait until a widget's drag box reads the same on two consecutive frames
+     * — the layout has settled where the pointer is about to go — or say so
+     * after 10s. The box is what `onGloballyPositioned` last wrote.
+     */
+    private fun kayaAwaitSettledBox(activity: ComponentActivity, nodeId: Long) {
+        val deadline = System.nanoTime() + 10_000_000_000L
+        var previous = onUi(activity) { kayaDragBoxes[nodeId]?.let { listOf(it.windowLeft, it.windowTop, it.width, it.height) } }
+        var frames = 0
+        while (System.nanoTime() < deadline) {
+            kayaAwaitFrames(activity, 1)
+            frames += 1
+            val now = onUi(activity) { kayaDragBoxes[nodeId]?.let { listOf(it.windowLeft, it.windowTop, it.width, it.height) } }
+            if (now != null && now == previous) {
+                Log.i("kaya", "KAYA_DRAG_EVENT: destination node=$nodeId box=$now settled after $frames frame(s)")
+                return
+            }
+            previous = now
+        }
+        Log.i("kaya", "KAYA_DRAG_EVENT: destination node=$nodeId box=$previous still moving after 10s")
+    }
+
+    /**
      * THE REQUEST THE RUNNER EXECUTES (docs/dnd-plan.md D10): the two
      * widgets' centres in SCREEN PIXELS — each surface's own
      * `boundsInWindow` plus the decor view's location on screen — on the
@@ -6176,6 +6198,14 @@ object KayaCompose {
                                 "drag wants `<source> to <destination> [before|onto]`")
                         } else {
                             kayaAwaitFrames(activity, 2)
+                            // THE BOX MUST HAVE SETTLED (docs/deferred.md's
+                            // android drag WATCH, sightings four and five):
+                            // two frames passed and the verb still aimed at
+                            // the previous arrangement under load, so the
+                            // wait is for the destination's own box to hold
+                            // still across frames, not for frames.
+                            val destinationId = onUi(activity) { kayaWidgetTarget(words[2])?.id }
+                            if (destinationId != null) kayaAwaitSettledBox(activity, destinationId)
                             val plan = onUi(activity) {
                                 kayaDragPlan(activity, words[0], words[2], reorder)
                             }
