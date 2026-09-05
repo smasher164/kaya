@@ -5897,6 +5897,20 @@ impl ClipboardHub {
                     return true;
                 };
                 let hub = self.clone();
+                // The wayland WATCH's instrument (docs/deferred.md): a wayland
+                // client reads the selection only while focused, so the
+                // premise is logged at the moment of every paste.
+                {
+                    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+                    let active = focused_native()
+                        .and_then(|w| w.root())
+                        .and_then(|r| r.downcast::<gtk4::Window>().ok())
+                        .map(|w| w.is_active());
+                    eprintln!(
+                        "KAYA_CLIP_EVENT: paste widget={id} window_active={active:?} offers={}",
+                        display.clipboard().formats().to_str()
+                    );
+                }
                 materialize(
                     &ClipOffer::Board(display.clipboard()),
                     &accepts,
@@ -8631,6 +8645,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.clipboard.armed.set(true);
             let clipboard = gtk4::prelude::WidgetExt::display(&core.window).clipboard();
             let sink = core.occurrences.clone();
+            {
+                use gtk4::prelude::GtkWindowExt;
+                eprintln!(
+                    "KAYA_CLIP_EVENT: read_clipboard request={request} window_active={} offers={}",
+                    core.window.is_active(),
+                    clipboard.formats().to_str()
+                );
+            }
             materialize(
                 &ClipOffer::Board(clipboard),
                 &accepting,
@@ -13405,9 +13427,14 @@ impl crate::harness::Stage for GtkStage {
                  would be foreign in name only"
             ),
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(5);
         loop {
             if foreign_clip_targets().contains(expected) {
+                eprintln!(
+                    "KAYA_CLIP_EVENT: seed {kind} listed after {}ms",
+                    started.elapsed().as_millis()
+                );
                 return;
             }
             if std::time::Instant::now() > deadline {

@@ -10704,6 +10704,16 @@ that lost focus under load reads an empty offer. One sighting; on the
 next, instrument the chokepoint — log `is_active`/focus at the moment of
 each paste and the seed poll's own outcome — before rerunning.
 
+SECOND SIGHTING 2026-09-05, on the JS guest: `clipboard-js-wayland` red on
+the same five steps (every paste "empty") in the second matrix of the
+tooltips breadth tree, launched at a one-minute load of 8.5 with the
+five-minute at 33; the x11 twin and the eight other wayland clipboard legs
+green, and the leg green alone two minutes later (2s). The instrument the
+first sighting asked for went in the same day: `KAYA_CLIP_EVENT` lines on
+the GTK backend's stderr — the seed poll's own outcome and, at each paste,
+whether the reading window is active — so the third sighting names its
+cause rather than its class.
+
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps
