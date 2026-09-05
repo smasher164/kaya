@@ -1111,6 +1111,22 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// A slider's granularity: the thumb rests only on `min + k * step`
+    /// (docs/slider-plan.md S1). Must divide the range evenly; 0 is
+    /// continuous, the default.
+    pub fn step(self, step: f64) -> Self {
+        self.tx.set(self.id, Prop::Step, step);
+        self
+    }
+
+    /// The distance between a slider's drawn ticks, in value units
+    /// (docs/slider-plan.md S5): divides the range evenly, a multiple of
+    /// the step when one is declared; 0 draws none, the default.
+    pub fn tick_spacing(self, spacing: f64) -> Self {
+        self.tx.set(self.id, Prop::TickSpacing, spacing);
+        self
+    }
+
     /// End the chain: the durable id, releasing the transaction
     /// borrow.
     pub fn id(self) -> WidgetId {
@@ -3402,6 +3418,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().slider(min, max, src)
     }
 
+    pub fn step(&mut self, node: TemplateNodeId, step: f64) {
+        self.tpl().step(node, step)
+    }
+
+    pub fn tick_spacing(&mut self, node: TemplateNodeId, spacing: f64) {
+        self.tpl().tick_spacing(node, spacing)
+    }
+
     pub fn select(
         &mut self,
         options: &[&str],
@@ -3663,6 +3687,16 @@ impl<M> Messages<M> {
         );
     }
 
+    /// The value a slider gesture SETTLED ON — once per release or key
+    /// move, after that gesture's `on_value` moves (docs/slider-plan.md S2).
+    pub fn on_commit(&self, w: WidgetId, f: impl Fn(f64) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::ValueCommitted { value, .. } => Some(f(*value)),
+                _ => None,
+            }),
+        );
+    }
+
     /// A date picker's committed picks (docs/datetime-plan.md D7).
     pub fn on_date(&self, w: WidgetId, f: impl Fn(crate::Date) -> M + 'static) {
         self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
@@ -3721,6 +3755,17 @@ impl<M> Messages<M> {
     pub fn on_value_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64) -> M + 'static) {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceValueChanged { path, value, .. } => {
+                    Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped slider's settled value, keys first (docs/slider-plan.md S2).
+    pub fn on_commit_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceValueCommitted { path, value, .. } => {
                     Some(f(path.clone(), *value))
                 }
                 _ => None,
@@ -4113,6 +4158,7 @@ impl<M> Messages<M> {
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Toggled { id, .. }
                 | Occurrence::ValueChanged { id, .. }
+                | Occurrence::ValueCommitted { id, .. }
                 | Occurrence::SortRequested { id, .. }
                 | Occurrence::Pasted { id, .. }
                 | Occurrence::Dropped { id, .. }
@@ -4127,6 +4173,7 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
                 | Occurrence::InstanceValueChanged { node, .. }
+                | Occurrence::InstanceValueCommitted { node, .. }
                 | Occurrence::InstanceSortRequested { node, .. }
                 | Occurrence::InstancePasted { node, .. }
                 | Occurrence::InstanceDropped { node, .. }
@@ -6155,6 +6202,17 @@ impl<'b> Tpl<'_, 'b> {
         self.apply_source(node, Prop::A11yId, src.into().inner);
     }
 
+    /// A stamped slider's granularity (docs/slider-plan.md S1): constant
+    /// across the copies, like the range.
+    pub fn step(&mut self, node: TemplateNodeId, step: f64) {
+        self.set(node, Prop::Step, step);
+    }
+
+    /// A stamped slider's tick spacing (docs/slider-plan.md S5).
+    pub fn tick_spacing(&mut self, node: TemplateNodeId, spacing: f64) {
+        self.set(node, Prop::TickSpacing, spacing);
+    }
+
     /// A stamped copy's SPOKEN accessibility label, from any addressable
     /// source — the row's own field being the point
     /// (docs/tpl-props-plan.md P3).
@@ -7157,6 +7215,8 @@ mod tests {
                     | Occurrence::SectionSelected { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. }
+                    | Occurrence::ValueCommitted { .. }
+                    | Occurrence::InstanceValueCommitted { .. }
                     | Occurrence::DateChanged { .. }
                     | Occurrence::InstanceDateChanged { .. }
                     | Occurrence::TimeChanged { .. }

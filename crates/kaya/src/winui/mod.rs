@@ -12014,6 +12014,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
                     slider.SetMaximum(v)?;
                 }
+                // The breadth slice's arms (docs/slider-plan.md §5): a step or
+                // tick spacing declared against this backend fails HERE, by
+                // name, never as a slider that quietly stays continuous.
+                (NativeWidget::Slider(_), Prop::Step | Prop::TickSpacing, _) => {
+                    crate::depth_stub("sliders")
+                }
                 // THE PICKERS' FIVE PROPS (docs/datetime-plan.md §3). Each
                 // interactive write is quiet — DateChanged and
                 // SelectedTimeChanged cannot tell a user's pick from a
@@ -15359,6 +15365,16 @@ impl crate::harness::Stage for WinUiStage {
             core.sliders[i].SetValue(value)?;
             Ok(())
         });
+    }
+
+    fn slider_value(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
+                return Ok("<no such target>".to_owned());
+            };
+            Ok(crate::harness::spelled_slider(core.sliders[i].Value()?))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to the contract's

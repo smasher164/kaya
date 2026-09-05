@@ -160,6 +160,8 @@ pub enum Step {
     /// (a programmatic write, GTK's out-of-range snap) where occurrences
     /// and labels can only measure an absence.
     ExpectPicker(Target, String),
+    /// The CONTROL's slider value in the fixed spelling (docs/slider-plan.md S8).
+    ExpectSlider(Target, String),
     SetText(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
@@ -531,6 +533,7 @@ impl Step {
             | Step::SetDate(t, _)
             | Step::SetTime(t, _)
             | Step::ExpectPicker(t, _)
+            | Step::ExpectSlider(t, _)
             | Step::SetText(t, _)
             | Step::Expect(t, _)
             | Step::ExpectOrder(t, _)
@@ -631,6 +634,7 @@ impl Step {
             Step::SetDate { .. } => false,
             Step::SetTime { .. } => false,
             Step::ExpectPicker { .. } => true,
+            Step::ExpectSlider { .. } => true,
             Step::SetText { .. } => false,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
@@ -717,6 +721,18 @@ impl Step {
 /// What a backend supplies: its native calls, each hopping to its UI
 /// thread internally and blocking until applied.
 ///
+/// THE ONE SPELLING of a slider value every harness reads back
+/// (docs/slider-plan.md S8): rounded to six decimals, trailing zeros and a
+/// trailing point dropped, so 0.75 reads "0.75" and 40.0 reads "40" on every
+/// platform. The Swift and Kotlin interpreters carry the same rule.
+pub fn spelled_slider(value: f64) -> String {
+    let rounded = (value * 1_000_000.0).round() / 1_000_000.0;
+    let s = format!("{rounded:.6}");
+    let s = s.trim_end_matches('0');
+    let s = s.trim_end_matches('.');
+    if s.is_empty() || s == "-" || s == "-0" { "0".to_owned() } else { s.to_owned() }
+}
+
 /// NO METHOD HERE GETS A DEFAULT BODY. A backend that forgets one must
 /// fail to COMPILE; a default would let it pass that scene's legs
 /// vacuously, which is how the GTK reorder gap reached the Linux suite.
@@ -737,6 +753,9 @@ pub trait Stage: Send + 'static {
     /// never kaya's model of it, which would make the scene agree with
     /// itself.
     fn picker_value(&self, target: Target) -> String;
+    /// The slider CONTROL's value, spelled by [`spelled_slider`] — read from
+    /// the toolkit, never kaya's model (docs/slider-plan.md S8).
+    fn slider_value(&self, target: Target) -> String;
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform keystrokes.
     /// THE CONTRACT, since every backend implements it separately:
@@ -1256,6 +1275,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     parse_target(target)?,
                     time.trim().parse().map_err(|why| format!("set_time: {why} in {line:?}"))?,
                 )
+            }
+            "expect_slider" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_slider wants a target and a string: {line:?}"))?;
+                let want = parse_string(text)?;
+                let canonical = want.parse::<f64>().ok().map(spelled_slider);
+                if canonical.as_deref() != Some(want.as_str()) {
+                    return Err(format!(
+                        "expect_slider wants a number in its fixed spelling (up to six \
+                         decimals, no trailing zeros: 0.75, 40), got {want:?} in {line:?}"
+                    ));
+                }
+                Step::ExpectSlider(parse_target(target)?, want)
             }
             "expect_picker" => {
                 let (target, text) = rest
@@ -2744,6 +2777,17 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 stage.set_time(*t, *tm);
                 None
             }
+            Step::ExpectSlider(t, want) => Some(match t.kind {
+                TargetKind::Slider => poll(|| {
+                    let got = stage.slider_value(*t);
+                    if got == *want {
+                        Ok(got)
+                    } else {
+                        Err(format!("{t:?} holds {got:?}, wanted {want:?}"))
+                    }
+                }),
+                other => Err(format!("expect_slider reads sliders — not {other:?}")),
+            }),
             Step::ExpectPicker(t, want) => Some(match t.kind {
                 TargetKind::DatePicker | TargetKind::TimePicker => poll(|| {
                     let got = stage.picker_value(*t);
@@ -4713,6 +4757,9 @@ mod tests {
         fn picker_value(&self, _: Target) -> String {
             "2026-09-04".to_string()
         }
+        fn slider_value(&self, _: Target) -> String {
+            "0.75".to_string()
+        }
         fn set_text(&self, _: Target, _: &str) {}
         fn type_text(&self, text: &str) {
             self.seen.lock().unwrap().push(format!("type {text}"));
@@ -5559,6 +5606,9 @@ mod tests {
             fn picker_value(&self, _: Target) -> String {
                 String::new()
             }
+            fn slider_value(&self, _: Target) -> String {
+                String::new()
+            }
             fn set_text(&self, _: Target, _: &str) {}
             fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
@@ -5801,6 +5851,9 @@ mod tests {
             fn set_date(&self, _: Target, _: crate::Date) {}
             fn set_time(&self, _: Target, _: crate::Time) {}
             fn picker_value(&self, _: Target) -> String {
+                String::new()
+            }
+            fn slider_value(&self, _: Target) -> String {
                 String::new()
             }
             fn set_text(&self, _: Target, _: &str) {}

@@ -83,7 +83,10 @@ PAD_EXTRAS = {
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes"]
 # Scenes whose GUEST cannot run here yet. Empty since 2026-08-28 (the
 # packaging milestone wired the two python scenes).
-UNWIRED_SCENES = []
+# The sliders' iOS legs come with the breadth slice (docs/slider-plan.md
+# §5): the hosted UISlider arm is in the shared interpreter, and the lane
+# wires the scene once its roles are measured on the phone.
+UNWIRED_SCENES = ["sliders"]
 
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names

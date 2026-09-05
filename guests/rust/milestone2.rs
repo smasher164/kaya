@@ -109,7 +109,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDragEnded { .. }
             | Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
             Occurrence::Toggled { .. } | Occurrence::InstanceToggled { .. } => {}
-            Occurrence::ValueChanged { .. } | Occurrence::InstanceValueChanged { .. } => {}
+            Occurrence::ValueChanged { .. }
+            | Occurrence::InstanceValueChanged { .. }
+            | Occurrence::ValueCommitted { .. }
+            | Occurrence::InstanceValueCommitted { .. } => {}
             Occurrence::CloseRequested { .. } | Occurrence::WindowClosed { .. } => {}
             Occurrence::EntryPopped { .. }
             | Occurrence::BackRequested { .. }

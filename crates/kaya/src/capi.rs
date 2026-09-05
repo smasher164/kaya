@@ -89,6 +89,7 @@ pub const KAYA_OCCURRENCE_DROPPED: u16 = 22;
 pub const KAYA_OCCURRENCE_DRAG_ENDED: u16 = 23;
 pub const KAYA_OCCURRENCE_DATE_CHANGED: u16 = 24;
 pub const KAYA_OCCURRENCE_TIME_CHANGED: u16 = 25;
+pub const KAYA_OCCURRENCE_VALUE_COMMITTED: u16 = 26;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -116,6 +117,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_DRAG_ENDED == ring::REC_DRAG_ENDED
         && KAYA_OCCURRENCE_DATE_CHANGED == ring::REC_DATE_CHANGED
         && KAYA_OCCURRENCE_TIME_CHANGED == ring::REC_TIME_CHANGED
+        && KAYA_OCCURRENCE_VALUE_COMMITTED == ring::REC_VALUE_COMMITTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -725,6 +727,8 @@ pub const KAYA_PROP_TIME: u32 = 20;
 pub const KAYA_PROP_MIN_DATE: u32 = 21;
 pub const KAYA_PROP_MAX_DATE: u32 = 22;
 pub const KAYA_PROP_MINUTE_STEP: u32 = 23;
+pub const KAYA_PROP_STEP: u32 = 24;
+pub const KAYA_PROP_TICK_SPACING: u32 = 25;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -856,7 +860,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 25,
+    crate::spec::SPEC.occurrence.len() == 26,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -901,6 +905,8 @@ const _: () = assert!(
         && KAYA_PROP_MIN_DATE == wire::PROP_MIN_DATE
         && KAYA_PROP_MAX_DATE == wire::PROP_MAX_DATE
         && KAYA_PROP_MINUTE_STEP == wire::PROP_MINUTE_STEP
+        && KAYA_PROP_STEP == wire::PROP_STEP
+        && KAYA_PROP_TICK_SPACING == wire::PROP_TICK_SPACING
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1069,7 +1075,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 23,
+    crate::spec::PROPS.len() == 25,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -2888,6 +2894,22 @@ pub unsafe extern "C" fn kaya_emit_value_changed(tag: *const u8, tag_len: usize,
     state()
         .ring
         .push_record(ring::REC_VALUE_CHANGED, &wire::value_changed_body(tag, value));
+}
+
+/// Presentation side: emit the value a slider gesture SETTLED ON — once,
+/// when the thumb is released or a key moved it (docs/slider-plan.md S2).
+/// Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_value_committed(tag: *const u8, tag_len: usize, value: f64) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty slider tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_value_committed_tag(tag, value);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_VALUE_COMMITTED, &wire::value_committed_body(tag, value));
 }
 
 /// Presentation side: emit an entry edit — `tag` the entry's CREATE tag,

@@ -328,6 +328,8 @@ pub(crate) const PROP_TIME: u32 = 20;
 pub(crate) const PROP_MIN_DATE: u32 = 21;
 pub(crate) const PROP_MAX_DATE: u32 = 22;
 pub(crate) const PROP_MINUTE_STEP: u32 = 23;
+pub(crate) const PROP_STEP: u32 = 24;
+pub(crate) const PROP_TICK_SPACING: u32 = 25;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -767,6 +769,8 @@ fn prop(raw: u32) -> Prop {
         PROP_MIN_DATE => Prop::MinDate,
         PROP_MAX_DATE => Prop::MaxDate,
         PROP_MINUTE_STEP => Prop::MinuteStep,
+        PROP_STEP => Prop::Step,
+        PROP_TICK_SPACING => Prop::TickSpacing,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2265,6 +2269,29 @@ pub fn decode_value_changed_tag(tag: &[u8], value: f64) -> Occurrence {
     }
 }
 
+/// The committed twin (docs/slider-plan.md S2): the same body, its own kind.
+pub fn value_committed_body(tag: &[u8], value: f64) -> Vec<u8> {
+    value_changed_body(tag, value)
+}
+
+pub fn decode_value_committed_tag(tag: &[u8], value: f64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::ValueCommitted {
+            id: WidgetId(id),
+            value,
+        }
+    } else {
+        Occurrence::InstanceValueCommitted {
+            node: TemplateNodeId(id),
+            path,
+            value,
+        }
+    }
+}
+
 // A date/time-changed occurrence body: the picker's stored tag followed
 // by the new committed value as one I64 (packed decimal, PropKind::Date /
 // PropKind::Time — docs/datetime-plan.md D2).
@@ -3549,6 +3576,8 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::MinDate => PROP_MIN_DATE,
         Prop::MaxDate => PROP_MAX_DATE,
         Prop::MinuteStep => PROP_MINUTE_STEP,
+        Prop::Step => PROP_STEP,
+        Prop::TickSpacing => PROP_TICK_SPACING,
     }
 }
 

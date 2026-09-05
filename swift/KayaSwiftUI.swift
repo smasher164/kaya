@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x33b9ee831818ac41
+let kayaSpecHash: UInt64 = 0xd256e8d390e32c4c
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -144,6 +144,9 @@ private let propTime: UInt32 = 20
 private let propMinDate: UInt32 = 21
 private let propMaxDate: UInt32 = 22
 private let propMinuteStep: UInt32 = 23
+/// The slider's step and tick spacing (docs/slider-plan.md S1, S5).
+private let propStep: UInt32 = 24
+private let propTickSpacing: UInt32 = 25
 private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
@@ -322,6 +325,12 @@ final class KayaNode: Identifiable {
     var value = 0.0
     var minValue = 0.0
     var maxValue = 1.0
+    /// The slider's granularity and drawn ticks (0 = none), and the value the
+    /// last gesture SETTLED ON — what value_committed compares against
+    /// (docs/slider-plan.md S1, S2, S5).
+    var step = 0.0
+    var tickSpacing = 0.0
+    var committed = 0.0
     /// The pickers' packed values (docs/datetime-plan.md D2); 0 is "no
     /// bound" for the range, and 1 the step's default.
     var date: Int64 = 0
@@ -3760,6 +3769,13 @@ enum KayaHost {
         }
     }
 
+    /// The value a slider gesture settled on (docs/slider-plan.md S2).
+    static func emitValueCommitted(_ tag: [UInt8], _ value: Double) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_value_committed(buffer.baseAddress, UInt(buffer.count), value)
+        }
+    }
+
     /// A picker's COMMITTED value, packed (docs/datetime-plan.md D7).
     static func emitDateChanged(_ tag: [UInt8], _ packed: Int64) {
         tag.withUnsafeBufferPointer { buffer in
@@ -4563,6 +4579,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
                 case (propValue, valueF64):
                     kayaScene.nodes[id]!.value =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    kayaScene.nodes[id]!.committed = kayaScene.nodes[id]!.value
+                case (propStep, valueF64):
+                    kayaScene.nodes[id]!.step =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propTickSpacing, valueF64):
+                    kayaScene.nodes[id]!.tickSpacing =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propMin, valueF64):
                     kayaScene.nodes[id]!.minValue =
@@ -6305,15 +6328,35 @@ private func kayaRunScript(_ script: String) {
                 }
                 if !ok { failures.append("no such target \(parts[1])") }
             case "set_value":
+                // THROUGH the control (docs/slider-plan.md S8): its value moves
+                // and the arm's own commit path runs — the step's snap, the
+                // range's clamp, the live emit and the committed one — the
+                // path a user's gesture takes.
                 let ok = DispatchQueue.main.sync { () -> Bool in
-                    guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else {
-                        return false
-                    }
-                    kayaUserWrite { node.value = Double(parts[2])! }
-                    KayaHost.emitValue(node.tag, node.value)
+                    guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders),
+                        let control = kayaSliderControls[node.id]
+                    else { return false }
+                    kayaDriveSlider(control, node: node, to: Double(parts[2])!)
                     return true
                 }
                 if !ok { failures.append("no such target \(parts[1])") }
+            case "expect_slider":
+                // The CONTROL's value in the fixed spelling, never the node's
+                // (docs/slider-plan.md S8).
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders),
+                        let control = kayaSliderControls[node.id]
+                    else { return nil }
+                    return kayaSpelledSlider(kayaControlSliderValue(control))
+                }
+                if let got, got == want {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) holds \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "set_date", "set_time":
                 // THROUGH the control (docs/datetime-plan.md D8): its value
                 // moves and its own action fires, the path a user's pick
@@ -9019,6 +9062,263 @@ func kayaInvalidateTableGeometry() {
         table.tableGeometryEpoch &+= 1
     }
 }
+
+// ---- the slider (docs/slider-plan.md) ---------------------------------------
+// The hosted platform slider with ONE commit path (S1, S2, S8): snap the value
+// to the declared step, clamp it to the range, mirror the node, emit the live
+// move, and — when the gesture is over — the committed value, once, only when
+// it differs from the last committed one.
+
+/// THE ONE SPELLING every harness reads back (harness.rs spelled_slider):
+/// six decimals, trailing zeros and point dropped.
+func kayaSpelledSlider(_ value: Double) -> String {
+    let rounded = (value * 1_000_000).rounded() / 1_000_000
+    var s = String(format: "%.6f", rounded)
+    while s.hasSuffix("0") { s.removeLast() }
+    if s.hasSuffix(".") { s.removeLast() }
+    return (s.isEmpty || s == "-" || s == "-0") ? "0" : s
+}
+
+/// Where the thumb may rest: on the step's lattice from the minimum, inside
+/// the range.
+func kayaSnappedSlider(_ node: KayaNode, _ raw: Double) -> Double {
+    var v = raw
+    if node.step > 0 {
+        v = node.minValue + ((raw - node.minValue) / node.step).rounded() * node.step
+    }
+    return min(max(v, node.minValue), node.maxValue)
+}
+
+func kayaSliderCommitted(_ node: KayaNode, _ raw: Double, final: Bool, restore: (Double) -> Void) {
+    let v = kayaSnappedSlider(node, raw)
+    if v != raw { restore(v) }
+    if v != node.value {
+        kayaUserWrite { node.value = v }
+        KayaHost.emitValue(node.tag, v)
+    }
+    if final && v != node.committed {
+        kayaUserWrite { node.committed = v }
+        KayaHost.emitValueCommitted(node.tag, v)
+    }
+}
+
+/// The keyboard's nudge (S7): one step, or a hundredth of the range when the
+/// slider is continuous.
+func kayaSliderNudge(_ node: KayaNode) -> Double {
+    node.step > 0 ? node.step : (node.maxValue - node.minValue) / 100
+}
+
+#if os(macOS)
+    /// The hosted controls by node id: what `set_value` drives and
+    /// `expect_slider` reads.
+    nonisolated(unsafe) var kayaSliderControls: [UInt64: KayaNSSlider] = [:]
+
+    func kayaControlSliderValue(_ control: KayaNSSlider) -> Double { control.doubleValue }
+
+    /// Drive the control the way a user's gesture reaches it: the value moves
+    /// and the commit path runs as one finished gesture.
+    func kayaDriveSlider(_ control: KayaNSSlider, node: KayaNode, to value: Double) {
+        control.doubleValue = value
+        kayaSliderCommitted(node, control.doubleValue, final: true) { control.doubleValue = $0 }
+    }
+
+    /// NSSlider whose arrow keys move by kaya's nudge and commit at once, and
+    /// whose action tells a drag's movement from its release by the event that
+    /// carried it.
+    final class KayaNSSlider: NSSlider {
+        var node: KayaNode?
+
+        private func nudge(by direction: Double) {
+            guard let node else { return }
+            let target = doubleValue + direction * kayaSliderNudge(node)
+            doubleValue = target
+            kayaSliderCommitted(node, doubleValue, final: true) { self.doubleValue = $0 }
+        }
+        override func moveLeft(_ sender: Any?) { nudge(by: -1) }
+        override func moveDown(_ sender: Any?) { nudge(by: -1) }
+        override func moveRight(_ sender: Any?) { nudge(by: 1) }
+        override func moveUp(_ sender: Any?) { nudge(by: 1) }
+    }
+
+    final class KayaSliderCoordinator: NSObject {
+        var node: KayaNode
+        init(node: KayaNode) { self.node = node }
+        @objc func changed(_ sender: KayaNSSlider) {
+            // A continuous NSSlider sends its action for every drag movement
+            // and once more on the release; the event type tells them apart.
+            let type = NSApp.currentEvent?.type
+            let final = type != .leftMouseDown && type != .leftMouseDragged
+            kayaSliderCommitted(node, sender.doubleValue, final: final) { sender.doubleValue = $0 }
+        }
+    }
+
+    struct KayaSliderSurface: NSViewRepresentable {
+        let node: KayaNode
+
+        func makeCoordinator() -> KayaSliderCoordinator { KayaSliderCoordinator(node: node) }
+
+        func makeNSView(context: Context) -> KayaNSSlider {
+            let slider = KayaNSSlider()
+            slider.isContinuous = true
+            slider.target = context.coordinator
+            slider.action = #selector(KayaSliderCoordinator.changed(_:))
+            kayaSliderControls[node.id] = slider
+            apply(slider)
+            return slider
+        }
+
+        func updateNSView(_ slider: KayaNSSlider, context: Context) {
+            context.coordinator.node = node
+            kayaSliderControls[node.id] = slider
+            apply(slider)
+        }
+
+        static func dismantleNSView(_ slider: KayaNSSlider, coordinator: KayaSliderCoordinator) {
+            if kayaSliderControls[coordinator.node.id] === slider {
+                kayaSliderControls.removeValue(forKey: coordinator.node.id)
+            }
+        }
+
+        private func apply(_ slider: KayaNSSlider) {
+            slider.node = node
+            slider.minValue = node.minValue
+            slider.maxValue = node.maxValue
+            // Ticks at the declared spacing (S5); the control snaps to them
+            // itself only when every tick is a stop and every stop a tick,
+            // otherwise the commit path snaps.
+            let span = node.maxValue - node.minValue
+            slider.numberOfTickMarks =
+                node.tickSpacing > 0 && span > 0 ? Int((span / node.tickSpacing).rounded()) + 1 : 0
+            slider.tickMarkPosition = .below
+            slider.allowsTickMarkValuesOnly = node.step > 0 && node.tickSpacing == node.step
+            slider.doubleValue = node.value
+        }
+    }
+#else
+    nonisolated(unsafe) var kayaSliderControls: [UInt64: KayaTickedSlider] = [:]
+
+    func kayaControlSliderValue(_ control: KayaTickedSlider) -> Double { Double(control.slider.value) }
+
+    func kayaDriveSlider(_ control: KayaTickedSlider, node: KayaNode, to value: Double) {
+        control.slider.setValue(Float(value), animated: false)
+        kayaSliderCommitted(node, Double(control.slider.value), final: true) {
+            control.slider.setValue(Float($0), animated: false)
+        }
+    }
+
+    /// UISlider over a tick strip of kaya's own, since UIKit draws none: the
+    /// shape of Settings' Larger Text slider (docs/slider-plan.md S5). The
+    /// ticks sit under the track, one per spacing, each centred where the
+    /// thumb rests on that value.
+    final class KayaTickedSlider: UIView {
+        let slider = UISlider()
+        var tickValues: [Double] = [] {
+            didSet { setNeedsDisplay(); invalidateIntrinsicContentSize() }
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isOpaque = false
+            backgroundColor = .clear
+            slider.isContinuous = true
+            addSubview(slider)
+        }
+        required init?(coder: NSCoder) { fatalError("kaya: not from a storyboard") }
+
+        override var intrinsicContentSize: CGSize {
+            let base = slider.intrinsicContentSize
+            return CGSize(width: base.width, height: base.height + (tickValues.isEmpty ? 0 : 8))
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            let height = slider.intrinsicContentSize.height
+            slider.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
+            setNeedsDisplay()
+        }
+
+        override func draw(_ rect: CGRect) {
+            guard !tickValues.isEmpty, let ctx = UIGraphicsGetCurrentContext() else { return }
+            let track = slider.trackRect(forBounds: slider.bounds)
+            ctx.setStrokeColor(UIColor.tertiaryLabel.cgColor)
+            ctx.setLineWidth(1)
+            let top = slider.frame.minY + track.maxY + 2
+            for value in tickValues {
+                let thumb = slider.thumbRect(forBounds: slider.bounds, trackRect: track, value: Float(value))
+                let x = (slider.frame.minX + thumb.midX).rounded() + 0.5
+                ctx.move(to: CGPoint(x: x, y: top))
+                ctx.addLine(to: CGPoint(x: x, y: top + 6))
+            }
+            ctx.strokePath()
+        }
+    }
+
+    final class KayaSliderCoordinator: NSObject {
+        var node: KayaNode
+        init(node: KayaNode) { self.node = node }
+        @objc func moved(_ sender: UISlider) {
+            kayaSliderCommitted(node, Double(sender.value), final: false) {
+                sender.setValue(Float($0), animated: false)
+            }
+        }
+        @objc func released(_ sender: UISlider) {
+            kayaSliderCommitted(node, Double(sender.value), final: true) {
+                sender.setValue(Float($0), animated: false)
+            }
+        }
+    }
+
+    struct KayaSliderSurface: UIViewRepresentable {
+        let node: KayaNode
+
+        func makeCoordinator() -> KayaSliderCoordinator { KayaSliderCoordinator(node: node) }
+
+        func makeUIView(context: Context) -> KayaTickedSlider {
+            let view = KayaTickedSlider()
+            view.slider.addTarget(
+                context.coordinator, action: #selector(KayaSliderCoordinator.moved(_:)),
+                for: .valueChanged)
+            view.slider.addTarget(
+                context.coordinator, action: #selector(KayaSliderCoordinator.released(_:)),
+                for: [.touchUpInside, .touchUpOutside, .touchCancel])
+            kayaSliderControls[node.id] = view
+            apply(view)
+            return view
+        }
+
+        func updateUIView(_ view: KayaTickedSlider, context: Context) {
+            context.coordinator.node = node
+            kayaSliderControls[node.id] = view
+            apply(view)
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: KayaTickedSlider, context: Context)
+            -> CGSize?
+        {
+            let fit = uiView.intrinsicContentSize
+            return CGSize(width: proposal.width ?? fit.width, height: fit.height)
+        }
+
+        static func dismantleUIView(_ view: KayaTickedSlider, coordinator: KayaSliderCoordinator) {
+            if kayaSliderControls[coordinator.node.id] === view {
+                kayaSliderControls.removeValue(forKey: coordinator.node.id)
+            }
+        }
+
+        private func apply(_ view: KayaTickedSlider) {
+            view.slider.minimumValue = Float(node.minValue)
+            view.slider.maximumValue = Float(node.maxValue)
+            view.slider.setValue(Float(node.value), animated: false)
+            let span = node.maxValue - node.minValue
+            if node.tickSpacing > 0 && span > 0 {
+                let count = Int((span / node.tickSpacing).rounded())
+                view.tickValues = (0...count).map { node.minValue + Double($0) * node.tickSpacing }
+            } else {
+                view.tickValues = []
+            }
+        }
+    }
+#endif
 
 // ---- the pickers (docs/datetime-plan.md) ------------------------------------
 // The wire packs a date as YYYYMMDD and a time as HHMM (D2); the CONTROL holds
@@ -12763,20 +13063,13 @@ struct KayaRender: View {
                 return d[.top]
             }
         case kindSlider:
-            // Uncontrolled toward the app, the entry's shape: the node
-            // mirrors the slider's position (SwiftUI needs the
-            // binding), and every move is emitted with the slider's
-            // identity tag.
-            Slider(
-                value: Binding(
-                    get: { node.value },
-                    set: { newValue in
-                        kayaUserWrite { node.value = newValue }
-                        KayaHost.emitValue(node.tag, newValue)
-                    }),
-                in: node.minValue...node.maxValue
-            )
-            // SwiftUI's Slider has no natural width, so 200 stands in as the
+            // The platform's own control, hosted (docs/slider-plan.md §5):
+            // NSSlider on the mac, UISlider on iOS, one commit path for a
+            // user's move and a driven one. Hosted rather than SwiftUI's
+            // Slider because a stepped SwiftUI slider on macOS draws a tick
+            // per stop with no switch, and iOS draws none at all.
+            KayaSliderSurface(node: node)
+            // A slider has no natural width, so 200 stands in as the
             // intrinsic size every other toolkit's slider has. A grower must NOT
             // keep that cap: capping the drawn control below its track rendered
             // a 1:3 row as 38/62 while expect_shares kept passing.

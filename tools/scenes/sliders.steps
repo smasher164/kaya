@@ -1,0 +1,39 @@
+# The slider's contract (docs/slider-plan.md S1, S2, S8, S9): a stepped
+# slider with ticks, a continuous one with ticks, and a stamped stepped
+# one driven by key. Values are read back in the fixed spelling from the
+# CONTROL (expect_slider) and from the labels the guest's handlers write.
+expect_slider slider#0 "50"
+expect_slider slider#1 "0.5"
+expect label#0 "value: 50"
+expect label#1 "commits: 0"
+expect label#2 "volume: 0.5"
+# A driven move goes THROUGH the control: 37 snaps to the step (35); the
+# app hears the snapped value live and, once the gesture is over, committed.
+set_value slider#0 37
+expect_slider slider#0 "35"
+expect label#0 "value: 35"
+expect label#1 "commits: 1"
+# The continuous slider keeps what it is given.
+set_value slider#1 0.37
+expect_slider slider#1 "0.37"
+expect label#2 "volume: 0.37"
+# Past the range the value lands on the bound, the pickers' rule (D4).
+set_value slider#0 140
+expect_slider slider#0 "100"
+expect label#0 "value: 100"
+expect label#1 "commits: 2"
+# The echo negative: button#0 writes slider#0's signal to 25
+# PROGRAMMATICALLY. The control moves; nothing may fire, live or committed.
+click button#0
+expect_slider slider#0 "25"
+settle 700
+expect label#0 "value: 100"
+expect label#1 "commits: 2"
+# The template zone: a stamped slider stepping by 10, driven by key; the
+# handler hears the key first and the committed, snapped value.
+expect_slider slider@level[b] "20"
+set_value slider@level[b] 44
+expect label#3 "row b: 40"
+expect_slider slider@level[b] "40"
+expect_slider slider@level[a] "70"
+expect_ax slider#0 "slider/Level"

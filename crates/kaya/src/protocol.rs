@@ -571,6 +571,11 @@ pub enum Occurrence {
     ValueChanged { id: WidgetId, value: f64 },
     /// The user moved a stamped copy of a template slider.
     InstanceValueChanged { node: TemplateNodeId, path: Path, value: f64 },
+    /// The user FINISHED a slider gesture — released the thumb, or moved it
+    /// by a key — and this is the value it settled on (docs/slider-plan.md
+    /// S2). One per gesture, after that gesture's ValueChanged moves.
+    ValueCommitted { id: WidgetId, value: f64 },
+    InstanceValueCommitted { node: TemplateNodeId, path: Path, value: f64 },
     /// The user COMMITTED a new date in a date picker the guest created
     /// directly (docs/datetime-plan.md D7): the value the control holds
     /// once the user is done, never an intermediate movement.
@@ -1294,6 +1299,8 @@ pub enum Prop {
     /// A time picker's minute granularity (F64-valued count: 1, 5, 10,
     /// 15 or 30; docs/datetime-plan.md D3).
     MinuteStep,
+    Step,
+    TickSpacing,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;
@@ -2035,6 +2042,16 @@ impl OccSink {
                     let body = crate::wire::value_changed_body(&tag, value);
                     ring.push_record(crate::ring::REC_VALUE_CHANGED, &body);
                 }
+                Occurrence::ValueCommitted { id, value } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::value_committed_body(&tag, value);
+                    ring.push_record(crate::ring::REC_VALUE_COMMITTED, &body);
+                }
+                Occurrence::InstanceValueCommitted { node, path, value } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::value_committed_body(&tag, value);
+                    ring.push_record(crate::ring::REC_VALUE_COMMITTED, &body);
+                }
                 Occurrence::CloseRequested { window } => {
                     ring.push_record(
                         crate::ring::REC_CLOSE_REQUESTED,
@@ -2230,6 +2247,22 @@ impl OccSink {
                 ring.push_record(
                     crate::ring::REC_VALUE_CHANGED,
                     &crate::wire::value_changed_body(tag, value),
+                );
+            }
+        }
+    }
+
+    /// The committed twin (docs/slider-plan.md S2).
+    pub(crate) fn send_value_committed_tag(&self, tag: &[u8], value: f64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_value_committed_tag(tag, value)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_VALUE_COMMITTED,
+                    &crate::wire::value_committed_body(tag, value),
                 );
             }
         }

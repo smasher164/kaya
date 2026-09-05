@@ -9211,6 +9211,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Slider(scale), Prop::Max, Value::F64(v)) => {
                     scale.adjustment().set_upper(v);
                 }
+                // The slider's step and ticks are the breadth slice
+                // (docs/slider-plan.md §5): declared against this backend
+                // they fail HERE, by name, never as a slider that quietly
+                // stays continuous.
+                (NativeWidget::Slider(_), Prop::Step | Prop::TickSpacing, _) => {
+                    crate::depth_stub("sliders")
+                }
                 // Kind-agnostic, like the prop itself: the weight rides
                 // on the widget and the parent's flex manager reads it
                 // at allocate time.
@@ -11368,6 +11375,15 @@ impl crate::harness::Stage for GtkStage {
             let i = crate::harness::resolve(t.index, core.sliders.len());
             core.sliders[i].set_value(value);
         });
+    }
+
+    fn slider_value(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else {
+                return "<no such target>".to_owned();
+            };
+            crate::harness::spelled_slider(core.sliders[i].value())
+        })
     }
 
     /// The real-keystroke typing verb (docs/undo-plan.md A8), to harness.rs's

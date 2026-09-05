@@ -1114,7 +1114,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x33b9ee831818ac41uL
+    private const val SPEC_HASH: ULong = 0xd256e8d390e32c4cuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1343,6 +1343,9 @@ object KayaCompose {
     private const val PROP_MIN_DATE = 21
     private const val PROP_MAX_DATE = 22
     private const val PROP_MINUTE_STEP = 23
+    // The slider's step and tick spacing (docs/slider-plan.md S1, S5).
+    private const val PROP_STEP = 24
+    private const val PROP_TICK_SPACING = 25
     // The role enum's wire values (spec enum "role"). Long, because the
     // prop rides as an i64 and the render arms compare against the
     // node's own field.
@@ -1808,6 +1811,11 @@ object KayaCompose {
                         PROP_MAX_DATE -> KayaSceneModel.nodes[id]!!.maxDate = readI64(b)
                         PROP_MINUTE_STEP ->
                             KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
+                        // The breadth slice's arms (docs/slider-plan.md §5): a
+                        // step or tick spacing declared against this backend
+                        // fails HERE, by name, never as a slider that quietly
+                        // stays continuous.
+                        PROP_STEP, PROP_TICK_SPACING -> depthStub("sliders")
                         PROP_SOURCE -> {
                             // A null bitmap is the PLACEHOLDER class,
                             // never a crash — imageSize stays "0x0".
@@ -5625,6 +5633,22 @@ object KayaCompose {
                                 node?.also { kayaPickerCommitted(it, isTime, packed) } != null
                             }
                             if (!ok) failures.add("no such target ${parts[1]}")
+                        }
+                    }
+                    "expect_slider" -> {
+                        // The slider's value in the one fixed spelling
+                        // (docs/slider-plan.md S8): the state the composable
+                        // draws from IS the control's value here.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], "slider", KayaSceneModel.sliders)?.let {
+                                kayaSpelledSlider(it.value)
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else -> failures.add("${parts[1]} holds \"$got\", wanted \"$want\"")
                         }
                     }
                     "expect_picker" -> {
@@ -12002,6 +12026,21 @@ fun kayaUserBack() {
 fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
+}
+
+// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
+// docs/traps.md); an unused private function fails check-detekt, so this
+// exists only while some arm stubs.
+private fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on android")
+
+/** THE ONE SPELLING every harness reads a slider back in (harness.rs
+ * spelled_slider): six decimals, trailing zeros and point dropped. */
+fun kayaSpelledSlider(value: Double): String {
+    val rounded = Math.round(value * 1_000_000.0) / 1_000_000.0
+    var s = String.format(java.util.Locale.ROOT, "%.6f", rounded).trimEnd('0').trimEnd('.')
+    if (s.isEmpty() || s == "-" || s == "-0") s = "0"
+    return s
 }
 
 // ---- the pickers (docs/datetime-plan.md) ------------------------------------

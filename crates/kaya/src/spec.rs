@@ -162,6 +162,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("min_date", 21, PropKind::Date),
     ("max_date", 22, PropKind::Date),
     ("minute_step", 23, PropKind::F64),
+    // The slider's contract (docs/slider-plan.md S1, S5): `step` is the
+    // granularity the thumb rests on (0 = continuous) and `tick_spacing`
+    // the distance between drawn ticks in value units (0 = none); each
+    // divides the range evenly and the spacing is a multiple of the step,
+    // all domain-checked at the root.
+    ("step", 24, PropKind::F64),
+    ("tick_spacing", 25, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2553,6 +2560,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   committed value as one Time (an I64 value, packed decimal). \
                   Same stance as date_changed.",
         },
+        Record {
+            kind: 26,
+            name: "value_committed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::F64),
+            doc: "path_len key values follow, then the slider's position as \
+                  one F64 value, ONCE PER GESTURE: when the thumb is released, \
+                  or a keyboard change lands (docs/slider-plan.md S2). \
+                  value_changed carries every movement inside the gesture; \
+                  this carries the value the user settled on. A programmatic \
+                  write never echoes; same ownership stance.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2690,6 +2713,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("min_date", 21),
                 ("max_date", 22),
                 ("minute_step", 23),
+                ("step", 24),
+                ("tick_spacing", 25),
             ],
         },
         EnumSpec {
@@ -3126,6 +3151,7 @@ mod tests {
                 ("drag_ended", crate::ring::REC_DRAG_ENDED),
                 ("date_changed", crate::ring::REC_DATE_CHANGED),
                 ("time_changed", crate::ring::REC_TIME_CHANGED),
+                ("value_committed", crate::ring::REC_VALUE_COMMITTED),
             ]
         );
     }
@@ -3361,6 +3387,8 @@ mod tests {
                     ("prop", "min_date") => wire::PROP_MIN_DATE,
                     ("prop", "max_date") => wire::PROP_MAX_DATE,
                     ("prop", "minute_step") => wire::PROP_MINUTE_STEP,
+                    ("prop", "step") => wire::PROP_STEP,
+                    ("prop", "tick_spacing") => wire::PROP_TICK_SPACING,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

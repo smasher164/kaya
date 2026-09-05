@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x33b9ee831818ac41L;
+    public static final long SPEC_HASH = 0xd256e8d390e32c4cL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -93,6 +93,8 @@ public final class KayaWire {
     public static final int PROP_MIN_DATE = 21;
     public static final int PROP_MAX_DATE = 22;
     public static final int PROP_MINUTE_STEP = 23;
+    public static final int PROP_STEP = 24;
+    public static final int PROP_TICK_SPACING = 25;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -295,6 +297,7 @@ public final class KayaWire {
     public static final short OCC_KIND_DRAG_ENDED = 23;
     public static final short OCC_KIND_DATE_CHANGED = 24;
     public static final short OCC_KIND_TIME_CHANGED = 25;
+    public static final short OCC_KIND_VALUE_COMMITTED = 26;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1418,6 +1421,52 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant step value. */
+    public static byte[] txSetStep(long widgetId, double step) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_STEP).putInt(SOURCE_CONST);
+        encodeValue(b, step);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound step value. */
+    public static byte[] txBindStep(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_STEP).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindStepElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_STEP).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant tick_spacing value. */
+    public static byte[] txSetTickSpacing(long widgetId, double tickSpacing) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TICK_SPACING).putInt(SOURCE_CONST);
+        encodeValue(b, tickSpacing);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound tick_spacing value. */
+    public static byte[] txBindTickSpacing(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TICK_SPACING).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindTickSpacingElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TICK_SPACING).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -1974,7 +2023,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -2109,7 +2158,7 @@ public final class KayaWire {
         if (kind == OCC_KIND_SORT_REQUESTED) {
             payload = b.getInt(20);
         }
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED || kind == OCC_KIND_DATE_CHANGED || kind == OCC_KIND_TIME_CHANGED || kind == OCC_KIND_VALUE_COMMITTED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
             switch (ptype) {

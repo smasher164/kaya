@@ -609,6 +609,20 @@ rules so far:
   negative test: a programmatic write with the assertion that the
   fold did NOT run (ratified 2026-07-22).
 
+- **A slider says where the thumb IS and, once, where it SETTLED.**
+  `value_changed` carries every movement of a gesture; `value_committed`
+  carries the value once when the gesture ends — the thumb released, or a
+  key moved it — and only when it differs from the last committed one, so
+  a scrub previews live and the model and the undo stack take one write
+  (docs/slider-plan.md S2). The thumb rests on `min + k * step` when a
+  `step` is declared (0 is continuous) and ticks are drawn every
+  `tick_spacing` value units (0 is none), two independent numbers because
+  which values exist and which positions are drawn are independent facts;
+  each divides the range evenly and the spacing is a multiple of the step,
+  checked at the root on the complete declaration (S1, S5). Where a
+  platform cannot quantize a drag the arm snaps in its commit path; where
+  it draws no ticks kaya draws them in the platform's own look.
+
 - Construction-prop spellings, ratified per language family after a
   survey of each ecosystem's dominant GUI idiom (2026-07-20; grow and
   spacing are the first two props riding them):

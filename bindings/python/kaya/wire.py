@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x33b9ee831818ac41
+SPEC_HASH = 0xd256e8d390e32c4c
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -90,6 +90,8 @@ PROP_TIME = 20
 PROP_MIN_DATE = 21
 PROP_MAX_DATE = 22
 PROP_MINUTE_STEP = 23
+PROP_STEP = 24
+PROP_TICK_SPACING = 25
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -293,6 +295,7 @@ OCC_DROPPED = 22
 OCC_DRAG_ENDED = 23
 OCC_DATE_CHANGED = 24
 OCC_TIME_CHANGED = 25
+OCC_VALUE_COMMITTED = 26
 
 
 def _pad(b):
@@ -912,6 +915,36 @@ def tx_bind_minute_step_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MINUTE_STEP, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_step(widget_id, step):
+    """set_property with a constant step value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_STEP, SOURCE_CONST) + _enc.value(step))
+
+
+def tx_bind_step(widget_id, signal_id):
+    """set_property with a signal-bound step value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_STEP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_step_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_STEP, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_tick_spacing(widget_id, tick_spacing):
+    """set_property with a constant tick_spacing value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TICK_SPACING, SOURCE_CONST) + _enc.value(tick_spacing))
+
+
+def tx_bind_tick_spacing(widget_id, signal_id):
+    """set_property with a signal-bound tick_spacing value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TICK_SPACING, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_tick_spacing_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TICK_SPACING, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1205,7 +1238,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
@@ -1290,7 +1323,7 @@ def parse_occurrence(buf):
     payload = None
     if kind in (OCC_SORT_REQUESTED,):
         (payload,) = struct.unpack_from("<I", buf, 20)
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED,):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED,):
         payload, at = parse_value(buf, at)
     if kind in (OCC_PASTED,):
         clip, values, at = parse_clip(buf, at)

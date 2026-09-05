@@ -89,6 +89,12 @@ along the track; pair with a spin button when precision is needed.
 
 ## §2 — The gaps, as rulings
 
+**RULED 2026-09-04** by the maintainer, after the survey: the recommended
+set stands (S1 yes, S2 yes as a second occurrence, S3 defer, S4 defer, S6 no
+props, S7 derived from the step, S8 yes, S9 fixed with S1, S10 refuse), with
+S5 amended to `tick_spacing` (below). His three questions and their
+answers are recorded under S2, S5 and S10.
+
 Each says what the platforms do, what kaya would add, and a
 recommendation. Every one is a binding-surface change: nine bindings, two
 zones, an explicit do/can't/defer per language (invariant 2), and the
@@ -152,7 +158,39 @@ does not. Defer; when it comes, the Apple arm hosts `NSSlider.isVertical`
 on the mac and the two phones stay horizontal by carve-out, stated
 uniformly.
 
-### S5 — Ticks and marks (RECOMMEND: ride the step, no prop)
+### S5 — Ticks (RULED 2026-09-04: `tick_spacing`, a second number)
+
+The maintainer asked whether ticks should be explicit rather than follow
+the step ("the playhead shouldn't have ticks"), how other frameworks handle
+it, and whether one number could express everything. The field splits three
+ways: ONE KNOB where ticks follow steps (Compose's `steps`, Flutter's
+`divisions`, SwiftUI on the Mac) — an integer slider from 8 to 72 gets 65
+ticks; TWO INDEPENDENT KNOBS (WinUI `StepFrequency` + `TickFrequency` with
+`SnapsTo`, Qt `singleStep` + `tickInterval`, AppKit `numberOfTickMarks` +
+`allowsTickMarkValuesOnly`, HTML's `step` + a datalist, GTK's per-call
+`add_mark`); and AUTOMATIC WITH A DENSITY LIMIT (Material Components for
+Android's tick visibility mode: hidden, hide-all-when-crowded, or draw as
+many as fit). No single number covers the cases, because which values the
+thumb rests on and which positions are drawn are independent: ticks-follow-
+steps fails the integer slider, steps-follow-ticks fails it the other way,
+and a step with a count threshold fails the balance slider (continuous, one
+centre mark) and adds a number nobody chose. RULED: `tick_spacing`, in value
+units, 0 = none, independent of `step`; it divides the range evenly, and
+when a step is also declared it is a multiple of the step, so every tick is
+a position the thumb can reach; ticks at hand-picked values (50, 100, 200)
+are refused. The five shapes real apps ship, in that spelling: volume
+(0, 0); balance −1..1 with a centre mark (0, 1); quality low/medium/high
+0..2 (1, 1); font size 8..72 or a frame playhead (1, 0); a thermostat
+60..80 with a tick every five (1, 5). ON THE IPHONE, DRAW THEM: Apple's own
+Larger Text slider in Settings is a stepped slider with a tick at every
+size, drawn under the track — a custom control, since UISlider offers no
+ticks, and it looks like the platform. The Mac hosts NSSlider (SwiftUI's
+own Slider draws a tick per stop for any stepped slider and offers no
+switch), Windows and GTK take the spacing natively, and Compose draws kaya's
+ticks when the spacing is coarser than the step, since Material's indicators
+sit only on stops. The recommendation this replaced follows.
+
+#### S5 as first recommended — ride the step, no prop (superseded)
 
 Ticks appear wherever a stepped slider is drawn by a platform that draws
 them (mac, Compose, WinUI); iOS and GTK draw none for a step. LABELLED
@@ -198,7 +236,16 @@ other four are continuous. S1 replaces the constant: the declared step,
 or for a continuous slider a frequency of (max − min)/1000 so the thumb
 moves at pixel resolution on any range.
 
-### S10 — Direction, origin fill, centered (RECOMMEND: refuse)
+### S10 — Direction, origin fill, centered (RULED: refuse)
+
+Asked what these are: DIRECTION flips which end is the maximum (GTK
+`inverted`, WinUI `IsDirectionReversed`; Apple has no switch, and RTL
+locales already flip a slider on every platform). ORIGIN FILL is where the
+coloured part of the track starts: every platform paints from the minimum
+to the thumb, GTK can turn the fill off, and Material's 2025 spec adds a
+centered slider whose fill starts in the middle (exposure −2..+2), which is
+not in the Compose version kaya pins and has no Apple counterpart. Refused:
+every kaya slider fills from its minimum end and reads left to right.
 
 GTK's `inverted`/`has-origin`, WinUI's `IsDirectionReversed` and
 Material's centered slider have no counterpart on the Apple platforms

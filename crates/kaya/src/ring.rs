@@ -56,6 +56,7 @@ pub(crate) const REC_DROPPED: u16 = 22;
 pub(crate) const REC_DRAG_ENDED: u16 = 23;
 pub(crate) const REC_DATE_CHANGED: u16 = 24;
 pub(crate) const REC_TIME_CHANGED: u16 = 25;
+pub(crate) const REC_VALUE_COMMITTED: u16 = 26;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

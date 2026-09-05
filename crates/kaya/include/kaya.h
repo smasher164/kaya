@@ -109,6 +109,8 @@
 
 #define KAYA_OCCURRENCE_TIME_CHANGED 25
 
+#define KAYA_OCCURRENCE_VALUE_COMMITTED 26
+
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
@@ -712,6 +714,10 @@
 
 #define KAYA_PROP_MINUTE_STEP 23
 
+#define KAYA_PROP_STEP 24
+
+#define KAYA_PROP_TICK_SPACING 25
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
@@ -1124,6 +1130,10 @@ typedef struct KayaHostApi {
                             uint8_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
+  /**
+   * The value a slider gesture settled on (docs/slider-plan.md S2).
+   */
+  void (*emit_value_committed)(const uint8_t*, uintptr_t, double);
   /**
    * The pickers' committed values, packed (docs/datetime-plan.md D2).
    */
@@ -1705,6 +1715,13 @@ void kaya_emit_time_changed(const uint8_t *tag, uintptr_t tag_len, int64_t packe
  * with kaya_run.
  */
 void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value);
+
+/**
+ * Presentation side: emit the value a slider gesture SETTLED ON — once,
+ * when the thumb is released or a key moved it (docs/slider-plan.md S2).
+ * Do not combine with kaya_run.
+ */
+void kaya_emit_value_committed(const uint8_t *tag, uintptr_t tag_len, double value);
 
 /**
  * Presentation side: emit an entry edit — `tag` the entry's CREATE tag,

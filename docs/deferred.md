@@ -10704,3 +10704,39 @@ that lost focus under load reads an empty offer. One sighting; on the
 next, instrument the chokepoint — log `is_active`/focus at the moment of
 each paste and the seed poll's own outcome — before rerunning.
 
+
+## SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)
+KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps
+
+THE DEPTH SLICE (2026-09-04, the maintainer's rulings S1–S10 taken the same
+day): PROPS `step` 24 and `tick_spacing` 25 (F64, 0 = none; each divides the
+range evenly and the spacing is a multiple of the step, checked at the END of
+the transaction over the complete declaration so the order the props arrive
+in cannot matter), occurrence `value_committed` 26 with its template twin
+(once per gesture, only when the settled value differs from the last one),
+the Rust sugar (`.step()`, `.tick_spacing()`, `on_commit`, `on_commit_node`,
+the template zone's `step`/`tick_spacing`), the harness verb `expect_slider`
+reading the CONTROL in the one fixed spelling (`spelled_slider`: six
+decimals, trailing zeros dropped) and `set_value` driving the control on
+every backend, the SwiftUI arm hosting NSSlider (arrow keys nudge by the
+step; ticks from the spacing; the control snaps itself only when every tick
+is a stop) and UISlider over a tick strip of kaya's own (Settings' Larger
+Text shape), and tools/scenes/sliders.steps green on the mac with
+guests/rust/sliders.rs.
+
+OPEN, the breadth slice — each backend refuses the two props by name until
+its arm lands, and the lanes carry no sliders legs until then:
+
+- DEPTH STUB: sliders on gtk — the step snapped in the commit path (GTK
+  quantizes no drag), `add_mark` per tick, `set_increments` from the step,
+  the release gesture as the commit; `slider_value` already reads the scale.
+- DEPTH STUB: sliders on winui — `StepFrequency` from the step (or
+  (max − min)/1000 for a continuous slider, retiring the silent 0.01),
+  `SnapsTo.StepValues`, `TickFrequency` from the spacing,
+  `SmallChange`/`LargeChange` from the step, `PointerCaptureLost` as the
+  commit; `slider_value` already reads the control.
+- DEPTH STUB: sliders on compose — `steps` from the step, `onValueChangeFinished`
+  as the commit, the track drawing kaya's ticks when the spacing is coarser
+  than the step, the `expect_slider` verb, the `emitValueCommitted` native.
+- The eight other bindings' `step`/`tick_spacing`/`on_commit` in both zones;
+  tools/check-sugar-surface.py's slider clause; the five rosters; the matrix.

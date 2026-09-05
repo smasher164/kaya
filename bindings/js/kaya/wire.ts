@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x33b9ee831818ac41n;
+export const SPEC_HASH = 0xd256e8d390e32c4cn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -87,6 +87,8 @@ export const PROP_TIME = 20;
 export const PROP_MIN_DATE = 21;
 export const PROP_MAX_DATE = 22;
 export const PROP_MINUTE_STEP = 23;
+export const PROP_STEP = 24;
+export const PROP_TICK_SPACING = 25;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -290,6 +292,7 @@ export const OCC_DROPPED = 22;
 export const OCC_DRAG_ENDED = 23;
 export const OCC_DATE_CHANGED = 24;
 export const OCC_TIME_CHANGED = 25;
+export const OCC_VALUE_COMMITTED = 26;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1015,6 +1018,36 @@ export function tx_bind_minute_step_element(widget_id: number, level = 0, field 
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MINUTE_STEP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
+/** set_property with a constant step value. */
+export function tx_set_step(widget_id: number, step: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_CONST), enc.value(step)));
+}
+
+/** set_property with a signal-bound step value. */
+export function tx_bind_step(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_step_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_STEP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant tick_spacing value. */
+export function tx_set_tick_spacing(widget_id: number, tick_spacing: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_CONST), enc.value(tick_spacing)));
+}
+
+/** set_property with a signal-bound tick_spacing value. */
+export function tx_bind_tick_spacing(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_tick_spacing_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_TICK_SPACING), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
@@ -1328,7 +1361,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -1437,7 +1470,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   // The u32 slot the tag family calls `reserved` is a real value on
   // these (sort_requested's column) — read before the generic tail.
   if ([OCC_SORT_REQUESTED].includes(kind)) payload = read_u32(buf, 20);
-  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED].includes(kind)) [payload, at] = parse_value(buf, at);
+  if ([OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED].includes(kind)) [payload, at] = parse_value(buf, at);
   // A paste rides a click tag VERBATIM, so the key path above is already
   // read and the clip sits after it.
   if ([OCC_PASTED].includes(kind)) [payload, at] = parse_clip(buf, at);

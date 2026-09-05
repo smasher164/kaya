@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x33b9ee831818ac41
+	SpecHash uint64 = 0xd256e8d390e32c4c
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -94,6 +94,8 @@ const (
 	PropMinDate = 21
 	PropMaxDate = 22
 	PropMinuteStep = 23
+	PropStep = 24
+	PropTickSpacing = 25
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -296,6 +298,7 @@ const (
 	occDragEnded = 23
 	occDateChanged = 24
 	occTimeChanged = 25
+	occValueCommitted = 26
 )
 
 func pad8(b []byte) []byte {
@@ -1600,6 +1603,70 @@ func TxBindMinuteStepElement(widgetID uint64, level uint32, field uint32) []byte
 	return endRecord(b)
 }
 
+// TxSetStep: set_property with a constant step value.
+func TxSetStep(widgetID uint64, step float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, step)
+	return endRecord(b)
+}
+
+// TxBindStep: set_property with a signal-bound step value.
+func TxBindStep(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindStepElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindStepElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropStep)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetTickSpacing: set_property with a constant tick_spacing value.
+func TxSetTickSpacing(widgetID uint64, tickSpacing float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTickSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, tickSpacing)
+	return endRecord(b)
+}
+
+// TxBindTickSpacing: set_property with a signal-bound tick_spacing value.
+func TxBindTickSpacing(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTickSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindTickSpacingElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindTickSpacingElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTickSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -2136,7 +2203,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -2293,7 +2360,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occSortRequested {
 		payload = binary.LittleEndian.Uint32(rec[20:])
 	}
-	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged || kind == occDateChanged || kind == occTimeChanged {
+	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged || kind == occDateChanged || kind == occTimeChanged || kind == occValueCommitted {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
 		switch vtype {

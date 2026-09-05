@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x33b9ee831818ac41
+specHash = 0xd256e8d390e32c4c
 
 valueBool :: Word32
 valueBool = 1
@@ -182,6 +182,10 @@ propMaxDate :: Word32
 propMaxDate = 22
 propMinuteStep :: Word32
 propMinuteStep = 23
+propStep :: Word32
+propStep = 24
+propTickSpacing :: Word32
+propTickSpacing = 25
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -586,6 +590,8 @@ occKindDateChanged :: Word16
 occKindDateChanged = 24
 occKindTimeChanged :: Word16
 occKindTimeChanged = 25
+occKindValueCommitted :: Word16
+occKindValueCommitted = 26
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1279,6 +1285,44 @@ txBindMinuteStepElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propMinuteStep <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant step value.
+txSetStep :: Word64 -> Double -> Builder
+txSetStep widgetId step = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propStep <> word32LE sourceConst
+    <> encodeValue (VF64 step))
+
+-- set_property with a signal-bound step value.
+txBindStep :: Word64 -> Word64 -> Builder
+txBindStep widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propStep <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindStepElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindStepElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propStep <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant tick_spacing value.
+txSetTickSpacing :: Word64 -> Double -> Builder
+txSetTickSpacing widgetId tickSpacing = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTickSpacing <> word32LE sourceConst
+    <> encodeValue (VF64 tickSpacing))
+
+-- set_property with a signal-bound tick_spacing value.
+txBindTickSpacing :: Word64 -> Word64 -> Builder
+txBindTickSpacing widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTickSpacing <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindTickSpacingElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindTickSpacingElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTickSpacing <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -1647,7 +1691,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -1700,7 +1744,7 @@ parseOccurrence redeem rec = do
                 op <- peekByteOff rec at' :: IO Word32
                 return (Just (VI64 (fromIntegral op)))
               else
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged || kind == occKindDateChanged || kind == occKindTimeChanged || kind == occKindValueCommitted
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

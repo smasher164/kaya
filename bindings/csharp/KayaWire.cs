@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x33b9ee831818ac41;
+    public const ulong SpecHash = 0xd256e8d390e32c4c;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -92,6 +92,8 @@ static class KayaWire
     public const uint PropMinDate = 21;
     public const uint PropMaxDate = 22;
     public const uint PropMinuteStep = 23;
+    public const uint PropStep = 24;
+    public const uint PropTickSpacing = 25;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -294,6 +296,7 @@ static class KayaWire
     public const ushort OccKindDragEnded = 23;
     public const ushort OccKindDateChanged = 24;
     public const ushort OccKindTimeChanged = 25;
+    public const ushort OccKindValueCommitted = 26;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1484,6 +1487,56 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant step value.
+    public static byte[] TxSetStep(ulong widgetId, double step)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropStep); w.Write(SourceConst);
+        EncodeValue(w, step);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound step value.
+    public static byte[] TxBindStep(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropStep); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindStepElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropStep); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant tick_spacing value.
+    public static byte[] TxSetTickSpacing(ulong widgetId, double tickSpacing)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTickSpacing); w.Write(SourceConst);
+        EncodeValue(w, tickSpacing);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound tick_spacing value.
+    public static byte[] TxBindTickSpacing(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTickSpacing); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindTickSpacingElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTickSpacing); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -1928,7 +1981,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -2000,7 +2053,7 @@ static class KayaWire
         {
             payload = BitConverter.ToUInt32(rec, 20);
         }
-        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged || kind == OccKindDateChanged || kind == OccKindTimeChanged)
+        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged || kind == OccKindDateChanged || kind == OccKindTimeChanged || kind == OccKindValueCommitted)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);
             int plen = BitConverter.ToInt32(rec, at + 4);

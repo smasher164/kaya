@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x33b9ee831818ac41
+let kayaSpecHash: UInt64 = 0xd256e8d390e32c4c
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -1314,6 +1314,70 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant step value.
+    mutating func setStep(_ widgetId: UInt64, _ step: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_STEP))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(step))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound step value.
+    mutating func bindStep(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_STEP))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindStepElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_STEP))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant tick_spacing value.
+    mutating func setTickSpacing(_ widgetId: UInt64, _ tickSpacing: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TICK_SPACING))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(tickSpacing))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound tick_spacing value.
+    mutating func bindTickSpacing(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TICK_SPACING))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindTickSpacingElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TICK_SPACING))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -1876,6 +1940,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_DRAG_ENDED)
             || kind == UInt16(KAYA_OCCURRENCE_DATE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -1962,6 +2027,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_DATE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))

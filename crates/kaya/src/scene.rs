@@ -652,6 +652,13 @@ pub(crate) struct Scene {
     /// append-only — the protocol has no remove_child). Feeds the
     /// selected-index upper-bound check at the live SetProp site.
     select_options: HashMap<WidgetId, u32>,
+    /// Every slider's declared range, step and tick spacing, live widgets
+    /// and template nodes apart (the two id spaces may collide); the
+    /// relations between them are checked at the END of the transaction
+    /// that touched them, so the order the props arrive in cannot matter
+    /// (docs/slider-plan.md S1, S5).
+    slider_ranges: HashMap<(bool, u64), SliderRange>,
+    slider_dirty: Vec<(bool, u64)>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -725,6 +732,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             matches!(kind, WidgetKind::Slider | WidgetKind::Progress) || is_choice(kind)
         }
         Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
+        // The slider's granularity and its drawn ticks (docs/slider-plan.md S1, S5).
+        Prop::Step | Prop::TickSpacing => matches!(kind, WidgetKind::Slider),
         // The pickers' own slots (docs/datetime-plan.md §3): a date and its
         // inclusive range on the date picker, a time and its minute step on
         // the time picker. A time has no range (D4).
@@ -896,6 +905,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         // precedent, an I64 the spec labels.
         Prop::Date | Prop::MinDate | Prop::MaxDate | Prop::Time => ValueType::I64,
         Prop::MinuteStep => ValueType::F64,
+        Prop::Step | Prop::TickSpacing => ValueType::F64,
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
@@ -1227,6 +1237,57 @@ fn validate_shortcut(spelling: &str) -> Result<(), String> {
 }
 
 /// applies it.
+/// A slider's declared numbers (docs/slider-plan.md S1, S5); 0 is "none"
+/// for the step and the spacing.
+#[derive(Clone, Copy, Debug)]
+struct SliderRange {
+    min: f64,
+    max: f64,
+    step: f64,
+    tick_spacing: f64,
+}
+
+impl Default for SliderRange {
+    fn default() -> Self {
+        SliderRange { min: 0.0, max: 1.0, step: 0.0, tick_spacing: 0.0 }
+    }
+}
+
+/// Does `unit` fit `span` a whole number of times (at least once)? Read
+/// with a relative tolerance, since 0.1 * 3 is not 0.3 in binary.
+fn divides_evenly(span: f64, unit: f64) -> bool {
+    let n = span / unit;
+    n >= 1.0 - 1e-9 && (n - n.round()).abs() <= 1e-9 * n.max(1.0)
+}
+
+impl SliderRange {
+    fn check(&self, id: u64) {
+        let span = self.max - self.min;
+        if self.step > 0.0 {
+            assert!(
+                divides_evenly(span, self.step),
+                "kaya: slider {id}: step {} does not divide its range {}..{} evenly",
+                self.step, self.min, self.max
+            );
+        }
+        if self.tick_spacing > 0.0 {
+            assert!(
+                divides_evenly(span, self.tick_spacing),
+                "kaya: slider {id}: tick_spacing {} does not divide its range {}..{} evenly",
+                self.tick_spacing, self.min, self.max
+            );
+            if self.step > 0.0 {
+                assert!(
+                    divides_evenly(self.tick_spacing, self.step),
+                    "kaya: slider {id}: tick_spacing {} is not a multiple of step {}, so a \
+                     tick would sit where the thumb cannot rest",
+                    self.tick_spacing, self.step
+                );
+            }
+        }
+    }
+}
+
 fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     assert!(
         value.type_of() == prop_value_type(prop),
@@ -1353,6 +1414,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             (0..=1).contains(mode),
             "kaya: axis must be horizontal (0) or vertical (1), got {mode}"
+        );
+    }
+    // A slider's step and tick spacing are non-negative and finite; their
+    // relations to the range are checked at the end of the transaction.
+    if let (Prop::Step | Prop::TickSpacing, Value::F64(x)) = (prop, value) {
+        assert!(
+            x.is_finite() && *x >= 0.0,
+            "kaya: a slider's {prop:?} must be finite and non-negative (0 = none), got {x}"
         );
     }
     // A progress fraction outside 0..=1 has no reading — nonsense
@@ -1580,6 +1649,23 @@ impl Scene {
     /// the end. A property bound mid-transaction is also set at bind
     /// time, so a scene arrives fully valued. Collection deltas are
     /// edits: in place, in order, never coalesced.
+    /// Record one of a slider's declared numbers and queue the relation
+    /// check for the end of this transaction (docs/slider-plan.md S1, S5).
+    fn note_slider_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
+        let Value::F64(x) = value else { return };
+        let range = self.slider_ranges.entry(key).or_default();
+        match prop {
+            Prop::Min => range.min = *x,
+            Prop::Max => range.max = *x,
+            Prop::Step => range.step = *x,
+            Prop::TickSpacing => range.tick_spacing = *x,
+            _ => return,
+        }
+        if !self.slider_dirty.contains(&key) {
+            self.slider_dirty.push(key);
+        }
+    }
+
     pub(crate) fn apply(&mut self, tx: Transaction) -> Vec<ApplyOp> {
         let mut out = Vec::new();
         // First-dirtied order, deduped.
@@ -1713,6 +1799,9 @@ impl Scene {
                     match value {
                         PropValue::Const(v) => {
                             check_prop_value(kind, prop, &v);
+                            if kind == WidgetKind::Slider {
+                                self.note_slider_prop((false, widget.0), prop, &v);
+                            }
                             // The select index's upper bound is scene
                             // state: options added SO FAR in op order, so
                             // "add options, then select" is the required
@@ -3017,6 +3106,15 @@ impl Scene {
             scopes.is_empty(),
             "kaya: template scope left open at end of transaction"
         );
+        // The slider relations, on the COMPLETE declaration: a step that
+        // does not divide the range, a tick spacing that does not, or one
+        // that is not a multiple of the step, dies here by name rather than
+        // as four backends' different roundings (docs/slider-plan.md S1, S5).
+        for key in std::mem::take(&mut self.slider_dirty) {
+            if let Some(range) = self.slider_ranges.get(&key) {
+                range.check(key.1);
+            }
+        }
 
         // Barrier: validate every signal-bound menu prop on its COMPLETE
         // coalesced value BEFORE any fan-out mutates derived state (a
@@ -4513,7 +4611,12 @@ impl Scene {
                 let node_kind = self.template_nodes[&widget.0];
                 check_prop(node_kind, prop);
                 match &value {
-                    PropValue::Const(v) => check_prop_value(node_kind, prop, v),
+                    PropValue::Const(v) => {
+                        check_prop_value(node_kind, prop, v);
+                        if node_kind == WidgetKind::Slider {
+                            self.note_slider_prop((true, widget.0), prop, v);
+                        }
+                    }
                     PropValue::Signal(id) => {
                         let current = self.signals.get(id).unwrap_or_else(|| {
                             panic!("kaya: binding to unknown signal {id:?}")
