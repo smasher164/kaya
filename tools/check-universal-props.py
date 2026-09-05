@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die
+from kaya_gate import ROOT, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -14,6 +14,14 @@ dev_shell_or_die()
 # SwiftUI's one central wrapper with no path around it, GTK and WinUI
 # kind-agnostic, so nobody may narrow the binder to one NativeWidget
 # variant. Kinds come from the GENERATED wire file.
+#
+# HELP (the third universal prop, docs/tooltip-plan.md) takes the OTHER
+# shape on Compose: a tooltip is a COMPOSABLE, not a modifier, so it
+# cannot ride the per-kind `a11y` chain the way the two a11y props do.
+# Its visible half is SwiftUI's shape one file over — KayaRenderHelped,
+# one wrapper every render path goes through — and its READER'S half is
+# a modifier in that same `a11y` chain, which the per-kind census above
+# then carries to every kind for free.
 
 import re
 
@@ -113,6 +121,60 @@ def census(files):
                         f"{swiftui}: KayaRender.body renders `widget` without "
                         f"kayaA11y on it: {line.strip()!r}")
 
+    # COMPOSE'S HELP: the wrapper no render path avoids, the tooltip
+    # drawing the node's own help, PLAIN only (T4), and the reader's half
+    # in the chain the per-kind clause above already holds.
+    text = read(compose)
+    helped_at = text.find("private fun KayaRenderHelped(")
+    if helped_at < 0:
+        bad.append(f"{compose}: no KayaRenderHelped — the help wrapper "
+                   "every render path goes through is gone, and help is "
+                   "then a prop no kind draws")
+    else:
+        end = text.find("\n}\n", helped_at)
+        helped = text[helped_at:end if end > 0 else len(text)]
+        for m in re.finditer(r"\bKayaRenderAnchored\(", text):
+            if helped_at <= m.start() < helped_at + len(helped):
+                continue
+            if text[:m.start()].endswith("private fun "):
+                continue
+            line = text[:m.start()].count("\n") + 1
+            bad.append(
+                f"{compose}:{line}: KayaRenderAnchored is called outside "
+                "KayaRenderHelped — that path renders a widget whose help "
+                "no tooltip draws, and no scene can see the difference")
+        if "TooltipBox(" not in code_only(helped):
+            bad.append(f"{compose}: KayaRenderHelped draws no TooltipBox — "
+                       "kaya draws no tooltip of its own (T2), so the "
+                       "platform's own box is the whole arm")
+        if not re.search(r"PlainTooltip\s*\{\s*Text\(node\.help\)",
+                         code_only(helped)):
+            bad.append(f"{compose}: KayaRenderHelped's tooltip does not draw "
+                       "PlainTooltip { Text(node.help) } — either the text "
+                       "is not the node's help, or T4's plain tier is not "
+                       "what draws it")
+        if not re.search(r"onLongClick\(label = node\.help", code_only(helped)):
+            bad.append(f"{compose}: KayaRenderHelped does not relabel the "
+                       "tooltip anchor with the node's help — material's "
+                       "anchor merges its descendants, so a helped LEAF is "
+                       "the node a reader focuses and it would say \"show "
+                       "tooltip\" (measured, docs/tooltip-plan.md §6)")
+        chain = re.search(r"^\s*val a11y = .*$", code_only(text), re.M)
+        if not chain:
+            bad.append(f"{compose}: no `val a11y =` chain — the modifier "
+                       "the per-kind census reads moved")
+        elif "a11yHelp" not in chain.group(0):
+            bad.append(f"{compose}: the `a11y` chain drops a11yHelp — help "
+                       "then reaches the tooltip and never the assistive "
+                       "reader (docs/tooltip-plan.md T2/§6)")
+        if not re.search(r"val a11yHelp\b[\s\S]{0,400}?node\.help",
+                         code_only(text)):
+            bad.append(f"{compose}: a11yHelp does not read node.help — the "
+                       "reader's half publishes something else")
+    if re.search(r"\bRichTooltip\b", code_only(text)):
+        bad.append(f"{compose}: names RichTooltip — titles, actions and "
+                   "images inside a tooltip are refused (T4)")
+
     # GTK and WINUI. A binder that names a NativeWidget variant would
     # silently scope the props to one kind.
     for path in (gtk, winui):
@@ -143,6 +205,28 @@ for path, pattern, repl in (
     if not census(load({path: re.sub(pattern, repl, real[path])})):
         print(f"check-universal-props: self-test failed — a copy of {path} with"
               " the universal props unapplied still passed")
+        raise SystemExit(1)
+
+# HELP's four links, one negative each, through the prelude's doctor() so
+# the substitution count is printed and a perturbation that applied
+# nothing is a FAILED self-test rather than a passed one.
+g = Gate("check-universal-props")
+for label, pattern, repl, want in (
+    ("the help wrapper bypassed",
+     r"KayaRenderHelped\(node, isRoot,", "KayaRenderAnchored(node, isRoot,", 2),
+    ("the tooltip drawing something other than the node's help",
+     r"PlainTooltip \{ Text\(node\.help\) \}", 'PlainTooltip { Text("") }', 1),
+    ("the tooltip upgraded to the rich tier (T4)",
+     r"PlainTooltip \{ Text\(node\.help\) \}", "RichTooltip { Text(node.help) }", 1),
+    ("the reader's half dropped out of the a11y chain",
+     r"\.then\(a11yHelp\)", "", 1),
+    ("the tooltip anchor left with material's own label",
+     r"        modifier = Modifier\.semantics \{ onLongClick\(label = "
+     r"node\.help, action = null\) \},\n", "", 1),
+):
+    doctored = g.doctor(label, real[COMPOSE], pattern, repl, want=want)
+    if not census(load({COMPOSE: doctored})):
+        print(f"check-universal-props: self-test failed — {label} still passed")
         raise SystemExit(1)
 
 offenders = census(real)

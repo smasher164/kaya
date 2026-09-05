@@ -125,11 +125,15 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.Typography
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 // Material 3 adaptive: Android's OWN list-detail container
@@ -208,6 +212,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
@@ -340,6 +345,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var a11yId by mutableStateOf("")
     var a11yLabel by mutableStateOf("")
     var a11yHint by mutableStateOf("")
+
+    /** HELP (docs/tooltip-plan.md T1): what this control is or does, drawn
+     * by the platform's own tooltip. Composition state — [KayaRenderHelped]
+     * draws from it. */
+    var help by mutableStateOf("")
 
     /** The widget's accept list, verbatim. Recorded here because the
      * paste hook and the standard commands' enablement both read it off
@@ -1834,10 +1844,8 @@ object KayaCompose {
                         PROP_MAX_DATE -> KayaSceneModel.nodes[id]!!.maxDate = readI64(b)
                         PROP_MINUTE_STEP ->
                             KayaSceneModel.nodes[id]!!.minuteStep = readF64(b).toInt()
-                        // The breadth slice's arm (docs/tooltip-plan.md §5): help declared
-                        // against this backend fails HERE, by name, never as a tooltip that
-                        // quietly is not there.
-                        PROP_HELP -> depthStub("tooltips")
+                        PROP_HELP ->
+                            KayaSceneModel.nodes[id]!!.help = readString(b)
                         PROP_STEP -> KayaSceneModel.nodes[id]!!.step = readF64(b)
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
@@ -7424,6 +7432,23 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_help" -> {
+                        // The state the platform's own tooltip draws
+                        // from (docs/tooltip-plan.md T5): the wrapper in
+                        // [KayaRenderHelped] reads this same field.
+                        val want = quoted(parts.drop(2))
+                        val node = kayaWidgetTarget(parts[1])
+                        if (node == null) {
+                            failures.add("no such target ${parts[1]}")
+                        } else {
+                            val got = onUi(activity) { node.help }
+                            if (got == want) {
+                                observed.add("help \"$want\"")
+                            } else {
+                                failures.add("help \"$got\", wanted \"$want\"")
+                            }
+                        }
+                    }
                     "expect_ax_hint" -> {
                         val want = quoted(parts.drop(2))
                         val node = kayaWidgetTarget(parts[1])
@@ -9360,10 +9385,50 @@ fun KayaRender(
 ) {
     val dnd = kayaDragAndDropSurface(node)
     if (dnd == null) {
-        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, flexAlign)
         return
     }
     Box(modifier = dnd) {
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, flexAlign)
+    }
+}
+
+/**
+ * HELP, the platform's own tooltip (docs/tooltip-plan.md T1/T2/T4): one
+ * wrapper every render arm passes through — a tooltip is a COMPOSABLE and
+ * not a modifier, so it cannot ride `a11y` the way the other two universal
+ * props do (tools/check-universal-props.py holds both shapes). Material's
+ * box brings its own triggers, long press and mouse hover, and kaya adds no
+ * gesture of its own; PLAIN only, since T4 refuses titles, actions and
+ * images. A node that declares no help never gets the wrapper, the
+ * drag-and-drop surface's and the context anchor's rule.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaRenderHelped(
+    node: KayaNode,
+    isRoot: Boolean,
+    flexVertical: Boolean?,
+    flexStretch: Boolean,
+    flexAlign: Long,
+) {
+    if (node.help.isEmpty()) {
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+        return
+    }
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(node.help) } },
+        state = rememberTooltipState(),
+        // MATERIAL'S ANCHOR MERGES ITS DESCENDANTS, so a widget that is no
+        // merging root of its own — a plain label — IS the node a reader
+        // focuses, and material labels its long press "show tooltip". The
+        // label is relabelled here and the action left alone (the action
+        // key's merge policy: the outer label, the inner action), so the
+        // help is what the reader hears on either node (measured,
+        // docs/tooltip-plan.md §6).
+        modifier = Modifier.semantics { onLongClick(label = node.help, action = null) },
+    ) {
         KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
     }
 }
@@ -9567,7 +9632,19 @@ private fun KayaRenderCore(
         } else {
             Modifier
         }
-    val a11y = a11yTag.then(a11yName).then(a11yHint)
+    // HELP REACHES THE READER through the LONG-PRESS ACTION'S LABEL, the
+    // hint's mechanism one key over: Compose publishes no tooltip text to
+    // AccessibilityNodeInfo at all (measured, docs/tooltip-plan.md §6), and
+    // material3's own anchor labels that action "show tooltip" on a node no
+    // service focuses. The label rides the FOCUSED node here, and
+    // `action = null` names what the long press already does.
+    val a11yHelp =
+        if (node.help.isNotEmpty()) {
+            Modifier.semantics { onLongClick(label = node.help, action = null) }
+        } else {
+            Modifier
+        }
+    val a11y = a11yTag.then(a11yName).then(a11yHint).then(a11yHelp)
     when (node.kind) {
         KayaCompose.KIND_SELECT -> {
             // The dressed floor: M3's exposed dropdown menu — the
@@ -12042,12 +12119,6 @@ fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
 }
-
-// A depth stub is a CALL and never a sentence (tools/check-stubs.py,
-// docs/traps.md); an unused private function fails check-detekt, so this
-// exists only while some arm stubs.
-private fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on android")
 
 /** THE ONE SPELLING every harness reads a slider back in (harness.rs
  * spelled_slider): six decimals, trailing zeros and point dropped. */

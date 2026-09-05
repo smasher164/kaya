@@ -56,6 +56,7 @@ LEGS = {
         "assets-compose", "clipboard-compose", "background-compose",
         "undo-compose", "dirty-compose", "ranges-compose",
         "dnd-compose", "pickers-compose", "sliders-compose",
+        "tooltips-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

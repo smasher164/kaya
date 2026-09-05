@@ -120,6 +120,9 @@ mod pickers;
 #[path = "sliders.rs"]
 mod sliders;
 
+#[path = "tooltips.rs"]
+mod tooltips;
+
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
 #[cfg(target_os = "android")]
@@ -170,6 +173,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("dnd") => dnd::app(ctx),
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
+        Ok("tooltips") => tooltips::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.
         Ok("typeface") => typeface::app(ctx),

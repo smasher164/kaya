@@ -150,24 +150,32 @@ def ink_tolerance(harness_src=None, swift_src=None, kotlin_src=None):
 # text. The census reads each emitter out of its OWN ARM — `Step::ExpectAx(`
 # alone matches harness.rs's PARSER first, and a reader anchored on the
 # name found ZERO observations there.
-AX_OBS = {"ax": 'ax "<v>"', "ax hint": 'ax hint "<v>"'}
+AX_OBS = {"ax": 'ax "<v>"', "ax hint": 'ax hint "<v>"',
+          "help": 'help "<v>"'}
 AX_WANTED = {"ax": 'ax "<v>", wanted "<v>"',
-             "ax hint": 'ax hint "<v>", wanted "<v>"'}
+             "ax hint": 'ax hint "<v>", wanted "<v>"',
+             "help": 'help "<v>", wanted "<v>"'}
 
 AX_HARNESSES = [
     ("harness.rs", HARNESS, "rust",
      [("ax", r"Step::ExpectAx\([^()]*\) => Some\(poll\(",
        "\n            Step::"),
       ("ax hint", r"Step::ExpectAxHint\([^()]*\) => Some\(poll\(",
+       "\n            Step::"),
+      # HELP rides the same rule: three harnesses, one spelling
+      # (docs/tooltip-plan.md T5).
+      ("help", r"Step::ExpectHelp\([^()]*\) => Some\(poll\(",
        "\n            Step::")],
      r"Ok\(format!\(", r"Err\(format!\("),
     ("KayaSwiftUI.swift", SWIFT, "swift",
      [("ax", 'case "expect_ax":', "\n            case "),
-      ("ax hint", 'case "expect_ax_hint":', "\n            case ")],
+      ("ax hint", 'case "expect_ax_hint":', "\n            case "),
+      ("help", 'case "expect_help":', "\n            case ")],
      r"observed\.append\(", r"failures\.append\("),
     ("KayaCompose.kt", KOTLIN, "kotlin",
      [("ax", '"expect_ax" ->', '\n                    "'),
-      ("ax hint", '"expect_ax_hint" ->', '\n                    "')],
+      ("ax hint", '"expect_ax_hint" ->', '\n                    "'),
+      ("help", '"expect_help" ->', '\n                    "')],
      r"observed\.add\(", r"failures\.add\("),
 ]
 
@@ -298,7 +306,7 @@ def ax_spelling(harness_src=None, swift_src=None, kotlin_src=None):
                                  "apart")
 
     # A census that reads nothing agrees with everything.
-    if not bad and seen < 6:
+    if not bad and seen < 9:
         bad.append("only " + str(seen) + " ax observations found "
                    "across three harnesses — the reader is matching "
                    "almost nothing and would pass any spelling")
@@ -872,6 +880,12 @@ for rel, pattern, repl, slot, label, finding in (
      "kotlin", "the Compose ax-hint observation made a fixed string",
      r"^KayaCompose\.kt records the ax hint observation as "
      r"ax hint ok, "),
+    # AND THE HELP OBSERVATION, on the harness that joined last: the
+    # verb reads a different platform surface on every backend, so its
+    # verdict text is the only thing that can be compared across them.
+    (KOTLIN, r'(observed\.add\("help )\\"\$want\\""', '$want"',
+     "kotlin", "the Compose help observation unquoted",
+     r"^KayaCompose\.kt records the help observation as help <v>, "),
 ):
     drifted = perturb(f"ax-spelling ({label})", rel, pattern, repl)
     kwargs = {f"{slot}_src": drifted}

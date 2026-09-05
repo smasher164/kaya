@@ -9175,3 +9175,37 @@ by `SmallChange`: WinUI 3 does not spend `LargeChange` on Page Up here.
 it is the numeric keypad's 9 and NumLock decides what arrives — a probe's
 own key injection is a premise, and it was re-measured before the finding
 was written down.)
+
+
+## Compose publishes NO tooltip text to accessibility, and its tooltip anchor eats a plain leaf's node (measured 2026-09-05, the android tooltips leg)
+
+`View.setTooltipText` lands in `AccessibilityNodeInfo.setTooltipText`, and
+every survey of Android tooltips says so. COMPOSE DOES NOT: compose-ui
+1.7.5 declares no tooltip key among the 37 in `SemanticsProperties`, its
+accessibility delegate never names one, and with material3's `TooltipBox`
+around every helped widget the provider served `tooltipText = null` on
+EVERY node of the tooltips scene. Material's whole contribution to a
+reader is the anchor's long-press action LABEL, the string "show
+tooltip". So a Compose app that draws tooltips and stops there has told
+its assistive reader nothing, and no lane can see it — the bubble is
+pixels and the label is not compared anywhere.
+
+kaya's arm publishes the help itself, in the slot Android has for it: the
+LONG-PRESS ACTION'S LABEL, the accessibility hint's mechanism one key over
+(`onLongClick(label = help, action = null)`; the delegate adds
+ACTION_LONG_CLICK with the label whenever the AccessibilityAction is
+present, even with a null action function — read out of the bytecode
+before it was measured).
+
+AND IT MUST BE APPLIED TWICE. material3's tooltip anchor sets
+`mergeDescendants = true`, so a widget that is a merging root of its own
+(a Button) stays the node a service focuses, while a plain LABEL is
+absorbed INTO the anchor — and the anchor's own "show tooltip" then wins
+the label, because an action key's merge policy takes the parent's label
+with the child's action. The first reading had exactly that: two stamped
+labels reading "show tooltip" instead of the row's help, with every
+BUTTON correct. The help now rides both the widget's own `a11y` chain and
+the TooltipBox's `modifier`. One consequence no scene asserts: a helped
+LEAF is absorbed, so its `a11y_id` test tag is not in the merged tree and
+an `expect_ax` on it would read "nothing carries test tag"
+(docs/tooltip-plan.md §6).

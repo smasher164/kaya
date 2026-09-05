@@ -10808,9 +10808,17 @@ guests/rust/tooltips.rs. Measured: GTK 4 shows no tooltip on keyboard focus
 
 OPEN, the breadth slice:
 
-- DEPTH STUB: tooltips on compose — a TooltipBox with a PlainTooltip around
-  every kind's composable, the node's `help` as composition state, the
-  `expect_help` verb reading it, the android roster.
+- ~~DEPTH STUB: tooltips on compose~~ (FIXED 2026-09-05: the arm landed —
+  `KayaRenderHelped`, one wrapper every render path goes through, drawing
+  material3's PlainTooltip over the node's `help` (composition state) with
+  the toolkit's own long press and mouse hover; the `expect_help` verb; the
+  android lane's `tooltips-compose` leg, the lane ALL PASS). A TooltipBox
+  cannot ride the per-kind `a11y` modifier — a tooltip is a COMPOSABLE — so
+  tools/check-universal-props.py grew the wrapper's own clauses, five
+  watched negatives. AND COMPOSE PUBLISHES NO TOOLTIP TEXT TO
+  ACCESSIBILITY AT ALL (measured; docs/tooltip-plan.md §6), so the arm
+  publishes the help as the LONG-PRESS ACTION'S LABEL, on the widget's own
+  node AND on material's anchor, which merges a plain leaf into itself.
 - The eight other bindings' `help` in both zones (the a11y label's spelling
   in each), nine guests, tools/check-sugar-surface.py's clause, the iOS and
   android rosters, the matrix.
