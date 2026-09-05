@@ -524,7 +524,21 @@ grouped iOS tier through 2026-08-30. The THIRD is the VIDEO EDITOR
 (Akhil, 2026-09-02, in Rust; design pass docs/video-editor-plan.md),
 named to force drag and drop and sliders — both shipped, 2026-09-03
 and 2026-09-04, with the pickers and tooltips beside them — and still
-forcing its own build and the `video` kind. The section remains the
+forcing its own build and the `video` kind. THE ORDER WAS RE-DERIVED
+2026-09-05 from evidence rather than from the ledger's own sequence:
+docs/probes/roadmap-app-needs-2026-09-05.md (fifteen archetypes, a
+105-app corpus, the vendor catalogues, store and legal obligation, issue
+votes across eleven frameworks) and
+docs/probes/roadmap-framework-parity-2026-09-05.md (seventy features
+across fifteen frameworks) score every open item on need and parity, and
+kaya's own delivery record prices the cost. What they say: the table
+stakes come first — search field, toggle switch, badge, hyperlink label,
+splash slot, local notifications, settings persistence, and a compliance
+pass proving dynamic type, RTL and locale formatting on every lane — then
+the sheet, rich text with the text-layout props, the tree view,
+OS-scheduled background work, the `video` kind, animations and the
+packaging milestone; the task manager and the settings utility are the
+two archetypes the first tier finishes. The section remains the
 roadmap list, in rough priority order; chat / todo / media stay
 unpicked.
 
