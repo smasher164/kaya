@@ -104,12 +104,12 @@ expect label@title[t1] "Buy milk"
 # Settings: promoted into the chrome, pushed onto the active section.
 menu_activate "View>Settings"
 expect_entries 1
-expect label@settings "Week starts Monday; badge shown; completed move to Logbook"
-choose select@week 1
-toggle checkbox@hide_badge on
-expect label@settings "Week starts Sunday; badge hidden; completed move to Logbook"
-toggle checkbox@keep_done on
-expect label@settings "Week starts Sunday; badge hidden; completed stay in place"
+expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
+choose select@week[s] 1
+toggle checkbox@hide_badge[s] on
+expect label@settings[s] "Week starts Sunday; badge hidden; completed move to Logbook"
+toggle checkbox@keep_done[s] on
+expect label@settings[s] "Week starts Sunday; badge hidden; completed stay in place"
 back
 expect_entries 0
 select_section 3

@@ -194,6 +194,13 @@ the gate or trap it became.
   name. The app gives its pushed screens their own ids (`lb_title`)
   until the core tears a popped entry down; the ledger entry now
   carries the consumer and the fix.
+- **2026-09-05 — a live checkbox has no sugar for an initial state.** The
+  Settings screen's first draft set `Prop::Checked` at the floor and
+  tools/guest-floor.py refused it (invariant 5). Rust's live zone spells
+  `checkbox(text)` unchecked and nothing else; the template zone binds a
+  field. The screen became a one-row stamped record, which is the sugar
+  kaya has; whether the live zone wants `checked(bool)` in nine bindings
+  is a small sweep, ledgered.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through

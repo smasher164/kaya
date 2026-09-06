@@ -1992,6 +1992,15 @@ unpicked.
   untyped, so the scoping error it was hoped to move to compile time
   would stay a runtime one either way.
 - Binding-maintained mirrors (todos-iterable style shadow state).
+- A LIVE checkbox's initial state has no sugar (2026-09-05, found by
+  tools/guest-floor.py refusing `tx.set(w, Prop::Checked, true)` in the
+  task manager's first Settings screen): Rust's `checkbox(text)` is
+  unchecked and the only way to start it checked is the floor write; the
+  template zone binds a field. A `checked(bool)` on the live builder,
+  swept across nine bindings with a check-sugar-surface clause, or a
+  ruling that a checkbox with state belongs in a record. Trigger: the
+  next live checkbox an app wants checked at build. KEY: live checkbox
+  checked sugar, Prop::Checked floor, guest-floor
 - Navigation sugar remainder from the nav breadth slice: (1)
   pop_to_root/pop(n) sugar + the binding stack mirrors it needs;
   (2) signal-bound entry titles have wire + scene + fan-out but no
@@ -10853,6 +10862,13 @@ untouched — while `tasks-compose`'s own reorder drag went through in
 green. The sighting count is the argument for the named next step (a
 longer `input draganddrop` duration under load); nothing else is new.
 
+NINTH SIGHTING, 2026-09-05, the task manager's third matrix (d5b85612,
+one-minute load 8.8 at launch): `dnd-go` again, shape (b) with a twist —
+`started=1 entered=2 dropped=1 ended=false`, the drop taken and
+ACTION_DRAG_ENDED never delivered in 20s — while `tasks-compose`'s own
+reorder went through. Three matrices in a row on the same day; the
+longer-duration experiment is due.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 
@@ -10878,6 +10894,36 @@ first sighting asked for went in the same day: `KAYA_CLIP_EVENT` lines on
 the GTK backend's stderr — the seed poll's own outcome and, at each paste,
 whether the reading window is active — so the third sighting names its
 cause rather than its class.
+
+THIRD SIGHTING 2026-09-05, on the RUST guest: `clipboard-rust-wayland` red
+on the same steps (every paste "empty", the entry "" where "pasted by hand"
+was expected) in the task manager's third matrix (d5b85612, one-minute load
+8.8 at launch, the fifteen-minute 11.5). The `KAYA_CLIP_EVENT` lines are in
+the lane log for this run and are the next read: whether the reading window
+was active at each paste.
+
+## WATCH — windows `dnd_java` under a matrix: the keyed drag onto a stamped row landed the wrong payload (first sighting 2026-09-05)
+KEY: dnd_java, windows drag, item y drag ended none, text target got text hello, matrix contention
+
+The task manager's third matrix (d5b85612): the windows lane's `dnd_java` leg
+read `label#4 "text target got text hello (copy)", wanted "text target got
+text y (copy)"`, `item y drag ended none` wanted `copy`, and `label#1 "hello"`
+wanted `"y"` — the drag from the stamped row `y` onto the text target never
+happened, and the target kept the earlier drop's payload. Every other dnd leg
+on the lane green, the lane at 879s against its 600 ceiling with the core
+rebuilt cold. One sighting; on the next, read the WinUI arm's
+`KAYA_DRAG_EVENT` lines for that leg.
+
+## WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)
+KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
+
+The task manager's third matrix (d5b85612): `column@ledger presents
+"Date|Ticker|Side|Total ^3", wanted "... v3"` and `label@count reads "15003 of
+15003 transactions", wanted "4698 of 15003"` — the second header click (the
+descending sort) did not register, so the filtered count never followed.
+A different shape from the recorded title WATCH above (that one is the push
+after a pop); green in every earlier matrix on this tree. One sighting; on
+the next, read the Compose header's click log beside the harness step.
 
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.

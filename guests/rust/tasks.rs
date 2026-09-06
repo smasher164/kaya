@@ -32,6 +32,16 @@ struct Line {
     title: String,
 }
 
+// The Settings screen is ONE stamped row: a live checkbox has no sugar for
+// an initial state, a template one binds a field (invariant 5).
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
+struct Settings {
+    week_start: f64,
+    hide_badge: bool,
+    keep_done: bool,
+    line: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum List {
     Inbox,
@@ -62,7 +72,7 @@ enum Msg {
     ProjectAdd,
     Reorder(kaya::Dropped),
     ProjectPopped,
-    WeekStart(usize),
+    WeekStart(f64),
     HideBadge(bool),
     KeepDone(bool),
     Section(WindowId),
@@ -194,13 +204,12 @@ struct App {
     // The selected section: the surface the menu's screens push onto.
     active: WindowId,
     logbook_screen: Option<kaya::Collection<TaskRow>>,
-    settings_open: bool,
+    settings_screen: Option<kaya::Collection<Settings>>,
     draft: String,
     pdraft: String,
     week_start: usize,
     hide_badge: bool,
     keep_done: bool,
-    settings_text: kaya::SignalId,
 }
 
 impl App {
@@ -301,13 +310,32 @@ impl App {
         }
     }
 
-    fn settings_line(&self) -> String {
-        format!(
-            "Week starts {}; badge {}; completed {}",
-            ["Monday", "Sunday"][self.week_start],
-            if self.hide_badge { "hidden" } else { "shown" },
-            if self.keep_done { "stay in place" } else { "move to Logbook" },
-        )
+    fn settings_row(&self) -> Settings {
+        Settings {
+            week_start: self.week_start as f64,
+            hide_badge: self.hide_badge,
+            keep_done: self.keep_done,
+            line: format!(
+                "Week starts {}; badge {}; completed {}",
+                ["Monday", "Sunday"][self.week_start],
+                if self.hide_badge { "hidden" } else { "shown" },
+                if self.keep_done { "stay in place" } else { "move to Logbook" },
+            ),
+        }
+    }
+
+    /// Mirror the settings into the open screen's row, if one is open.
+    fn write_settings(&self, ctx: &kaya::AppCtx) {
+        let Some(screen) = self.settings_screen.clone() else { return };
+        let row = self.settings_row();
+        ctx.apply(|tx| {
+            screen
+                .patch(tx, "s")
+                .week_start(row.week_start)
+                .hide_badge(row.hide_badge)
+                .keep_done(row.keep_done)
+                .line(row.line);
+        });
     }
 }
 
@@ -315,7 +343,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let today = today();
 
-    let (lists, projects_coll, quick, settings_text) = ctx.apply(|tx| {
+    let (lists, projects_coll, quick) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             .sections_presentation(kaya::SectionsPresentation::Sidebar)
@@ -418,9 +446,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-
-        let settings_text = tx.signal("");
-        (lists, projects_coll, quick, settings_text)
+        (lists, projects_coll, quick)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -437,13 +463,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         open_project: None,
         active: INBOX,
         logbook_screen: None,
-        settings_open: false,
+        settings_screen: None,
         draft: String::new(),
         pdraft: String::new(),
         week_start: 0,
         hide_badge: false,
         keep_done: false,
-        settings_text,
     };
 
     // The seed, against the fixed clock (docs/tasks-plan.md §1).
@@ -485,8 +510,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         for project in ["kitchen", "thesis", "trip"] {
             app.project_count(tx, project);
         }
-        let line = app.settings_line();
-        tx.write(app.settings_text, line);
     });
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -754,18 +777,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::ProjectPopped => app.open_project = None,
             Msg::WeekStart(index) => {
-                app.week_start = index;
-                let line = app.settings_line();
-                ctx.apply(|tx| tx.write(app.settings_text, line));
+                app.week_start = index as usize;
+                app.write_settings(&ctx);
             }
             Msg::HideBadge(on) => {
                 app.hide_badge = on;
-                let line = app.settings_line();
-                ctx.apply(|tx| tx.write(app.settings_text, line));
+                app.write_settings(&ctx);
             }
             Msg::KeepDone(on) => {
                 app.keep_done = on;
-                let line = app.settings_line();
                 let done: Vec<(String, TaskRow)> = app
                     .tasks
                     .iter()
@@ -773,12 +793,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .map(|(k, (_, r))| (k.clone(), r.clone()))
                     .collect();
                 ctx.apply(|tx| {
-                    tx.write(app.settings_text, line);
                     // Completed tasks follow the setting: re-placed, not undoable.
                     for (key, row) in done {
                         app.place(tx, &key, row);
                     }
                 });
+                app.write_settings(&ctx);
             }
             Msg::Section(sid) => app.active = sid,
             Msg::OpenLogbook => {
@@ -827,35 +847,42 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::LogbookPopped => app.logbook_screen = None,
             Msg::OpenSettings => {
-                if app.settings_open {
+                if app.settings_screen.is_some() {
                     continue;
                 }
                 let active = app.active;
-                let (week_start, hide_badge, keep_done, settings_text) =
-                    (app.week_start, app.hide_badge, app.keep_done, app.settings_text);
-                ctx.apply(|tx| {
+                let row = app.settings_row();
+                let screen = ctx.apply(|tx| {
                     let entry = tx.push_entry_in(active, SETTINGS_SCREEN).title("Settings").id();
-                    let week_label = tx.signal("Week starts on");
+                    let screen = tx.collection::<Settings>();
                     let root = tx
                         .column(|tx| {
-                            tx.caption(week_label).id();
-                            let week = tx.select(&["Monday", "Sunday"], week_start).a11y_id("week").id();
-                            msgs.on_select(week, Msg::WeekStart);
-                            let hide = tx.checkbox("Hide the Today badge").a11y_id("hide_badge").id();
-                            tx.set(hide, kaya::Prop::Checked, hide_badge);
-                            msgs.on_toggle(hide, Msg::HideBadge);
-                            let keep = tx.checkbox("Keep completed tasks in their list").a11y_id("keep_done").id();
-                            tx.set(keep, kaya::Prop::Checked, keep_done);
-                            msgs.on_toggle(keep, Msg::KeepDone);
-                            tx.caption(settings_text).a11y_id("settings").id();
+                            for mut row in screen.rows(tx) {
+                                row.column(|t| {
+                                    t.caption("Week starts on");
+                                    let week = t.select(&["Monday", "Sunday"], Settings::week_start());
+                                    t.a11y_id(week, "week");
+                                    msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
+                                    let hide = t.checkbox(Settings::hide_badge());
+                                    t.a11y_id(hide, "hide_badge");
+                                    msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
+                                    let keep = t.checkbox(Settings::keep_done());
+                                    t.a11y_id(keep, "keep_done");
+                                    msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
+                                    let line = t.caption(Settings::line());
+                                    t.a11y_id(line, "settings");
+                                });
+                            }
                         })
                         .id();
                     tx.mount_in(entry, root);
+                    tx.insert(&screen, "s", row);
                     msgs.on_entry_popped(entry, Msg::SettingsPopped);
+                    screen
                 });
-                app.settings_open = true;
+                app.settings_screen = Some(screen);
             }
-            Msg::SettingsPopped => app.settings_open = false,
+            Msg::SettingsPopped => app.settings_screen = None,
             Msg::Resync => ctx.apply(|tx| app.resync(tx)),
         }
     }
