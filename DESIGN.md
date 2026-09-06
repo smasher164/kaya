@@ -1022,7 +1022,9 @@ The known normalization worklist:
   cross axis the way a scroll does; in a row it keeps its intrinsic
   width unless it grows (docs/tasks-plan.md R10 — the task manager's
   notes field hugged a 240 minimum on four backends and an arbitrary
-  480 cap on the fifth, the maintainer's review of 2026-09-05).
+  480 cap on the fifth, the maintainer's review of 2026-09-05). On
+  Android the date and time pickers and the select are text fields, so
+  the rule covers them there; the compact pickers elsewhere hug.
 - `fill` is the child's own word on that cross axis
   (docs/layout-knobs-plan.md §1): true spans the container's cross axis
   whatever its `align`, false hugs, and unset leaves the kind's default —

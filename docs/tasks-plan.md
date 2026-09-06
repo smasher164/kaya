@@ -428,7 +428,11 @@ the gate or trap it became.
 - Compose (2026-09-06): the exposed-dropdown select draws Material's own
   trailing icon — sized to its value with no arrow it read as a plain
   box — and its width follows the picker's rule exactly (text + 16 +
-  48 + 16dp; a hand-counted 24dp icon slot wrapped "Thesis"). A bottom
+  48 + 16dp; a hand-counted 24dp icon slot wrapped "Thesis"). Both
+  value-sized widths apply BESIDE a label only; in a column, and so
+  under a labelled row's label, the picker and select fields fill their
+  width like the entry and textarea, since on Android they are text
+  fields (the maintainer's review, 2026-09-06; docs/forms-plan.md §5.1). A bottom
   bar label is one line: five sections on a 360dp phone give each label
   56dp, and "Upcoming" wrapped to "Upcomin" / "g"; a long title now
   overflows its padding rather than breaking a word.

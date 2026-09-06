@@ -9722,6 +9722,9 @@ private fun KayaRenderCore(
     // label drew 23 of its 109pt track on the backend told only about
     // containers. A CROSSING CONTAINER joins the stretch arm.
     var boxFill = rootFill
+    // Whether a value-sized field (the picker's, the select's) yields its
+    // own width to the column it fills.
+    var fieldFills = false
     if (flexVertical != null) {
         val crossing =
             if (flexVertical) {
@@ -9739,9 +9742,17 @@ private fun KayaRenderCore(
         // left a 79pt pannable strip in a 375pt window on iOS
         // (docs/traps.md); the scene's expect_breadth holds this on every lane.
         val scrollSpans = node.kind == KayaCompose.KIND_SCROLL
-        // A text field fills its column's width (docs/tasks-plan.md §4, R10).
+        // A text field fills its column's width (docs/tasks-plan.md §4, R10)
+        // — and on THIS platform the pickers and the select are text
+        // fields too (M3's exposed dropdown and the picker's field), so
+        // under a label they span the slot as Material's own form fields
+        // do; a value-sized field left the row three-quarters empty
+        // (the maintainer's review of the Android form, 2026-09-06).
         val textFills = flexVertical &&
-            (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA)
+            (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
+                node.kind == KayaCompose.KIND_DATE_PICKER ||
+                node.kind == KayaCompose.KIND_TIME_PICKER ||
+                node.kind == KayaCompose.KIND_SELECT)
         // An auto grid is width-driven, so it takes its column's width
         // (docs/layout-knobs-plan.md §3).
         val autoGridSpans = flexVertical && node.kind == KayaCompose.KIND_GRID && node.columns == 0
@@ -9750,6 +9761,7 @@ private fun KayaRenderCore(
         if (node.fill ?: (flexStretch || crossing || scrollSpans || textFills || autoGridSpans)) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
+            fieldFills = flexVertical
         }
     }
     val hugCross = kayaHugCross(node, isRoot, flexVertical, flexStretch)
@@ -9831,7 +9843,7 @@ private fun KayaRenderCore(
                     // that spans while its control hugs is the false green
                     // kayaDrawnExtents exists to catch.
                     modifier = boxFill.then(a11y)
-                        .then(if (node.grow > 0) Modifier else Modifier.width(selectWidth))
+                        .then(if (node.grow > 0 || fieldFills) Modifier else Modifier.width(selectWidth))
                         .menuAnchor(),
                 )
                 ExposedDropdownMenu(
@@ -10372,7 +10384,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
         KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER ->
-            KayaPickerField(node, a11y, boxFill)
+            KayaPickerField(node, a11y, boxFill, fieldFills)
         KayaCompose.KIND_CANVAS -> {
             // THE BLIT (docs/canvas-plan.md §8), interpreting no draw op.
             // STRICTLY 1:1, NEVER STRETCHED (§3.2.1 ruling 2), and THE
@@ -12683,7 +12695,7 @@ internal fun kayaPickerCommitted(node: KayaNode, isTime: Boolean, raw: Long) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
+private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier, fieldFills: Boolean) {
     val isTime = node.kind == KayaCompose.KIND_TIME_PICKER
     val packed = if (isTime) node.time else node.date
     val context = LocalContext.current
@@ -12720,7 +12732,7 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         // names the control instead of leaving an unnamed box beside it
         // (the checkbox arm's measurement).
         modifier = boxFill.then(a11y)
-            .then(if (node.grow > 0) Modifier else Modifier.width(contentWidth))
+            .then(if (node.grow > 0 || fieldFills) Modifier else Modifier.width(contentWidth))
             .semantics(mergeDescendants = true) { this[KayaPickerKind] = "datetime" },
         trailingIcon = {
             IconButton(onClick = { open = true }) {

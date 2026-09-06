@@ -170,7 +170,13 @@ asserts keep their ids (`date_picker@when`, `button@clear_when`,
 - Compose folds every control but a checkbox UNDER its label
   (supportingContent), the settings-screen shape; trailing content
   starved the headline on a 360dp phone ("Project" one letter per line
-  beside a 280dp select). The select's field is sized to its value too.
+  beside a 280dp select). The select's field is sized to its value too —
+  BESIDE a label. UNDER one it fills the slot (the maintainer's review of
+  the Android form, 2026-09-06: a value-sized "9/7/26" left the row
+  three-quarters empty): on this platform the pickers and the select ARE
+  text fields, so the column-wide text-field rule (R10) covers them
+  there, and `fill = false` is the opt-out. iOS and the desktops keep
+  their compact pickers, since those are not fields.
 - iOS draws the form as the inset-grouped card the table and the fold
   already draw: a List-backed Form inside a scroll collapses to nothing
   (measured 2026-09-06, the whole form gone from the phone). macOS keeps
