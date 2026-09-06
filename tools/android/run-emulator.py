@@ -105,10 +105,10 @@ if _rc != 0 or "\n" not in _state.strip():
     die("run-emulator: could not resolve the emulator state identity")
 EMULATOR_EXE, SYSTEM_IMAGE_DIR = _state.strip().split("\n", 1)
 # One tablet alongside the phone pool, for exactly one reason: every
-# pool device is 320dp wide, an unambiguously COMPACT window, and
-# Material shows two panes only at 840dp — so nothing else in this lane
-# observes the list-detail SPLIT arm, and a wrong one compiled and
-# passed everything.
+# pool device is 360dp wide (KAYA_ANDROID_LCD below), an unambiguously
+# COMPACT window, and Material shows two panes only at 840dp — so nothing
+# else in this lane observes the list-detail SPLIT arm, and a wrong one
+# compiled and passed everything.
 TABLET_AVD = "kaya-tablet"
 
 _avds = out_of(["avdmanager", "list", "avd", "-c"]).splitlines()
@@ -250,6 +250,42 @@ def wait_emulator_exit(proc, label):
     return True
 
 
+# THE POOL PHONE'S PANEL (ruled 2026-09-05): 360x800dp at density 160 — the
+# most common Android phone box (Galaxy class) at the cheapest density
+# software rendering draws, 1.4x the pixels of avdmanager's 320x640
+# default, which no shipping phone is and which put a three-column form off
+# both edges before any real phone would have. NOT the Pixel's 412: that is
+# inside the 400..840 band where the platforms disagree about pane count,
+# and the pool-width assertion below refuses it. KAYA_ANDROID_LCD ("WxH")
+# is the hand knob for an edge-case run at 320x640: the quickboot snapshot
+# is tied to the panel, so a changed size reseeds it once.
+LCD = os.environ.get("KAYA_ANDROID_LCD", "360x800")
+
+
+def shape_pool_panel(avd):
+    parts = LCD.split("x")
+    if len(parts) != 2 or not all(x.isdigit() for x in parts):
+        die(f"run-emulator: KAYA_ANDROID_LCD wants WxH in dp, got {LCD!r}")
+    want = {"hw.lcd.width": parts[0], "hw.lcd.height": parts[1],
+            "hw.lcd.density": "160"}
+    avd_dir = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd"
+    ini = avd_dir / "config.ini"
+    lines = ini.read_text(encoding="utf-8").splitlines()
+    have = dict(ln.split("=", 1) for ln in lines if "=" in ln)
+    if all(have.get(k) == v for k, v in want.items()):
+        return
+    if not stop_all_avd_instances(avd):
+        die(f"run-emulator: could not stop {avd} to reshape its panel")
+    kept = [ln for ln in lines if ln.split("=", 1)[0] not in want]
+    kept += [f"{k}={v}" for k, v in want.items()]
+    ini.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    shutil.rmtree(avd_dir / "snapshots/default_boot", ignore_errors=True)
+    (avd_dir / ".kaya-default-boot-id").unlink(missing_ok=True)
+    print(f"run-emulator: {avd} panel is now {parts[0]}x{parts[1]}dp at "
+          f"density 160 (was {have.get('hw.lcd.width')}x"
+          f"{have.get('hw.lcd.height')}); the quickboot snapshot reseeds")
+
+
 def make_snapshot(avd, port):
     serial = f"emulator-{port}"
     avd_dir = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd"
@@ -383,6 +419,7 @@ def finish_reader(port, expected_avd, proc):
     return True
 
 
+shape_pool_panel(AVD)
 if not make_snapshot(AVD, 5554):
     sys.exit(1)
 if not make_snapshot(TABLET_AVD, TABLET_PORT):

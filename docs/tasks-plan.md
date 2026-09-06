@@ -346,6 +346,18 @@ the gate or trap it became.
   and its first caption drawn over the notes field — a column squeezed
   past its content on Compose; a form's platform idiom is a scrolling
   one on every platform, and on the desktops the scroll is invisible.
+- **2026-09-05 — the Android pool was a 320dp phone by accident.** The
+  pool AVD is created without a device profile, and avdmanager's default
+  is a 320x640 panel at density 160 — narrower than any shipping phone
+  (360dp is the floor), which is why the three-column form fell off both
+  edges here before it would have on a real device. Ruled the same night
+  ("do the modern dp one"): the pool phone is 360x800dp at density 160,
+  the most common Android phone box at the cheapest density software
+  rendering draws — not a Pixel's 412, which the runner refused on its
+  first run because 400..840dp is the band where the platforms disagree
+  about pane count and the list-detail leg cannot be asserted there.
+  `KAYA_ANDROID_LCD=320x640` is the hand knob for an edge-case look
+  (docs/HACKING.md). The tablet is untouched.
 - **2026-09-05, the folded iPhone form — mechanical, not idiomatic.**
   Under compact the Details grid folds to caption, value and Clear
   stacked three deep per field, which fits and scrolls but reads heavy

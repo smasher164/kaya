@@ -214,6 +214,13 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `KAYA_MENU_TRACE` proved the iPadOS menu-build laziness, and
   `KAYA_WINUI_NAV_PROBE` / `KAYA_WINUI_MENU_PROBE` isolate those two
   subsystems.
+- The Android pool's panel: 360x800dp at density 160 by default (ruled
+  2026-09-05, the most common Android phone box; a Pixel's 412dp sits in
+  the 400..840 panes band the runner refuses). `KAYA_ANDROID_LCD=320x640
+  tools/android/run-emulator.py compose` runs the compose suite on the
+  old 320dp panel for an edge-case look — the AVD is reshaped and its
+  quickboot snapshot reseeded once on each change of size, so switch back
+  (unset the variable and run again) before the next matrix.
 - Pool widths: `KAYA_JOBS` (mac/linux legs), `KAYA_ANDROID_EMUS`
   (emulators, default 4), `KAYA_IOS_SIMS` (simulators, default 3),
   `KAYA_WIN_JOBS` (windows legs, default 4). `tools/probe-env.sh
