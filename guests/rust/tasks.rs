@@ -863,12 +863,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                     let week = t.select(&["Monday", "Sunday"], Settings::week_start());
                                     t.a11y_id(week, "week");
                                     msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
-                                    let hide = t.checkbox(Settings::hide_badge());
-                                    t.a11y_id(hide, "hide_badge");
-                                    msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
-                                    let keep = t.checkbox(Settings::keep_done());
-                                    t.a11y_id(keep, "keep_done");
-                                    msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
+                                    t.row(|t| {
+                                        let hide = t.checkbox(Settings::hide_badge());
+                                        t.a11y_id(hide, "hide_badge");
+                                        msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
+                                        t.label("Hide the Today badge");
+                                    });
+                                    t.row(|t| {
+                                        let keep = t.checkbox(Settings::keep_done());
+                                        t.a11y_id(keep, "keep_done");
+                                        msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
+                                        t.label("Keep completed tasks in their list");
+                                    });
                                     let line = t.caption(Settings::line());
                                     t.a11y_id(line, "settings");
                                 });
