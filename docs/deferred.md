@@ -7854,6 +7854,19 @@ named retained `dev.kaya.editorgo`, and the positive cleanup removed it.
 The full standalone iOS lane then passed; this still does not close the
 distinct six-delivered-and-ignored-taps face.
 
+## WATCH — `save-swiftui`: the XCUITest driver exited 65 before the sheet was driven (first sighting 2026-09-05)
+KEY: save-swiftui, driver exited 65, no file dialog live, file_choose draft, xcuidrive, matrix contention
+
+The task manager's fourth matrix (f65bd32e, one-minute load 3.7 at launch):
+`no file dialog live, wanted "kaya-save-11871"` and `file_choose draft:
+the driver on 8F0680C5… exited 65` — the resident XCUITest driver died
+before the save sheet was driven, and every later step failed on the file
+that was never opened. A different shape from the struck sheets entry
+above (those taps landed and the sheet shrugged); the other 127 iOS legs
+were green. On the next sighting read the driver's own log for the exit
+65 (an xcodebuild test-run failure code) before anything about the sheet.
+
+
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 
@@ -10868,6 +10881,11 @@ one-minute load 8.8 at launch): `dnd-go` again, shape (b) with a twist —
 ACTION_DRAG_ENDED never delivered in 20s — while `tasks-compose`'s own
 reorder went through. Three matrices in a row on the same day; the
 longer-duration experiment is due.
+
+TENTH SIGHTING, 2026-09-05, the task manager's fourth matrix (f65bd32e):
+`dnd-compose`, shape (b) again (`started=1 entered=2 dropped=1
+ended=false`), the tasks leg's own reorder green beside it. Four
+matrices on one afternoon, four sightings.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention

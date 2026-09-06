@@ -201,6 +201,13 @@ the gate or trap it became.
   field. The screen became a one-row stamped record, which is the sugar
   kaya has; whether the live zone wants `checked(bool)` in nine bindings
   is a small sweep, ledgered.
+- **2026-09-05, the Windows capture — WinUI's checkbox is wide too.** The
+  task rows on Windows show a hundred-pixel gap between the box and the
+  title: WinUI's CheckBox carries a default MinWidth of 120, so a
+  text-less checkbox claims that width where the mac's and GTK's hug the
+  box. The iPhone's greedy switch one platform over; the same rule
+  applies (a text-less checkbox hugs its box), unfixed as of this note,
+  and the same missing layout assertion would have caught both.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through
