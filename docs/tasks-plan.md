@@ -221,6 +221,16 @@ the gate or trap it became.
   first witness; the three findings of this kind (the iPhone switch, the
   WinUI checkbox, the SwiftUI entry) argue for a layout scene of the
   common list-row shapes, ledgered.
+- **2026-09-05, the captures after the spacer — a stamped row spans on
+  SwiftUI and hugs on the other three.** With the spacer in place the
+  Details buttons share one edge on every platform, but that edge is the
+  window's on the mac and the iPhone and the content's on GTK, WinUI and
+  Compose: the For's stamped rows take the column's width on SwiftUI and
+  hug their content elsewhere, so the spacer has nothing to take. DESIGN's
+  layout rule says a nested container maximizes its own main axis; the
+  three widget backends do not apply it to a stamped row. Unfixed as of
+  this note; it is the first case the ledgered list-row layout scene
+  should assert, and a three-backend fix once it does.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through

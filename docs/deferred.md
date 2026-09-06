@@ -1926,8 +1926,14 @@ unpicked.
   captioned checkbox — each asserted with `expect_fills`/`expect_shares`
   on every lane, so a control that hugs where it should fill or fills
   where it should hug fails a gate rather than a reviewer's eye. Small;
-  nine guests or a rust-only depth scene. KEY: list-row layout scene,
-  hugging control, grown entry, checkbox MinWidth, fixedSize
+  nine guests or a rust-only depth scene. ITS FIRST CASE IS ALREADY
+  KNOWN: a For's stamped row spans its column on SwiftUI and hugs its
+  content on GTK, WinUI and Compose (the task manager's captures, same
+  day), so a spacer in the row reaches the window's edge on two platforms
+  and the content's on three — a three-backend fix under DESIGN's
+  nested-container rule once the scene asserts it. KEY: list-row layout
+  scene, hugging control, grown entry, checkbox MinWidth, fixedSize,
+  stamped row spans, hexpand
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose
@@ -10902,6 +10908,9 @@ alone, the other four lanes and the gates green (the fifth matrix, one
 hour earlier, was the day's one fully green run). Six matrices on the
 afternoon, five with a drag sighting on one android leg or another.
 
+TWELFTH SIGHTING, 2026-09-05, the seventh matrix (75b3b36a): `dnd-compose`,
+shape (b), `dropped=1 ended=false`; the tasks leg's reorder green beside it.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 
@@ -10935,8 +10944,8 @@ was expected) in the task manager's third matrix (d5b85612, one-minute load
 the lane log for this run and are the next read: whether the reading window
 was active at each paste.
 
-## WATCH — windows `dnd_java` under a matrix: the keyed drag onto a stamped row landed the wrong payload (first sighting 2026-09-05)
-KEY: dnd_java, windows drag, item y drag ended none, text target got text hello, matrix contention
+## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` and then linux `dnd-js-wayland` (first sighting 2026-09-05)
+KEY: dnd_java, dnd-js-wayland, windows drag, wayland drag, item y drag ended none, text target got text hello, matrix contention
 
 The task manager's third matrix (d5b85612): the windows lane's `dnd_java` leg
 read `label#4 "text target got text hello (copy)", wanted "text target got
@@ -10946,6 +10955,15 @@ happened, and the target kept the earlier drop's payload. Every other dnd leg
 on the lane green, the lane at 879s against its 600 ceiling with the core
 rebuilt cold. One sighting; on the next, read the WinUI arm's
 `KAYA_DRAG_EVENT` lines for that leg.
+
+SECOND SIGHTING 2026-09-05, the task manager's seventh matrix (75b3b36a),
+on LINUX this time — `dnd-js-wayland`, byte for byte the same three
+readings (`text target got text hello (copy)` wanted `y`, `item y drag
+ended none` wanted `copy`, label#1 `hello` wanted `y`). Two backends, one
+shape: the drag FROM the stamped row `y` is the one that does not happen,
+under load, on whichever lane. That points at the verb's timing against
+the freshly stamped copy rather than at either arm; the next sighting
+compares the drive's source geometry line against the copy's settle.
 
 ## WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
