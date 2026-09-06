@@ -10979,6 +10979,21 @@ slice; load 264 mid-run): `dnd-go`, the keyed-drag-earlier-payload shape
 again (`label#4 reads "text target got text y (copy)", wanted "item x got
 text hello (copy)"`, then `drag ended none` and the injected gesture not
 finishing) — the thirteenth-to-fifteenth sightings' exact text.
+NINETEENTH SIGHTING, 2026-09-06 02:40, matrix #12 (the `fill` knob;
+five-minute load 96 by its end): `dnd-go` again, 38s.
+
+## GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)
+KEY: run-leg, compiled guest, staged guest, build_ step, spec hash mismatch, hand run
+
+run-leg builds the rust example and verifies libkaya and the interpreter,
+but the go, csharp, java, swift, ocaml and haskell guests run from
+target/ as the last lane staged them; after a spec-hash move the go leg
+panicked naming both hashes (docs/traps.md, the same day). The lane's own
+`build_*` steps live in tools/validate-mac.py rather than in
+tools/lib/lanes/mac.py, so run-leg cannot call them yet. The fix is the
+same move the rust build took: the per-language build into the lane
+module, run-leg calling it under `--build`, and a refusal (not a stale
+run) when a staged guest's binding hash is not the tree's.
 
 ## WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)
 KEY: varied-python, no such target label#0, first step, starved host, android python guest, step ceiling
@@ -11029,6 +11044,16 @@ was expected) in the task manager's third matrix (d5b85612, one-minute load
 the lane log for this run and are the next read: whether the reading window
 was active at each paste.
 
+THE X11 TWIN, 2026-09-06 02:40, matrix #12 (the `fill` knob; five-minute
+load 96 by its end): `clipboard-js-x11`, `label#0 reads "empty", wanted
+"text from another app"` — the FIRST paste, the foreign seed's text, read
+empty on x11 where every earlier sighting was wayland's, and the other
+five clipboard legs on both protocols passed. The linux lane standalone
+launched right after: ALL PASS, 739 legs, the x11 leg among them — load,
+not code. The focus premise above is wayland's, so an x11 sighting says
+the seed's own read is worth the instrument too (the seed poll's outcome
+at the moment of the first paste).
+
 ## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` and then linux `dnd-js-wayland` (first sighting 2026-09-05)
 KEY: dnd_java, dnd-js-wayland, windows drag, wayland drag, item y drag ended none, text target got text hello, matrix contention
 
@@ -11066,6 +11091,14 @@ SECOND SIGHTING, 2026-09-06 01:42, matrix #11 (load 264 mid-run):
 transactions"` — the filter's click did not land, the first sighting's
 shape; the python suite standalone was not run before the sighting, so the
 standalone rerun launched right after is the discriminator.
+The android lane standalone ten minutes after that matrix: ALL PASS, 136
+legs, portfolio-python among them — load, not code.
+
+THIRD SIGHTING, 2026-09-06 02:40, matrix #12 (the `fill` knob): the same
+count sentence, 36s. Three sightings in three matrices on two trees, and
+green standalone between them: the instrument the first sighting asked
+for (log the click's arrival against the sort's own apply) is due before
+the next.
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps

@@ -412,6 +412,10 @@ func (sc SumCase[K, V]) BindHelp(n Node, sel func(*V) *string) {
 	sc.t.BindHelp(n, FieldBy(sel))
 }
 
+// SetFill gives every stamped copy of this arm the same cross-axis
+// stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
+func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

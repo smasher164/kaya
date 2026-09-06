@@ -2631,6 +2631,14 @@ final class KayaAppTx {
         tx.setGrow(w.id, weight)
     }
 
+    /// Whether a widget spans its container's cross axis — a column's
+    /// width, a row's height — whatever the container's align
+    /// (docs/layout-knobs-plan.md §1). Unset, the kind's own default
+    /// holds.
+    func setFill(_ w: KayaWidget, _ on: Bool) {
+        tx.setFill(w.id, on)
+    }
+
     /// A widget's accessibility IDENTIFIER: a stable authored key that
     /// automation addresses it by, and which is NEVER spoken.
     func setA11yId(_ w: KayaWidget, _ id: String) {
@@ -4119,6 +4127,11 @@ final class KayaTpl {
 
     func setHelp(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
         tx.tx.bindHelpElement(n.id, level: level, field: f.index)
+    }
+
+    /// A stamped copy's cross-axis stretch (KayaTx.setFill).
+    func setFill(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setFill(n.id, on)
     }
 
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.

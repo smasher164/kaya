@@ -55,6 +55,13 @@ let () =
                label ~a11y_id:"plainlabel" ~bind:plain (* label#4 *);
                image ~source:tall_png;
              ];
+           (* column@knobs: NO align; fill opts one child out of its
+              default and one in *)
+           column ~a11y_id:"knobs"
+             [
+               textarea ~fill:false ~a11y_id:"optout";
+               button ~fill:true ~a11y_id:"fills" ~text:"fills";
+             ];
          ]
          ()
      in

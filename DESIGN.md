@@ -1023,6 +1023,15 @@ The known normalization worklist:
   width unless it grows (docs/tasks-plan.md R10 — the task manager's
   notes field hugged a 240 minimum on four backends and an arbitrary
   480 cap on the fifth, the maintainer's review of 2026-09-05).
+- `fill` is the child's own word on that cross axis
+  (docs/layout-knobs-plan.md §1): true spans the container's cross axis
+  whatever its `align`, false hugs, and unset leaves the kind's default —
+  the scroll, the text field in a column, the crossing container, the
+  stamped-row host and the derived form span; everything else hugs. The
+  defaults above are this prop's defaults, and `fill = false` is the
+  opt-out each of them lacked. Every backend reads it at its one
+  cross-placement site ahead of every default; `expect_hugs` is the
+  opt-out's observation, `expect_breadth` the opt-in's.
 - A stamped row spans its host column, as a live nested row does. A
   For's copies obey the nested-container rule above; three widget
   backends applied it to live children only, and a spacer inside a

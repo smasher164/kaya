@@ -1311,6 +1311,10 @@ pub enum Prop {
     Step,
     TickSpacing,
     Help,
+    /// A child's cross-axis stretch (Bool-valued): spans its container's
+    /// cross axis, or hugs; unset leaves the kind's default
+    /// (docs/layout-knobs-plan.md §1).
+    Fill,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

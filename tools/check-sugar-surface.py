@@ -528,11 +528,11 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               f"func {camel}\\(_ text: String\\) -> KayaNodeHandle",
               findings)
     want_role("ocaml-live", "bindings/ocaml/kaya_app.ml", snake,
-              f"^let {snake} \\?grow \\?a11y_id \\?a11y_id_bind \\?a11y_label "
-              f"\\?a11y_label_bind \\?help \\?help_bind \\?text "
+              f"^let {snake} \\?grow \\?fill \\?a11y_id \\?a11y_id_bind "
+              f"\\?a11y_label \\?a11y_label_bind \\?help \\?help_bind \\?text "
               f"\\?bind \\(\\)", findings)
     want_role("ocaml-tpl", "bindings/ocaml/kaya_app.ml", snake,
-              f"^  let {snake} \\?grow \\?a11y_id \\?a11y_id_bind",
+              f"^  let {snake} \\?grow \\?fill \\?a11y_id \\?a11y_id_bind",
               findings)
     want_role("haskell-live", "bindings/haskell/KayaApp.hs", snake,
               f"^{camel}Text :: \\(LeafArgs r\\) => String -> r",
@@ -3418,7 +3418,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 14 members")
+    ], "js's prop reader found only 15 members")
     return "\n".join(lines)
 
 
@@ -3821,7 +3821,8 @@ check("swift", "bindings/swift/KayaApp.swift", "spacing",
 check("haskell", "bindings/haskell/KayaApp.hs", "spacing",
       r"Spacing :: Double -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "spacing",
-      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind "
+      r"let row \?grow \?fill \?a11y_id \?a11y_id_bind \?a11y_label "
+      r"\?a11y_label_bind "
       r"\?help \?help_bind \?spacing ")
 check("js", "bindings/js/kaya/index.ts", "spacing", r"^  spacing\(gap: number\)")
 
@@ -3840,7 +3841,8 @@ check("swift", "bindings/swift/KayaApp.swift", "align",
 check("haskell", "bindings/haskell/KayaApp.hs", "align",
       r"Align :: Align -> Attr")
 check("ocaml", "bindings/ocaml/kaya_app.ml", "align",
-      r"let row \?grow \?a11y_id \?a11y_id_bind \?a11y_label \?a11y_label_bind "
+      r"let row \?grow \?fill \?a11y_id \?a11y_id_bind \?a11y_label "
+      r"\?a11y_label_bind "
       r"\?help \?help_bind \?spacing \?align ")
 check("js", "bindings/js/kaya/index.ts", "align", r"^  align\(mode: AlignValue")
 

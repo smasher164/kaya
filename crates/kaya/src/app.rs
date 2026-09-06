@@ -980,6 +980,16 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// Whether this widget spans its container's cross axis — a column's
+    /// width, a row's height — whatever the container's `align`
+    /// (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds:
+    /// a scroll, a text field in a column and a crossing container span,
+    /// everything else hugs.
+    pub fn fill(self, on: bool) -> Self {
+        self.tx.fill(self.id, on);
+        self
+    }
+
     /// Stack this row's children vertically while the window's size class
     /// is `when` — [`Tx::breakpoint_when`] chained
     /// (docs/adaptive-layout-plan.md D3). The root refuses a non-container
@@ -2041,6 +2051,11 @@ impl<'a> Tx<'a> {
     /// OVERRIDES that.
     pub fn help(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
         self.set_live(widget, Prop::Help, text.into());
+    }
+
+    /// Cross-axis stretch for one child (docs/layout-knobs-plan.md §1).
+    pub fn fill(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::Fill, on);
     }
 
     pub fn a11y_label(&mut self, widget: WidgetId, label: impl Into<LiveSource<StrKind>>) {
@@ -3516,6 +3531,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn help(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.tpl().help(node, src)
+    }
+
+    pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
+        self.tpl().fill(node, on)
     }
 
     pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
@@ -6183,6 +6202,11 @@ impl<'b> Tpl<'_, 'b> {
         let n = self.widget(WidgetKind::Progress);
         self.set(n, Prop::Indeterminate, true);
         n
+    }
+
+    /// A stamped copy's cross-axis stretch (docs/layout-knobs-plan.md §1).
+    pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
+        self.set(node, Prop::Fill, on);
     }
 
     /// A slider over `min..max` whose POSITION comes from a source. The

@@ -18,3 +18,7 @@ expect_fills column@fitcol
 # and a tall no-baseline image beside one label is what makes centre the only reading.
 expect label@plainlabel "plain probe"
 expect_aligned row@plain "center"
+# fill (docs/layout-knobs-plan.md §1), in column@knobs, which sets NO align:
+# a text field's column-wide default opted OUT, and a button opted IN.
+expect_hugs textarea@optout
+expect_breadth button@fills

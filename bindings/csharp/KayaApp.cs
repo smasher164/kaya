@@ -1652,6 +1652,13 @@ sealed class Tx
     public void SetGrow(Widget w, double weight) =>
         Records.Add(KayaWire.TxSetGrow(w.Id, weight));
 
+    /// Whether a widget spans its container's cross axis — a column's
+    /// width, a row's height — whatever the container's align
+    /// (docs/layout-knobs-plan.md §1). Unset, the kind's own default
+    /// holds.
+    public void SetFill(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetFill(w.Id, on));
+
     /// A container's inter-child gap (main axis, DIP; the normalized
     /// default is 8). Containers only — the root rejects it elsewhere.
     public void SetSpacing(Widget w, double gap) =>
@@ -3320,6 +3327,10 @@ sealed class Tpl
 
     public void SetHelp(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindHelpElement(n.Id, level, f.Index));
+
+    /// A stamped copy's cross-axis stretch (Tx.SetFill).
+    public void SetFill(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
 
     /// What ACTIVATING a stamped copy does — write a verb phrase.
     /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the

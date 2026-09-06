@@ -332,6 +332,7 @@ pub(crate) const PROP_MINUTE_STEP: u32 = 23;
 pub(crate) const PROP_STEP: u32 = 24;
 pub(crate) const PROP_TICK_SPACING: u32 = 25;
 pub(crate) const PROP_HELP: u32 = 26;
+pub(crate) const PROP_FILL: u32 = 27;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -776,6 +777,7 @@ fn prop(raw: u32) -> Prop {
         PROP_STEP => Prop::Step,
         PROP_TICK_SPACING => Prop::TickSpacing,
         PROP_HELP => Prop::Help,
+        PROP_FILL => Prop::Fill,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -3585,6 +3587,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Step => PROP_STEP,
         Prop::TickSpacing => PROP_TICK_SPACING,
         Prop::Help => PROP_HELP,
+        Prop::Fill => PROP_FILL,
     }
 }
 

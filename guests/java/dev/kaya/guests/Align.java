@@ -50,6 +50,12 @@ public final class Align {
                     tx.label(plain).a11yId("plainlabel"); // label#4
                     tx.image(TALL_PNG);
                 }).a11yId("plain");
+                // column@knobs: NO align; fill opts one child out of its
+                // default and one in
+                tx.column(() -> {
+                    tx.textarea().fill(false).a11yId("optout");
+                    tx.button("fills").fill(true).a11yId("fills");
+                }).a11yId("knobs");
             }).align(KayaApp.Align.STRETCH).a11yId("root"));
             return null;
         });

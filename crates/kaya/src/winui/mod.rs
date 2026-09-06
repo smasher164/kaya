@@ -607,6 +607,9 @@ struct CoreState {
     /// Columns a For has stamped ROW copies into (docs/tasks-plan.md §4,
     /// R7): such a host spans a vertical parent as its rows span it.
     stamps_rows: std::collections::HashSet<u64>,
+    /// One child's own `fill` (docs/layout-knobs-plan.md §1), read by
+    /// reindex ahead of every kind default.
+    fills: HashMap<u64, bool>,
     /// The three drag-and-drop declarations (docs/dnd-plan.md D1, D8), by
     /// widget id: what a source hands over, what a destination will do,
     /// and which live For reorders its own rows.
@@ -2205,6 +2208,9 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
         let crossing = crossing
             || (vertical && matches!(widget, NativeWidget::Entry(_) | NativeWidget::Textarea(_)));
+        // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
+        // (docs/layout-knobs-plan.md §1).
+        let crossing = core.fills.get(&child.0).copied().unwrap_or(crossing);
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks
@@ -12163,6 +12169,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 return Ok(());
             }
+            // Fill likewise lands on the parent's next reindex
+            // (docs/layout-knobs-plan.md §1).
+            if let (Prop::Fill, Value::Bool(on)) = (prop, &value) {
+                core.fills.insert(id.0, *on);
+                if let Some(parent) = core.child_order.parent_of(id) {
+                    core.child_order.mark(parent);
+                }
+                return Ok(());
+            }
             // A FORM'S SHARED LABEL TRACK IS MEASURED FROM THE LABELS
             // (docs/forms-plan.md §3), so a bound label's new text re-stamps
             // its row and the column, which re-stamps every sibling row.
@@ -14141,6 +14156,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             textarea_ids: Vec::new(),
             grid_children: HashMap::new(),
             stamps_rows: std::collections::HashSet::new(),
+            fills: HashMap::new(),
             grid_cols: HashMap::new(),
             radio_options: HashMap::new(),
             select_options: HashMap::new(),

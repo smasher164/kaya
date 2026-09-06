@@ -59,6 +59,13 @@ main = kayaMain $ \app -> do
             [A11yId "plain"]
             [ labelBound plain [A11yId "plainlabel"], -- label#4
               imageBytes tallPng
+            ],
+          -- column@knobs: NO align; fill opts one child out of its
+          -- default and one in
+          column
+            [A11yId "knobs"]
+            [ textarea [Fill False, A11yId "optout"],
+              button "fills" [Fill True, A11yId "fills"]
             ]
         ]
     mount root

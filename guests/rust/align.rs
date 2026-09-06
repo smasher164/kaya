@@ -47,6 +47,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.image(&TALL_PNG[..]);
                 })
                 .a11y_id("plain");
+                tx.column(|tx| {
+                    // column@knobs: NO align; fill opts one child out of its
+                    // default and one in
+                    tx.textarea().fill(false).a11y_id("optout");
+                    tx.button("fills").fill(true).a11y_id("fills");
+                })
+                .a11y_id("knobs");
             })
             .align(Align::Stretch)
             .a11y_id("root")

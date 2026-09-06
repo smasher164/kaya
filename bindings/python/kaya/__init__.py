@@ -473,6 +473,14 @@ class _Handle:
             wire.tx_bind_help, wire.tx_bind_help_element))
         return self
 
+    def fill(self, on):
+        """Whether this widget spans its container's cross axis — a
+        column's width, a row's height — whatever the container's
+        `align` (docs/layout-knobs-plan.md §1). Unset, the kind's own
+        default holds. Returns the handle."""
+        _records().append(wire.tx_set_fill(self.id, bool(on)))
+        return self
+
     def accepts(self, *kinds):
         """Declare what this widget takes from a paste — the closed kinds
         by name plus any custom format ids.

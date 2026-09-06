@@ -102,6 +102,8 @@ func (r trackRow) Help(n kaya.Node, f kaya.Field[string]) { r.c.Help(r.t, n, f) 
 
 func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
+func (r trackRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }
+
 func (r trackRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 
 func (r trackRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }

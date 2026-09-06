@@ -276,6 +276,8 @@ sealed class TrackRow
     public void SetRole(Node n, Role role) => t.SetRole(n, role);
 
     public void SetInset(Node n, double pad) => t.SetInset(n, pad);
+
+    public void SetFill(Node n, bool on) => t.SetFill(n, on);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

@@ -288,6 +288,9 @@ pub enum Step {
     /// consuming none of the leftover. root_fills cannot see it either.
     ExpectFills(Target),
     ExpectBreadth(Target),
+    /// The inverse: the target sits short of its container's breadth —
+    /// the `fill = false` opt-out's observation (docs/layout-knobs-plan.md §1).
+    ExpectHugs(Target),
     /// Expect the container's children to sit at the given cross-axis
     /// placement — the observation the `align` prop is verified by. The
     /// stage CLASSIFIES from geometry rather than reading the prop back:
@@ -529,6 +532,7 @@ impl Step {
             | Step::ExpectFocused(t)
             | Step::ExpectFills(t)
             | Step::ExpectBreadth(t)
+            | Step::ExpectHugs(t)
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
@@ -670,6 +674,7 @@ impl Step {
             Step::Frame(_) => false,
             Step::ExpectFills { .. } => true,
             Step::ExpectBreadth { .. } => true,
+            Step::ExpectHugs { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
             Step::ExpectFolded { .. } => true,
@@ -1386,6 +1391,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
+            "expect_hugs" => Step::ExpectHugs(parse_target(rest)?),
             "expect_axis" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_axis wants a target and an axis string: {line:?}")
@@ -3648,6 +3654,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                         Ok(format!("{} spans its breadth", target_spec(t)))
                     } else {
                         Err(format!("{} is short of its breadth ({short})", target_spec(t)))
+                    }
+                }))
+            }
+            Step::ExpectHugs(t) => {
+                // The same read, wanted SHORT: a reader that could not read
+                // ("no ...") is a failure on this side too, never a hug.
+                Some(poll(|| {
+                    let short = stage.widget_spans_breadth(*t);
+                    if short.is_empty() {
+                        Err(format!("{} spans its breadth, wanted it to hug", target_spec(t)))
+                    } else if short.starts_with("no ") {
+                        Err(format!("{} cannot be read ({short})", target_spec(t)))
+                    } else {
+                        Ok(format!("{} hugs", target_spec(t)))
                     }
                 }))
             }

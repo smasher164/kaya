@@ -177,6 +177,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // tooltip at all — Apple's documentation, measured to match 2026-09-05)
     // — and hands it to its assistive reader itself (T2, T3). kaya draws none.
     ("help", 26, PropKind::Str),
+    // ONE CHILD'S CROSS-AXIS STRETCH (docs/layout-knobs-plan.md §1): true
+    // spans the container's cross axis (a column's width, a row's height)
+    // whatever the container's `align`; false hugs. Never set, the kind's
+    // own default holds — a scroll, a text field in a column, a crossing
+    // container and a derived form span, everything else hugs — and those
+    // defaults are what `fill = false` exists to opt out of.
+    ("fill", 27, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2725,6 +2732,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("step", 24),
                 ("tick_spacing", 25),
                 ("help", 26),
+                ("fill", 27),
             ],
         },
         EnumSpec {
@@ -3402,6 +3410,7 @@ mod tests {
                     ("prop", "step") => wire::PROP_STEP,
                     ("prop", "tick_spacing") => wire::PROP_TICK_SPACING,
                     ("prop", "help") => wire::PROP_HELP,
+                    ("prop", "fill") => wire::PROP_FILL,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

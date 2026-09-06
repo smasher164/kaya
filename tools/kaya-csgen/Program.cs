@@ -439,6 +439,7 @@ static class Program
         Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");
         Set("SetRole", ["Node n", "Role role"], "n, role");
         Set("SetInset", ["Node n", "double pad"], "n, pad");
+        Set("SetFill", ["Node n", "bool on"], "n, on");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

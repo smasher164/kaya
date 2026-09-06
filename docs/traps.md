@@ -9337,3 +9337,13 @@ runningboardd's exit context before hunting a crash report.
   ~/Library/Logs/DiagnosticReports/<guest>-*.ips and the leg prints
   nothing at all. Unlink first, then copy: run-leg does; a hand copy must
   too.
+- **A hand run of a COMPILED guest's leg runs whatever is staged, and a
+  staged guest from before a spec-hash move dies at launch naming both
+  hashes** (2026-09-06, tools/run-leg.py). run-leg builds the rust example
+  itself, verifies libkaya and the interpreter, and then runs the go,
+  csharp, java, swift, ocaml and haskell guests AS STAGED; after `fill`
+  moved the hash the go leg panicked `library speaks spec
+  0xa2bb42a3ce2fc3c9, this binding was generated from 0x27300640cf479cec`.
+  The panic is the guard; the recipe is validate-mac.py's own `build_*`
+  step for that language before the leg, until run-leg learns to run it
+  (docs/deferred.md).

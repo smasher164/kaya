@@ -2294,6 +2294,21 @@ public final class KayaApp {
         }
 
         /**
+         * Span this widget across its container's cross axis at
+         * construction, or opt it out (docs/layout-knobs-plan.md §1).
+         * Same discipline as {@link #grow}.
+         */
+        public Widget fill(boolean on) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: fill on a widget outside its build transaction"
+                    + " — use Tx.setFill inside a live transaction");
+            }
+            tx.setFill(this, on);
+            return this;
+        }
+
+        /**
          * Stack this container's children vertically while the window's
          * SIZE CLASS is {@code when}, reverting on leaving it — one
          * core-evaluated breakpoint (docs/adaptive-layout-plan.md D3).
@@ -3029,6 +3044,12 @@ public final class KayaApp {
             t.setGrow(n, weight);
         }
 
+        /** Whether this row's copy of that node spans its container's
+         * cross axis ({@link Tpl#setFill}). */
+        public void setFill(Node n, boolean on) {
+            t.setFill(n, on);
+        }
+
         /** This row's copy of that slider's granularity (Tpl.setStep). */
         public void setStep(Node n, double step) {
             t.setStep(n, step);
@@ -3647,6 +3668,16 @@ public final class KayaApp {
          */
         public void setGrow(Widget w, double weight) {
             emit(KayaWire.txSetGrow(w.id, weight));
+        }
+
+        /**
+         * Whether a widget spans its container's cross axis — a column's
+         * width, a row's height — whatever the container's align
+         * (docs/layout-knobs-plan.md §1). Unset, the kind's own default
+         * holds.
+         */
+        public void setFill(Widget w, boolean on) {
+            emit(KayaWire.txSetFill(w.id, on));
         }
 
         /**
@@ -5080,6 +5111,12 @@ public final class KayaApp {
          */
         public void setGrow(Node n, double weight) {
             tx.emit(KayaWire.txSetGrow(n.id, weight));
+        }
+
+        /** A stamped copy's cross-axis stretch, the blueprint twin of
+         * {@link Tx#setFill(Widget, boolean)}. */
+        public void setFill(Node n, boolean on) {
+            tx.emit(KayaWire.txSetFill(n.id, on));
         }
 
         /** A stamped slider's granularity (docs/slider-plan.md S1):

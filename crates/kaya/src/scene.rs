@@ -783,6 +783,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::A11yId | Prop::A11yLabel => true,
         // Help text is the third universal prop (docs/tooltip-plan.md T1).
         Prop::Help => true,
+        // Cross-axis stretch rides any child, like grow
+        // (docs/layout-knobs-plan.md §1).
+        Prop::Fill => true,
         // Acceptance is scoped to what can RECEIVE a paste: the text
         // kinds, which are the ones with native paste behaviour to
         // override.
@@ -927,7 +930,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
-        Prop::Indeterminate => ValueType::Bool,
+        Prop::Indeterminate | Prop::Fill => ValueType::Bool,
         Prop::Columns => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help => ValueType::Str,
         // An ACCEPT LIST: the closed kinds by name plus any custom
@@ -8198,6 +8201,58 @@ mod tests {
             1,
             "the help text should reach the backend"
         );
+    }
+
+    /// `fill` rides any kind, like grow (docs/layout-knobs-plan.md §1):
+    /// a false on a text field is the opt-out the defaults lacked, and it
+    /// reaches the backend as the Bool it is.
+    #[test]
+    fn fill_rides_any_kind_as_a_bool() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Textarea },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Fill,
+                value: PropValue::Const(Value::Bool(false)),
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Fill,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let fills: Vec<(WidgetId, bool)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { id, prop: Prop::Fill, value: Value::Bool(on) } => {
+                    Some((*id, *on))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fills, vec![(WidgetId(2), false), (WidgetId(3), true)]);
+    }
+
+    /// A fill that is not a bool dies at the root by name, so no backend
+    /// meets a number where it reads a flag.
+    #[test]
+    #[should_panic(expected = "Fill")]
+    fn fill_of_the_wrong_type_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Fill,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+        ]);
     }
 
     /// The positive control: a label that says something records, by

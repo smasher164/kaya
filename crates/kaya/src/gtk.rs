@@ -596,6 +596,19 @@ fn set_text_field(widget: &gtk4::Widget) {
     unsafe { widget.set_data(TEXT_FIELD_KEY, true) }
 }
 
+/// One child's own `fill` (docs/layout-knobs-plan.md §1): 1 spans, 2 hugs,
+/// unset leaves the kind's default to apply_cross_align.
+const FILL_KEY: &str = "kaya-fill";
+fn fill_of(widget: &gtk4::Widget) -> Option<bool> {
+    // SAFETY: the key is private to this module and only ever set to an
+    // i8 by set_fill below.
+    unsafe { widget.data::<i8>(FILL_KEY).map(|p| *p.as_ref() == 1) }
+}
+fn set_fill(widget: &gtk4::Widget, on: bool) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(FILL_KEY, if on { 1i8 } else { 2i8 }) }
+}
+
 /// A container a For has stamped ROW copies into (docs/tasks-plan.md §4, R7).
 const STAMPED_ROWS_KEY: &str = "kaya-stamps-rows";
 fn stamps_rows(widget: &gtk4::Widget) -> bool {
@@ -654,13 +667,14 @@ fn ensure_flex(container: &gtk4::Widget) {
 /// maps to GTK's native baseline valign (rows only).
 fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) {
     use gtk4::prelude::WidgetExt;
-    let mut align = match mode {
+    let mode_align = match mode {
         1 => gtk4::Align::Center,
         2 => gtk4::Align::End,
         3 => gtk4::Align::Fill,
         4 => gtk4::Align::Baseline,
         _ => gtk4::Align::Start,
     };
+    let mut align = mode_align;
     // THE BREADTH RULE (the stretch ruling's second slice, 2026-08-22): a
     // nested CROSSING container spans its parent's inner breadth under every
     // align mode, so the mode never reaches one. Baseline is the exception
@@ -691,12 +705,41 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     if vertical_container && is_form(child) {
         align = gtk4::Align::Fill;
     }
+    // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
+    // (docs/layout-knobs-plan.md §1); baseline keeps its native valign.
+    match fill_of(child) {
+        Some(true) => align = gtk4::Align::Fill,
+        Some(false) if mode_align != gtk4::Align::Baseline => align = mode_align,
+        _ => {}
+    }
     if vertical_container {
         // A column's cross axis is horizontal.
         child.set_halign(align);
     } else {
         child.set_valign(align);
     }
+}
+
+/// Re-stamp one child's cross placement from its parent's declared mode,
+/// after the child's own `fill` moved.
+fn restamp_cross_align(child: &gtk4::Widget) {
+    use gtk4::prelude::WidgetExt;
+    let Some(parent) = child.parent() else { return };
+    let vertical = parent
+        .layout_manager()
+        .and_then(|layout| {
+            layout
+                .downcast_ref::<flex::FlexLayout>()
+                .map(|flex| flex.orientation() == gtk4::Orientation::Vertical)
+        })
+        .or_else(|| {
+            parent
+                .downcast_ref::<gtk4::Box>()
+                .map(|b| gtk4::prelude::OrientableExt::orientation(b) == gtk4::Orientation::Vertical)
+        });
+    let Some(vertical) = vertical else { return };
+    apply_cross_align(child, vertical, container_align(&parent));
+    parent.queue_resize();
 }
 
 fn reconcile_grow_align(child: &gtk4::Widget) {
@@ -9536,6 +9579,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     use gtk4::prelude::WidgetExt;
                     w.control()
                         .set_tooltip_text((!text.is_empty()).then_some(text.as_str()));
+                }
+                (w, Prop::Fill, Value::Bool(on)) => {
+                    let widget = w.widget();
+                    set_fill(&widget, on);
+                    restamp_cross_align(&widget);
                 }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the list
                 // drives the paste split and Paste's enablement, both read

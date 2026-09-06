@@ -49,6 +49,13 @@ app.window(() => {
       kaya.image(TALL_PNG);
     });
     plainRow.a11yId("plain");
+    // column@knobs: NO align; fill opts one child out of its default and
+    // one in
+    const knobs = kaya.column(() => {
+      kaya.textarea().fill(false).a11yId("optout");
+      kaya.button("fills").fill(true).a11yId("fills");
+    });
+    knobs.a11yId("knobs");
   });
   root.a11yId("root");
 });

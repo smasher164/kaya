@@ -556,6 +556,15 @@ export class Handle {
     return this;
   }
 
+  /** Whether this widget spans its container's cross axis — a column's
+   * width, a row's height — whatever the container's `align`
+   * (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds.
+   * Chains. */
+  fill(on: boolean): this {
+    records().push(wire.tx_set_fill(this.id, Boolean(on)));
+    return this;
+  }
+
   /** Declare what this widget takes from a paste — the closed kinds by
    * name plus any custom format ids. Constant in a template: an accept
    * list describes the prototype, not the row. Chains. */

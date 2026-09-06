@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x27300640cf479cecn;
+export const SPEC_HASH = 0xa2bb42a3ce2fc3c9n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -91,6 +91,7 @@ export const PROP_MINUTE_STEP = 23;
 export const PROP_STEP = 24;
 export const PROP_TICK_SPACING = 25;
 export const PROP_HELP = 26;
+export const PROP_FILL = 27;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1064,6 +1065,21 @@ export function tx_bind_help(widget_id: number, signal_id: number): Uint8Array {
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_help_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HELP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant fill value. */
+export function tx_set_fill(widget_id: number, fill: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_CONST), enc.value(fill)));
+}
+
+/** set_property with a signal-bound fill value. */
+export function tx_bind_fill(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_fill_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_FILL), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */

@@ -454,6 +454,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // Progress-only: the platform's activity mode (value carries the
     // determinate fraction, reused from the slider).
     var indeterminate by mutableStateOf(false)
+    // One child's cross-axis stretch (docs/layout-knobs-plan.md §1); null
+    // leaves the kind's default to KayaRenderCore's boxFill.
+    var fill by mutableStateOf<Boolean?>(null)
     var columns by mutableStateOf(1)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
@@ -1142,7 +1145,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x27300640cf479cecuL
+    private const val SPEC_HASH: ULong = 0xa2bb42a3ce2fc3c9uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1347,6 +1350,7 @@ object KayaCompose {
     private const val PROP_ALIGN = 9
     private const val PROP_AXIS = 18
     private const val PROP_INDETERMINATE = 10
+    private const val PROP_FILL = 27
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1826,6 +1830,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.axis = readI64(b)
                         PROP_INDETERMINATE ->
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
+                        PROP_FILL ->
+                            KayaSceneModel.nodes[id]!!.fill = readBool(b)
                         PROP_COLUMNS ->
                             KayaSceneModel.nodes[id]!!.columns = readF64(b).toInt()
                         PROP_A11Y_ID ->
@@ -4624,6 +4630,28 @@ object KayaCompose {
         return answer
     }
 
+    /**
+     * expect_breadth's read, shared with expect_hugs: null for no such target,
+     * "" when the target spans its container's breadth, otherwise the shortfall
+     * (a "no ..." sentence when a reader has nothing recorded). UI thread.
+     */
+    private fun kayaBreadthShortfall(spec: String): String? =
+        kayaWidgetTarget(spec)?.let { widget ->
+            val parent = (KayaSceneModel.columns + KayaSceneModel.rows)
+                .firstOrNull { c -> c.children.any { it.id == widget.id } }
+                ?: return@let "no parent — not a flex child"
+            val inner = kayaContainerCross[parent.id] ?: 0.0
+            if (inner <= 0.0) return@let "no container layout recorded"
+            val rect = kayaCrossRects[widget.id]
+                ?: return@let "no cross box recorded — not a flex child"
+            if (rect.second >= inner - 2.0) {
+                ""
+            } else {
+                "spans ${Math.round(rect.second)}px of its parent's " +
+                    "${Math.round(inner)}px breadth"
+            }
+        }
+
     private fun kayaWidgetTarget(spec: String): KayaNode? {
         val delimiter = spec.indexOfAny(charArrayOf('#', '@'))
         if (delimiter < 0) return null
@@ -7267,29 +7295,28 @@ object KayaCompose {
                         // recorded cross rect against its container's
                         // recorded cross breadth, the readers expect_aligned
                         // classifies from; a nested container is a target too.
-                        val short = onUi(activity) {
-                            kayaWidgetTarget(parts[1])?.let { widget ->
-                                val parent = (KayaSceneModel.columns + KayaSceneModel.rows)
-                                    .firstOrNull { c -> c.children.any { it.id == widget.id } }
-                                    ?: return@let "no parent — not a flex child"
-                                val inner = kayaContainerCross[parent.id] ?: 0.0
-                                if (inner <= 0.0) return@let "no container layout recorded"
-                                val rect = kayaCrossRects[widget.id]
-                                    ?: return@let "no cross box recorded — not a flex child"
-                                if (rect.second >= inner - 2.0) {
-                                    ""
-                                } else {
-                                    "spans ${Math.round(rect.second)}px of its parent's " +
-                                        "${Math.round(inner)}px breadth"
-                                }
-                            }
-                        }
+                        val short = onUi(activity) { kayaBreadthShortfall(parts[1]) }
                         if (short == null) {
                             failures.add("no such target: ${parts[1]}")
                         } else if (short.isEmpty()) {
                             observed.add("${parts[1]} spans its breadth")
                         } else {
                             failures.add("${parts[1]} is short of its breadth ($short)")
+                        }
+                    }
+                    "expect_hugs" -> {
+                        // The same read, wanted SHORT (harness.rs
+                        // Step::ExpectHugs, the `fill = false` opt-out): a
+                        // reader that could not read is a failure here too.
+                        val short = onUi(activity) { kayaBreadthShortfall(parts[1]) }
+                        if (short == null) {
+                            failures.add("no such target: ${parts[1]}")
+                        } else if (short.isEmpty()) {
+                            failures.add("${parts[1]} spans its breadth, wanted it to hug")
+                        } else if (short.startsWith("no ")) {
+                            failures.add("${parts[1]} cannot be read ($short)")
+                        } else {
+                            observed.add("${parts[1]} hugs")
                         }
                     }
                     "expect_fills" -> {
@@ -9608,7 +9635,8 @@ private fun kayaHugCross(
     // A For's stamped rows span it (docs/tasks-plan.md §4, R7).
     if (!crossVertical && kayaStampsRows(node)) return Modifier
     val pinned =
-        isRoot || if (flexVertical == crossVertical) node.grow > 0 else flexStretch
+        isRoot || node.fill == true ||
+            if (flexVertical == crossVertical) node.grow > 0 else (flexStretch && node.fill != false)
     val crossingKind =
         if (crossVertical) KayaCompose.KIND_COLUMN else KayaCompose.KIND_ROW
     if (pinned || node.children.none { it.kind == crossingKind }) return Modifier
@@ -9676,7 +9704,9 @@ private fun KayaRenderCore(
         // A text field fills its column's width (docs/tasks-plan.md §4, R10).
         val textFills = flexVertical &&
             (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA)
-        if (flexStretch || crossing || scrollSpans || textFills) {
+        // The child's own `fill` outranks every default above
+        // (docs/layout-knobs-plan.md §1).
+        if (node.fill ?: (flexStretch || crossing || scrollSpans || textFills)) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
         }

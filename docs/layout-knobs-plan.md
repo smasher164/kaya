@@ -22,6 +22,21 @@ three are the user-defined side. Rulings marked PROPOSED-overnight.
 - Sugar: `.fill(true|false)` chained on every binding's widget handle,
   both zones; the template zone censused by tpl-surfaces' PROP_MEMBERS.
 
+BUILT 2026-09-06 (overnight). Prop 27, Bool, kind-agnostic at the root;
+the model holds it as a tri-state (`Option<bool>` / `Bool?` / `Boolean?`)
+and every backend reads it at its one cross-placement site AFTER its
+kind defaults, so the child's word outranks them: SwiftUI's stack and flex
+frames, the entry's and textarea's column-wide frames, the scroll's span
+and a container's own `boxFills`; Compose's `boxFill` (and `kayaHugCross`'s
+pin); GTK's `apply_cross_align` off a widget-data key with a re-stamp on
+write; WinUI's `reindex` crossing off `core.fills`. The observation pair is
+`expect_breadth` (opt-in) and the new `expect_hugs` (opt-out) — the same
+read wanted short, with a reader that has nothing recorded failing on
+that side too. align.steps' `column@knobs` holds both in nine guests. The
+mac align leg read `textarea@optout hugs, button@fills spans its breadth`
+on the first run. A BUTTON is the opt-in probe rather than a label,
+because a stretched WinUI TextBlock arranges text-sized (docs/traps.md).
+
 ## §2 — `wrap`: a row that flows onto new lines
 
 - A prop on Row, `wrap` (bool): children keep their natural size and flow

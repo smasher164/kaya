@@ -50,5 +50,11 @@ with app.window():
             plain_row.a11y_id("plain")
             kaya.label(bind=plain).a11y_id("plainlabel")  # label#4
             kaya.image(TALL_PNG)
+        # column@knobs: NO align; fill opts one child out of its default
+        # and one in
+        with kaya.column() as knobs:
+            knobs.a11y_id("knobs")
+            kaya.textarea().fill(False).a11y_id("optout")
+            kaya.button("fills").fill(True).a11y_id("fills")
 
 sys.exit(app.run())

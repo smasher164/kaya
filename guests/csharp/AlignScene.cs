@@ -47,6 +47,18 @@ static class AlignScene
                     tx.Image(TallPng);
                 });
                 tx.SetA11yId(plainRow, "plain");
+                // column@knobs: NO align; fill opts one child out of its
+                // default and one in
+                var knobs = tx.Column(() =>
+                {
+                    var optout = tx.Textarea();
+                    tx.SetFill(optout, false);
+                    tx.SetA11yId(optout, "optout");
+                    var fills = tx.Button("fills");
+                    tx.SetFill(fills, true);
+                    tx.SetA11yId(fills, "fills");
+                });
+                tx.SetA11yId(knobs, "knobs");
             }, align: Align.Stretch);
             tx.SetA11yId(root, "root");
             tx.Mount(root);

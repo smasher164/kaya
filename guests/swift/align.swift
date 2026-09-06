@@ -51,6 +51,17 @@ app.build { tx in
                 tx.image(tallPNG)
             }
             tx.setA11yId(plainRow, "plain")
+            // column@knobs: NO align; fill opts one child out of its
+            // default and one in
+            let knobs = tx.column {
+                let optout = tx.textarea()
+                tx.setFill(optout, false)
+                tx.setA11yId(optout, "optout")
+                let fills = tx.button("fills")
+                tx.setFill(fills, true)
+                tx.setA11yId(fills, "fills")
+            }
+            tx.setA11yId(knobs, "knobs")
         }
     tx.setA11yId(root, "root")
     tx.mount(root)

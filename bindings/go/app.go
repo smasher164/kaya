@@ -663,6 +663,14 @@ func (tx *Tx) SetGrow(w Widget, weight float64) {
 	tx.emit(TxSetGrow(w.id, weight))
 }
 
+// SetFill says whether a widget spans its container's cross axis — a
+// column's width, a row's height — whatever the container's align
+// (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds.
+// The dynamic path; the declarative spelling is the Fill chain.
+func (tx *Tx) SetFill(w Widget, on bool) {
+	tx.emit(TxSetFill(w.id, on))
+}
+
 // SetInset sets a container's own padding — DIP between its bounds and
 // its children, uniform on all four sides (docs/styling-plan.md D3).
 // Containers only. The dynamic path; the chain is the declarative one.
@@ -687,6 +695,16 @@ func (w Widget) Grow(weight float64) Widget {
 		panic("kaya: Grow on a widget outside its build transaction — use Tx.SetGrow inside a live transaction")
 	}
 	w.tx.SetGrow(w, weight)
+	return w
+}
+
+// Fill spans this widget across its container's cross axis at
+// construction, or opts it out. Same transaction discipline as Grow.
+func (w Widget) Fill(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Fill on a widget outside its build transaction — use Tx.SetFill inside a live transaction")
+	}
+	w.tx.SetFill(w, on)
 	return w
 }
 
@@ -3567,6 +3585,12 @@ func (t *Tpl) BindHelp[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
 	t.applyStrProp(n, src, TxBindHelp, TxBindHelpElement)
+}
+
+// SetFill spans every stamped copy across its container's cross axis, or
+// opts it out (Tx.SetFill).
+func (t *Tpl) SetFill(n Node, on bool) {
+	t.tx.emit(TxSetFill(n.id, on))
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x27300640cf479cec
+let kayaSpecHash: UInt64 = 0xa2bb42a3ce2fc3c9
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -186,6 +186,7 @@ private let propSpacing: UInt32 = 8
 private let propAlign: UInt32 = 9
 private let propAxis: UInt32 = 18
 private let propIndeterminate: UInt32 = 10
+private let propFill: UInt32 = 27
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -307,6 +308,9 @@ final class KayaNode: Identifiable {
     var a11yLabel = ""
     var a11yHint = ""
     var help = ""
+    /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
+    /// leaves the kind's default to the arm that draws it.
+    var fill: Bool? = nil
     /// Semantic emphasis (docs/styling-plan.md D4), 0 = none — never a raw
     /// color.
     var role: Int64 = 0
@@ -4629,6 +4633,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propIndeterminate, valueBool):
                     kayaScene.nodes[id]!.indeterminate = raw[body + 24] != 0
+                case (propFill, valueBool):
+                    kayaScene.nodes[id]!.fill = raw[body + 24] != 0
                 case (propColumns, valueF64):
                     kayaScene.nodes[id]!.columns =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
@@ -8035,34 +8041,7 @@ private func kayaRunScript(_ script: String) {
                 // Step::ExpectBreadth): the target's cross rect against its
                 // container's breadth, both from expect_aligned's readers; a
                 // nested container is a target too.
-                let short = DispatchQueue.main.sync { () -> String? in
-                    guard let widget = kayaAnyTarget(parts[1]) else { return nil }
-                    guard
-                        let parent = (kayaScene.columns + kayaScene.rows).first(where: { c in
-                            c.children.contains(where: { $0.id == widget.id })
-                        })
-                    else { return "no parent — not a flex child" }
-                    guard let inner = kayaContainerCross[parent.id], inner > 0 else {
-                        return "no container layout recorded"
-                    }
-                    // A SCROLL'S BREADTH IS ITS SCROLL VIEW'S, never its cell's:
-                    // the cell wrapper spanned while the ScrollView inside it
-                    // hugged, and only the driver's real pan saw the difference.
-                    let breadth: Double
-                    if widget.kind == kindScroll {
-                        guard widget.scrollViewportW > 0 else {
-                            return "no scroll viewport recorded"
-                        }
-                        breadth = widget.scrollViewportW
-                    } else {
-                        guard let rect = kayaCrossRects[widget.id] else {
-                            return "no cross box recorded — not a flex child"
-                        }
-                        breadth = rect.1
-                    }
-                    if breadth >= inner - 2 { return "" }
-                    return "spans \(Int(breadth.rounded()))pt of its parent's \(Int(inner.rounded()))pt breadth"
-                }
+                let short = DispatchQueue.main.sync { kayaBreadthShortfall(parts[1]) }
                 guard let short else {
                     failures.append("no such target: \(parts[1])")
                     break
@@ -8071,6 +8050,22 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) spans its breadth")
                 } else {
                     failures.append("\(parts[1]) is short of its breadth (\(short))")
+                }
+            case "expect_hugs":
+                // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
+                // the `fill = false` opt-out): a reader that could not read is
+                // a failure on this side too.
+                let short = DispatchQueue.main.sync { kayaBreadthShortfall(parts[1]) }
+                guard let short else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if short.isEmpty {
+                    failures.append("\(parts[1]) spans its breadth, wanted it to hug")
+                } else if short.hasPrefix("no ") {
+                    failures.append("\(parts[1]) cannot be read (\(short))")
+                } else {
+                    observed.append("\(parts[1]) hugs")
                 }
             case "expect_fills":
                 // ONE VERB, TWO SUBJECTS (harness.rs Step::ExpectFills): a
@@ -9059,6 +9054,38 @@ private struct KayaBoxReader: View {
         // expect_aligned rule).
         kayaContainerAxis[id] = vertical
     }
+}
+
+/// expect_breadth's read, shared with expect_hugs: nil for no such target,
+/// "" when the target spans its container's breadth, otherwise the shortfall
+/// (a "no ..." sentence when a reader has nothing recorded). Main thread.
+func kayaBreadthShortfall(_ spec: Substring) -> String? {
+    guard let widget = kayaAnyTarget(spec) else { return nil }
+    guard
+        let parent = (kayaScene.columns + kayaScene.rows).first(where: { c in
+            c.children.contains(where: { $0.id == widget.id })
+        })
+    else { return "no parent — not a flex child" }
+    guard let inner = kayaContainerCross[parent.id], inner > 0 else {
+        return "no container layout recorded"
+    }
+    // A SCROLL'S BREADTH IS ITS SCROLL VIEW'S, never its cell's: the cell
+    // wrapper spanned while the ScrollView inside it hugged, and only the
+    // driver's real pan saw the difference.
+    let breadth: Double
+    if widget.kind == kindScroll {
+        guard widget.scrollViewportW > 0 else {
+            return "no scroll viewport recorded"
+        }
+        breadth = widget.scrollViewportW
+    } else {
+        guard let rect = kayaCrossRects[widget.id] else {
+            return "no cross box recorded — not a flex child"
+        }
+        breadth = rect.1
+    }
+    if breadth >= inner - 2 { return "" }
+    return "spans \(Int(breadth.rounded()))pt of its parent's \(Int(inner.rounded()))pt breadth"
 }
 
 /// The mounted root's rendered size and the area the window offered it — what
@@ -13119,8 +13146,8 @@ struct KayaRender: View {
                 reorderIn: node.reorderable ? node : nil
             )
             .frame(
-                maxWidth: vertical && node.align == alignStretch ? .infinity : nil,
-                maxHeight: !vertical && node.align == alignStretch ? .infinity : nil,
+                maxWidth: vertical && (child.fill ?? (node.align == alignStretch)) ? .infinity : nil,
+                maxHeight: !vertical && (child.fill ?? (node.align == alignStretch)) ? .infinity : nil,
                 alignment: .topLeading)
             .background(
                 KayaCellReader(id: child.id, parent: node.id, vertical: vertical)
@@ -13141,12 +13168,13 @@ struct KayaRender: View {
             // returns its natural size however large a frame it is offered, so
             // nothing below it would have leftover space to divide.
             let boxFills =
-                isRoot || flexStretch || (node.grow > 0 && flexVertical == !vertical)
+                isRoot || (flexStretch && node.fill != false) || node.fill == true
+                || (node.grow > 0 && flexVertical == !vertical)
             // A CROSSING container maximizes its main axis (the 2026-08-22
             // breadth ruling). It rides a frame around the chosen body, not the
             // flex path: forcing the flex path was watched breaking baseline
             // mode, since a common baseline is the stack's native gift.
-            let boxCrosses = flexVertical == !vertical
+            let boxCrosses = flexVertical == !vertical && node.fill != false
             Group {
                 if vertical && !node.tableColumns.isEmpty {
                     // The declared table (docs/tables-plan.md);
@@ -13217,11 +13245,12 @@ struct KayaRender: View {
                                     // was watched failing before it).
                                     .frame(
                                         maxWidth: (vertical
-                                            ? node.align == alignStretch
+                                            ? (child.fill ?? (node.align == alignStretch))
                                             : child.grow > 0) ? .infinity : nil,
                                         maxHeight: (vertical
                                             ? child.grow > 0
-                                            : node.align == alignStretch) ? .infinity : nil,
+                                            : (child.fill ?? (node.align == alignStretch)))
+                                            ? .infinity : nil,
                                         alignment: .topLeading)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: vertical)
@@ -13527,7 +13556,7 @@ struct KayaRender: View {
             // PARENT'S CROSS AXIS (ruled 2026-09-02): a vertical ScrollView is
             // as wide as its content, which left a 79pt pannable strip in a
             // 375pt window (docs/traps.md).
-            let scrollSpans = flexVertical != nil
+            let scrollSpans = flexVertical != nil && node.fill != false
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     if let content = node.children.first {
@@ -16985,7 +17014,9 @@ struct KayaEntry: View {
         // has in a ROW; a grower keeps its track, and IN A COLUMN a text
         // field fills the width — an input region, not content (DESIGN.md
         // Layout, docs/tasks-plan.md R10).
-        .frame(maxWidth: (node.grow > 0 || flexVertical == true) ? .infinity : 200)
+        .frame(
+            maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
+                ? .infinity : 200)
         .focused($focused)
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in
@@ -17006,13 +17037,16 @@ struct KayaEntry: View {
 /// fixed frame refuses the assigned track, so a full-window buffer with grow(1)
 /// got a small box while every share assertion passed.
 extension View {
-    func kayaTextareaFrame(grow: Double, flexVertical: Bool?, stretch: Bool) -> some View {
+    func kayaTextareaFrame(grow: Double, flexVertical: Bool?, stretch: Bool, fill: Bool?)
+        -> some View
+    {
         let grows = grow > 0
-        // In a column a text area fills the width (docs/tasks-plan.md R10).
+        // In a column a text area fills the width (docs/tasks-plan.md R10)
+        // unless its own `fill` says otherwise (docs/layout-knobs-plan.md §1).
         let fillsWidth =
-            (grows && flexVertical == false) || (stretch && flexVertical == true)
-            || flexVertical == true
-        let fillsHeight = (grows && flexVertical == true) || (stretch && flexVertical == false)
+            (grows && flexVertical == false) || (flexVertical == true && fill != false)
+        let fillsHeight =
+            (grows && flexVertical == true) || (flexVertical == false && (fill ?? stretch))
         return frame(
             minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,
             minHeight: 96, maxHeight: fillsHeight ? .infinity : 96)
@@ -17054,7 +17088,8 @@ struct KayaTextarea: View {
             revealRequest: node.revealRequest,
             revealSeq: node.revealSeq
         )
-        .kayaTextareaFrame(grow: node.grow, flexVertical: flexVertical, stretch: flexStretch)
+        .kayaTextareaFrame(
+            grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
         .border(Color.gray.opacity(0.4))
     }
 }
@@ -17460,7 +17495,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 revealRequest: node.revealRequest,
                 revealSeq: node.revealSeq
             )
-            .kayaTextareaFrame(grow: node.grow, flexVertical: flexVertical, stretch: flexStretch)
+            .kayaTextareaFrame(
+                grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
             .border(Color.gray.opacity(inGroupedCard ? 0 : 0.4))
         }
     }

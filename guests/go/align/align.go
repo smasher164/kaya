@@ -48,6 +48,12 @@ func App() *kaya.App {
 				tx.Label(plain).A11yID("plainlabel") // label#4
 				tx.Image(tallPNG)
 			}).A11yID("plain")
+			// column@knobs: NO align; fill opts one child out of its
+			// default and one in
+			tx.Column(func() {
+				tx.Textarea(nil).Fill(false).A11yID("optout")
+				tx.Button("fills", nil).Fill(true).A11yID("fills")
+			}).A11yID("knobs")
 		}).Align(kaya.AlignStretch).A11yID("root"))
 	})
 
