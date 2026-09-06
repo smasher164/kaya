@@ -1918,6 +1918,16 @@ unpicked.
   manager's Logbook and Settings went behind the View menu instead.
   KEY: root list presentation, sections_presentation list, lists of
   lists, More tab
+- **A layout scene of the common list-row shapes** (2026-09-05, after
+  three captures found three hugging-or-filling divergences in one day:
+  the iPhone switch and the WinUI checkbox claiming a row's free width, the
+  SwiftUI entry refusing its grow track): a row of checkbox, label,
+  caption, spacer and button; a row of a grown entry and a button; a
+  captioned checkbox — each asserted with `expect_fills`/`expect_shares`
+  on every lane, so a control that hugs where it should fill or fills
+  where it should hug fails a gate rather than a reviewer's eye. Small;
+  nine guests or a rust-only depth scene. KEY: list-row layout scene,
+  hugging control, grown entry, checkbox MinWidth, fixedSize
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose

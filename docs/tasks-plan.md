@@ -206,8 +206,21 @@ the gate or trap it became.
   title: WinUI's CheckBox carries a default MinWidth of 120, so a
   text-less checkbox claims that width where the mac's and GTK's hug the
   box. The iPhone's greedy switch one platform over; the same rule
-  applies (a text-less checkbox hugs its box), unfixed as of this note,
-  and the same missing layout assertion would have caught both.
+  applies (a text-less checkbox hugs its box) and the WinUI arm now sets
+  MinWidth 0 on creation, a captioned box still sized by its content. The
+  same missing layout assertion would have caught both. The same review
+  found the rows' trailing Details buttons drifting with the title's
+  width; a template `spacer()` takes the free width so they share one
+  edge, which is the list-row idiom on every platform.
+- **2026-09-05, the review before republishing — a grown entry stopped
+  short on SwiftUI.** The quick-add field filled its row on GTK and WinUI
+  and stopped at 200 points on the mac and the iPhone: `KayaEntry` capped
+  every entry at 200 regardless of `grow`, the shape the slider arm had
+  already been corrected for. The cap now yields to a grower's track. No
+  layout scene puts a grown entry in a row, so the capture was again the
+  first witness; the three findings of this kind (the iPhone switch, the
+  WinUI checkbox, the SwiftUI entry) argue for a layout scene of the
+  common list-row shapes, ledgered.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through

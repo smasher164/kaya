@@ -16769,7 +16769,11 @@ struct KayaEntry: View {
                 })
         )
         .textFieldStyle(.roundedBorder)
-        .frame(maxWidth: 200)
+        // 200 stands in for the intrinsic width every other toolkit's entry
+        // has; a grower keeps its track (the slider's rule — a cap below the
+        // track let the quick-add field stop short while GTK's and WinUI's
+        // filled it, tools/scenes/tasks.steps' captures, 2026-09-05).
+        .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         .focused($focused)
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in

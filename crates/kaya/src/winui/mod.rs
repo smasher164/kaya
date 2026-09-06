@@ -10738,6 +10738,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // SetIsChecked too — the USER/programmatic split
                     // rides apply_quiet (see that field).
                     let check = CheckBox::new()?;
+                    // The stock CheckBox carries MinWidth 120, so a caption-less
+                    // box claimed a hundred pixels in a row where every other
+                    // backend's hugs its box (tools/scenes/tasks.steps' Windows
+                    // capture, 2026-09-05). Content still sizes a captioned one.
+                    check.SetMinWidth(0.0)?;
                     let caption = text_block()?;
                     check.SetContent(&caption)?;
                     let tag = tag.expect("checkboxes carry a tag");

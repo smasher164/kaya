@@ -416,6 +416,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             t.a11y_id(title, "title");
                             let caption = t.caption(TaskRow::caption());
                             t.a11y_id(caption, "caption");
+                            // The trailing accessory: a spacer takes the row's
+                            // free width so every Details button shares one edge.
+                            t.spacer();
                             let details = t.button("Details");
                             t.a11y_id(details, "details");
                             msgs.on_click_node(details, Msg::Details);
@@ -441,6 +444,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         t.a11y_id(name, "name");
                         let count = t.caption(ProjectRow::count());
                         t.a11y_id(count, "pcount");
+                        t.spacer();
                         let open = t.button("Open");
                         t.a11y_id(open, "open");
                         msgs.on_click_node(open, Msg::OpenProject);
