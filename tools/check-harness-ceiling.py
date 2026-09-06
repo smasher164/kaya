@@ -75,6 +75,13 @@ RUNNERS = {
     "KayaSwiftUI.swift": (r"private func kayaRunScript\(", r"\n\}"),
     "KayaCompose.kt": (r"private fun runScript\(", r"\n    \}"),
 }
+# The step retry deadline's one declaration per runner (seconds; the
+# Compose spelling is nanoseconds and its scale is read from NUMBERS).
+DEADLINES = {
+    "harness.rs": (r"POLL_DEADLINE: Duration = Duration::from_secs\((\d+)\)", 1),
+    "KayaSwiftUI.swift": (r"kayaStepDeadline: TimeInterval = (\d+)(?:\.0)?\b", 1),
+    "KayaCompose.kt": (r"stepDeadline = stepStart \+ ([\d_]+)L", 1_000_000_000),
+}
 # The arm, the publish, and what the fire path leaves with.
 SHAPES = {
     "harness.rs": (r"watch\.enter\(([^)]*)\)", r"watch\.published\(",
@@ -150,6 +157,20 @@ def check(harness, swiftui, compose):
                 continue
             seconds.setdefault(what, {})[label] = \
                 int(m.group(1).replace("_", "")) / scale
+
+        # THE STEP RETRY DEADLINE IS ONE NUMBER TOO (2026-09-06): Compose
+        # carried the mac's 5s while the core and iOS had 15, and the mac
+        # then carried 5 alone; both read the same sort click missing its
+        # answer under a loaded host (docs/traps.md).
+        deadline_pat, deadline_scale = DEADLINES[label]
+        m = re.search(deadline_pat, text)
+        if not m:
+            bad.append(f"{paths[label]} declares no step retry deadline — "
+                       f"expected /{deadline_pat}/. The runner whose deadline "
+                       f"cannot be read is the one that drifts.")
+        else:
+            seconds.setdefault("step retry deadline", {})[label] = \
+                int(m.group(1).replace("_", "")) / deadline_scale
 
         start = re.search(RUNNERS[label][0], text)
         if not start:
@@ -308,6 +329,13 @@ g.negative("a SwiftUI scene-ready sentence that drifted",
            lambda: check(HARNESS, str(swiftui_ready_drift), COMPOSE),
            want="does not carry the scene-ready sentence")
 
+swiftui_deadline_drift = g.perturb(
+    "the KayaSwiftUI.swift step-deadline drift", SWIFTUI,
+    r"kayaStepDeadline: TimeInterval = 15", "kayaStepDeadline: TimeInterval = 5")
+g.negative("a SwiftUI step deadline shorter than the other two",
+           lambda: check(HARNESS, str(swiftui_deadline_drift), COMPOSE),
+           want="the step retry deadline disagrees across the three harnesses")
+
 swiftui_unarmed = g.perturb(
     "the KayaSwiftUI.swift unarmed-step perturbation", SWIFTUI,
     r"watchdog\.enter\(line\)\n", "")
@@ -401,7 +429,7 @@ g.negative("an absent harness",
            lambda: check(HARNESS, SWIFTUI, str(absent)),
            want=f"cannot read {absent}")
 
-g.negatives_ran(13)
+g.negatives_ran(14)
 
 # --- Clause B: the runtime negative, where the toolchain exists. ------
 if platform.system() == "Darwin":

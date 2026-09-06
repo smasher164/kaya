@@ -2813,9 +2813,12 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 None
             }
             Step::Click(t) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 vtrace::note("click", format_args!("-> stage.click {}", target_spec(t)));
                 stage.click(*t);
                 vtrace::note("click", format_args!("<- stage.click {}", target_spec(t)));
+                await_answer(answered);
                 None
             }
             // WRAPPED IN `poll` because the watchdog needs its threshold
@@ -2843,11 +2846,17 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 )),
             })),
             Step::Toggle(t, on) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.toggle(*t, *on);
+                await_answer(answered);
                 None
             }
             Step::SetValue(t, v) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.set_value(*t, *v);
+                await_answer(answered);
                 None
             }
             Step::SetDate(t, d) => {
@@ -3234,7 +3243,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     // An action, silent like click: `expect select#N`
                     // and the guest's value_changed reaction are the
                     // observables.
+                    await_quiet();
+                    let answered = crate::scene::answers();
                     stage.choose(*t, *index);
+                    await_answer(answered);
                     None
                 }
             }
@@ -3375,7 +3387,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             }
             Step::HeaderClick(t, column) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.header_click(*t, *column);
+                await_answer(answered);
                 None
             }
             Step::ExpectShares(t, want) => {
@@ -4215,6 +4230,76 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // that was 145/145 solo went red (entry_go, 2026-08-03). A pass returns
 // the moment it matches, so the width costs a green run nothing.
 pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
+
+// The action wait's numbers, the same three in all three runners.
+const ANSWER_POLL: Duration = Duration::from_millis(5);
+const ANSWER_POLLS: u32 = 60;
+const QUIET_POLLS: u32 = 40;
+const ANSWER_SILENCE: Duration = Duration::from_secs(1);
+
+/// AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT — one rule, three
+/// runners (KayaCompose.kt's kayaAwaitAnswer, KayaSwiftUI.swift's twin;
+/// tools/check-verbs.py holds every action arm to calling both halves).
+/// An action is not retried and the step after it may be another action
+/// with no POLL_DEADLINE cover, so a verb that returns the moment it
+/// emits leaves its own answer in flight (`Stage::type_text` point 4, and
+/// gtk.rs's typing arm, which carried a private copy of this wait before
+/// the rule reached the runner).
+///
+/// THE SIGNAL IS THE CORE'S APPLIED-TRANSACTION COUNT
+/// (crate::scene::answers): a guest transaction is the app's answer, both
+/// widget backends apply one inside a single UI-thread callback, and
+/// every Stage read hops behind that callback — so a count that has
+/// stopped moving is an answer that is on the widgets.
+///
+/// BOUNDED AND SILENT (some actions produce no transaction), and the
+/// bound is a CLOCK as well as a poll count: 60 sleeps of 5ms ran to
+/// 2400ms under load (docs/traps.md).
+fn await_answer(seen: u64) {
+    let mut last = seen;
+    let mut quiet = 0;
+    let silent_until = Instant::now() + ANSWER_SILENCE;
+    for _ in 0..ANSWER_POLLS {
+        let now = crate::scene::answers();
+        if now != last {
+            last = now;
+            quiet = 0;
+        } else if now != seen {
+            // A BATCH IS NOT ENOUGH, IT HAS TO BE THE LAST ONE: the app
+            // may still be answering something from BEFORE this action,
+            // and returning on that batch leaves the action's own answer
+            // in flight. Wait for the count to STOP rather than to move.
+            quiet += 1;
+            if quiet >= 3 {
+                return;
+            }
+        } else if Instant::now() > silent_until {
+            // Nothing has arrived at all, so nothing is in flight.
+            return;
+        }
+        std::thread::sleep(ANSWER_POLL);
+    }
+}
+
+/// The app has nothing left to say. Called BEFORE an action so the wait
+/// after it cannot mistake the previous answer for this one.
+fn await_quiet() {
+    let mut last = crate::scene::answers();
+    let mut quiet = 0;
+    for _ in 0..QUIET_POLLS {
+        let now = crate::scene::answers();
+        if now != last {
+            last = now;
+            quiet = 0;
+        } else {
+            quiet += 1;
+            if quiet >= 3 {
+                return;
+            }
+        }
+        std::thread::sleep(ANSWER_POLL);
+    }
+}
 
 /// The scene-ready wait's one sentence (tools/check-harness-ceiling.py
 /// holds the three harnesses to it, flattened).

@@ -3174,7 +3174,13 @@ retryable default. Source-side data provision (`IDataObject::GetData`,
 pasteboard promises) is demand with a generous deadline; the blocked party
 is the receiving process, and platforms have long normalized slow
 providers. A side benefit: app logic keeps running inside the drag and
-resize modal loops that stall single-threaded apps.
+resize modal loops that stall single-threaded apps. A drag source is an
+interactive element, so on the TOUCH platforms it takes the platform's own
+minimum touch target — 48dp on Android, 44pt on iOS — and the row it sits
+in grows with it; the desktops are unchanged, since a mouse has no touch
+slop. A drop target is not a source and takes nothing from that rule. The
+app spells none of it: the rule is the lowering's, uniform in all nine
+bindings because it is below every one of them (docs/dnd-plan.md D12).
 
 **Accessibility.** Native widgets are the accessibility tree, and they
 answer VoiceOver, UIA, and AT-SPI from retained core state, so the app is

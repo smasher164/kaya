@@ -1438,6 +1438,11 @@ struct KayaDragPayload {
     /// row's key path, dot-joined, under a kaya-private id.
     let kayaRowDragType = "dev.kaya/row"
 
+    /// D12 (docs/dnd-plan.md): a drag source is an interactive element, and
+    /// on the touch platforms it takes the platform's own minimum touch
+    /// target — 44pt here, the HIG's number; Material's 48dp on Compose.
+    let kayaMinTouchTarget: CGFloat = 44
+
     func kayaDragOpMask(_ op: UIDropOperation) -> UInt32 {
         switch op {
         case .copy: return kayaDragOpCopy
@@ -4030,6 +4035,12 @@ func kayaStartCommandPump() {
             let blobs = kayaCollectBlobs()
             DispatchQueue.main.async {
                 kayaApply(batch, blobs)
+                // THE APP ANSWERED. An action verb waits for this before it
+                // returns (see kayaAwaitAnswer) — bumped where the apply has
+                // RETURNED, so the count moves only once everything in the
+                // batch has landed, and outside kayaApply, whose tail
+                // tools/check-steps.py freezes.
+                kayaBatches += 1
             }
         }
     }
@@ -5603,33 +5614,45 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         // the step's bounded retry is what waits for it (no sleep here —
         // a fixed wait would be a guess, and the retry already exists).
         kayaAxEnableAutomation()
-        for scene in UIApplication.shared.connectedScenes.compactMap({
-            $0 as? UIWindowScene
-        }) {
-            for window in scene.windows {
-                if let hit = kayaAxFind(window, identifier) {
-                    // A control's spoken name is its LABEL when authored and
-                    // its VALUE when derived from its own content: an unnamed
-                    // text field publishes no label at all. NO SCENE CAN CATCH
-                    // IT — both of the a11y scene's field reads are authored.
-                    let spoken =
-                        [hit.accessibilityLabel, hit.accessibilityValue]
-                        .lazy
-                        .compactMap { $0 }
-                        .first { !$0.isEmpty } ?? ""
-                    return kayaAxRole(hit) + "/" + spoken
-                }
-            }
-        }
-        if !kayaAxDumped {
-            kayaAxDumped = true
+        // ON THE MAIN THREAD, like kayaAxHintRead below and the Mac's reader:
+        // asking UIKit for accessibility elements LAYS VIEWS OUT, and off-main
+        // that is "Modifications to the layout engine must not be performed
+        // from a background thread after it has been accessed from the main
+        // thread" — an uncaught NSException that takes the process with it
+        // (ios tasks-swiftui, 2026-09-06). The hint reader took this fix on
+        // 2026-09-05 when the same walk only LOGGED; this one was left behind,
+        // and it crashed the moment an action verb began waiting for the app's
+        // answer, which is what gives the main thread its layout pass first.
+        return DispatchQueue.main.sync { () -> String? in
             for scene in UIApplication.shared.connectedScenes.compactMap({
                 $0 as? UIWindowScene
             }) {
-                for window in scene.windows { kayaAxDump(window) }
+                for window in scene.windows {
+                    if let hit = kayaAxFind(window, identifier) {
+                        // A control's spoken name is its LABEL when authored
+                        // and its VALUE when derived from its own content: an
+                        // unnamed text field publishes no label at all. NO
+                        // SCENE CAN CATCH IT — both of the a11y scene's field
+                        // reads are authored.
+                        let spoken =
+                            [hit.accessibilityLabel, hit.accessibilityValue]
+                            .lazy
+                            .compactMap { $0 }
+                            .first { !$0.isEmpty } ?? ""
+                        return kayaAxRole(hit) + "/" + spoken
+                    }
+                }
             }
+            if !kayaAxDumped {
+                kayaAxDumped = true
+                for scene in UIApplication.shared.connectedScenes.compactMap({
+                    $0 as? UIWindowScene
+                }) {
+                    for window in scene.windows { kayaAxDump(window) }
+                }
+            }
+            return nil
         }
-        return nil
     }
 
     /// The HINT as UIKit publishes it — `.accessibilityHint()` lands
@@ -5660,17 +5683,21 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     /// self-explaining, and it is one simulator round-trip per answer without
     /// this.
     private func kayaAxWhy(_ identifier: String) -> String {
-        for scene in UIApplication.shared.connectedScenes.compactMap({
-            $0 as? UIWindowScene
-        }) {
-            for window in scene.windows {
-                guard let hit = kayaAxFind(window, identifier) else { continue }
-                let count = hit.accessibilityElementCount()
-                return " (class=\(type(of: hit)) traits=\(hit.accessibilityTraits.rawValue)"
-                    + " elements=\(count == NSNotFound ? 0 : count))"
+        // ON THE MAIN THREAD for kayaAxRead's reason — this one calls
+        // accessibilityElementCount(), the very call in that crash's stack.
+        return DispatchQueue.main.sync { () -> String in
+            for scene in UIApplication.shared.connectedScenes.compactMap({
+                $0 as? UIWindowScene
+            }) {
+                for window in scene.windows {
+                    guard let hit = kayaAxFind(window, identifier) else { continue }
+                    let count = hit.accessibilityElementCount()
+                    return " (class=\(type(of: hit)) traits=\(hit.accessibilityTraits.rawValue)"
+                        + " elements=\(count == NSNotFound ? 0 : count))"
+                }
             }
+            return ""
         }
-        return ""
     }
 
     /// The unsaved-work mark as THIS platform can honestly report it: the APPLIED
@@ -6281,6 +6308,70 @@ final class KayaStepWatchdog {
     }
 }
 
+/// How many apply batches this interpreter has finished — the signal an
+/// ACTION verb waits on (kayaAwaitAnswer), this file's copy of
+/// crates/kaya/src/scene.rs's ANSWERS. Written on the MAIN QUEUE at the end
+/// of kayaApply and read back through it, which is the hop every
+/// observation already takes: a read cannot land inside a half-applied
+/// batch.
+nonisolated(unsafe) var kayaBatches = 0
+
+func kayaAnswers() -> Int { DispatchQueue.main.sync { kayaBatches } }
+
+/// AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT — one rule, three
+/// runners (crates/kaya/src/harness.rs is the norm; KayaCompose.kt keeps
+/// the same two helpers). An action is never retried and the step after it
+/// may be another action with no retry deadline over it, so a verb that
+/// returns the moment it emits leaves its own answer in flight. BOUNDED
+/// AND SILENT (some actions produce no batch), and the bound is a CLOCK as
+/// well as a poll count: 60 sleeps of 5ms ran to 2400ms under load
+/// (docs/traps.md).
+/// The step retry deadline, one number in all three runners
+/// (tools/check-harness-ceiling.py pins it beside the ceiling).
+let kayaStepDeadline: TimeInterval = 15
+func kayaAwaitAnswer(_ seen: Int) {
+    var last = seen
+    var quiet = 0
+    let silentUntil = Date().addingTimeInterval(1.0)
+    for _ in 0..<60 {
+        let now = kayaAnswers()
+        if now != last {
+            last = now
+            quiet = 0
+        } else if now != seen {
+            // A BATCH IS NOT ENOUGH, IT HAS TO BE THE LAST ONE: the app may
+            // still be answering something from BEFORE this action, and
+            // returning on that batch leaves the action's own answer in
+            // flight. Wait for the batches to STOP rather than for one to
+            // arrive.
+            quiet += 1
+            if quiet >= 3 { return }
+        } else if Date() > silentUntil {
+            // Nothing has arrived at all, so nothing is in flight.
+            return
+        }
+        Thread.sleep(forTimeInterval: 0.005)
+    }
+}
+
+/// The app has nothing left to say. Called BEFORE an action so the wait
+/// after it cannot mistake the previous answer for this one.
+func kayaAwaitQuiet() {
+    var last = kayaAnswers()
+    var quiet = 0
+    for _ in 0..<40 {
+        let now = kayaAnswers()
+        if now != last {
+            last = now
+            quiet = 0
+        } else {
+            quiet += 1
+            if quiet >= 3 { return }
+        }
+        Thread.sleep(forTimeInterval: 0.005)
+    }
+}
+
 private func kayaRunScript(_ script: String) {
     // Watched, before any step: a fault now reddens this leg instead of
     // ending the process (crates/kaya/src/fault.rs; the fault census
@@ -6355,13 +6446,14 @@ private func kayaRunScript(_ script: String) {
             stepOrdinal += 1
             // The observation contract (harness.rs is the norm): every expect
             // is a BOUNDED RETRY appending one failure on a miss, actions never
-            // re-run, and the FIRST expect is the scene-ready wait. THE DEADLINE
-            // IS THE LANE'S (docs/clipboard-plan.md §8).
-            #if os(macOS)
-                let stepDeadline = Date().addingTimeInterval(5.0)
-            #else
-                let stepDeadline = Date().addingTimeInterval(15.0)
-            #endif
+            // re-run, and the scene-ready wait above precedes the first. ONE
+            // DEADLINE IN ALL THREE RUNNERS (harness.rs POLL_DEADLINE,
+            // KayaCompose.kt): the mac carried 5s as "the lane's" number
+            // until matrix #16 read the portfolio sort click's second flip
+            // missing it under a five-lane host — the android class one
+            // platform over (docs/traps.md); a step's deadline is a per-host
+            // number, and tools/check-harness-ceiling.py holds the three equal.
+            let stepDeadline = Date().addingTimeInterval(kayaStepDeadline)
             var retryStep = true
             var attempt = 0
             while retryStep {
@@ -6371,6 +6463,8 @@ private func kayaRunScript(_ script: String) {
             case "settle":
                 Thread.sleep(forTimeInterval: Double(parts[1])! / 1000)
             case "click":
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     // A click on a TEXT KIND focuses it — the only way a scene
                     // can focus a STAMPED copy, which has no live handle.
@@ -6394,8 +6488,14 @@ private func kayaRunScript(_ script: String) {
                     KayaHost.emit(node.tag)
                     return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "toggle":
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     guard let node = kayaTarget(parts[1], "checkbox", kayaScene.checkboxes) else {
                         return false
@@ -6404,12 +6504,18 @@ private func kayaRunScript(_ script: String) {
                     KayaHost.emitToggled(node.tag, node.checked)
                     return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "set_value":
                 // THROUGH the control (docs/slider-plan.md S8): its value moves
                 // and the arm's own commit path runs — the step's snap, the
                 // range's clamp, the live emit and the committed one — the
                 // path a user's gesture takes.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders),
                         let control = kayaSliderControls[node.id]
@@ -6417,7 +6523,11 @@ private func kayaRunScript(_ script: String) {
                     kayaDriveSlider(control, node: node, to: Double(parts[2])!)
                     return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_slider":
                 // The CONTROL's value in the fixed spelling, never the node's
                 // (docs/slider-plan.md S8).
@@ -6495,6 +6605,8 @@ private func kayaRunScript(_ script: String) {
                 // Picker's binding set — mirrored here exactly as set_value
                 // mirrors the slider's: write the model the binding reads,
                 // emit with the identity tag.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     let node =
                         parts[1].hasPrefix("radio")
@@ -6507,7 +6619,11 @@ private func kayaRunScript(_ script: String) {
                     KayaHost.emitValue(node.tag, node.value)
                     return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "set_text":
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     let node =
@@ -6794,6 +6910,8 @@ private func kayaRunScript(_ script: String) {
                 // column index, and NO model change, since the indicator moves
                 // when the guest re-declares.
                 let index = Int(parts[2]) ?? -1
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let off = DispatchQueue.main.sync { () -> String? in
                     guard let node = kayaTarget(parts[1], "column", kayaScene.columns) else {
                         return "no such target \(parts[1])"
@@ -6807,7 +6925,11 @@ private func kayaRunScript(_ script: String) {
                     KayaHost.emitSortRequested(node.sortTag, UInt32(index))
                     return nil
                 }
-                if let off { failures.append("header_click: \(off)") }
+                if let off {
+                    failures.append("header_click: \(off)")
+                } else {
+                    kayaAwaitAnswer(answered)
+                }
             case "expect_window":
                 // THE REALIZED BAND AND THE DECLARED TOTAL
                 // (docs/virtualization-plan.md §5), read from the tier that
@@ -13309,12 +13431,29 @@ struct KayaRender: View {
             #if os(macOS)
                 view.background(KayaMacDragDropSurface(node: node, reorderIn: reorderIn))
             #else
-                view.background(KayaPhoneDragDropSurface(node: node, reorderIn: reorderIn))
+                kayaPhoneDragDrop(view)
             #endif
         } else {
             view
         }
     }
+
+    #if !os(macOS)
+        /// D12 (docs/dnd-plan.md): the host of a DRAG interaction takes the
+        /// platform's minimum touch target, 44pt on both axes — the frame
+        /// comes BEFORE the background so the UIView behind it is the
+        /// enlarged one and a touch anywhere in it starts the drag. A
+        /// drop-only view is no source and takes nothing from the rule.
+        @ViewBuilder private func kayaPhoneDragDrop(_ view: some View) -> some View {
+            if node.dragPayload != nil || reorderIn != nil {
+                view
+                    .frame(minWidth: kayaMinTouchTarget, minHeight: kayaMinTouchTarget)
+                    .background(KayaPhoneDragDropSurface(node: node, reorderIn: reorderIn))
+            } else {
+                view.background(KayaPhoneDragDropSurface(node: node, reorderIn: reorderIn))
+            }
+        }
+    #endif
 
     /// The stock-stack path's children, both axes: frame BEFORE the
     /// reader, content top-leading (the stretch-classified-center fix,

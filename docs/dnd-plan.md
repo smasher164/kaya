@@ -408,6 +408,63 @@ and ask operations (D3). A failure reason on cancel (GTK has three,
 WinUI none; the diagnostics rule forbids a sentence that discriminates
 on one platform).
 
+### D12 — A drag source takes the platform's minimum touch target on the touch platforms (RULING 2026-09-06)
+
+A drag source is an interactive element. On the TOUCH platforms it takes
+the platform's own minimum touch target: **48dp on Android**
+(`Modifier.minimumInteractiveComponentSize()`, the same modifier Material
+applies to its own small interactive elements) and **44pt on iOS** (the
+drag interaction's host view no smaller than 44x44). The DESKTOPS are
+unchanged — a mouse has no touch slop. A DROP TARGET is not a drag source
+and takes nothing from this rule.
+
+WHAT RULED IT. docs/deferred.md's keyed-payload WATCH, third sighting
+(2026-09-06, matrix #15, android `dnd-jvm`): `drag label@item[y] to
+label#1` ended `op=0 entered=0` from a press three pixels inside a source
+box of `[231,64,7,16]` — the stamped row's one-letter label, SEVEN pixels
+wide, narrower than Android's own touch slop (8dp). The same step passed
+fifty seconds later with that label measuring fourteen pixels. So the
+gesture never became a drag at all; nothing was dropped, and the "earlier
+payload" the WATCH is named for was simply what the previous step had
+left. The remedy is the platform's own rule and not a wider scene text:
+tools/scenes/dnd.steps keeps its one-letter labels, because they are the
+edge case that found this.
+
+THE LAYOUT CONSEQUENCE IS THE RULING. A one-letter label that is a drag
+source becomes a 48dp box on Android and a 44pt one on iOS, and the row
+it sits in grows with it. That is what a touch target costs, and it is
+what every Material and UIKit control already pays.
+
+WHERE IT SITS, WHICH COST A LANE TO LEARN. On Compose the minimum
+wraps the CONTENT INSIDE the drag-and-drop surface's own box, never the
+surface's modifier chain. `minimumInteractiveComponentSize` reports the
+enlarged size and then PLACES its content centred, and Compose's
+drag-and-drop hit test reads that placement's origin together with the
+enlarged size: with the minimum on the chain, a 16px row inside a 48dp
+box answered the drag for the rectangle 16px BELOW where it draws.
+Measured 2026-09-06 on `dnd-compose` and `tasks-compose`, with the aim
+line beside it — a text drop aimed at label#1 (y=104) was delivered to
+the SOURCE, whose box ends at y=88, and the reorder `drag label@row[c]
+to label@row[a] before` aimed at y=52 hit nothing at all and ended
+`op=0` with no drop, because the row's hit rectangle had started at
+y=56. Wrapped inside the box, the surface's own layout node is 48dp at
+the node's true origin with no placement offset of its own, so the
+`onGloballyPositioned` recorder the `drag` verb's aim reads (D10), the
+long press that starts the drag and the target all agree. An
+enlargement the aim could not see would move the touch target and leave
+the verb aiming at the old seven pixels, so the gate holds BOTH halves:
+the minimum inside the box, and the surface's chain free of it. On iOS
+the `frame` comes before the `.background`, so the `KayaDragDropView`
+behind the widget is the enlarged one and there is no second layout
+node to disagree.
+
+The a11y surface is unchanged: the label is still the label.
+
+THE DESKTOP SIGHTINGS ARE NOT CLOSED BY THIS. The windows (`dnd_java`)
+and wayland (`dnd-js-wayland`) readings of the same three strings are to
+be read through their own arms' drag lines before anyone assumes the same
+cause; a mouse has no slop, so a 7px source is a legal target there.
+
 ## §2 — Probes before arms
 
 The clipboard milestone measured the platform before writing each arm

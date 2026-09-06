@@ -12419,7 +12419,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let field = widget.editable().expect("the arm matched a text widget");
                     // Quiet: a property write is configuration, not a
                     // user edit — and TextChanged is raised async, so the
-                    // flag is a counter (see entry_swallow).
+                    // flag is a counter (see entry_swallow). AND THE LEDGER
+                    // IS SHOWN THE TEXT HERE: banked only by the handler,
+                    // the first raise it did not swallow — a RichEditBox
+                    // raises TextChanged for kaya's own highlight paint —
+                    // compared the document against an EMPTY bank and sent
+                    // the whole unchanged text to the app as an edit; the
+                    // ranges guest then reset its count to "0 matches" over
+                    // the find it had just answered, once the scene-ready
+                    // wait made the first click early enough (windows,
+                    // matrix #16 and standalone, 2026-09-06; docs/traps.md).
                     if lf(field.text()?) != s {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -12427,6 +12436,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         field.set_text(&s)?;
                         clear_native_undo(&field);
                     }
+                    core.banked_text.insert(id.0, s.clone());
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;

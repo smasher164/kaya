@@ -116,6 +116,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
@@ -5885,6 +5886,8 @@ object KayaCompose {
                         }
                     }
                     "toggle" -> {
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val ok = onUi(activity) {
                             target(parts[1], "checkbox", KayaSceneModel.checkboxes)?.also { node ->
                                 node.checked = parts[2] == "on"
@@ -5892,18 +5895,22 @@ object KayaCompose {
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     "set_value" -> {
                         // THROUGH THE COMMIT PATH a user's gesture takes
                         // (docs/slider-plan.md S8), as one finished
                         // gesture: the step's snap, the range's clamp,
                         // the live emit and the committed one all run.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val ok = onUi(activity) {
                             target(parts[1], "slider", KayaSceneModel.sliders)?.also { node ->
                                 kayaSliderCommitted(node, parts[2].toDouble(), final = true)
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     "set_date", "set_time" -> {
                         // THROUGH THE COMMIT PATH a user's confirm takes
@@ -6066,6 +6073,8 @@ object KayaCompose {
                     "choose" -> {
                         // Mirrors the item's own onClick: write the state
                         // the control reads, emit with the identity tag.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val ok = onUi(activity) {
                             val node =
                                 if (parts[1].startsWith("radio"))
@@ -6080,6 +6089,7 @@ object KayaCompose {
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     // THE REAL-KEYSTROKE TYPING VERB (docs/undo-plan.md
                     // A8). A stand-in would LIE: writing the text
@@ -6376,6 +6386,8 @@ object KayaCompose {
                         // column index, and NO model change: the
                         // indicator moves when the guest re-declares.
                         val index = parts.getOrNull(2)?.toIntOrNull() ?: -1
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val off = onUi(activity) {
                             val node = target(parts[1], "column", KayaSceneModel.columns)
                             when {
@@ -6399,6 +6411,7 @@ object KayaCompose {
                             }
                         }
                         if (off != null) failures.add("header_click: $off")
+                        else kayaAwaitAnswer(answered)
                     }
                     "expect_window" -> {
                         // THE FIRST VISIBLE ROW AND THE DECLARED TOTAL
@@ -9616,6 +9629,10 @@ private fun kayaPerformDrop(
     return true
 }
 
+/** A DRAG SOURCE, the nodes D12's touch target is for (docs/dnd-plan.md). */
+private fun kayaIsDragSource(node: KayaNode): Boolean =
+    node.dragPayload != null || node.reorderIn != null
+
 /**
  * THE DRAG-AND-DROP SURFACE behind a node that declares a payload, an
  * operation mask, or is a row of a reorderable For — null for every
@@ -9633,6 +9650,7 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
     val reorderIn = node.reorderIn
     val payload = node.dragPayload
     if (payload == null && node.dropOps == 0 && reorderIn == null) return null
+    val isSource = kayaIsDragSource(node)
     val target = remember(node, reorderIn) {
         object : DragAndDropTarget {
             override fun onStarted(event: DragAndDropEvent) {
@@ -9675,7 +9693,7 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
             root.left, root.top, window.left, window.top,
             it.size.width.toFloat(), it.size.height.toFloat())
     }
-    if (payload != null || reorderIn != null) {
+    if (isSource) {
         // THE PLATFORM'S OWN GESTURE STARTS IT (D8): the default start
         // detector of this overload is a LONG PRESS on touch, which is
         // the phone's affordance and what `input draganddrop` injects.
@@ -9697,6 +9715,9 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
             DragAndDropTransferData(kayaDragClipData(declared), session, 0)
         })
     }
+    // NO LAYOUT MODIFIER MAY JOIN THIS CHAIN: D12's minimum touch target
+    // wraps the CONTENT inside KayaRender's box instead, and the reason is
+    // measured (docs/dnd-plan.md D12).
     return modifier.dragAndDropTarget(
         shouldStartDragAndDrop = { event ->
             // A SOURCE ACCEPTS ITS OWN DRAG (docs/traps.md: A Compose drag
@@ -9727,7 +9748,22 @@ fun KayaRender(
         return
     }
     Box(modifier = dnd) {
-        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
+        if (kayaIsDragSource(node)) {
+            // D12 (docs/dnd-plan.md): a drag source takes Material's own
+            // 48dp minimum touch target. INSIDE the surface's box, never on
+            // its modifier chain: the minimum PLACES its content centred,
+            // and Compose's drag hit test then reads that placement's
+            // origin with the enlarged size, so a drop aimed a quarter of
+            // the way down a 48dp row hit nothing at all (measured
+            // 2026-09-06, docs/traps.md). Wrapped here the surface's own
+            // box is 48dp at the node's true origin, and the recorder the
+            // aim reads, the long press and the target all agree.
+            Box(modifier = Modifier.minimumInteractiveComponentSize()) {
+                KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
+            }
+        } else {
+            KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
+        }
     }
 }
 

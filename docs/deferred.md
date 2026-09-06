@@ -11028,6 +11028,24 @@ read through the aim line — a drag from a seven-pixel source that never
 began, recorded under the keyed-drag earlier-payload WATCH above, which
 it belongs to.
 
+TWENTY-THIRD SIGHTING, 2026-09-06, matrix #16 (`dnd-go`, 120s): THE
+FIRST ONE WITH THE 48dp SOURCE, and the aim line now rules the plan and
+the box out. `drag label@item[y] to label#1`, seq=2: source
+`[271,96,48,48]` point 295,120, destination `[72,96,29,16]` point 86,104,
+both inside; `KAYA_DRAG_STARTED` printed — the long press became a
+drag — and then `ended op=0 entered=0` with NO entered line at all, not
+even the source's own box, which every green drag reports first. The
+next drag (seq=3) never started inside 20s. So what is left is the
+emulator's input pipeline under a five-lane host: a drag session that
+began and ended before any DRAG_LOCATION reached the app. The sixth
+sighting's other half — a longer `input draganddrop` duration — is the
+one remedy candidate the aim line leaves standing, and it is not taken
+here: 1.5s is spent on every drag of every lane, and a retry on
+`op=0 entered=0` cannot be told from a legitimate `drag ended none`.
+
+TWENTY-FOURTH, 2026-09-06, matrix #17 (`dnd-go`, 88s): the twenty-third's
+shape on the same leg, the android lane's only red.
+
 
 ## ~~GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)~~
 KEY: run-leg, compiled guest, staged guest, build_ step, spec hash mismatch, hand run
@@ -11058,6 +11076,21 @@ same move the rust build took: the per-language build into the lane
 module, run-leg calling it under `--build`, and a refusal (not a stale
 run) when a staged guest's binding hash is not the tree's.
 
+## WATCH — `kaya_app_checks` under a matrix: the bulk-insert growth bound read 5.75x against 3.0x (first sighting 2026-09-06)
+KEY: kaya_app_checks, bulk insert, growth bound, BULK_GROWTH, 32_000 rows, gate sweep under load
+
+Matrix #16's gate sweep (niced, after the android lane, five-minute load
+66): `bulk insert: 2000 rows 0.00447 ms/row, 32000 rows 0.02573 ms/row,
+growth 5.75x (bound 3.0x)` and `FAIL an insert costs the same at 32,000
+entries as at 2,000` — the one gate red of 55, and the sweep had passed
+55/55 standalone forty minutes earlier on the same tree. The check
+exists to catch an insert that grew linear in the table's size; a wall
+clock per row on a host running five lanes cannot separate that from
+the host. One sighting. On the next: the bound wants a measurement that
+is not a wall clock (counted work, or two runs and the smaller), or the
+sweep's own load figure printed beside the growth so a reader can tell
+the two apart.
+
 ## WATCH — the iOS lane under a matrix: one simulator's LocalStorage admission probe hit its slow flow and the lane ran no leg (first sighting 2026-09-06)
 KEY: LocalStorage admission, rc=76, device preparation failed, picker probe, slow flow, ios lane, matrix contention
 
@@ -11074,7 +11107,7 @@ admission times are already printed, so the next sighting reads whether
 the 77s was the probe waiting or the probe re-probing, and whether a
 second admission attempt on that one device would have admitted it.
 
-## GAP — of the Compose action verbs only `click` waits for the app's answer; `choose`, `header_click`, `toggle` and `set_value` return the moment they emit (2026-09-06)
+## ~~GAP — of the Compose action verbs only `click` waits for the app's answer; `choose`, `header_click`, `toggle` and `set_value` return the moment they emit (2026-09-06)~~
 KEY: kayaAwaitQuiet, kayaAwaitAnswer, action returns once the app has answered, choose, header_click, toggle, set_value, Compose runner
 
 Found while reading the sort-click WATCH's cause: the runner's comment
@@ -11086,6 +11119,51 @@ deadline fix so one change is read at a time; the fix is the click arm's
 own wait on the four, and the other two runners are to be read for the
 same rule before it lands, since a verb that waits on one platform and
 not another is a divergence in the harness itself.
+
+RESOLVED 2026-09-06: the rule holds for all five action verbs in ALL
+THREE runners, which is four verbs and two runners wider than this entry
+asked for — reading the other two found that neither waited on ANY
+action, `click` included, so the Compose runner was the only one that
+kept its own comment at all. Each runner waits on its own signal, one
+mechanism: Compose on `kayaBatches` unchanged; the SwiftUI interpreter on
+a `kayaBatches` of its own, written last in `kayaApply` (which runs on the
+main queue) and read back through the same `DispatchQueue.main.sync` hop
+every observation already takes; the Rust runner on
+`crate::scene::answers()`, an applied-transaction count bumped at the end
+of `Scene::apply` — the ONE place every Rust-runner backend's drain
+applies a guest transaction, while a backend-originated report (the
+presentation, a window's metrics, a native undo, a window range) returns
+ops without going through it and so never reads as the app saying
+something. Both halves in all three: a quiet-wait BEFORE the action so
+the wait after it cannot mistake the previous answer for this one, and a
+bounded, silent answer-wait after; 5ms polls, three quiet reads, a 1s
+clock, the same numbers everywhere. The Rust half is honest about ops
+that run after the bump because both widget backends apply a batch inside
+one non-preemptible UI-thread callback and every Stage read hops behind
+it — gtk.rs's typing arm had carried a private copy of exactly this wait
+since 2026-08-04, and the rule is the runner's now.
+tools/check-verbs.py holds the fifteen arms, each read out of its own
+block, with six watched negatives (both halves cut, one runner at a
+time). Measured: validate-mac ALL PASS, legs 298s before and 180s after
+on the same quiet host — the difference the save family's own
+pre-existing dialog flake and not this rule's; the other 400 legs sum
+to 208s before and 207s after; the android compose and python suites and the iOS
+rust-swiftui suite ALL PASS.
+
+The verbs still outside the rule are their own entry, below.
+
+## GAP — ten action verbs still return before the app has answered: `set_date`, `set_time`, `select_range`, `set_text`, `type`, `scroll_end`, `menu_activate`, `back`, `close_window`, `resize_window` (2026-09-06)
+KEY: ACTION_VERBS, await_answer, kayaAwaitAnswer, set_date, set_time, select_range, set_text, type, scroll_end, menu_activate, back, close_window, resize_window
+
+Named the day the rule landed for the five (the struck entry above): `set_date` and `set_time` (whose Compose arm calls itself
+"the toggle arm's shape, one kind over"), `select_range`, `set_text`,
+`type` (which reaches the platform's own input path and blocks by
+contract — `Stage::type_text` point 4 — and whose GTK arm still carries
+the private drain-to-quiet this rule generalizes), `scroll_end`,
+`menu_activate`, `back`, `close_window` and `resize_window`. Each is an
+action whose answer is a transaction; extending the rule to them is the
+next slice, and tools/check-verbs.py's ACTION_VERBS is the one list to
+add them to.
 
 ## ~~WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)~~
 KEY: varied-python, no such target label#0, first step, starved host, android python guest, step ceiling
@@ -11273,6 +11351,26 @@ either the scene's stamped labels stop being narrower than a touch slop
 touch width the way Material's `minimumInteractiveComponentSize` does —
 which changes layout and so wants a ruling.
 
+THE REMEDY IS TAKEN ON THE TOUCH PLATFORMS, 2026-09-06
+(docs/dnd-plan.md D12, ruled by the maintainer on the third
+sighting's reading). A drag source is an interactive element, so on
+Android it takes Material's own 48dp minimum
+(`Modifier.minimumInteractiveComponentSize()`, INNERMOST of the
+drag-and-drop surface so the aim, the long press and the target all
+measure the enlarged box) and on iOS a 44pt minimum on the drag
+interaction's host view. The row grows with it; that is the ruling,
+and tools/scenes/dnd.steps KEEPS its one-letter labels because they
+are the edge case that found this. tools/check-universal-props.py
+holds both arms with six watched negatives — no scene can see the
+rule, since a source under the slop presents identical bytes and
+simply never becomes a drag.
+
+THE DESKTOP SIGHTINGS STAY OPEN. Windows (`dnd_java`) and wayland
+(`dnd-js-wayland`) read the same three strings from the same step,
+but a mouse has no touch slop and a 7px source is a legal target
+there, so their cause is unread: the next sighting on either lane is
+to be read through that arm's own drag lines before anyone assumes
+this one.
 
 ## ~~WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)~~
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
@@ -11337,6 +11435,17 @@ and `set_value` return the moment they emit, so the following expect's
 clock starts while the answer is still in flight. The rule that comment
 states ("AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT") holds for one
 verb of five.
+
+AND THE MAC READ THE SAME CLASS the moment its runner alone still
+carried the five seconds: matrix #16 (2026-09-06, the action-wait tree,
+five-minute load 66), `portfolio-python-swiftui` read `column@ledger
+presents "Total ^3", wanted "v3"` — the second header click's flip,
+missed inside a 5s step deadline while the python guest re-sorted 15,003
+rows on a loaded host. KayaSwiftUI.swift's per-step deadline was 5s on
+macOS by a lane ruling and 15s on iOS; it is ONE number now, 15, in all
+three runners, and tools/check-harness-ceiling.py holds the three equal
+beside the ceiling (a watched negative drifts the Swift one back to 5).
+
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps
@@ -11471,3 +11580,12 @@ THE BREADTH SLICE, two worktrees merged 2026-09-05:
   and its positive control); the python and JS negatives compare `help`'s
   bytes to the generated setters' in both zones. The ANDROID roster waits on
   the Compose arm above.
+
+SIGHTING 2026-09-06 (matrix #17, the action-wait + drag-target tree;
+five-minute load 85): `save-swiftui`, `no file dialog live, wanted
+"kaya-save-…"` and `the driver on 45F06B45-… exited 65` — the XCUI driver
+lost, the dialog never read, every later step reading the app with no
+file open; the iOS lane at 609s beside it. The class this entry holds;
+the same lane read ALL PASS standalone earlier the same day.
+
+

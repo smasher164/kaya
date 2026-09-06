@@ -1569,9 +1569,21 @@ NORM_NEGATIVES = [
     ("the Drag verb's destination dropped again",
      r"Step::Drag\(source, destination, _\) => vec!\[source, destination\],",
      "Step::Drag(source, _, _) => vec![source],", "Step::Drag"),
+    # NOT a rename of the binding: `_table` still reads as a binding
+    # handed over, so the census could not see it and this negative
+    # passed VACUOUSLY — invisibly, because every SELF-TEST `fail()`
+    # below the first drain went into a list nothing read (fixed with
+    # the second drain at the foot of this file). The whole arm goes,
+    # which is what dropping a Target actually looks like.
     ("the fold verb's table dropped",
-     r"Step::ExpectFolded\(child, table\) => \{\n                let mut out",
-     "Step::ExpectFolded(child, _table) => {\n                let mut out",
+     r"Step::ExpectFolded\(child, table\) => \{\n"
+     r"                let mut out = vec!\[child\];\n"
+     r"                if let Some\(table\) = table \{\n"
+     r"                    out\.push\(table\);\n"
+     r"                \}\n"
+     r"                out\n"
+     r"            \}",
+     "Step::ExpectFolded(child, _) => vec![child],",
      "Step::ExpectFolded"),
 ]
 for label, pattern, repl, want in NORM_NEGATIVES:
@@ -1593,6 +1605,135 @@ if sample_out or sample_multi != 1:
 print(f"check-verbs: step targets: {norm_variants} variants read, "
       f"{norm_multi} carrying two, {len(NORM_NEGATIVES)} watched negatives "
       f"refused", file=sys.stderr)
+
+# --- AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT ------------------
+# The Compose runner states that rule in its own words and `click` kept
+# it alone: `choose`, `header_click`, `toggle` and `set_value` returned
+# the moment they emitted, and the OTHER TWO runners waited on none of
+# the five (docs/deferred.md, the Compose action-verb entry). NO SCENE
+# CAN FAIL IT — every expect is a bounded retry, so an action whose
+# answer is still in flight costs poll attempts and changes no verdict,
+# while the step that pays is the one with no retry over it: another
+# ACTION (crates/kaya/src/harness.rs, `Stage::type_text` point 4). So
+# the arms are held statically, each read out of its OWN BLOCK: the
+# helper's definition and one arm's call both name the function, so a
+# file-wide search is satisfied by a runner that waits on `click` and
+# nothing else.
+ACTION_VERBS = ("click", "toggle", "set_value", "choose", "header_click")
+
+
+def rust_action_arm(src, verb):
+    """One `Step::<Verb>(..) => { .. }` block of harness.rs's dispatch."""
+    variant = "".join(w.capitalize() for w in verb.split("_"))
+    hits = list(re.finditer(r"Step::" + variant + r"\([^()]*\)\s*=>\s*\{", src))
+    if len(hits) != 1:
+        return None
+    return balanced(src, src.index("{", hits[0].end() - 1))
+
+
+def kotlin_action_arm(src, verb):
+    """One `"<verb>" -> { .. }` block of KayaCompose.kt's step `when`."""
+    hits = list(re.finditer(r'^\s*"' + re.escape(verb) + r'" -> \{', src, re.M))
+    if len(hits) != 1:
+        return None
+    return balanced(src, src.index("{", hits[0].end() - 1))
+
+
+def swift_action_arm(src, verb):
+    """One `case "<verb>":` arm of KayaSwiftUI.swift's step `switch`. It
+    has no braces of its own, so it ends at the next label indented the
+    same way."""
+    hits = list(re.finditer(r'^(\s*)case "' + re.escape(verb) + r'":', src, re.M))
+    if len(hits) != 1:
+        return None
+    indent = hits[0].group(1)
+    nxt = re.search(r"^" + indent + r"(?:case |default:|\})",
+                    src[hits[0].end():], re.M)
+    return src[hits[0].start(): hits[0].end() + (nxt.start() if nxt else 0)]
+
+
+# runner file, arm reader, (the wait BEFORE the action, the wait AFTER)
+ANSWER_RUNNERS = (
+    (HARNESS, rust_action_arm, ("await_quiet()", "await_answer(")),
+    (SWIFT, swift_action_arm, ("kayaAwaitQuiet()", "kayaAwaitAnswer(")),
+    (KOTLIN, kotlin_action_arm, ("kayaAwaitQuiet()", "kayaAwaitAnswer(")),
+)
+ANSWER_KWARG = {HARNESS: "harness_src", SWIFT: "swift_src",
+                KOTLIN: "kotlin_src"}
+
+
+def answer_wait(harness_src=None, swift_src=None, kotlin_src=None):
+    """Findings, and how many action arms were actually read."""
+    bad = []
+    read = 0
+    given = {HARNESS: harness_src, SWIFT: swift_src, KOTLIN: kotlin_src}
+
+    def cannot(rel):
+        return lambda src, exc: ("cannot read " + src + " for the action "
+                                 "wait (" + str(exc.strerror) + "): the "
+                                 "runner this rule holds is not there")
+
+    for rel, reader, (before, after) in ANSWER_RUNNERS:
+        text = source_text(given[rel], rel, bad, cannot(rel))
+        if text is None:
+            continue
+        for verb in ACTION_VERBS:
+            body = reader(text, verb)
+            if body is None:
+                bad.append(f"{rel}: no single `{verb}` action arm to read — "
+                           f"the dispatch moved and this census would agree "
+                           f"with anything")
+                continue
+            read += 1
+            for call, when in ((before, "before"), (after, "after")):
+                if call not in body:
+                    bad.append(
+                        f"{rel}: the `{verb}` arm never calls `{call}` "
+                        f"{when} it acts — AN ACTION RETURNS ONCE THE APP "
+                        f"HAS ANSWERED IT, and this one returns the moment "
+                        f"it emits, so the step after it starts its clock "
+                        f"with the answer still in flight")
+    return bad, read
+
+
+answer_out, answer_read = answer_wait()
+g.counted("action arms read across the three runners", answer_read,
+          floor=len(ACTION_VERBS) * len(ANSWER_RUNNERS))
+for line in answer_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+answer_status = 1 if answer_out else 0
+
+# The watched negatives: BOTH HALVES of the rule on EACH runner, cut out
+# of one arm at a time on a doctored copy — a wait deleted from the arm
+# that has no other reason to name it.
+ANSWER_NEGATIVES = (
+    (HARNESS, "header_click", r"\n\s*await_answer\(answered\);", "await_answer("),
+    (HARNESS, "toggle", r"\n\s*await_quiet\(\);", "await_quiet()"),
+    (SWIFT, "choose", r"\n\s*kayaAwaitAnswer\(answered\)", "kayaAwaitAnswer("),
+    (SWIFT, "click", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    (KOTLIN, "toggle", r"\n\s*else kayaAwaitAnswer\(answered\)",
+     "kayaAwaitAnswer("),
+    (KOTLIN, "header_click", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+)
+for rel, verb, pattern, call in ANSWER_NEGATIVES:
+    reader = dict((r, fn) for r, fn, _ in ANSWER_RUNNERS)[rel]
+    whole = real(rel)
+    arm = reader(whole, verb)
+    if arm is None:
+        fail(f"check-verbs SELF-TEST: {rel} has no single `{verb}` action "
+             f"arm to doctor")
+    cut = g.doctor(f"the {verb} arm's `{call}` cut out of {rel}", arm,
+                   pattern, "")
+    found, _ = answer_wait(**{ANSWER_KWARG[rel]: whole.replace(arm, cut, 1)})
+    if not [line for line in found
+            if line not in answer_out and f"`{verb}` arm" in line
+            and call in line]:
+        fail(f"check-verbs SELF-TEST: the action-wait census passed with "
+             f"`{call}` cut out of {rel}'s `{verb}` arm")
+print(f"check-verbs: an action returns once the app has answered it: "
+      f"{answer_read} action arms in 3 runners, "
+      f"{len(ANSWER_NEGATIVES)} watched negatives refused", file=sys.stderr)
+
 
 # --- THE REORDER'S INSERTION INDICATOR IS DRAWN --------------------
 # docs/dnd-plan.md D8 declined WinUI's CanReorderItems because it writes
@@ -1683,11 +1824,22 @@ print(f"check-verbs: the reorder's insertion indicator: "
       f"links, {len(INDICATOR_SITES) + len(INDICATOR_SHEET)} watched "
       f"negatives refused", file=sys.stderr)
 
+# EVERY SELF-TEST FAILURE BELOW THE FIRST DRAIN REACHES THE EXIT. The
+# `if failures:` above runs where the module reaches it, and the seven
+# SELF-TEST `fail()` calls after it appended to a list nothing read
+# again — so a watched negative that PASSED its doctored copy printed
+# nothing and this gate exited OK, which is the one failure a guard may
+# not have.
+if failures:
+    for f_ in failures:
+        print(f"check-verbs: {f_}", file=sys.stderr)
+    raise SystemExit(1)
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
         or metrics_status or keyed_status or drop_line_status
-        or vtrace_status or norm_status or ind_status):
+        or vtrace_status or norm_status or ind_status
+        or answer_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -1698,4 +1850,6 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"backends + the reorder insertion indicator's 4 WinUI arms "
           f"+ the reorder's insertion indicator on GTK "
           f"+ every Step's Targets normalized "
+          f"+ an action returns once the app has answered it in 3 "
+          f"runners "
           f"+ spec hash against 2 interpreters")

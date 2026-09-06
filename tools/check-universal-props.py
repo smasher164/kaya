@@ -175,6 +175,98 @@ def census(files):
         bad.append(f"{compose}: names RichTooltip — titles, actions and "
                    "images inside a tooltip are refused (T4)")
 
+    # THE TOUCH TARGET, docs/dnd-plan.md D12. It lives in THIS gate
+    # because this is the one that already reads both interpreters'
+    # render wrappers, and the drag-and-drop surface is a wrapper of
+    # exactly the shape `help` is — one no render path may bypass. And
+    # because NO SCENE CAN SEE THE RULE: a drag source narrower than the
+    # platform's touch slop presents identical bytes to every observable
+    # and simply never becomes a drag, which is what the keyed-payload
+    # WATCH's third sighting measured (a seven-pixel source, `op=0
+    # entered=0`, docs/deferred.md).
+    compose_code = code_only(read(compose))
+
+    def block(text, head):
+        at = text.find(head)
+        if at < 0:
+            return None
+        end = text.find("\n}\n", at)
+        return text[at:end if end > 0 else len(text)]
+
+    surface = block(compose_code, "private fun kayaDragAndDropSurface(")
+    if surface is None:
+        bad.append(f"{compose}: no kayaDragAndDropSurface — the drag-and-drop "
+                   "surface moved, and android's touch target with it (D12)")
+    elif "minimumInteractiveComponentSize" in surface:
+        # THE MEASURED PLACEMENT, 2026-09-06: the minimum PLACES its content
+        # centred, and Compose's drag hit test then reads that placement's
+        # origin with the enlarged size — a reorder aimed a quarter of the
+        # way down a 48dp row hit nothing, and a text drop landed on the
+        # source. It may not join this chain.
+        bad.append(
+            f"{compose}: minimumInteractiveComponentSize sits in the drag "
+            "surface's OWN modifier chain — its centred placement desyncs "
+            "Compose's drag hit test from the recorded box, which is a "
+            "measured red (D12); it wraps the content inside KayaRender's "
+            "box instead")
+    render = block(compose_code, "fun KayaRender(")
+    if render is None:
+        bad.append(f"{compose}: no KayaRender — the render entry that carries "
+                   "android's touch target moved (D12)")
+    else:
+        arm = render
+        minimum = arm.find("minimumInteractiveComponentSize()")
+        boxed = arm.find("Box(modifier = dnd)")
+        if minimum < 0:
+            bad.append(
+                f"{compose}: the android drag source takes no "
+                "minimumInteractiveComponentSize — a source narrower than "
+                "the platform's touch slop never becomes a drag at all "
+                "(D12, 48dp)")
+        elif not (boxed >= 0 and boxed < minimum):
+            bad.append(
+                f"{compose}: android's minimum touch target is not inside "
+                "the drag surface's own box — the box the `drag` verb's aim "
+                "reads would then be the un-enlarged one (D12)")
+        elif "kayaIsDragSource(node)" not in arm[boxed:minimum]:
+            bad.append(
+                f"{compose}: android's minimum touch target is not guarded "
+                "by the source test — a drop target is no drag source and "
+                "takes nothing from D12")
+
+    swift_code = code_only(read(swiftui))
+    at = swift_code.find("private func kayaPhoneDragDrop(")
+    if at < 0:
+        bad.append(f"{swiftui}: no kayaPhoneDragDrop — the iOS host of the "
+                   "drag interaction moved, and its touch target with it "
+                   "(D12)")
+    else:
+        end = swift_code.find("\n        }\n", at)
+        host = swift_code[at:end if end > 0 else len(swift_code)]
+        framed = host.find(
+            ".frame(minWidth: kayaMinTouchTarget, minHeight: kayaMinTouchTarget)")
+        hosted = host.find(".background(KayaPhoneDragDropSurface(")
+        if framed < 0:
+            bad.append(
+                f"{swiftui}: the iOS drag host takes no minimum touch "
+                "target — a source smaller than the platform's own 44pt is "
+                "a drag the finger cannot start (D12)")
+        elif not (hosted >= 0 and framed < hosted):
+            bad.append(
+                f"{swiftui}: the iOS minimum frame does not precede the "
+                "drag surface's background — the KayaDragDropView behind "
+                "the widget would then be the un-enlarged one (D12)")
+        elif "node.dragPayload != nil || reorderIn != nil" not in host:
+            bad.append(
+                f"{swiftui}: the iOS minimum touch target is not guarded by "
+                "the source test — a drop target is no drag source and "
+                "takes nothing from D12")
+    if not re.search(r"let kayaMinTouchTarget: CGFloat = 44\b", swift_code):
+        bad.append(
+            f"{swiftui}: kayaMinTouchTarget is not the ruled 44pt — iOS's "
+            "minimum touch target is the HIG's number, pinned here rather "
+            "than merely held equal to itself (D12)")
+
     # GTK and WINUI. A binder that names a NativeWidget variant would
     # silently scope the props to one kind.
     for path in (gtk, winui):
@@ -196,6 +288,9 @@ def census(files):
 # unapplied perturbation cannot pass, since the copy would then equal the
 # real file and the census's acceptance IS the red below.
 real = load()
+g = Gate("check-universal-props")
+RAN = 0
+DECLARED = 15
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -206,14 +301,14 @@ for path, pattern, repl in (
         print(f"check-universal-props: self-test failed — a copy of {path} with"
               " the universal props unapplied still passed")
         raise SystemExit(1)
+    RAN += 1
 
 # HELP's four links, one negative each, through the prelude's doctor() so
 # the substitution count is printed and a perturbation that applied
 # nothing is a FAILED self-test rather than a passed one.
-g = Gate("check-universal-props")
 for label, pattern, repl, want in (
     ("the help wrapper bypassed",
-     r"KayaRenderHelped\(node, isRoot,", "KayaRenderAnchored(node, isRoot,", 2),
+     r"KayaRenderHelped\(node, isRoot,", "KayaRenderAnchored(node, isRoot,", 3),
     ("the tooltip drawing something other than the node's help",
      r"PlainTooltip \{ Text\(node\.help\) \}", 'PlainTooltip { Text("") }', 1),
     ("the tooltip upgraded to the rich tier (T4)",
@@ -228,6 +323,50 @@ for label, pattern, repl, want in (
     if not census(load({COMPOSE: doctored})):
         print(f"check-universal-props: self-test failed — {label} still passed")
         raise SystemExit(1)
+    RAN += 1
+
+# THE TOUCH TARGET's five, one per link of D12: android's call gone, its
+# guard weakened, the call put back on the surface's own chain (the
+# measured red), iOS's frame gone, and iOS's 44 drifted.
+for label, path, pattern, repl, want in (
+    ("android's minimum touch target deleted", COMPOSE,
+     r"\.minimumInteractiveComponentSize\(\)", "", 1),
+    ("android's minimum guard weakened (a drop target enlarged too)", COMPOSE,
+     r"if \(kayaIsDragSource\(node\)\) \{\n            // D12",
+     "if (true) {\n            // D12", 1),
+    ("android's minimum moved onto the drag surface's own chain", COMPOSE,
+     r"        target = target,\n    \)\n\}",
+     "        target = target,\n    ).minimumInteractiveComponentSize()\n}", 1),
+    ("iOS's minimum frame deleted", SWIFTUI,
+     r"\n *\.frame\(minWidth: kayaMinTouchTarget, minHeight: kayaMinTouchTarget\)",
+     "", 1),
+    ("iOS's 44pt drifted off the ruled number", SWIFTUI,
+     r"let kayaMinTouchTarget: CGFloat = 44", "let kayaMinTouchTarget: CGFloat = 20", 1),
+):
+    doctored = g.doctor(label, real[path], pattern, repl, want=want)
+    if not census(load({path: doctored})):
+        print(f"check-universal-props: self-test failed — {label} still passed")
+        raise SystemExit(1)
+    RAN += 1
+
+# The one a bare presence check cannot see: the minimum moved OUT of the
+# surface's box, where the box the aim reads is still the un-enlarged one.
+moved = g.doctor(
+    "android's minimum lifted out of the drag surface's box", real[COMPOSE],
+    r"    Box\(modifier = dnd\) \{\n        if \(kayaIsDragSource\(node\)\) \{",
+    "    if (kayaIsDragSource(node)) {", want=1)
+if not census(load({COMPOSE: moved})):
+    print("check-universal-props: self-test failed — the android minimum "
+          "outside the drag surface's box still passed")
+    raise SystemExit(1)
+RAN += 1
+
+print(f"check-universal-props: {RAN} watched negative(s) ran")
+if RAN != DECLARED:
+    print(f"check-universal-props: REFUSAL — {RAN} watched negative(s) ran, "
+          f"but {DECLARED} are declared — a self-test that did not run is "
+          f"not a self-test", file=sys.stderr)
+    raise SystemExit(1)
 
 offenders = census(real)
 if offenders:

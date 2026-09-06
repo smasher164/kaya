@@ -10,6 +10,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(feature = "harness")]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::protocol::{
     ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp,
@@ -20,6 +22,23 @@ use crate::protocol::{
 
 /// Internal instance ids live above this bit; guest widget ids below it.
 const INTERNAL_BIT: u64 = 1 << 63;
+
+/// How many guest transactions this core has applied — THE APP'S ANSWER,
+/// and the signal an ACTION verb waits on (crate::harness's await_answer;
+/// KayaCompose.kt's kayaBatches is an interpreter's own copy of it).
+/// Bumped where EVERY Rust-runner backend's drain goes through, so a
+/// backend-originated report (the presentation, a window's metrics, a
+/// native undo) never reads as the app saying something.
+#[cfg(feature = "harness")]
+static ANSWERS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(feature = "harness")]
+// Dead on macOS/iOS/Android, where the harness feature is on but the
+// runner that reads this (crate::harness) is not compiled.
+#[allow(dead_code)]
+pub(crate) fn answers() -> u64 {
+    ANSWERS.load(Ordering::Acquire)
+}
 
 /// Auxiliary windows: the host can materialize a surface beside the
 /// primary one. Clear on the phones, whose systems own surface geometry.
@@ -3404,6 +3423,13 @@ impl Scene {
         }
         #[cfg(debug_assertions)]
         self.assert_bands_hold();
+        // THE APP ANSWERED. Last, so the count moves only once the batch
+        // has been turned into ops: the widget backends run them inside
+        // this same UI-thread callback, which every Stage read hops
+        // behind, so a count that has stopped moving is a batch that is
+        // on the widgets.
+        #[cfg(feature = "harness")]
+        ANSWERS.fetch_add(1, Ordering::Release);
         out
     }
 

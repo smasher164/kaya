@@ -9417,5 +9417,81 @@ runningboardd's exit context before hunting a crash report.
   is a per-HOST number, and the slowest host cannot carry the fastest
   lane's clock; the runner's own poll grew 120 -> 240 rounds with it, or
   a red leg's longer failing step could outrun the runner and be written
-  down as "no verdict". Of the Compose action verbs only `click` waits
-  for the app's answer (docs/deferred.md, the action-verbs GAP).
+  down as "no verdict". AND THE MAC CARRIED THE FIVE ALONE for one more
+  matrix: #16 read `portfolio-python-swiftui` missing the same second
+  header flip under a five-lane host (five-minute load 66) — the same
+  fifteen-thousand-row re-sort, the same 5s clock, the "fastest lane"
+  premise gone the moment the host is shared. The step retry deadline is
+  ONE number in all three runners now (15s), held equal by
+  tools/check-harness-ceiling.py beside the ceiling; a per-lane deadline
+  was a per-host bet that the host would stay quiet.
+- **A wait that makes the app finish first turns a latent off-main read
+  into a crash** (2026-09-06, swift/KayaSwiftUI.swift, the iOS `kayaAxRead`
+  and `kayaAxWhy`). The iOS accessibility read walked
+  `UIApplication.shared.connectedScenes` from the HARNESS thread; asking
+  UIKit for accessibility elements lays views out
+  (`_UIHostingView.accessibilityElementCount` down to `UIView.setFrame:`),
+  and off-main that is `NSInternalInconsistencyException: Modifications
+  to the layout engine must not be performed from a background thread
+  AFTER IT HAS BEEN ACCESSED FROM THE MAIN THREAD`, which takes the
+  process (`tasks-swiftui: FAIL (4s)`, ios lane). The sibling
+  `kayaAxHintRead` had taken the main-queue hop on 2026-09-05 and this
+  reader was left behind; the assertion's precondition simply had not
+  been true before the action wait let the main thread's layout land
+  first. Both readers hop to the main queue now, as the Mac's reader
+  does — `kayaAxWhy` calls the very method at the top of the crash's
+  stack and is reached only while explaining an `expect_ax` failure, so
+  it would have crashed the process mid-diagnosis.
+- **A gate that drains its findings once, before its self-tests append
+  to the same list, passes with red self-tests** (2026-09-06,
+  tools/check-verbs.py). Seven `fail()` calls sat below the one drain,
+  every one a self-test's, appending to a list nothing read again; a
+  second drain before the verdict (watched: a doctored copy exits 0
+  without it, 1 with it) immediately exposed a vacuous watched negative —
+  the fold verb's "table dropped" perturbation renamed `table` to
+  `_table`, which the binding census still counted as a binding, so the
+  census had seen no change for as long as the negative existed. It drops
+  the whole arm now. The general rule stands one gate over: a negative
+  nobody has watched fail is a guess about a state nobody reached.
+- A DRAG SOURCE NARROWER THAN THE TOUCH SLOP IS NOT A DRAG SOURCE
+  (android, measured 2026-09-06, matrix #15 `dnd-jvm`). `drag
+  label@item[y] to label#1` ended `op=0 entered=0`: the source box was
+  `[231,64,7,16]` — a stamped row's one-letter label, SEVEN pixels
+  wide — and `adb shell input draganddrop` pressed 3px inside it, so
+  the finger never travelled 8dp inside the view and the long press
+  never became a drag. Nothing was dropped; the drop target kept the
+  PREVIOUS step's payload, and the three assertions that followed read
+  like a mis-delivered drag rather than an absent one. The same step
+  passed fifty seconds later with that label 14px wide.
+
+  WHAT THE READING COSTS TO GET: only the failing path dumps
+  `KAYA_DRAG_EVENT` (tools/android/run-emulator.py), so a green leg's
+  aim line has to be read off a `adb logcat -s kaya:I` you started
+  BEFORE the run — the runner's own per-leg `logcat -c` does not
+  disturb a reader already attached.
+
+  THE FIX IS THE PLATFORM'S RULE, not a wider scene text: a drag
+  source takes the platform's minimum touch target on the touch
+  platforms (docs/dnd-plan.md D12). Beware where the enlargement sits
+  in a Compose modifier chain — `onGloballyPositioned` reports the size
+  of everything INNER to it, so a minimum placed outside the box
+  recorder moves the touch target while the `drag` verb's aim keeps
+  reading the old seven pixels, and the leg fails exactly as before.
+- **A programmatic text write on WinUI must bank its text, or the next
+  raise the handler does not swallow reports the whole unchanged
+  document as an edit** (2026-09-06, crates/kaya/src/winui/mod.rs, found
+  by the scene-ready wait). The text arm armed a one-shot swallow for its
+  own async TextChanged and set the text; the handler's no-change guard
+  compares a raise against what the HANDLER last banked, and only the
+  handler banked. So after the app's own `set_text` the bank was empty,
+  and the first raise the swallow did not cover — a RichEditBox raises
+  TextChanged for kaya's own highlight paint — compared the document
+  against nothing, banked it and sent it to the app as an edit. The
+  ranges guest answers an edit by resetting its count, so `ranges_rust`
+  read "0 matches" over the "3 matches" its find had just written, with
+  the highlights and selection of that find still on the control. It had
+  passed every lane before because the first expect's poll spent ~34ms
+  waiting for the scene, and the paint's raise landed inside that; the
+  scene-ready wait put the click at +19ms and the raise after the find.
+  The write banks its text now. A faster harness is a new clock on every
+  race the old one paid for.

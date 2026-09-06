@@ -664,6 +664,14 @@ in docs/deferred.md.
    cannot read is a finding that names it, never a skip — anchoring on
    `Step::ExpectAx(` alone matches harness.rs's PARSER first and finds
    ZERO observations there. Five watched negatives, counts printed.
+   AND AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT, since 2026-09-06:
+   the fifteen action arms (click, choose, header_click, toggle,
+   set_value in three runners) each call their runner's quiet-wait before
+   and answer-wait after, read out of their own blocks, six watched
+   negatives — the Compose runner had stated the rule and kept it for one
+   verb, and the other two runners for none, so an expect's clock could
+   start with the answer still in flight (the sort-click class). Ten
+   more action verbs are outside the rule and named on the ledger.
    AND THE METRICS CLASS CHANNEL, ruled 2026-08-31 (adaptive-layout
    D8): iOS is the one platform whose size class the platform itself
    decides, and the only route it reaches the core is
