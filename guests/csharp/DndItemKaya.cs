@@ -279,6 +279,8 @@ sealed class DndItemRow
 
     public void SetColumnsAuto(Node n, double minWidth) =>
         t.SetColumnsAuto(n, minWidth);
+
+    public void SetWrap(Node n, bool on) => t.SetWrap(n, on);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

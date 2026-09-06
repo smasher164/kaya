@@ -441,6 +441,7 @@ static class Program
         Set("SetInset", ["Node n", "double pad"], "n, pad");
         Set("SetFill", ["Node n", "bool on"], "n, on");
         Set("SetColumnsAuto", ["Node n", "double minWidth"], "n, minWidth");
+        Set("SetWrap", ["Node n", "bool on"], "n, on");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

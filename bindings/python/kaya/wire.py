@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x88e3d11bce4a8350
+SPEC_HASH = 0x78077d8d3ee2fc37
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -96,6 +96,7 @@ PROP_TICK_SPACING = 25
 PROP_HELP = 26
 PROP_FILL = 27
 PROP_MIN_COLUMN_WIDTH = 28
+PROP_WRAP = 29
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -993,6 +994,21 @@ def tx_bind_min_column_width(widget_id, signal_id):
 def tx_bind_min_column_width_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN_COLUMN_WIDTH, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_wrap(widget_id, wrap):
+    """set_property with a constant wrap value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_WRAP, SOURCE_CONST) + _enc.value(wrap))
+
+
+def tx_bind_wrap(widget_id, signal_id):
+    """set_property with a signal-bound wrap value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_WRAP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_wrap_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_WRAP, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

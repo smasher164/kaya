@@ -1318,6 +1318,9 @@ pub enum Prop {
     /// A grid's minimum column width when its `columns` is 0, auto
     /// (F64-valued, DIP; docs/layout-knobs-plan.md §3).
     MinColumnWidth,
+    /// A row that flows its children onto new lines (Bool-valued;
+    /// docs/layout-knobs-plan.md §2).
+    Wrap,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

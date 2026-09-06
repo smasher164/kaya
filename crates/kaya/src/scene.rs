@@ -531,6 +531,10 @@ pub(crate) struct Scene {
     /// transaction (docs/layout-knobs-plan.md §3).
     min_column_widths: HashMap<WidgetId, f64>,
     grid_dirty: Vec<WidgetId>,
+    /// The rows that flow, and the ones whose wrap or children moved this
+    /// transaction (docs/layout-knobs-plan.md §2).
+    wrapping: std::collections::HashSet<WidgetId>,
+    wrap_dirty: Vec<WidgetId>,
     /// Live containers that DECLARED COLUMNS — a table is a column
     /// whose header bar makes it one, and that declaration is what gives
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
@@ -781,6 +785,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The grid's own shape: how many columns children fill
         // row-major.
         Prop::Columns | Prop::MinColumnWidth => matches!(kind, WidgetKind::Grid),
+        // A row flows (docs/layout-knobs-plan.md §2); a column has no line
+        // to break onto.
+        Prop::Wrap => matches!(kind, WidgetKind::Row),
         // The first UNIVERSAL props: every element in the tree has an
         // identity and a spoken name. Containers included, deliberately —
         // a column is a labelled group to an assistive client.
@@ -934,7 +941,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
-        Prop::Indeterminate | Prop::Fill => ValueType::Bool,
+        Prop::Indeterminate | Prop::Fill | Prop::Wrap => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help => ValueType::Str,
         // An ACCEPT LIST: the closed kinds by name plus any custom
@@ -1966,11 +1973,22 @@ impl Scene {
                                 }
                                 self.grid_dirty.push(widget);
                             }
+                            if prop == Prop::Wrap {
+                                if v == Value::Bool(true) {
+                                    self.wrapping.insert(widget);
+                                } else {
+                                    self.wrapping.remove(&widget);
+                                }
+                                self.wrap_dirty.push(widget);
+                            }
                             // The fold rule's input (D7): a grower is a
                             // grower at evaluation time, not at write time.
                             if prop == Prop::Grow {
                                 if let Value::F64(w) = &v {
                                     self.grow_weights.insert(widget, *w);
+                                }
+                                if let Some(parent) = self.parent_of.get(&widget) {
+                                    self.wrap_dirty.push(*parent);
                                 }
                                 self.layout_dirty = true;
                             }
@@ -3271,6 +3289,23 @@ impl Scene {
                 .map(|c| c.iter().map(|w| self.widgets[w]).collect())
                 .unwrap_or_default();
             check_labeled_shape(&format!("{id:?}"), &kinds);
+        }
+        // NO GROW INSIDE A WRAPPING ROW (docs/layout-knobs-plan.md §2): a
+        // weight has no track to take on a line that breaks where it must.
+        for id in std::mem::take(&mut self.wrap_dirty) {
+            if !self.wrapping.contains(&id) {
+                continue;
+            }
+            let grower = self
+                .children_of
+                .get(&id)
+                .and_then(|c| c.iter().find(|w| self.grow_weights.get(w).copied().unwrap_or(0.0) > 0.0))
+                .copied();
+            assert!(
+                grower.is_none(),
+                "kaya: row {id:?} wraps and its child {grower:?} grows — a weight has no track \
+                 on a line that breaks (docs/layout-knobs-plan.md §2)"
+            );
         }
         // An AUTO grid names its floor (docs/layout-knobs-plan.md §3): the
         // pair is read on the complete declaration, in either order.
@@ -8266,6 +8301,71 @@ mod tests {
             })
             .collect();
         assert_eq!(fills, vec![(WidgetId(2), false), (WidgetId(3), true)]);
+    }
+
+    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): the flag reaches
+    /// the backend as the Bool it is.
+    #[test]
+    fn wrap_reaches_the_backend() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Wrap,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        assert_eq!(
+            ops.iter()
+                .filter(|op| matches!(
+                    op,
+                    ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Wrap, value: Value::Bool(true) }
+                ))
+                .count(),
+            1
+        );
+    }
+
+    /// No grow inside a wrapping row, whichever of the two arrives last.
+    #[test]
+    #[should_panic(expected = "wraps and its child")]
+    fn a_grower_inside_a_wrapping_row_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Wrap,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// A column has no line to break onto.
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn wrap_on_a_column_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Wrap,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
     }
 
     /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): columns 0 and

@@ -1039,6 +1039,12 @@ The known normalization worklist:
   was given rather than from a size class. An explicit count, or a
   `columns_when` while its class holds, still wins. The observation is
   `expect_grid_columns` after a resize, the adaptive scene's pattern.
+- A row with `wrap` flows: children keep their natural size and move onto
+  the next line when the row runs out of width, leading-aligned, the
+  row's spacing on both axes (docs/layout-knobs-plan.md §2). No child of a
+  wrapping row grows — a weight has no track on a line that breaks — and
+  the root refuses one by name. The observation is `expect_lines`: the
+  runs of children whose cross-axis boxes overlap.
 - A stamped row spans its host column, as a live nested row does. A
   For's copies obey the nested-container rule above; three widget
   backends applied it to live children only, and a spacer inside a

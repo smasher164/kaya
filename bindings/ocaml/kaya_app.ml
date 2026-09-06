@@ -627,6 +627,12 @@ let set_columns_auto (Widget id) min_width =
   emit tx (Kaya_wire.tx_set_columns id 0.0);
   emit tx (Kaya_wire.tx_set_min_column_width id min_width)
 
+(* A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep their
+   natural size and move onto the next line when the row runs out of
+   width, leading-aligned, the row's [~spacing] on both axes. Rows only,
+   and no child of a wrapping row may grow. *)
+let set_wrap (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_wrap id on)
+
 (* A widget's accessibility IDENTIFIER: a stable authored key that assistive
    tooling and UI automation address it by, and which is NEVER spoken. *)
 let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
@@ -1378,11 +1384,12 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?stack_when children () =
+let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?stack_when ?wrap children () =
   let parent =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset Kaya_wire.kind_row
       children ()
   in
+  Option.iter (fun v -> set_wrap parent v) wrap;
   Option.iter
     (fun Compact ->
       let (Widget id) = parent in
@@ -2659,6 +2666,10 @@ module Tpl = struct
       emit tx (Kaya_wire.tx_set_columns id 0.0);
       emit tx (Kaya_wire.tx_set_min_column_width id min_width)
 
+    (* A stamped row that flows onto new lines (the live [set_wrap];
+       docs/layout-knobs-plan.md §2). *)
+    let set_wrap (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_wrap id on)
+
     (* CONST ONLY, like [set_accepts]: what a copy means, and how far its
        prototype holds its children off its edge, are facts about the
        PROTOTYPE. Neither needs a type-level wall — the root judges the
@@ -3346,10 +3357,14 @@ module Tpl = struct
      exactly as it does live: the root admits the prop on Column, Row and
      Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset children =
-    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset Kaya_wire.kind_row
-      children
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset ?wrap children () =
+    let parent =
+      container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset Kaya_wire.kind_row
+        children ()
+    in
+    Option.iter (fun v -> Floor.set_wrap parent v) wrap;
+    parent
 
   (* Attach a live-built context catalog to a template node: each
      activation carries that copy's key path — the keys ARE the noun. *)

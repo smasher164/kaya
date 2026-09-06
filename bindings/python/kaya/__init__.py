@@ -490,6 +490,14 @@ class _Handle:
         _records().append(wire.tx_set_min_column_width(self.id, float(min_width)))
         return self
 
+    def wrap(self, on):
+        """A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep
+        their natural size and move onto the next line when the row runs
+        out of width, leading-aligned, the row's `spacing` on both axes.
+        No child of a wrapping row may grow. Returns the handle."""
+        _records().append(wire.tx_set_wrap(self.id, bool(on)))
+        return self
+
     def accepts(self, *kinds):
         """Declare what this widget takes from a paste — the closed kinds
         by name plus any custom format ids.

@@ -1011,6 +1011,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep their
+    /// natural size and move onto the next line when the row runs out of
+    /// width, leading-aligned, the row's `spacing` on both axes. No child
+    /// of a wrapping row may grow; the root refuses one by name.
+    pub fn wrap(self, on: bool) -> Self {
+        self.tx.wrap(self.id, on);
+        self
+    }
+
     /// Lay this grid out in `columns` columns while the window's size class
     /// is `when` — [`Tx::breakpoint_when`] chained; the authored count
     /// returns when the class does. The root refuses a non-grid target.
@@ -2071,6 +2080,11 @@ impl<'a> Tx<'a> {
     pub fn columns_auto(&mut self, widget: WidgetId, min_width: f64) {
         self.set(widget, Prop::Columns, 0.0);
         self.set(widget, Prop::MinColumnWidth, min_width);
+    }
+
+    /// A row that flows (docs/layout-knobs-plan.md §2).
+    pub fn wrap(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::Wrap, on);
     }
 
     pub fn a11y_label(&mut self, widget: WidgetId, label: impl Into<LiveSource<StrKind>>) {
@@ -3554,6 +3568,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
         self.tpl().columns_auto(node, min_width)
+    }
+
+    pub fn wrap(&mut self, node: TemplateNodeId, on: bool) {
+        self.tpl().wrap(node, on)
     }
 
     pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
@@ -6232,6 +6250,11 @@ impl<'b> Tpl<'_, 'b> {
     pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
         self.set(node, Prop::Columns, 0.0);
         self.set(node, Prop::MinColumnWidth, min_width);
+    }
+
+    /// A stamped row that flows (docs/layout-knobs-plan.md §2).
+    pub fn wrap(&mut self, node: TemplateNodeId, on: bool) {
+        self.set(node, Prop::Wrap, on);
     }
 
     /// A slider over `min..max` whose POSITION comes from a source. The

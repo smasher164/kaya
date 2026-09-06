@@ -10981,6 +10981,8 @@ text hello (copy)"`, then `drag ended none` and the injected gesture not
 finishing) — the thirteenth-to-fifteenth sightings' exact text.
 NINETEENTH SIGHTING, 2026-09-06 02:40, matrix #12 (the `fill` knob;
 five-minute load 96 by its end): `dnd-go` again, 38s.
+TWENTIETH SIGHTING, 2026-09-06 04:15, matrix #14 (the `wrap` knob):
+`dnd-jvm`, 35s; the android lane's only red.
 
 ## GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)
 KEY: run-leg, compiled guest, staged guest, build_ step, spec hash mismatch, hand run

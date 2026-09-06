@@ -2326,6 +2326,23 @@ public final class KayaApp {
         }
 
         /**
+         * A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): this row's
+         * children keep their natural size and move onto the next line
+         * when it runs out of width, leading-aligned, the row's spacing
+         * on both axes. No child of a wrapping row may grow. Same
+         * discipline as {@link #grow}.
+         */
+        public Widget wrap(boolean on) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: wrap on a widget outside its build transaction"
+                    + " — use Tx.setWrap inside a live transaction");
+            }
+            tx.setWrap(this, on);
+            return this;
+        }
+
+        /**
          * Stack this container's children vertically while the window's
          * SIZE CLASS is {@code when}, reverting on leaving it — one
          * core-evaluated breakpoint (docs/adaptive-layout-plan.md D3).
@@ -3073,6 +3090,12 @@ public final class KayaApp {
             t.setColumnsAuto(n, minWidth);
         }
 
+        /** Whether this row's copy of that row flows onto new lines
+         * ({@link Tpl#setWrap}). */
+        public void setWrap(Node n, boolean on) {
+            t.setWrap(n, on);
+        }
+
         /** This row's copy of that slider's granularity (Tpl.setStep). */
         public void setStep(Node n, double step) {
             t.setStep(n, step);
@@ -3712,6 +3735,16 @@ public final class KayaApp {
         public void setColumnsAuto(Widget w, double minWidth) {
             emit(KayaWire.txSetColumns(w.id, 0));
             emit(KayaWire.txSetMinColumnWidth(w.id, minWidth));
+        }
+
+        /**
+         * A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep
+         * their natural size and move onto the next line when the row
+         * runs out of width, leading-aligned, the row's spacing on both
+         * axes. Rows only, and no child of a wrapping row may grow.
+         */
+        public void setWrap(Widget w, boolean on) {
+            emit(KayaWire.txSetWrap(w.id, on));
         }
 
         /**
@@ -5158,6 +5191,12 @@ public final class KayaApp {
         public void setColumnsAuto(Node n, double minWidth) {
             tx.emit(KayaWire.txSetColumns(n.id, 0));
             tx.emit(KayaWire.txSetMinColumnWidth(n.id, minWidth));
+        }
+
+        /** A stamped row that flows onto new lines, the blueprint twin
+         * of {@link Tx#setWrap(Widget, boolean)}. */
+        public void setWrap(Node n, boolean on) {
+            tx.emit(KayaWire.txSetWrap(n.id, on));
         }
 
         /** A stamped slider's granularity (docs/slider-plan.md S1):

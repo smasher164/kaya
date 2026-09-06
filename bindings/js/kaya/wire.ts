@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x88e3d11bce4a8350n;
+export const SPEC_HASH = 0x78077d8d3ee2fc37n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -93,6 +93,7 @@ export const PROP_TICK_SPACING = 25;
 export const PROP_HELP = 26;
 export const PROP_FILL = 27;
 export const PROP_MIN_COLUMN_WIDTH = 28;
+export const PROP_WRAP = 29;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -1096,6 +1097,21 @@ export function tx_bind_min_column_width(widget_id: number, signal_id: number): 
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_min_column_width_element(widget_id: number, level = 0, field = 0): Uint8Array {
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_MIN_COLUMN_WIDTH), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
+/** set_property with a constant wrap value. */
+export function tx_set_wrap(widget_id: number, wrap: boolean): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_CONST), enc.value(wrap)));
+}
+
+/** set_property with a signal-bound wrap value. */
+export function tx_bind_wrap(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_wrap_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_WRAP), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
 /** set_window_prop with a constant title value; window 0, the primary surface. */

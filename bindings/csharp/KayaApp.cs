@@ -1668,6 +1668,13 @@ sealed class Tx
         Records.Add(KayaWire.TxSetMinColumnWidth(w.Id, minWidth));
     }
 
+    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep
+    /// their natural size and move onto the next line when the row runs
+    /// out of width, leading-aligned, the row's spacing on both axes.
+    /// Rows only, and no child of a wrapping row may grow.
+    public void SetWrap(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetWrap(w.Id, on));
+
     /// A container's inter-child gap (main axis, DIP; the normalized
     /// default is 8). Containers only — the root rejects it elsewhere.
     public void SetSpacing(Widget w, double gap) =>
@@ -3347,6 +3354,10 @@ sealed class Tpl
         tx.Records.Add(KayaWire.TxSetColumns(n.Id, 0));
         tx.Records.Add(KayaWire.TxSetMinColumnWidth(n.Id, minWidth));
     }
+
+    /// A stamped row that flows onto new lines (Tx.SetWrap).
+    public void SetWrap(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetWrap(n.Id, on));
 
     /// What ACTIVATING a stamped copy does — write a verb phrase.
     /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the

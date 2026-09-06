@@ -291,6 +291,10 @@ pub enum Step {
     /// The inverse: the target sits short of its container's breadth —
     /// the `fill = false` opt-out's observation (docs/layout-knobs-plan.md §1).
     ExpectHugs(Target),
+    /// How many LINES a row's children sit on — the runs of children
+    /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
+    /// `wrap` observation).
+    ExpectLines(Target, usize),
     /// Expect the container's children to sit at the given cross-axis
     /// placement — the observation the `align` prop is verified by. The
     /// stage CLASSIFIES from geometry rather than reading the prop back:
@@ -533,6 +537,7 @@ impl Step {
             | Step::ExpectFills(t)
             | Step::ExpectBreadth(t)
             | Step::ExpectHugs(t)
+            | Step::ExpectLines(t, _)
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
@@ -675,6 +680,7 @@ impl Step {
             Step::ExpectFills { .. } => true,
             Step::ExpectBreadth { .. } => true,
             Step::ExpectHugs { .. } => true,
+            Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
             Step::ExpectFolded { .. } => true,
@@ -938,6 +944,12 @@ pub trait Stage: Send + 'static {
     /// device units), otherwise a short description (failure text only).
     /// Baseline is rows-only and classifies via each toolkit's own query.
     fn cross_mode(&self, target: Target) -> String;
+    /// How many lines a row's children sit on, from geometry: the runs of
+    /// children whose cross-axis boxes overlap (a centred row's tall image
+    /// and short label share one line; a flowed row's second line starts
+    /// where nothing above it reaches). Empty when the count is `want`,
+    /// otherwise the count read (docs/layout-knobs-plan.md §2).
+    fn row_lines(&self, target: Target, want: usize) -> String;
     /// The container's rendered arrangement axis: "horizontal" or
     /// "vertical", read from the backend's own layout state.
     fn container_axis(&self, target: Target) -> String;
@@ -1392,6 +1404,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
             "expect_hugs" => Step::ExpectHugs(parse_target(rest)?),
+            "expect_lines" => {
+                let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_lines wants a target and a count: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Row {
+                    return Err(format!("expect_lines wants a row target: {line:?}"));
+                }
+                let count: usize = count
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("expect_lines wants a count: {line:?}"))?;
+                Step::ExpectLines(target, count)
+            }
             "expect_axis" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_axis wants a target and an axis string: {line:?}")
@@ -3657,6 +3683,16 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectLines(t, want) => {
+                Some(poll(|| {
+                    let off = stage.row_lines(*t, *want);
+                    if off.is_empty() {
+                        Ok(format!("{} lines {want}", target_spec(t)))
+                    } else {
+                        Err(format!("{} lines off ({off})", target_spec(t)))
+                    }
+                }))
+            }
             Step::ExpectHugs(t) => {
                 // The same read, wanted SHORT: a reader that could not read
                 // ("no ...") is a failure on this side too, never a hug.
@@ -5017,6 +5053,9 @@ mod tests {
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
+        fn row_lines(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
         fn container_axis(&self, _: Target) -> String {
             "center".into()
         }
@@ -5760,6 +5799,9 @@ mod tests {
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
+            fn row_lines(&self, _: Target, _: usize) -> String {
+                String::new()
+            }
             fn container_axis(&self, _: Target) -> String {
                 "start".into()
             }
@@ -6009,6 +6051,9 @@ mod tests {
             }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
+            }
+            fn row_lines(&self, _: Target, _: usize) -> String {
+                String::new()
             }
             fn container_axis(&self, _: Target) -> String {
                 "start".into()

@@ -3418,7 +3418,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 16 members")
+    ], "js's prop reader found only 17 members")
     return "\n".join(lines)
 
 

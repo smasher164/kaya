@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x88e3d11bce4a8350L;
+    public static final long SPEC_HASH = 0x78077d8d3ee2fc37L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -99,6 +99,7 @@ public final class KayaWire {
     public static final int PROP_HELP = 26;
     public static final int PROP_FILL = 27;
     public static final int PROP_MIN_COLUMN_WIDTH = 28;
+    public static final int PROP_WRAP = 29;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -1537,6 +1538,29 @@ public final class KayaWire {
     public static byte[] txBindMinColumnWidthElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_MIN_COLUMN_WIDTH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant wrap value. */
+    public static byte[] txSetWrap(long widgetId, boolean wrap) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_WRAP).putInt(SOURCE_CONST);
+        encodeValue(b, wrap);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound wrap value. */
+    public static byte[] txBindWrap(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_WRAP).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindWrapElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_WRAP).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

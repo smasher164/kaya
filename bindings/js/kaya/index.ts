@@ -574,6 +574,15 @@ export class Handle {
     return this;
   }
 
+  /** A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep their
+   * natural size and move onto the next line when the row runs out of
+   * width, leading-aligned, the row's `spacing` on both axes. No child of
+   * a wrapping row may grow. Chains. */
+  wrap(on: boolean): this {
+    records().push(wire.tx_set_wrap(this.id, Boolean(on)));
+    return this;
+  }
+
   /** Declare what this widget takes from a paste — the closed kinds by
    * name plus any custom format ids. Constant in a template: an accept
    * list describes the prototype, not the row. Chains. */

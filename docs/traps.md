@@ -9355,6 +9355,25 @@ runningboardd's exit context before hunting a crash report.
   returning drops that width, and a static window raises no further
   layout pass to bring it back. Matrix #13's `adaptive_java` read
   `grid#1 misaligned (3 column edges, wanted 1)` at 480 wide while the
-  rust leg passed on timing alone. The handler calls `InvalidateArrange()`
-  on a busy borrow now, so the next pass lands between reads; the GTK
-  twin needs nothing, since its frame tick keeps coming.
+  rust leg passed on timing alone. AND THE RETRY MAY NOT BE A LAYOUT
+  INVALIDATION: the first fix called `InvalidateArrange()` on a busy
+  borrow, and matrix #14 then failed every Windows align leg at its
+  baseline read (`row#0 aligns "start"`, 37s each) — the reader's
+  `UpdateLayout()` raises LayoutUpdated, the busy handler invalidates,
+  UpdateLayout runs another pass, and the pass raises the handler again:
+  a layout cycle inside the read. The handler hops the dispatcher instead
+  (`auto_grid_retry`/`wrap_retry`: TryEnqueue the same tracking, run once
+  the reader has returned); the GTK twin needs nothing, since its frame
+  tick keeps coming.
+- **A WinUI Grid of Auto tracks desires its whole one-line width and is
+  GRANTED it, so a wrapping row measured against its own ActualWidth never
+  breaks** (2026-09-06, crates/kaya/src/winui/mod.rs, `wrap`). WinUI hands
+  an element a desired size larger than the space it has, so the row's
+  ActualWidth was the overflow and `wrap_lines` read one line for six
+  100px images at 508 — every Windows align leg red at `expect_lines
+  row@wrapped 2`, standalone as well as under the matrix, while the rust
+  suite had passed an hour earlier on a retry that happened to reflow
+  mid-measure. The width a wrapping row fits is its PARENT's content width
+  (`wrap_width`: the parent's ActualWidth less its padding), and once the
+  breaks come from that, the re-stamped tracks make the row's own desired
+  width fit inside it.

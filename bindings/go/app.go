@@ -680,6 +680,15 @@ func (tx *Tx) SetColumnsAuto(w Widget, minWidth float64) {
 	tx.emit(TxSetMinColumnWidth(w.id, minWidth))
 }
 
+// SetWrap makes a row flow: its children keep their natural size and move
+// onto the next line when the row runs out of width, leading-aligned,
+// the row's spacing on both axes (docs/layout-knobs-plan.md §2). Rows
+// only, and no child of a wrapping row may grow. The dynamic path; the
+// declarative spelling is the Wrap chain.
+func (tx *Tx) SetWrap(w Widget, on bool) {
+	tx.emit(TxSetWrap(w.id, on))
+}
+
 // SetInset sets a container's own padding — DIP between its bounds and
 // its children, uniform on all four sides (docs/styling-plan.md D3).
 // Containers only. The dynamic path; the chain is the declarative one.
@@ -724,6 +733,16 @@ func (w Widget) ColumnsAuto(minWidth float64) Widget {
 		panic("kaya: ColumnsAuto on a widget outside its build transaction — use Tx.SetColumnsAuto inside a live transaction")
 	}
 	w.tx.SetColumnsAuto(w, minWidth)
+	return w
+}
+
+// Wrap makes this row flow onto new lines at construction. Same
+// transaction discipline as Grow.
+func (w Widget) Wrap(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Wrap on a widget outside its build transaction — use Tx.SetWrap inside a live transaction")
+	}
+	w.tx.SetWrap(w, on)
 	return w
 }
 
@@ -3617,6 +3636,12 @@ func (t *Tpl) SetFill(n Node, on bool) {
 func (t *Tpl) SetColumnsAuto(n Node, minWidth float64) {
 	t.tx.emit(TxSetColumns(n.id, 0))
 	t.tx.emit(TxSetMinColumnWidth(n.id, minWidth))
+}
+
+// SetWrap makes every stamped copy of this row flow onto new lines
+// (Tx.SetWrap).
+func (t *Tpl) SetWrap(n Node, on bool) {
+	t.tx.emit(TxSetWrap(n.id, on))
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry

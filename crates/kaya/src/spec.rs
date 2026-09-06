@@ -190,6 +190,12 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // `columns_when` still wins. Grid-only, and a grid at 0 without it
     // dies at the end of the transaction.
     ("min_column_width", 28, PropKind::F64),
+    // A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep their
+    // natural size and move onto the next line when the row runs out of
+    // width, leading-aligned, the row's spacing on both axes. Row-only;
+    // a weight inside one has no track to take, so grow is refused at the
+    // end of the transaction.
+    ("wrap", 29, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2740,6 +2746,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("help", 26),
                 ("fill", 27),
                 ("min_column_width", 28),
+                ("wrap", 29),
             ],
         },
         EnumSpec {
@@ -3419,6 +3426,7 @@ mod tests {
                     ("prop", "help") => wire::PROP_HELP,
                     ("prop", "fill") => wire::PROP_FILL,
                     ("prop", "min_column_width") => wire::PROP_MIN_COLUMN_WIDTH,
+                    ("prop", "wrap") => wire::PROP_WRAP,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

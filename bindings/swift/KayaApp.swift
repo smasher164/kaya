@@ -2647,6 +2647,14 @@ final class KayaAppTx {
         tx.setMinColumnWidth(w.id, minWidth)
     }
 
+    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children keep
+    /// their natural size and move onto the next line when the row runs
+    /// out of width, leading-aligned, the row's `spacing` on both axes.
+    /// Rows only, and no child of a wrapping row may grow.
+    func setWrap(_ w: KayaWidget, _ on: Bool) {
+        tx.setWrap(w.id, on)
+    }
+
     /// A widget's accessibility IDENTIFIER: a stable authored key that
     /// automation addresses it by, and which is NEVER spoken.
     func setA11yId(_ w: KayaWidget, _ id: String) {
@@ -4146,6 +4154,11 @@ final class KayaTpl {
     func setColumnsAuto(_ n: KayaNodeHandle, _ minWidth: Double) {
         tx.tx.setColumns(n.id, 0)
         tx.tx.setMinColumnWidth(n.id, minWidth)
+    }
+
+    /// A stamped row that flows onto new lines (KayaTx.setWrap).
+    func setWrap(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setWrap(n.id, on)
     }
 
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.

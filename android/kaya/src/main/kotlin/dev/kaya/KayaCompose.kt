@@ -460,6 +460,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var columns by mutableStateOf(1)
     // An auto grid's floor, read when columns is 0 (docs/layout-knobs-plan.md §3).
     var minColumnWidth by mutableStateOf(0.0)
+    // A row that flows its children onto new lines (docs/layout-knobs-plan.md §2).
+    var wrap by mutableStateOf(false)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
      * natural size; positive weights divide the leftover main-axis space
@@ -1147,7 +1149,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x88e3d11bce4a8350uL
+    private const val SPEC_HASH: ULong = 0x78077d8d3ee2fc37uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1354,6 +1356,7 @@ object KayaCompose {
     private const val PROP_INDETERMINATE = 10
     private const val PROP_FILL = 27
     private const val PROP_MIN_COLUMN_WIDTH = 28
+    private const val PROP_WRAP = 29
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1837,6 +1840,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.fill = readBool(b)
                         PROP_MIN_COLUMN_WIDTH ->
                             KayaSceneModel.nodes[id]!!.minColumnWidth = readF64(b)
+                        PROP_WRAP ->
+                            KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
                             KayaSceneModel.nodes[id]!!.columns = readF64(b).toInt()
                         PROP_A11Y_ID ->
@@ -7309,6 +7314,34 @@ object KayaCompose {
                             failures.add("${parts[1]} is short of its breadth ($short)")
                         }
                     }
+                    "expect_lines" -> {
+                        // The wrap observation (harness.rs Step::ExpectLines):
+                        // a run of children whose cross boxes overlap is one line.
+                        val want = parts[2].toIntOrNull() ?: -1
+                        val off = onUi(activity) {
+                            kayaWidgetTarget(parts[1])?.let { row ->
+                                val boxes = row.laidOut
+                                    .mapNotNull { kayaCrossRects[it.id] }
+                                    .map { Pair(it.first, it.first + it.second) }
+                                    .sortedBy { it.first }
+                                if (boxes.isEmpty()) return@let "no cells"
+                                var clusters = 0
+                                var reach = Double.NEGATIVE_INFINITY
+                                for ((start, end) in boxes) {
+                                    if (clusters == 0 || start >= reach - 0.5) clusters += 1
+                                    reach = maxOf(reach, end)
+                                }
+                                if (clusters == want) "" else "$clusters line edges, wanted $want"
+                            }
+                        }
+                        if (off == null) {
+                            failures.add("no such target: ${parts[1]}")
+                        } else if (off.isEmpty()) {
+                            observed.add("${parts[1]} lines $want")
+                        } else {
+                            failures.add("${parts[1]} lines off ($off)")
+                        }
+                    }
                     "expect_hugs" -> {
                         // The same read, wanted SHORT (harness.rs
                         // Step::ExpectHugs, the `fill = false` opt-out): a
@@ -10032,6 +10065,39 @@ private fun KayaRenderCore(
                                 flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
                             )
                         }
+                    }
+                }
+            }
+            else if (node.wrap) androidx.compose.foundation.layout.FlowRow(
+                // A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): Material's
+                // own flow layout, natural sizes, the row's spacing on both
+                // axes; the same readers as the row's, so expect_lines reads
+                // each child's top.
+                modifier = boxFill.then(a11y).onGloballyPositioned {
+                    kayaInsetOuter[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                }.padding(node.inset.dp).onGloballyPositioned {
+                    kayaInsetInner[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                    kayaContainerExtents[node.id] = it.size.width.toDouble()
+                    kayaContainerCross[node.id] = it.size.height.toDouble()
+                    kayaContainerAxis[node.id] = false
+                },
+                horizontalArrangement = Arrangement.spacedBy(node.spacing.dp),
+                verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
+            ) {
+                node.laidOut.forEach { child ->
+                    Box(
+                        Modifier.onGloballyPositioned {
+                            kayaMainExtents[child.id] = it.size.width.toDouble()
+                            kayaDrawnExtents[child.id] = it.size.width.toDouble()
+                            kayaCrossRects[child.id] = Pair(
+                                it.positionInParent().y.toDouble(),
+                                it.size.height.toDouble(),
+                            )
+                        }
+                    ) {
+                        KayaRender(child, flexVertical = false)
                     }
                 }
             }

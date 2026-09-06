@@ -1235,6 +1235,120 @@ mod flex {
         }
     }
 
+    /// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): the flex manager's
+    /// sibling, natural sizes, new lines when the width runs out, the
+    /// spacing on both axes. Children stay the box's direct children, so
+    /// every reader that walks them is unchanged.
+    #[derive(Default)]
+    pub struct FlowLayoutInner {
+        pub spacing: std::cell::Cell<i32>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FlowLayoutInner {
+        const NAME: &'static str = "KayaFlowLayout";
+        type Type = FlowLayout;
+        type ParentType = gtk4::LayoutManager;
+    }
+
+    impl ObjectImpl for FlowLayoutInner {}
+
+    /// The lines a width allows: each child at its natural width and the
+    /// natural height it wants at that width.
+    fn flow_lines(
+        widget: &gtk4::Widget,
+        width: i32,
+        spacing: i32,
+    ) -> Vec<(Vec<(gtk4::Widget, i32, i32)>, i32)> {
+        let mut lines: Vec<(Vec<(gtk4::Widget, i32, i32)>, i32)> = Vec::new();
+        let mut line: Vec<(gtk4::Widget, i32, i32)> = Vec::new();
+        let mut line_h = 0;
+        let mut x = 0;
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            if !c.is_visible() {
+                continue;
+            }
+            let (_, w, _, _) = c.measure(gtk4::Orientation::Horizontal, -1);
+            let (_, h, _, _) = c.measure(gtk4::Orientation::Vertical, w);
+            let next = x + if line.is_empty() { 0 } else { spacing } + w;
+            if !line.is_empty() && width >= 0 && next > width {
+                lines.push((std::mem::take(&mut line), line_h));
+                line_h = 0;
+                x = 0;
+            }
+            x += if line.is_empty() { 0 } else { spacing } + w;
+            line_h = line_h.max(h);
+            line.push((c, w, h));
+        }
+        if !line.is_empty() {
+            lines.push((line, line_h));
+        }
+        lines
+    }
+
+    impl LayoutManagerImpl for FlowLayoutInner {
+        fn measure(
+            &self,
+            widget: &gtk4::Widget,
+            orientation: gtk4::Orientation,
+            for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let spacing = self.spacing.get();
+            if orientation == gtk4::Orientation::Horizontal {
+                // Narrowest: the widest child; natural: everything on one line.
+                let (mut minimum, mut natural, mut any) = (0, 0, false);
+                let mut child = widget.first_child();
+                while let Some(c) = child {
+                    child = c.next_sibling();
+                    if !c.is_visible() {
+                        continue;
+                    }
+                    let (cmin, cnat, _, _) = c.measure(orientation, -1);
+                    minimum = minimum.max(cmin);
+                    natural += cnat + if any { spacing } else { 0 };
+                    any = true;
+                }
+                (minimum, natural, -1, -1)
+            } else {
+                let lines = flow_lines(widget, for_size, spacing);
+                let height: i32 = lines.iter().map(|(_, h)| *h).sum::<i32>()
+                    + spacing * (lines.len() as i32 - 1).max(0);
+                (height, height, -1, -1)
+            }
+        }
+
+        fn allocate(&self, widget: &gtk4::Widget, width: i32, _height: i32, _baseline: i32) {
+            let spacing = self.spacing.get();
+            let mut y = 0;
+            for (line, line_h) in flow_lines(widget, width, spacing) {
+                let mut x = 0;
+                for (c, w, h) in line {
+                    let transform = gtk4::gsk::Transform::new()
+                        .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                    super::set_child_track(&c, f64::from(w));
+                    c.allocate(w, h, -1, Some(transform));
+                    x += w + spacing;
+                }
+                y += line_h + spacing;
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct FlowLayout(ObjectSubclass<FlowLayoutInner>)
+            @extends gtk4::LayoutManager;
+    }
+
+    impl FlowLayout {
+        pub fn new(spacing: i32) -> Self {
+            let this: Self = glib::Object::new();
+            this.imp().spacing.set(spacing);
+            this
+        }
+    }
+
     glib::wrapper! {
         pub struct FlexLayout(ObjectSubclass<FlexLayoutInner>)
             @extends gtk4::LayoutManager;
@@ -9723,6 +9837,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grid_min_col.insert(id.0, min);
                     core.grid_auto_cols.remove(&id.0);
                 }
+                (NativeWidget::Row(container), Prop::Wrap, Value::Bool(on)) => {
+                    use gtk4::prelude::{Cast, WidgetExt};
+                    let widget = container.clone().upcast::<gtk4::Widget>();
+                    if on {
+                        container.set_layout_manager(Some(flex::FlowLayout::new(
+                            container_spacing(&widget),
+                        )));
+                    } else {
+                        container.set_layout_manager(Some(flex::FlexLayout::new(
+                            gtk4::Orientation::Horizontal,
+                            container_spacing(&widget),
+                        )));
+                    }
+                    widget.queue_resize();
+                }
                 (NativeWidget::Grid(grid), Prop::Spacing, Value::F64(gap)) => {
                     grid.set_row_spacing(gap as u32);
                     grid.set_column_spacing(gap as u32);
@@ -13313,6 +13442,45 @@ impl crate::harness::Stage for GtkStage {
                 (true, true) => "folded".to_owned(),
                 (false, _) => "not folded".to_owned(),
                 (true, false) => "stamped folded, but rendered outside that table's viewport".to_owned(),
+            }
+        })
+    }
+
+    fn row_lines(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(i) = crate::harness::try_resolve(t.index, core.rows.len()) else {
+                return "<no such target>".to_string();
+            };
+            let row = &core.rows[i];
+            while glib::MainContext::default().iteration(false) {}
+            // Geometry: the children's cross boxes, content-relative; a run
+            // of overlapping boxes is one line.
+            let mut boxes: Vec<(i32, i32)> = Vec::new();
+            let mut child = row.first_child();
+            while let Some(c) = child {
+                child = c.next_sibling();
+                if c.is_visible() {
+                    let a = c.allocation();
+                    boxes.push((a.y(), a.y() + a.height()));
+                }
+            }
+            if boxes.is_empty() {
+                return "no cells".to_string();
+            }
+            boxes.sort_unstable();
+            let mut clusters = 0;
+            let mut reach = i32::MIN;
+            for (start, end) in boxes {
+                if clusters == 0 || start >= reach {
+                    clusters += 1;
+                }
+                reach = reach.max(end);
+            }
+            if clusters == want {
+                String::new()
+            } else {
+                format!("{clusters} line edges, wanted {want}")
             }
         })
     }

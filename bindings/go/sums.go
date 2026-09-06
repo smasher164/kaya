@@ -421,6 +421,10 @@ func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
 // docs/layout-knobs-plan.md §3).
 func (sc SumCase[K, V]) SetColumnsAuto(n Node, minWidth float64) { sc.t.SetColumnsAuto(n, minWidth) }
 
+// SetWrap makes every stamped copy of this arm's row flow onto new lines
+// (Tpl.SetWrap; docs/layout-knobs-plan.md §2).
+func (sc SumCase[K, V]) SetWrap(n Node, on bool) { sc.t.SetWrap(n, on) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

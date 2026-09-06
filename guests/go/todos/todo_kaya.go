@@ -104,6 +104,8 @@ func (r todoRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }
 
 func (r todoRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
 
+func (r todoRow) SetWrap(n kaya.Node, on bool) { r.t.SetWrap(n, on) }
+
 func (r todoRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 
 func (r todoRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }

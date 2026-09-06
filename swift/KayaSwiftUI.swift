@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x88e3d11bce4a8350
+let kayaSpecHash: UInt64 = 0x78077d8d3ee2fc37
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -188,6 +188,7 @@ private let propAxis: UInt32 = 18
 private let propIndeterminate: UInt32 = 10
 private let propFill: UInt32 = 27
 private let propMinColumnWidth: UInt32 = 28
+private let propWrap: UInt32 = 29
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -315,6 +316,9 @@ final class KayaNode: Identifiable {
     /// An auto grid's floor, read when `columns` is 0
     /// (docs/layout-knobs-plan.md §3).
     var minColumnWidth: Double = 0
+    /// A row that flows its children onto new lines
+    /// (docs/layout-knobs-plan.md §2).
+    var wrap = false
     /// Semantic emphasis (docs/styling-plan.md D4), 0 = none — never a raw
     /// color.
     var role: Int64 = 0
@@ -4642,6 +4646,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMinColumnWidth, valueF64):
                     kayaScene.nodes[id]!.minColumnWidth =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propWrap, valueBool):
+                    kayaScene.nodes[id]!.wrap = raw[body + 24] != 0
                 case (propColumns, valueF64):
                     kayaScene.nodes[id]!.columns =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
@@ -8057,6 +8063,33 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) spans its breadth")
                 } else {
                     failures.append("\(parts[1]) is short of its breadth (\(short))")
+                }
+            case "expect_lines":
+                // The wrap observation (harness.rs Step::ExpectLines): a run
+                // of the row's children whose cross boxes overlap is one line.
+                let want = Int(parts[2]) ?? -1
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let row = kayaTarget(parts[1], "row", kayaScene.rows) else { return nil }
+                    let boxes = row.laidOut.compactMap { kayaCrossRects[$0.id] }
+                        .map { ($0.0, $0.0 + $0.1) }
+                        .sorted { $0.0 < $1.0 }
+                    if boxes.isEmpty { return "no cells" }
+                    var clusters = 0
+                    var reach = -Double.infinity
+                    for (start, end) in boxes {
+                        if clusters == 0 || start >= reach - 0.5 { clusters += 1 }
+                        reach = max(reach, end)
+                    }
+                    return clusters == want ? "" : "\(clusters) line edges, wanted \(want)"
+                }
+                guard let off else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if off.isEmpty {
+                    observed.append("\(parts[1]) lines \(want)")
+                } else {
+                    failures.append("\(parts[1]) lines off (\(off))")
                 }
             case "expect_hugs":
                 // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
@@ -11744,6 +11777,71 @@ struct KayaAutoGrid: Layout {
     }
 }
 
+/// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): children at their
+/// natural size, leading-aligned, onto a new line when the proposed width
+/// runs out, the row's spacing on both axes.
+struct KayaFlow: Layout {
+    let spacing: CGFloat
+
+    private func lines(_ subviews: Subviews, width: CGFloat) -> [[(Int, CGSize)]] {
+        var out: [[(Int, CGSize)]] = []
+        var line: [(Int, CGSize)] = []
+        var x: CGFloat = 0
+        for i in subviews.indices {
+            let size = subviews[i].sizeThatFits(.unspecified)
+            let next = x + (line.isEmpty ? 0 : spacing) + size.width
+            if !line.isEmpty, width.isFinite, next > width {
+                out.append(line)
+                line = []
+                x = 0
+            }
+            x += (line.isEmpty ? 0 : spacing) + size.width
+            line.append((i, size))
+        }
+        if !line.isEmpty { out.append(line) }
+        return out
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        var width: CGFloat = .infinity
+        if let offered = proposal.width, offered.isFinite {
+            width = offered
+        }
+        let plan = lines(subviews, width: width)
+        var height: CGFloat = 0
+        var widest: CGFloat = 0
+        for line in plan {
+            var lineH: CGFloat = 0
+            var lineW: CGFloat = 0
+            for (_, size) in line {
+                lineH = max(lineH, size.height)
+                lineW += size.width
+            }
+            lineW += spacing * CGFloat(max(0, line.count - 1))
+            height += lineH
+            widest = max(widest, lineW)
+        }
+        height += spacing * CGFloat(max(0, plan.count - 1))
+        return CGSize(width: width.isFinite ? width : widest, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        var y = bounds.minY
+        for line in lines(subviews, width: bounds.width) {
+            let lineH = line.map { $0.1.height }.max() ?? 0
+            var x = bounds.minX
+            for (i, size) in line {
+                subviews[i].place(
+                    at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += lineH + spacing
+        }
+    }
+}
+
 /// A column of nothing but labelled rows, two or more, is a form
 /// (docs/forms-plan.md §2).
 func kayaIsForm(_ node: KayaNode) -> Bool {
@@ -13252,6 +13350,18 @@ struct KayaRender: View {
                     // rule): the flow's subtree renders as the section
                     // stream instead of its own flex layout.
                     KayaGroupedSections(flow: node)
+                } else if !vertical && node.wrap {
+                    // A ROW THAT FLOWS (docs/layout-knobs-plan.md §2): natural
+                    // sizes, new lines when the width runs out, the cross
+                    // reader on every child so expect_lines reads the tops.
+                    KayaFlow(spacing: node.spacing) {
+                        ForEach(node.laidOut) { child in
+                            KayaRender(node: child, flexVertical: false)
+                                .background(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                                )
+                        }
+                    }
                 } else if vertical && kayaIsForm(node) {
                     // A COLUMN OF LABELLED ROWS IS A FORM (docs/forms-plan.md
                     // §2), AHEAD of the flex branch: a section stream renders

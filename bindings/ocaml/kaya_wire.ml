@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x88e3d11bce4a8350L
+let spec_hash = 0x78077d8d3ee2fc37L
 
 let value_bool = 1
 let value_i64 = 2
@@ -116,6 +116,7 @@ let prop_tick_spacing = 25
 let prop_help = 26
 let prop_fill = 27
 let prop_min_column_width = 28
+let prop_wrap = 29
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -1480,6 +1481,32 @@ let tx_bind_min_column_width_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_min_column_width);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant wrap value. *)
+let tx_set_wrap widget_id wrap =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_wrap);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool wrap))
+
+(* set_property with a signal-bound wrap value. *)
+let tx_bind_wrap widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_wrap);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_wrap_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_wrap);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

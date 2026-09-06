@@ -51,6 +51,39 @@ because a stretched WinUI TextBlock arranges text-sized (docs/traps.md).
 - Observable: `expect_lines row@<id> N` — the distinct clusters of the
   children's cross-axis edges, the grid-columns reader's shape rotated.
 
+BUILT 2026-09-06 (overnight). Prop 29, Bool, Row-only at the root, which
+also refuses a growing child of a wrapping row at the end of the
+transaction in either order. `expect_lines` is a Stage read
+(`row_lines`) every backend answers from the children's cross boxes — a
+run of overlapping boxes is one line, so a centred row's tall image and
+short label read as one and a flowed row's second line starts where
+nothing above it reaches (the first draft clustered TOP edges and read
+the centred control row as two; the mac leg caught it on the first run)
+— GTK from allocations, WinUI through TransformToVisual, SwiftUI and
+Compose from the cross rects their cell readers already record. SwiftUI: KayaFlow,
+a Layout beside KayaFlex, natural sizes and leading-aligned lines;
+Compose: FlowRow with the row's own readers on each child; GTK: a second
+layout manager, FlowLayout, swapped onto the same GtkBox (children stay
+direct children, so every walker is unchanged; measure answers the widest
+child as the minimum and one line as the natural, and the height for a
+width from the lines that width allows); WinUI: reindex hands a wrapping
+row to reflow_wrap, which re-stamps the Grid from its own ActualWidth into
+Auto tracks, and the row's LayoutUpdated re-runs it only when the breaks
+moved. align.steps' `row@wrapped` flows six 100x20 images: exact pixel
+widths, so every lane breaks them onto two lines (desktops four and two,
+phones three and three; a third line needs under 316 points), and
+`row@plain` is the one-line control. Nine spellings, `wrap(bool)` on a
+row handle in both zones.
+Matrix #14 failed every Windows align leg at the BASELINE read, 37s
+each, and the auto grid's adaptive leg beside them: the previous fix's
+`InvalidateArrange()` on a busy borrow, raised from a LayoutUpdated that
+the reader's own UpdateLayout had fired, is a layout cycle inside the
+read (docs/traps.md). Both handlers hop the dispatcher now.
+And the width a wrapping row fits on WinUI is its PARENT's: a Grid of
+Auto tracks is granted its whole one-line desired width, so its own
+ActualWidth is the overflow and reads one line (docs/traps.md,
+`wrap_width`).
+
 ## §3 — the grid that fits: `columns: auto` with a minimum column width
 
 - `columns` gains `auto`, with a new prop `min_column_width` (points):

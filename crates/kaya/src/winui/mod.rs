@@ -421,6 +421,11 @@ struct CoreState {
     grid_min_col: HashMap<u64, f64>,
     grid_auto_cols: HashMap<u64, i32>,
     auto_grids: std::collections::HashSet<u64>,
+    /// The rows that flow, the ones whose LayoutUpdated is wired, and each
+    /// one's last line breaks (docs/layout-knobs-plan.md §2).
+    wrapping: std::collections::HashSet<u64>,
+    wrap_wired: std::collections::HashSet<u64>,
+    wrap_breaks: HashMap<u64, Vec<usize>>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
@@ -1920,6 +1925,21 @@ fn auto_grid_track(core: &mut CoreState, grid_id: u64, width: f64) -> windows_co
     Ok(())
 }
 
+/// The busy-borrow hop: the same width, tracked from a dispatcher callback
+/// after the reader that held the core has returned.
+fn auto_grid_retry(gid: u64, width: f64) {
+    let Some(dispatcher) = DISPATCHER.get() else { return };
+    let handler = DispatcherQueueHandler::new(move || {
+        CORE.with(|slot| {
+            let Ok(mut core) = slot.try_borrow_mut() else { return };
+            let Some(core) = core.as_mut() else { return };
+            let _ = auto_grid_track(core, gid, width);
+        });
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
 fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
         return Ok(());
@@ -2103,6 +2123,127 @@ fn reindex_labeled(core: &CoreState, id: WidgetId, grid: &Grid) -> windows_core:
     Ok(())
 }
 
+/// The lines a wrapping row's children fall onto at `width`: the index
+/// each line starts at, from the children's own desired widths.
+fn wrap_lines(core: &CoreState, order: &[WidgetId], width: f64, gap: f64) -> windows_core::Result<Vec<usize>> {
+    let mut breaks = vec![0usize];
+    let mut x = 0.0;
+    for (i, child) in order.iter().enumerate() {
+        let Some(widget) = core.widgets.get(child) else { continue };
+        let element: FrameworkElement = widget.element()?.cast()?;
+        let w = f64::from(element.DesiredSize()?.Width);
+        let first = *breaks.last().unwrap() == i;
+        let next = x + if first { 0.0 } else { gap } + w;
+        if !first && width > 0.0 && next > width {
+            breaks.push(i);
+            x = w;
+        } else {
+            x = next;
+        }
+    }
+    Ok(breaks)
+}
+
+/// THE WIDTH A WRAPPING ROW FITS: its PARENT's content width, never its
+/// own. A Grid of Auto tracks desires the whole one-line width and WinUI
+/// grants a desired size larger than the space, so the row's own
+/// ActualWidth is the overflow (six 100px images read ONE line at 508,
+/// the Windows lane 2026-09-06); the parent's box is what the row has.
+fn wrap_width(grid: &Grid) -> f64 {
+    if let Ok(parent) = grid.Parent().and_then(|p| p.cast::<FrameworkElement>()) {
+        let mut width = parent.ActualWidth().unwrap_or(0.0);
+        if let Ok(host) = parent.cast::<Grid>() {
+            if let Ok(pad) = host.Padding() {
+                width -= pad.Left + pad.Right;
+            }
+        }
+        if width > 0.0 {
+            return width;
+        }
+    }
+    grid.ActualWidth().unwrap_or(0.0)
+}
+
+/// A ROW THAT FLOWS (docs/layout-knobs-plan.md §2) is a Grid re-stamped
+/// from the width it has: Auto tracks, each child at its line and slot,
+/// leading-aligned. Reached from reindex and from the row's LayoutUpdated,
+/// which re-runs it only when the breaks moved.
+fn reflow_wrap(core: &CoreState, parent: WidgetId, grid: &Grid, order: &[WidgetId]) -> windows_core::Result<Vec<usize>> {
+    let gap = grid.ColumnSpacing()?;
+    grid.SetRowSpacing(gap)?;
+    let width = wrap_width(grid);
+    let breaks = wrap_lines(core, order, width, gap)?;
+    let lines = breaks.len();
+    let per_line = (0..lines)
+        .map(|l| {
+            let end = if l + 1 < lines { breaks[l + 1] } else { order.len() };
+            end - breaks[l]
+        })
+        .max()
+        .unwrap_or(0);
+    let cols = grid.ColumnDefinitions()?;
+    cols.Clear()?;
+    for _ in 0..per_line.max(1) {
+        let def = ColumnDefinition::new()?;
+        def.SetWidth(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+        cols.Append(&def)?;
+    }
+    let rows = grid.RowDefinitions()?;
+    rows.Clear()?;
+    for _ in 0..lines.max(1) {
+        let def = RowDefinition::new()?;
+        def.SetHeight(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+        rows.Append(&def)?;
+    }
+    for (i, child) in order.iter().enumerate() {
+        let Some(widget) = core.widgets.get(child) else { continue };
+        let element: FrameworkElement = widget.element()?.cast()?;
+        let line = breaks.iter().rposition(|b| *b <= i).unwrap_or(0);
+        Grid::SetRow(&element, line as i32)?;
+        Grid::SetColumn(&element, (i - breaks[line]) as i32)?;
+        element.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Left)?;
+        element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Top)?;
+    }
+    Ok(breaks)
+}
+
+/// A wrapping row's LayoutUpdated body: the breaks its width allows now,
+/// a reflow only when they moved.
+fn wrap_track(core: &mut CoreState, rid: u64, probe: &Grid) {
+    if !core.wrapping.contains(&rid) {
+        return;
+    }
+    let order: Vec<WidgetId> = core
+        .child_order
+        .children(WidgetId(rid))
+        .iter()
+        .copied()
+        .filter(|c| !core.folded_into.contains_key(&c.0))
+        .collect();
+    let gap = probe.ColumnSpacing().unwrap_or(0.0);
+    let width = wrap_width(probe);
+    let Ok(breaks) = wrap_lines(core, &order, width, gap) else { return };
+    if core.wrap_breaks.get(&rid) != Some(&breaks) {
+        if let Ok(placed) = reflow_wrap(core, WidgetId(rid), probe, &order) {
+            core.wrap_breaks.insert(rid, placed);
+        }
+    }
+}
+
+/// The busy-borrow hop for a wrapping row (auto_grid_retry's twin).
+fn wrap_retry(rid: u64, probe: Grid) {
+    let Some(dispatcher) = DISPATCHER.get() else { return };
+    let handler = DispatcherQueueHandler::new(move || {
+        CORE.with(|slot| {
+            let Ok(mut core) = slot.try_borrow_mut() else { return };
+            let Some(core) = core.as_mut() else { return };
+            wrap_track(core, rid, &probe);
+        });
+        Ok(())
+    });
+    let _ = dispatcher.0.TryEnqueue(&handler);
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let grid = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
@@ -2125,6 +2266,21 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         .filter(|c| !core.folded_into.contains_key(&c.0))
         .collect();
     let order = &order[..];
+    if !vertical && core.wrapping.contains(&parent.0) {
+        // The children must be in the panel for their desired sizes to
+        // exist; the flex path below appends them, so stamp membership
+        // here and let the flow place them.
+        let slots = grid.Children()?;
+        slots.Clear()?;
+        for child in order {
+            if let Some(widget) = core.widgets.get(child) {
+                slots.Append(&widget.element()?)?;
+            }
+        }
+        grid.UpdateLayout()?;
+        reflow_wrap(core, parent, &grid, order)?;
+        return Ok(());
+    }
     // A DECLARED TABLE OWNS THREE TRACKS OF ITS OWN — the header, the
     // rule and the scroll host — and its rows are placed inside the
     // host's band panel, one track down past the top spacer
@@ -12386,10 +12542,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                                 // A harness read's UpdateLayout raises this
                                 // INSIDE its borrow (adaptive_java read three
                                 // columns at 480, matrix #13): a busy borrow
-                                // asks for one more pass instead of dropping
-                                // the width on the floor.
+                                // hops the dispatcher and tracks the same
+                                // width once the reader is done — never a
+                                // layout invalidation from inside the pass,
+                                // which is a layout CYCLE (matrix #14,
+                                // docs/traps.md).
                                 let Ok(mut core) = slot.try_borrow_mut() else {
-                                    let _ = probe.InvalidateArrange();
+                                    auto_grid_retry(gid, width);
                                     return;
                                 };
                                 let Some(core) = core.as_mut() else { return };
@@ -12407,6 +12566,35 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Grid2D(_), Prop::MinColumnWidth, Value::F64(min)) => {
                     core.grid_min_col.insert(id.0, min);
                     core.grid_auto_cols.remove(&id.0);
+                    core.child_order.mark(id);
+                }
+                (NativeWidget::Row(grid), Prop::Wrap, Value::Bool(on)) => {
+                    if on {
+                        core.wrapping.insert(id.0);
+                    } else {
+                        core.wrapping.remove(&id.0);
+                        core.wrap_breaks.remove(&id.0);
+                    }
+                    if on && core.wrap_wired.insert(id.0) {
+                        // The width is read on LayoutUpdated (no SizeChanged
+                        // here), and only breaks that MOVED reflow.
+                        let rid = id.0;
+                        let probe = grid.clone();
+                        let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                            CORE.with(|slot| {
+                                // A busy borrow hops the dispatcher (the auto
+                                // grid's rule; docs/traps.md).
+                                let Ok(mut core) = slot.try_borrow_mut() else {
+                                    wrap_retry(rid, probe.clone());
+                                    return;
+                                };
+                                let Some(core) = core.as_mut() else { return };
+                                wrap_track(core, rid, &probe);
+                            });
+                            Ok(())
+                        });
+                        grid.LayoutUpdated(&laid)?;
+                    }
                     core.child_order.mark(id);
                 }
                 (NativeWidget::Grid2D(grid), Prop::Spacing, Value::F64(gap)) => {
@@ -14240,6 +14428,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             grid_min_col: HashMap::new(),
             grid_auto_cols: HashMap::new(),
             auto_grids: std::collections::HashSet::new(),
+            wrapping: std::collections::HashSet::new(),
+            wrap_wired: std::collections::HashSet::new(),
+            wrap_breaks: HashMap::new(),
             radio_options: HashMap::new(),
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -17099,6 +17290,48 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<winui read failed: {e:?}>"))
+    }
+
+    fn row_lines(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_ui_read(move |core| {
+            let registry = container_registry(core, t.kind);
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let grid = registry[i].clone();
+            grid.UpdateLayout()?;
+            // Geometry: each child's cross box in the row's own space; a run
+            // of overlapping boxes is one line.
+            let children = grid.Children()?;
+            let mut boxes: Vec<(f64, f64)> = Vec::new();
+            for k in 0..children.Size()? {
+                let cell: UIElement = children.GetAt(k)?;
+                let at = cell
+                    .TransformToVisual(&grid.cast::<UIElement>()?)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                let element: FrameworkElement = cell.cast()?;
+                let top = f64::from(at.Y);
+                boxes.push((top, top + element.ActualHeight()?));
+            }
+            if boxes.is_empty() {
+                return Ok("no cells".to_string());
+            }
+            boxes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mut clusters = 0;
+            let mut reach = f64::MIN;
+            for (start, end) in boxes {
+                if clusters == 0 || start >= reach - 0.5 {
+                    clusters += 1;
+                }
+                reach = reach.max(end);
+            }
+            Ok(if clusters == want {
+                String::new()
+            } else {
+                format!("{clusters} line edges, wanted {want}")
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn cross_mode(&self, t: crate::harness::Target) -> String {

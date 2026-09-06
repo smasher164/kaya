@@ -22,3 +22,9 @@ expect_aligned row@plain "center"
 # a text field's column-wide default opted OUT, and a button opted IN.
 expect_hugs textarea@optout
 expect_breadth button@fills
+# wrap (docs/layout-knobs-plan.md §2): row@wrapped flows six 100x20 images —
+# exact pixel widths, so every lane's window breaks them onto two lines
+# (a third would need under 316 points) — and row@plain, which does not
+# wrap, is the one-line control.
+expect_lines row@wrapped 2
+expect_lines row@plain 1
