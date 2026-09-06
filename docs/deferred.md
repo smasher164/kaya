@@ -11814,3 +11814,40 @@ THE BREADTH SLICE, two worktrees merged 2026-09-05:
   bytes to the generated setters' in both zones. The ANDROID roster waits on
   the Compose arm above.
 
+## GAP — kaya has no filtered view over a collection: every filter is the app's own diff (opened 2026-09-06)
+KEY: filtered view, collection pipelines, filter predicate, visible set, search filter, QSortFilterProxyModel, GtkFilterListModel
+
+The collection primitives are insert, update, update_field, remove and
+move; `when` binds one app-wide Bool and rebuilds rather than hides; there
+is no `visible` prop. So an app that filters a list keeps a mirror of the
+visible set and, on each change, removes the keys that stopped matching
+and inserts the ones that started, re-sending each record and restamping
+its row. The portfolio's reconciler (guests/python/portfolio.py) is the
+one precedent, and the task manager's search field (docs/search-plan.md
+S9) is the first text-driven one. The parity survey names the gap
+("collection pipelines as reusable objects",
+docs/probes/roadmap-framework-parity-2026-09-05.md) and docs/tasks-plan.md
+cited it with no entry behind it; this is the entry. At nine tasks the
+diff is trivial and non-undoable by the app's own choice; the cost that
+would justify a framework view is `place()`-style composition (an edit
+that stops matching must not insert) and the portfolio's scale.
+TRIGGER: a consumer filtering thousands of rows from a text field, or a
+second app writing the same reconciler. Then the design question is a
+derived collection (a predicate over a source collection, stamped like a
+For) versus a hide-without-forgetting prop, and DESIGN.md's own note
+prefers the prop for the second.
+
+## DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06)
+KEY: submitted occurrence, submit on Return, QuerySubmitted, onSubmit, search key, occurrence 27
+
+No occurrence in the spec reports Return in a text field; `text_changed`
+is the entry's only event. The search field's design pass
+(docs/search-plan.md S4) refused one for S1 because a filter acts on
+every keystroke and Return has nothing to publish, and recorded the shape:
+`submitted`, occurrence 27 with `value_committed`'s layout (the
+per-change event beside the settled one), a gate in
+tools/check-slider-commit.py's shape holding the four backends to
+"per-keystroke is not the submit". The phones already show the Search
+key on a search field and dismiss the keyboard on it.
+TRIGGER: an app whose search asks a server, or a form whose Return
+submits. It arrives with the shape taken, so the work is the arms.
