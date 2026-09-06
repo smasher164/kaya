@@ -10887,6 +10887,11 @@ TENTH SIGHTING, 2026-09-05, the task manager's fourth matrix (f65bd32e):
 ended=false`), the tasks leg's own reorder green beside it. Four
 matrices on one afternoon, four sightings.
 
+ELEVENTH SIGHTING, 2026-09-05, the sixth matrix (3d132bf7): `dnd-go`
+alone, the other four lanes and the gates green (the fifth matrix, one
+hour earlier, was the day's one fully green run). Six matrices on the
+afternoon, five with a drag sighting on one android leg or another.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 
