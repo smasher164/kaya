@@ -15,6 +15,11 @@ dev_shell_or_die()
 # built it: this refuses a stale one NAMING THE BUILD, or rebuilds with
 # --build.
 #
+# AND THE COMPILED GUEST IS THE LANE'S BUILD OR IT IS REFUSED (2026-09-06,
+# docs/traps.md): --build runs the leg's language through
+# tools/lib/lanes/mac.py's own build, and a guest staged against another
+# spec is named here rather than left to panic at launch.
+#
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
 import os
@@ -54,6 +59,17 @@ if "--build" in flags:
         if subprocess.run(cmd, cwd=ROOT).returncode != 0:
             print(f"run-leg: build failed: {' '.join(cmd)}", file=sys.stderr)
             sys.exit(1)
+    # THE LEG'S OWN LANGUAGE, THE LANE'S OWN BUILD: the same function
+    # validate-mac.py pools, streaming to this terminal. rust is built
+    # below (per example), and python and js run from source.
+    if lang in lane.GUEST_BUILDS:
+        print(f"run-leg: building the {lang} guests the lane's way",
+              flush=True)
+        guest_rc = lane.build_guests(ROOT, [lang])[lang]
+        if guest_rc != 0:
+            print(f"run-leg: the {lang} guest build failed (rc {guest_rc})",
+                  file=sys.stderr)
+            sys.exit(1)
 # THE WALL: both artifacts carry the id of the sources they came from,
 # and a hand run gets the lane's refusal, not a stale answer.
 for what, path, fix in (("libkaya", LIB, "cargo build --locked --lib"),
@@ -67,15 +83,13 @@ for what, path, fix in (("libkaya", LIB, "cargo build --locked --lib"),
         print(f"run-leg: {what} is stale or missing for this tree — run "
               f"`{fix}` (or re-run with --build)", file=sys.stderr)
         sys.exit(1)
-
-
-def hs_bin(name):
-    got = subprocess.run(["cabal", "list-bin", name, "-v0"],
-                         cwd=ROOT / "guests/haskell", stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL, check=False, text=True,
-                         encoding="utf-8", errors="replace")
-    return got.stdout.strip()
-
+# AND THE SAME WALL FOR THE STAGED GUEST: a compiled binding refuses a
+# library speaking another spec, so this names the mismatch here instead
+# of spending the leg on the panic (docs/deferred.md's run-leg entry).
+_spec = lane.spec_stamp_problem(ROOT, lang)
+if _spec is not None:
+    print(f"run-leg: {_spec}", file=sys.stderr)
+    sys.exit(1)
 
 # A RUST GUEST CARRIES ITS OWN CORE: the example links the crate statically,
 # so the two verified artifacts above vouch for nothing it runs. Build it
@@ -93,7 +107,7 @@ if lang == "rust":
     staged.unlink(missing_ok=True)
     shutil.copy2(ROOT / f"target/debug/examples/{stem}", staged)
 
-argv = lane.leg_argv(scene, lang, hs_bin)
+argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
 env = dict(os.environ)
 env.update(lane.leg_env(ROOT, scene, lang, appearance))
 print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)

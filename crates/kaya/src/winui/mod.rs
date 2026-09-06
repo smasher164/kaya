@@ -18456,6 +18456,10 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn mounted(&self) -> bool {
+        Self::on_ui_read(move |core| Ok(!core.mounted_roots.is_empty())).unwrap_or(false)
+    }
+
     fn root_fills(&self) -> String {
         Self::on_ui_read(move |core| {
             // The mounted root is the window's Content; the content

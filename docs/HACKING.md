@@ -47,6 +47,14 @@ A Rust leg's example is built and restaged on EVERY run, --build or not:
 it links the core statically, so the two dylibs vouch for nothing it
 runs (docs/traps.md: A hand-run leg uses whatever interpreter).
 
+`--build` rebuilds libkaya and the interpreter, AND builds the leg's own
+language the way the lane builds it (the seven compiled languages share
+one copy of each build with tools/validate-mac.py, in
+tools/lib/lanes/mac.py). Every one of those builds stamps the spec hash
+it compiled against into target/guest-specs/<lang>.spec, and a run whose
+staged guest carries another spec is refused by name — both hashes, and
+the panic the leg would otherwise die of — rather than started.
+
 A hand run that fails can keep its verb trace: `KAYA_VERB_TRACE=<file>
 tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt
 record to that file on a failure alone (crates/kaya/src/vtrace.rs; the
@@ -237,6 +245,37 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   (KAYA_BACKEND is gone); what remains is locating the SwiftUI
   interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.py for the
   exact pattern).
+
+## Reading a failed lane leg (the instruments, 2026-09-06)
+
+Every runner prints the verdict; what follows it is where the cause is,
+and each lane prints its own instruments under a failed leg's log:
+
+- `KAYA_HARNESS: scene ready after Nms` — every harness, the first line
+  after the epoch: the gap between the script's handover and the scene's
+  first mount. The first step's clock starts there (the scene-ready wait,
+  tools/check-harness-ceiling.py). A leg that never prints it ended in the
+  scene-ready sentence, not in a step.
+- Android `KAYA_DIAG:` lines — the Compose runner's ring, dumped beside a
+  FAILED verdict and echoed by tools/android/run-emulator.py: the verb's
+  own dispatch with the node and tag it resolved, the widget's handler
+  when a real tap ran it (`header tap`, `select tap`, `radio tap`), every
+  apply batch, and the sort's own `apply columns`. A dispatch with no
+  handler is a tap that never reached the lambda; a handler with no batch
+  is a guest that never answered.
+- Android `KAYA_DRAG_EVENT: aim …` — one line per drag: both boxes, both
+  injected points and each point's distance to the nearest edge of the
+  box the SETTLE observed, with the destination's node id, in screen
+  pixels. `entered=0` beside an aim inside the box is the gesture's; an
+  aim outside is the plan's.
+- Linux `verb=clipboard` records — the flight recorder's, printed by
+  tools/linux/run-suites.sh under a failed leg: each seed's settle
+  (`rounds`/`ms`) and each read's premise AND answer (what another process
+  listed against what this one was handed, and what materialized).
+  `gtk_window_active` is on the line but names no cause: it reads false
+  for the whole life of a green wayland leg (docs/traps.md).
+- run-leg refusals: a compiled guest staged against another spec is
+  named before the leg with both hashes; `--build` is the fix.
 
 ## Layout forensics (when a share assertion fails)
 

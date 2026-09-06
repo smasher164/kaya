@@ -432,7 +432,14 @@ in docs/deferred.md.
    `tools/check-harness-ceiling.py` (THE HARNESS LOSES LEGIBLY: every
    step is entered with a CEILING, and once a verdict is published the
    process leaves within the GRACE whether or not the platform's exit
-   path runs — one rule, all three harnesses. A step's retry deadline is
+   path runs — one rule, all three harnesses. AND THE FIRST STEP'S CLOCK
+   STARTS AT THE MOUNT, since 2026-09-06: each runner waits for the
+   scene's root to be mounted before its first step, armed on the
+   watchdog under one literal and ending in ONE sentence when no root
+   ever comes — the android `varied-python` leg's first step had timed
+   out at 5s on a starved host with every later step green, twice in
+   three matrices; the wait's own print (`scene ready after Nms`) is the
+   push-to-apply gap that class needed measured. A step's retry deadline is
    read only AFTER the step returns and every step blocks in a hop to
    the platform's UI thread with no timeout of its own, so a saturated
    app printed NOTHING, no verdict and no timeout sentence, until

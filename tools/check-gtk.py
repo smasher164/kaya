@@ -163,6 +163,22 @@ ENTRIES = (
      "slider.scale.adjustment().set_upper(v);\n                    "
      "slider_marks(slider);",
      "slider.scale.adjustment().set_upper(v);"),
+    # THE SEED'S TWO LINKS, NEITHER OF WHICH ANY LEG CAN SEE (2026-09-06,
+    # docs/deferred.md's `clipboard-python-wayland` WATCH). `materialize`
+    # reads THE APP'S OWN formats, so a seed that returns while only the
+    # FOREIGN targets list the type leaves a read that answers None — which
+    # every guest renders as "empty". On a quiet host the app's view has
+    # already caught up by the next step, so the race is green on every leg
+    # of every lane and shows only under a contended matrix; both
+    # perturbations below restore it silently.
+    ("the seed waiting on this process's own view of the selection",
+     "if view.generation != before.generation && view.sees {",
+     "if view.sees {"),
+    ("the app's own view sampled BEFORE the foreign write",
+     "let before = clip_app_view(kind);\n        "
+     "foreign_clip_write(mime, bytes);",
+     "foreign_clip_write(mime, bytes);\n        "
+     "let before = clip_app_view(kind);"),
 )
 
 

@@ -227,7 +227,7 @@ with scratch_dir("check-design-generation-") as tmp:
          "are linked by this shell's cc, and flake.nix's buildInputs SDK "
          "is what stamps them"),
         ("swift", "modern", "file", str(tmp / "probe-swift"), {},
-         "the swift legs (validate-mac.py's build_swift) and the SwiftUI "
+         "the swift legs (tools/lib/lanes/mac.py's build_swift) and the SwiftUI "
          "interpreter, both built through kaya_swiftc against Apple's "
          "SDK"),
         ("python", "compat", "which", "python3", {},

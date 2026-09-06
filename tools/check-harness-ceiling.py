@@ -81,8 +81,12 @@ SHAPES = {
                    r"harness_exit\("),
     "KayaSwiftUI.swift": (r"watchdog\.enter\(([^)]*)\)",
                           r"watchdog\.published\(", r"_exit\("),
+    # THE VERDICT'S OWN publish, by its code: the scene-ready wait
+    # publishes too (`published(1)`), and a bare `published(` would let
+    # that stand in for the one over the exit hop — which is the census
+    # accepting the very shape its negative removes.
     "KayaCompose.kt": (r"watchdog\.enter\(([^)]*)\)",
-                       r"watchdog\.published\(", r"\.halt\("),
+                       r"watchdog\.published\(code\)", r"\.halt\("),
 }
 
 # ONE SENTENCE, THREE HARNESSES. Everything after the elapsed number is
@@ -102,6 +106,15 @@ TAIL = (
 GRACE_NOTE = (
     "s later — leaving under the verdict's own code (the harness exit "
     "grace)"
+)
+# THE SCENE-READY WAIT (docs/deferred.md, the android `varied-python`
+# WATCH): the first step's clock starts once a root is mounted, not at the
+# script's handover, in all three runners — armed on the watchdog under
+# ONE literal and ending, when no root ever comes, in ONE sentence.
+READY_ARM = "<scene-ready wait>"
+READY_SENTENCE = (
+    "KAYA_SELFTEST: FAILED (the scene mounted no root inside the "
+    "scene-ready wait — the first step's clock never started)"
 )
 
 
@@ -162,6 +175,12 @@ def check(harness, swiftui, compose):
                        f"step nothing armed is a step that can hang "
                        f"with no verdict, and a fixed string names "
                        f"every step the same")
+        if READY_ARM not in body:
+            bad.append(f"{paths[label]}'s script runner never arms the "
+                       f"scene-ready wait ({READY_ARM!r}) — the first "
+                       f"step's clock would start at the script's "
+                       f"handover, which is the starved first step the "
+                       f"android varied-python WATCH recorded")
         if not re.search(publish_pat, body):
             bad.append(f"{paths[label]}'s script runner never publishes "
                        f"the verdict to the watchdog (/{publish_pat}/) "
@@ -186,7 +205,8 @@ def check(harness, swiftui, compose):
         flattened = flat(text)
         for what, want in (("verdict's opening", OPENING),
                            ("verdict's sentence", TAIL),
-                           ("exit-grace note", GRACE_NOTE)):
+                           ("exit-grace note", GRACE_NOTE),
+                           ("scene-ready sentence", READY_SENTENCE)):
             if want not in flattened:
                 bad.append(f"{paths[label]} does not carry the {what} "
                            f"the other harnesses carry — one wedge "
@@ -274,12 +294,41 @@ g.negative("a Rust harness whose ceiling cannot name the step it was "
            lambda: check(str(harness_fixed), SWIFTUI, COMPOSE),
            want="never arms the step ceiling with the step itself")
 
+harness_unready = g.perturb(
+    "the harness.rs unarmed scene-ready wait perturbation", HARNESS,
+    r'watch\.enter\("<scene-ready wait>"\.to_string\(\)\);\n', "")
+g.negative("a Rust harness whose scene-ready wait arms nothing",
+           lambda: check(str(harness_unready), SWIFTUI, COMPOSE),
+           want="never arms the scene-ready wait")
+
+swiftui_ready_drift = g.perturb(
+    "the KayaSwiftUI.swift scene-ready sentence drift", SWIFTUI,
+    r"the first step's clock never started", "the first step's clock did not start")
+g.negative("a SwiftUI scene-ready sentence that drifted",
+           lambda: check(HARNESS, str(swiftui_ready_drift), COMPOSE),
+           want="does not carry the scene-ready sentence")
+
 swiftui_unarmed = g.perturb(
     "the KayaSwiftUI.swift unarmed-step perturbation", SWIFTUI,
     r"watchdog\.enter\(line\)\n", "")
 g.negative("a SwiftUI step loop that arms nothing",
            lambda: check(HARNESS, str(swiftui_unarmed), COMPOSE),
            want="never arms the step ceiling with the step itself")
+
+compose_unready = g.perturb(
+    "the KayaCompose.kt unarmed scene-ready wait perturbation", COMPOSE,
+    r'watchdog\.enter\("<scene-ready wait>"\)\n', "")
+g.negative("an Android harness whose scene-ready wait arms nothing",
+           lambda: check(HARNESS, SWIFTUI, str(compose_unready)),
+           want="never arms the scene-ready wait")
+
+compose_ready_drift = g.perturb(
+    "the KayaCompose.kt scene-ready sentence drift", COMPOSE,
+    r"scene-ready wait — the first step's clock never started",
+    "scene-ready wait — the first step's clock did not start")
+g.negative("an Android scene-ready sentence that drifted",
+           lambda: check(HARNESS, SWIFTUI, str(compose_ready_drift)),
+           want="does not carry the scene-ready sentence")
 
 compose_drifted = g.perturb(
     "the KayaCompose.kt ceiling-drift perturbation", COMPOSE,
@@ -352,7 +401,7 @@ g.negative("an absent harness",
            lambda: check(HARNESS, SWIFTUI, str(absent)),
            want=f"cannot read {absent}")
 
-g.negatives_ran(9)
+g.negatives_ran(13)
 
 # --- Clause B: the runtime negative, where the toolchain exists. ------
 if platform.system() == "Darwin":

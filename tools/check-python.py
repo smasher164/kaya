@@ -89,6 +89,43 @@ def converted():
     return out
 
 
+def unconverted():
+    """Every OTHER tools/**/*.py: the lane tables, the lib helpers, the
+    probes. They carry no prelude header — a lanes/ module is imported,
+    not launched, and its depth has no header shape — so the ten rules
+    above cannot reach them, but RULE 11 MUST: a command is a command
+    wherever it is written, and moving one out of a policed population
+    into an unpoliced one is a measured defect here (the 2026-08-31
+    audit, twelve invocations that left check-shell's *.sh population
+    for nothing). tools/lib/lanes/mac.py took the mac lane's seven guest
+    builds on 2026-09-06 — javac among them — for exactly that reason.
+    """
+    done = set(converted())
+    out = {}
+    for p in sorted(gate.walk("*.py", under="tools")):
+        rel = str(p.relative_to(ROOT))
+        if rel in done:
+            continue
+        out[rel] = p.read_text(encoding="utf-8")
+    return out
+
+
+def command_census(files):
+    """Rule 11 alone, over {path: text}."""
+    bad = []
+    for path, text in sorted(files.items()):
+        try:
+            tree = ast.parse(text, filename=path)
+        except SyntaxError as e:
+            bad.append(f"{path}:{e.lineno}: does not parse — {e.msg}. A "
+                       f"module a gate or a lane imports cannot be trusted "
+                       f"to have run the branch you are reading.")
+            continue
+        for node in ast.walk(tree):
+            bad.extend(command_findings(path, node))
+    return bad
+
+
 # Rule 9's deliberate fakes: a self-test that needs a script which must
 # NOT exist names it here, with the reason.
 SCRIPT_EXEMPT = {
@@ -469,13 +506,32 @@ else:
     print("check-python: self-test N12 — the same body under an exempt name "
           "is quiet, so the table is live")
 
-gate.negatives_ran(18)
+# N20 — rule 11 over the UNCONVERTED population, watched on the file the
+# mac lane's guest builds moved into. A javac with no -encoding there is
+# the same defect it is in a gate body, and until this clause existed it
+# was seen by nothing at all.
+mac_body = gate.doctor(
+    "N20 rule 11 — a javac with no -encoding in an unconverted module",
+    gate.read("tools/lib/lanes/mac.py"),
+    r'^    return _run\(\["javac", "-encoding", "UTF-8", "-d",$',
+    '    return _run(["javac", "-d",', want=1, flags=re.M)
+gate.negative("N20 rule 11 — a javac with no -encoding in an unconverted "
+              "module",
+              lambda b=mac_body: command_census({"tools/lib/lanes/mac.py": b}),
+              want="javac compile without -encoding")
+
+gate.negatives_ran(19)
 
 # --------------------------------------------------------------- clauses
 
 gate.counted("converted gate bodies", files, floor=7)
 
 for line in census(files):
+    gate.finding(line)
+
+others = unconverted()
+gate.counted("other tools/ python bodies (rule 11 only)", others, floor=20)
+for line in command_census(others):
     gate.finding(line)
 
 # Every exemption must name a file that still exists, or it has rotted

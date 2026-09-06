@@ -6317,6 +6317,23 @@ private func kayaRunScript(_ script: String) {
         KayaVTrace.dump(
             "an uncaught NSException: \(exception.name.rawValue): \(exception.reason ?? "")")
     }
+    // THE SCENE-READY WAIT (harness.rs is the norm; docs/deferred.md, the
+    // android `varied-python` WATCH): the first step's clock starts once a
+    // root is mounted. Armed like a step, bounded short of the ceiling.
+    watchdog.enter("<scene-ready wait>")
+    let readyDeadline = Date().addingTimeInterval(max(1, kayaStepCeilingSetting() - 5))
+    while !(DispatchQueue.main.sync {
+        kayaScene.windows.values.contains(where: kayaWindowHasMountedContent)
+    }) {
+        if Date() > readyDeadline {
+            print(
+                "KAYA_SELFTEST: FAILED (the scene mounted no root inside the scene-ready wait — the first step's clock never started)")
+            watchdog.published(1)
+            exit(1)
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    print("KAYA_HARNESS: scene ready after \(Int(Date().timeIntervalSince(start) * 1000))ms")
     var stepOrdinal = 0
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.

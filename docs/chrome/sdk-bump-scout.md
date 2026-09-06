@@ -199,7 +199,7 @@ family reads the main executable, not the loaded image). So today:
 - every other leg's host process is stamped SDK 14.4 / 11.3 → **compatibility generation**
 
 **The mac lane is ALREADY running both design generations, and has been.**
-`tools/validate-mac.py:659-664` says so in `build_swift`'s docstring — "the fleet's
+tools/lib/lanes/mac.py says so in `build_swift`'s docstring — "the fleet's
 modern-stamp legs" — and `docs/deferred.md:967-969` says so explicitly ("the
 swift mac guests compile against the system toolchain and exercise the modern
 generation — both covered on purpose"). But no gate asserts it.

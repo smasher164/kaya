@@ -339,6 +339,85 @@ if not any("tools/guest/ghosthelper.ps1 is staged" in f for f in _f7):
 print("check-staging: self-test — N7 (a guest .ps1 the deploy list does "
       "not know) refused")
 
+# --- the STAGED GUEST'S SPEC, every branch watched -------------------
+# A compiled guest carries the wire hash its binding was generated from
+# and refuses a library speaking another one, so a guest staged before a
+# spec move dies at LAUNCH (docs/traps.md 2026-09-06 — the go leg panicked
+# `library speaks spec 0x…, this binding was generated from 0x…`). The
+# lane's builds stamp the spec they compiled against and tools/run-leg.py
+# reads it back. NO CLAUSE OVER DISK CAN HOLD THIS: the stamps live under
+# target/, which a clean tree does not have, so the rule is proven here on
+# a scratch tree — and all THREE refusals plus both quiet answers are made
+# to print, because a diagnostic branch nobody has seen print is a guess
+# (CLAUDE.md invariant 3).
+mac_lane = load_mac_lane(ROOT / "tools/lib/lanes/mac.py")
+SPEC_ROOT = gate.scratch() / "spec"
+(SPEC_ROOT / "bindings/c").mkdir(parents=True)
+HEADER_TEXT = (ROOT / "bindings/c/kaya_wire.h").read_text(encoding="utf-8")
+(SPEC_ROOT / "bindings/c/kaya_wire.h").write_text(HEADER_TEXT,
+                                                  encoding="utf-8")
+WANT_SPEC = mac_lane.spec_hash(SPEC_ROOT)
+if not WANT_SPEC:
+    print("check-staging: SELF-TEST FAIL (bindings/c/kaya_wire.h declares no "
+          "KAYA_SPEC_HASH, so every spec clause below is vacuous)",
+          file=sys.stderr)
+    sys.exit(1)
+print(f"check-staging: the tree's spec hash reads {WANT_SPEC}")
+
+
+def spec_case(label, root, lang, stamp, fragment):
+    """One state of the stamp, its answer PRINTED. `stamp` is the stamp
+    file's text, or None for no stamp at all; `fragment` is the text the
+    refusal must carry, or None when the state must be accepted."""
+    p = mac_lane.spec_stamp(root, lang)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.unlink(missing_ok=True)
+    if stamp is not None:
+        p.write_text(stamp, encoding="utf-8")
+    got = mac_lane.spec_stamp_problem(root, lang)
+    print(f"check-staging: {label} -> {got or 'accepted'}")
+    if fragment is None:
+        if got is not None:
+            print(f"check-staging: SELF-TEST FAIL ({label} was REFUSED — the "
+                  f"refusal is unconditional and would fire on a good tree)",
+                  file=sys.stderr)
+            sys.exit(1)
+        return
+    if got is None:
+        print(f"check-staging: SELF-TEST FAIL ({label} was accepted)",
+              file=sys.stderr)
+        sys.exit(1)
+    if fragment not in got:
+        print(f"check-staging: SELF-TEST FAIL ({label} was refused without "
+              f"naming '{fragment}')", file=sys.stderr)
+        sys.exit(1)
+
+
+spec_case("S1 (a compiled guest with no stamp at all)", SPEC_ROOT, "go",
+          None, "Re-run with --build")
+spec_case("S2 (a stamp carrying this tree's own spec)", SPEC_ROOT, "go",
+          WANT_SPEC + "\n", None)
+spec_case("S3 (a guest staged before the spec moved)", SPEC_ROOT, "go",
+          gate.doctor("S3 the stamp doctored to an older spec",
+                      WANT_SPEC + "\n", re.escape(WANT_SPEC),
+                      "0x0000000000000000"),
+          f"was built against spec 0x0000000000000000 and this tree's "
+          f"bindings/c/kaya_wire.h says {WANT_SPEC}")
+# python runs from source, so its binding is always the tree's: an
+# unstamped python leg must be quiet or every hand run of one is refused.
+spec_case("S5 (a language with no compiled artifact)", SPEC_ROOT, "python",
+          None, None)
+
+BROKEN_ROOT = gate.scratch() / "spec-broken"
+(BROKEN_ROOT / "bindings/c").mkdir(parents=True)
+(BROKEN_ROOT / "bindings/c/kaya_wire.h").write_text(
+    gate.doctor("S4 the generated header's KAYA_SPEC_HASH renamed away",
+                HEADER_TEXT, r"^#define KAYA_SPEC_HASH\b",
+                "#define KAYA_SPEC_HASH_MOVED", flags=re.M),
+    encoding="utf-8")
+spec_case("S4 (a header that declares no KAYA_SPEC_HASH)", BROKEN_ROOT, "go",
+          WANT_SPEC + "\n", "declares no KAYA_SPEC_HASH")
+
 findings = check(ROOT)
 if findings:
     for f in findings:
@@ -347,4 +426,5 @@ if findings:
     sys.exit(1)
 print("check-staging: OK (mac rust staging, windows suite lists, scene "
       "scripts and python guests all derive; the iOS bundle pins one "
-      "orientation per family)")
+      "orientation per family; a staged guest from another spec is refused "
+      "by name)")

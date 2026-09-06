@@ -10984,8 +10984,69 @@ five-minute load 96 by its end): `dnd-go` again, 38s.
 TWENTIETH SIGHTING, 2026-09-06 04:15, matrix #14 (the `wrap` knob):
 `dnd-jvm`, 35s; the android lane's only red.
 
-## GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)
+TWENTY-FIRST ENTRY, 2026-09-06, NOT a sighting: the instrument the sixth
+sighting asked for and the seventeenth restated is in. `kayaDragPlan` now
+prints, in ONE line and ONE space, the aim against the settled box:
+
+    KAYA_DRAG_EVENT: aim seq=5 duration=1500ms decor=0,0
+      source node=5 screen=[32,40,29,16] point=46,48 inside dx=14px dy=8px
+      destination node=8 screen=[32,112,66,16] root=[32,112,66,16]
+      point=65,120 inside dx=33px dy=8px
+
+Screen pixels, the space `input draganddrop` takes, with each point's
+distance to the nearest edge of its own box on each axis — positive inside,
+negative outside — and the destination's ROOT box beside it, because a
+DragEvent's own point is in root space, which is what the `entered … at=`
+line reports. So `entered=0` over a 7-px-wide target now separates a verb
+that aimed outside the box from a gesture the system compressed past it,
+and the destination's NODE ID says whether the plan resolved the target the
+step named.
+
+TWO READINGS OF THE RECORDED SIGHTINGS IT ALREADY CHANGES, from a green
+hand run of the same scene on a quiet emulator (2026-09-06):
+
+- The box `[32, 64, 7, 16]` that shape (a) reported for `drag label#0 to
+  label@item[x]` is, in a green run, **label#1's** box (node=6, the step
+  `drag label@item[y] to label#1`). A settled box of the right shape is not
+  a box of the right NODE, and the aim line names the node now.
+- The third sighting's decode — "injected to (65,120) while the pointer
+  `entered node=7 at=56,88`, so the drop landed in a gap" — is, number for
+  number, what the GREEN run prints at `drag label#0 to label#3`, the step
+  whose expectation IS `drag ended none`: the aim is inside label#3's box
+  (dx=33, dy=8) and node 7 is simply the target the pointer crossed on the
+  way. Read against the green run, "entered a different node than the
+  destination" is not by itself evidence of a bad aim.
+
+The other half of the sixth sighting's ask — a longer `input draganddrop`
+duration under load — is NOT taken here: the aim line is the reading that
+decides whether the duration is even the suspect (an aim inside the box
+with `entered=0` puts it on the gesture; an aim outside puts it on the
+plan), and 1500ms is spent on every drag of every lane.
+
+TWENTY-SECOND, 2026-09-06, matrix #15 (`dnd-jvm`): the first sighting
+read through the aim line — a drag from a seven-pixel source that never
+began, recorded under the keyed-drag earlier-payload WATCH above, which
+it belongs to.
+
+
+## ~~GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)~~
 KEY: run-leg, compiled guest, staged guest, build_ step, spec hash mismatch, hand run
+
+COMPLETE 2026-09-06. The seven per-language builds moved out of
+tools/validate-mac.py into tools/lib/lanes/mac.py as one copy —
+`build_guests(root, langs, log_dir)` pools them for the lane and runs
+the single one a hand run needs — and tools/run-leg.py calls it under
+`--build` for every compiled language, C included. Beside it a marker:
+every build that returns 0 stamps the tree's KAYA_SPEC_HASH into
+target/guest-specs/<lang>.spec, and run-leg refuses before the leg with
+three distinct sentences (no stamp, a stamp that is not this tree's
+naming BOTH hashes and the panic it would die of, and a header that
+declares no hash). tools/check-staging.py watches all five states on a
+scratch tree, acceptances included; tools/check-python.py's rule 11
+grew an unconverted-population sweep so the javac that moved into a
+lane module is still policed. Validated: nine languages green through
+`tools/run-leg.py … --build`, the refusal watched firing on a doctored
+stamp, and the mac lane on the moved builds in the day's closing runs.
 
 run-leg builds the rust example and verifies libkaya and the interpreter,
 but the go, csharp, java, swift, ocaml and haskell guests run from
@@ -10997,7 +11058,36 @@ same move the rust build took: the per-language build into the lane
 module, run-leg calling it under `--build`, and a refusal (not a stale
 run) when a staged guest's binding hash is not the tree's.
 
-## WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)
+## WATCH — the iOS lane under a matrix: one simulator's LocalStorage admission probe hit its slow flow and the lane ran no leg (first sighting 2026-09-06)
+KEY: LocalStorage admission, rc=76, device preparation failed, picker probe, slow flow, ios lane, matrix contention
+
+Matrix #15 (the robustness day; five lanes): `run-sim: LocalStorage
+admission on 8F0680C5-… took 77s (rc=76)` beside 56s and 102s on the other
+two simulators, then `device preparation failed (picker-8F0680C5-… rc=76)`
+and `ios: FAIL (279s, 0 legs)`. rc 76 is the picker probe's own slow-flow
+re-probe (tools/ios/run-sim.py), and the lane refuses to run legs on a
+device whose admission did not settle. The lane standalone twenty minutes
+later: ALL PASS, 128 legs, every admission 11s. The same class as the
+starved dialog legs one step earlier in a leg's life: the simulator's
+LocalStorage prompt under a loaded host. One sighting; the per-device
+admission times are already printed, so the next sighting reads whether
+the 77s was the probe waiting or the probe re-probing, and whether a
+second admission attempt on that one device would have admitted it.
+
+## GAP — of the Compose action verbs only `click` waits for the app's answer; `choose`, `header_click`, `toggle` and `set_value` return the moment they emit (2026-09-06)
+KEY: kayaAwaitQuiet, kayaAwaitAnswer, action returns once the app has answered, choose, header_click, toggle, set_value, Compose runner
+
+Found while reading the sort-click WATCH's cause: the runner's comment
+states the rule "AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT", and
+`click` keeps it (`kayaAwaitQuiet`/`kayaAwaitAnswer`), while the other
+four action verbs return the moment they emit, so the following expect's
+clock starts while the answer is still in flight. Left untaken with the
+deadline fix so one change is read at a time; the fix is the click arm's
+own wait on the four, and the other two runners are to be read for the
+same rule before it lands, since a verb that waits on one platform and
+not another is a divergence in the harness itself.
+
+## ~~WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)~~
 KEY: varied-python, no such target label#0, first step, starved host, android python guest, step ceiling
 
 Matrix #11 (the labelled-row slice; five lanes, one-minute load 264 as the
@@ -11019,8 +11109,23 @@ step green again. Two of three matrices since the class appeared, and the
 android lane standalone green between them: the first step's clock is
 the premise to move, not the guest.
 
+RESOLVED 2026-09-06 (the maintainer's robustness day): the harness waits
+for the scene's root to be MOUNTED before its first step, in all three
+runners — armed on the watchdog under `<scene-ready wait>`, bounded five
+seconds short of the step ceiling, ending in one sentence
+(`SCENE_READY_MISS`) when no root ever comes, and printing
+`KAYA_HARNESS: scene ready after Nms`, which is the push-to-apply gap
+this entry asked to have measured. tools/check-harness-ceiling.py holds
+the arm and the sentence in all three; a never-mounts unit test in
+harness.rs watches the loss path print. The first step's own 5s poll is
+untouched: it now starts from a scene that exists. The Compose half of the scene-ready wait is in KayaCompose.kt: armed on the
+watchdog as `<scene-ready wait>`, bounded at the step ceiling less five
+seconds with a one-second floor, the miss sentence byte-identical to the
+other two harnesses, and `KAYA_HARNESS: scene ready after <n>ms` on the way
+through. tools/check-harness-ceiling.py holds all three. The android python suite standalone the same day: varied-python 3s, green.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
-KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
+KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention, gtk_window_active, CLIP_GENERATION, clip_note, vtrace clipboard records, app_formats, foreign_targets
 
 Second matrix of the pickers breadth tree (five lanes; 5-minute load 33 at
 launch, the previous matrix having just ended). The wayland python
@@ -11040,7 +11145,7 @@ the same five steps (every paste "empty") in the second matrix of the
 tooltips breadth tree, launched at a one-minute load of 8.5 with the
 five-minute at 33; the x11 twin and the eight other wayland clipboard legs
 green, and the leg green alone two minutes later (2s). The instrument the
-first sighting asked for went in the same day: `KAYA_CLIP_EVENT` lines on
+first sighting asked for went in the same day: `KAYA_CLIP_EVENT (since 2026-09-06 a `clipboard` flight-recorder record)` lines on
 the GTK backend's stderr — the seed poll's own outcome and, at each paste,
 whether the reading window is active — so the third sighting names its
 cause rather than its class.
@@ -11048,7 +11153,7 @@ cause rather than its class.
 THIRD SIGHTING 2026-09-05, on the RUST guest: `clipboard-rust-wayland` red
 on the same steps (every paste "empty", the entry "" where "pasted by hand"
 was expected) in the task manager's third matrix (d5b85612, one-minute load
-8.8 at launch, the fifteen-minute 11.5). The `KAYA_CLIP_EVENT` lines are in
+8.8 at launch, the fifteen-minute 11.5). The `KAYA_CLIP_EVENT (since 2026-09-06 a `clipboard` flight-recorder record)` lines are in
 the lane log for this run and are the next read: whether the reading window
 was active at each paste.
 
@@ -11062,8 +11167,64 @@ not code. The focus premise above is wayland's, so an x11 sighting says
 the seed's own read is worth the instrument too (the seed poll's outcome
 at the moment of the first paste).
 
+THE SEED'S OWN RACE, FOUND BY READING AND FIXED 2026-09-06. `materialize`
+decides from THE APP'S OWN `formats()` and nothing else, while
+`clipboard_seed` waited only for the FOREIGN TARGETS list — a different
+process asking the compositor or the X server. Between the two there is a
+window in which the selection has moved and this client has not been handed
+the new owner's formats (on x11 the TARGETS round trip is still in flight;
+on wayland the compositor hands the selection to one client at a time), and
+a read taken there answers None, which every guest renders as `"empty"`.
+That is the x11 twin's shape exactly — the FIRST paste after the FIRST
+seed. The seed now also waits for THIS process: `CLIP_GENERATION` (bumped
+in gdk's own `changed` handler) must have moved AND the app's own offer
+must carry the seeded kind, which is `materialize`'s own test. The
+generation is what makes the wait real — every seed in the scene is written
+over an offer the app itself made a moment earlier, so the format test
+alone is satisfied before the selection has moved. Quiet-host cost:
+`rounds=1 ms=0-2` on every seed of all 16 clipboard legs.
+
+AND THE PREMISE THIS ENTRY NAMED IS NOT MEASURABLE THE WAY IT ASKED.
+`gtk_window_is_active()` reads `false` on EVERY record of a GREEN wayland
+leg (and `true` on every record of a green x11 one), because headless sway
+advertises no keyboard until `wtype` makes a virtual one, so gdk is never
+sent `wl_keyboard.enter` while wlroots goes on handing that surface the
+selection. An instrument printing `window_active=false` beside a red
+wayland leg would have CONFIRMED the focus theory and sent the next reader
+after focus (docs/traps.md). The reading is kept and renamed
+`gtk_window_active`, its limits are stated at the site, and no sentence
+draws a cause from it; the discriminator that works is what ANOTHER process
+reads against what THIS one was handed, both printed.
+
+THE INSTRUMENT NOW RIDES THE FLIGHT RECORDER rather than stderr: the seed's
+settle and expiry, and BOTH read routes' premise AND ANSWER (an offer that
+carried the type and still materialized nothing is a transfer that failed,
+which the premise alone cannot tell from an empty offer) are
+`vtrace::note("clipboard", …)` records, so a green leg carries none of it
+and `tools/linux/run-suites.sh` prints them under a failed leg's log. The
+expiry has three branches, one per cause the loop can tell apart, and all
+three were watched printing on both protocols against doctored copies.
+AND THE PASTE ARM RECORDS ALL THREE OF ITS ROUTES, not just the one kaya
+delivers itself: a paste that found no focused kaya widget and one the
+platform inserts through its own `clipboard.paste` action were both silent,
+and all three read the same afterwards — as "the paste reached nobody".
+Forced by hand, a run with `focused_widget_id()` cut prints
+`route='no kaya widget holds focus'` beside the three failing steps, which
+is the wayland sightings' own shape with a cause on the line.
+
+THE FIX ITSELF IS GUARDED, because no leg can see it: two entries in
+`tools/check-gtk.py`'s census hold the generation comparison and the
+baseline read's position, each perturbed into the shipped race on every run
+of the gate.
+
+ON THE NEXT SIGHTING: read the `seed … settled` line's `rounds`/`ms` (a
+settle that took hundreds of rounds says the race was real and the wait
+caught it) and the failing step's own `offers=`/`answered` pair — a full
+`offers` with `answered nothing` is a transfer failure, an empty or stale
+`offers` is the selection not having reached this client.
+
 ## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` and then linux `dnd-js-wayland` (first sighting 2026-09-05)
-KEY: dnd_java, dnd-js-wayland, windows drag, wayland drag, item y drag ended none, text target got text hello, matrix contention
+KEY: dnd_java, dnd-js-wayland, dnd-jvm, windows drag, wayland drag, android drag, item y drag ended none, text target got text hello, touch slop, seven-pixel source, matrix contention
 
 The task manager's third matrix (d5b85612): the windows lane's `dnd_java` leg
 read `label#4 "text target got text hello (copy)", wanted "text target got
@@ -11083,7 +11244,37 @@ under load, on whichever lane. That points at the verb's timing against
 the freshly stamped copy rather than at either arm; the next sighting
 compares the drive's source geometry line against the copy's settle.
 
-## WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)
+THIRD SIGHTING 2026-09-06, matrix #15, on ANDROID (`dnd-jvm`) — and the
+first one READ, since the aim line landed the same morning
+(docs/HACKING.md, "Reading a failed lane leg"). The three failing
+readings are the same bytes. The drag that did not happen is `drag
+label@item[y] to label#1`, seq=2 of the leg:
+
+    aim seq=2 source node=-9223372036854775803 screen=[231,64,7,16]
+      point=234,72 destination node=6 screen=[32,64,29,16] point=46,72
+      against the settled box [32,64,29,16] inside dx=14px dy=8px
+    ended node=-9223372036854775803 op=0 entered=0
+
+No `entered`, no `drop`: the session ended without the pointer ever
+entering anything, from a press 3px inside a SEVEN-PIXEL-WIDE source —
+the stamped row's one-letter label "y" — which is narrower than
+Android's own touch slop (8dp, 8px on this panel). The same step at
+seq=4, fifty seconds on, passed with that label measuring [203,64,14,16]:
+twice the width, the press 7px inside. So "the earlier payload landed"
+was never a payload delivered: nothing was dropped, and the text target
+kept what seq=1 had put there. The earlier sightings on windows and
+wayland carried the same three readings from the same step, and the
+same one-letter source; whether their platforms refuse a drag from a
+7px source the same way is the next thing their arms' lines will say.
+REMEDY CANDIDATES, for the maintainer: the runner cannot lengthen
+Android's long press (`input draganddrop` has no press duration), so
+either the scene's stamped labels stop being narrower than a touch slop
+(a wider seed text), or kaya's Compose drag source guarantees a minimum
+touch width the way Material's `minimumInteractiveComponentSize` does —
+which changes layout and so wants a ruling.
+
+
+## ~~WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)~~
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
 
 The task manager's third matrix (d5b85612): `column@ledger presents
@@ -11098,15 +11289,54 @@ SECOND SIGHTING, 2026-09-06 01:42, matrix #11 (load 264 mid-run):
 `label@count reads "15003 of 15003 transactions", wanted "4698 of 15003
 transactions"` — the filter's click did not land, the first sighting's
 shape; the python suite standalone was not run before the sighting, so the
-standalone rerun launched right after is the discriminator.
+standalone rerun that followed was the discriminator (green, below).
 The android lane standalone ten minutes after that matrix: ALL PASS, 136
 legs, portfolio-python among them — load, not code.
 
 THIRD SIGHTING, 2026-09-06 02:40, matrix #12 (the `fill` knob): the same
 count sentence, 36s. Three sightings in three matrices on two trees, and
 green standalone between them: the instrument the first sighting asked
-for (log the click's arrival against the sort's own apply) is due before
-the next.
+for (log the click's arrival against the sort's own apply) was built the
+same day, and reading for it found the cause (below).
+
+CAUSE READ AND FIXED 2026-09-06: this interpreter's step retry deadline was **5 seconds**, the
+MAC's number, while the core's `POLL_DEADLINE` (crates/kaya/src/harness.rs)
+and the iOS half of KayaSwiftUI.swift both carry **15**, measured on
+2026-08-03 for this exact shape one platform over ("under the five-lane
+matrix a loaded VM answered a first click in more than five seconds and a
+leg that was 145/145 solo went red", entry_go). The android emulator under
+a five-lane matrix is the slowest host in the roster and it was carrying
+the fast lane's clock. The WATCH's own evidence says so: sightings two and
+three failed ONE step — the `expect label@count` right after `choose
+select#0 2` — and every step after it, including both `header_click`s and
+their indicators, passed, so the filter landed, late. KayaCompose.kt's
+`stepDeadline` is 15s now; a pass returns the moment it matches, so a green
+leg costs nothing and a red one is slower.
+
+AND THE THREE-LINK TRACE THE FIRST SIGHTING ASKED FOR IS IN, kept: a click
+crosses the verb's own dispatch, the widget's own handler and the batch
+that answers, and until now a lane could see none of them — only the
+consequence, three steps later, in a label that had not moved. `KayaDiag`
+is a ring on the harness's own epoch, dumped as `KAYA_DIAG:` lines beside a
+FAILED verdict (and on the watchdog's fire path), and echoed by
+tools/android/run-emulator.py the way `KAYA_DRAG_EVENT` is. What it prints: the verb's
+identity (`header_click column@ledger -> node=2 column=3 tag=16B/… sorted=0
+dir=1 batches=3`, and `choose`/`click`'s equivalents); the widget's own
+handler when a REAL tap runs it (`header tap node=2 column=0 tag=…`,
+`select tap`, `radio tap`) — a trace with a dispatch and no handler is a tap
+that never reached the lambda; every apply (`batch #4 records=5 took=0ms`)
+and the sort's own record (`apply columns node=2 sorted=1 dir=0 cols=2
+tag=…`), which is the only line that says the guest answered; and the
+failure's own place in that timeline (`step-failed after 658 attempt(s):
+…`). So the next sighting names the link rather than the symptom.
+
+LEFT OPEN, and not taken with the fix so one change is read at a time: of
+the Compose action verbs only `click` waits for the app to answer
+(`kayaAwaitQuiet`/`kayaAwaitAnswer`); `choose`, `header_click`, `toggle`
+and `set_value` return the moment they emit, so the following expect's
+clock starts while the answer is still in flight. The rule that comment
+states ("AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT") holds for one
+verb of five.
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps

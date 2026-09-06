@@ -637,163 +637,17 @@ def drain():
 
 # The guest builds are per-language INDEPENDENT, so they pool (measured
 # 2026-07-22: 29-38s serial, bounded by the slowest language pooled).
+# The build BODIES are tools/lib/lanes/mac.py's, one copy: run-leg.py
+# builds a hand run's language through the same seven functions, and
+# each success stamps the spec it compiled against.
 BUILDS_DIR = pathlib.Path(tempfile.mkdtemp())
 
-
-def build_ocaml():
-    # --root . BECAUSE DUNE WALKS UP: run from a git worktree under
-    # the repo, a bare `dune build` builds the PARENT checkout
-    # (measured 2026-08-28).
-    return run(["dune", "build", "--root", "."],
-               stdout=_blog("ocaml"), stderr=subprocess.STDOUT)
-
-
-def build_haskell():
-    return run(["cabal", "build", "all",
-                f"--extra-lib-dirs={ROOT}/target/debug",
-                f"--ghc-options=-L{ROOT}/target/debug "
-                f"-optl-Wl,-rpath,{ROOT}/target/debug", "-v0"],
-               cwd=ROOT / "guests/haskell",
-               stdout=_blog("haskell"), stderr=subprocess.STDOUT)
-
-
-def build_csharp():
-    # dotnet run rebuilds per invocation; build once, legs exec it.
-    return run(["dotnet", "build", "--nologo", "-v", "q",
-                "guests/csharp/kaya-guests.csproj"],
-               stdout=_blog("csharp"), stderr=subprocess.STDOUT)
-
-
-def build_go():
-    # ONE BINARY FOR EVERY SCENE: guests/go/cmd imports every scene
-    # library and picks one from KAYA_SELFTEST. encodebench is
-    # guest-only and a benchmark, its own main package.
-    (ROOT / "target/go-guests").mkdir(parents=True, exist_ok=True)
-    rc = run(["go", "build", "-o", "target/go-guests/kaya-go",
-              "dev.kaya/guests/go/cmd"],
-             stdout=_blog("go"), stderr=subprocess.STDOUT)
-    if rc.returncode != 0:
-        return rc
-    return run(["go", "build", "-o", "target/go-guests/encodebench",
-                "dev.kaya/guests/go/encodebench"],
-               stdout=_blog("go"), stderr=subprocess.STDOUT)
-
-
-def build_swift():
-    """The same bindings the iOS bundles compile, linked against
-    libkaya.dylib. swiftc allows top-level code only in a file named
-    main.swift, so each scene gets its own staging dir and the
-    compiles pool. DEPTH_SCENES too: a depth slice's guests arrive one
-    language at a time, and the file test decides — a scene whose
-    Swift guest has not landed is skipped, not a build failure."""
-    (ROOT / "target/swift-guests").mkdir(parents=True, exist_ok=True)
-    procs = []
-    for guest in [*lane.SCENES, *lane.DEPTH_SCENES]:
-        src = ROOT / f"guests/swift/{guest}.swift"
-        if not src.is_file():
-            continue
-        stage = ROOT / f"target/swift-guests/.stage-{guest}"
-        shutil.rmtree(stage, ignore_errors=True)
-        stage.mkdir(parents=True)
-        shutil.copy2(src, stage / "main.swift")
-        companions = []
-        if (ROOT / f"guests/swift/{guest}+Kaya.swift").is_file():
-            companions = [f"guests/swift/{guest}+Kaya.swift"]
-        blog = open(stage / "build.log", "w", encoding="utf-8")
-        p = subprocess.Popen(
-            ["bash", "-c",
-             'source "$1/tools/lib/swift-toolchain.sh" && shift && '
-             'kaya_swiftc "$@"', "_", str(ROOT),
-             "-import-objc-header", "crates/kaya/include/kaya.h",
-             "bindings/swift/KayaWire.swift",
-             "bindings/swift/KayaApp.swift",
-             "bindings/swift/KayaRecords.swift",
-             "bindings/swift/KayaSums.swift",
-             *companions, str(stage / "main.swift"),
-             "-L", "target/debug", "-lkaya",
-             "-Xlinker", "-rpath", "-Xlinker",
-             f"{ROOT}/target/debug",
-             "-o", f"target/swift-guests/{guest}"],
-            stdout=blog, stderr=blog)
-        procs.append((guest, stage, p, blog))
-    rc = 0
-    for guest, stage, p, blog in procs:
-        if p.wait() != 0:
-            blog.close()
-            with open(_blog_path("swift"), "a",
-                      encoding="utf-8") as out:
-                out.write((stage / "build.log").read_text(
-                    encoding="utf-8", errors="replace"))
-            rc = 1
-        else:
-            blog.close()
-    for stage in (ROOT / "target/swift-guests").glob(".stage-*"):
-        shutil.rmtree(stage, ignore_errors=True)
-    return subprocess.CompletedProcess([], rc)
-
-
-def build_c():
-    # THE C FLOOR, THE SCENES THIS LANE ACTUALLY RUNS: the module's
-    # C_SCENES, which check-steps' sweep_c_floor reads from the other
-    # side — a guest built here and run nowhere is false coverage.
-    return run(["make", "-C", "guests/c",
-                f"SCENES={' '.join(lane.C_SCENES)}",
-                f"TARGET_DIR={ROOT}/target/debug",
-                f"OUT={ROOT}/target/c-guests"],
-               stdout=_blog("c"), stderr=subprocess.STDOUT)
-
-
-def build_java():
-    # The shared binding + the desktop transport + every scene + the
-    # Main selector, one javac.
-    shutil.rmtree(ROOT / "target/java-guests", ignore_errors=True)
-    (ROOT / "target/java-guests").mkdir(parents=True)
-    srcs = ["bindings/java-desktop/dev/kaya/KayaRing.java",
-            *sorted(str(p.relative_to(ROOT))
-                    for p in (ROOT / "bindings/java/dev/kaya"
-                              ).glob("*.java")),
-            *sorted(str(p.relative_to(ROOT))
-                    for p in (ROOT / "guests/java/dev/kaya/guests"
-                              ).glob("*.java"))]
-    return run(["javac", "-encoding", "UTF-8", "-d",
-                "target/java-guests", *srcs],
-               stdout=_blog("java"), stderr=subprocess.STDOUT)
-
-
-def _blog_path(name):
-    return BUILDS_DIR / f"{name}.log"
-
-
-def _blog(name):
-    return open(_blog_path(name), "a", encoding="utf-8")
-
-
-_build_threads = []
-_build_rc = {}
-
-
-def run_build(name, fn):
-    def go():
-        _build_rc[name] = fn().returncode
-
-    t = threading.Thread(target=go)
-    t.start()
-    _build_threads.append((name, t))
-
-
-run_build("ocaml", build_ocaml)
-run_build("haskell", build_haskell)
-run_build("csharp", build_csharp)
-run_build("go", build_go)
-run_build("swift", build_swift)
-run_build("java", build_java)
-run_build("c", build_c)
+_build_rc = lane.build_guests(ROOT, list(lane.GUEST_BUILDS), BUILDS_DIR)
 _build_status = 0
-for _name, _t in _build_threads:
-    _t.join()
-    if _build_rc.get(_name, 1) != 0:
+for _name, _rc in _build_rc.items():
+    if _rc != 0:
         print(f"guest build FAILED: {_name}", file=sys.stderr)
-        blog = _blog_path(_name)
+        blog = BUILDS_DIR / f"{_name}.log"
         if blog.is_file():
             print(blog.read_text(encoding="utf-8", errors="replace"),
                   file=sys.stderr, end="")
@@ -801,20 +655,6 @@ for _name, _t in _build_threads:
 shutil.rmtree(BUILDS_DIR, ignore_errors=True)
 if _build_status != 0:
     sys.exit(1)
-
-_hs_bins = {}
-
-
-def hs_bin(name):
-    if name not in _hs_bins:
-        got = subprocess.run(["cabal", "list-bin", name, "-v0"],
-                             cwd=ROOT / "guests/haskell",
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, check=False,
-                             **TEXT)
-        _hs_bins[name] = got.stdout.strip()
-    return _hs_bins[name]
-
 
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
@@ -854,7 +694,7 @@ KAYA_LIB_LANGS = lane.KAYA_LIB_LANGS
 def leg_argv(scene, lang):
     # ONE COPY, in the lane module: tools/run-leg.py runs a leg by hand
     # through the same mapping and the same env.
-    return lane.leg_argv(scene, lang, hs_bin)
+    return lane.leg_argv(scene, lang, lambda stem: lane.hs_bin(ROOT, stem))
 
 
 def leg_env(scene, lang, appearance=""):

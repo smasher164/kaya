@@ -88,7 +88,10 @@ GATES = {
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],
     # docs/: a stub is sanctioned only while its ledger entry is unstruck.
     "check-stubs": ["crates", "swift", "android", "docs"],
-    "check-staging": ["guests"],
+    # bindings/: its spec-stamp clauses read the tree's own KAYA_SPEC_HASH
+    # out of the generated bindings/c/kaya_wire.h, so a spec move must
+    # re-run this gate rather than hand back the answer from before it.
+    "check-staging": ["guests", "bindings"],
     # Its walk is guests/**/*.c, not guests/c alone; a key narrower than
     # the walk passes stale for a C guest in a new directory.
     "check-c-ids": ["guests"],

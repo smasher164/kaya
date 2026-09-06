@@ -867,6 +867,10 @@ pub trait Stage: Send + 'static {
     /// platform's own notion — the safe area on iOS, the contentView on
     /// macOS, the window's child area on GTK and WinUI.
     fn root_fills(&self) -> String;
+    /// Whether the scene has MOUNTED a root — the scene-ready wait's read
+    /// (docs/deferred.md, the android `varied-python` WATCH): the first
+    /// step's clock starts here, not at the script's handover.
+    fn mounted(&self) -> bool;
     /// The window content inset, MEASURED from real layout — the gap
     /// between the padding container's outer extent and its children's
     /// offer, halved — as whole layout units ("16"), or the backend's own
@@ -2689,6 +2693,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         watch.clear();
         return 1;
     }
+    // THE SCENE-READY WAIT (docs/deferred.md, the android `varied-python`
+    // WATCH): the first step's clock starts once a root is MOUNTED, not
+    // when the script is handed over — a guest's first push on a starved
+    // host took longer than one step's poll, and every later step passed.
+    // Armed on the watchdog like a step; bounded short of the ceiling so a
+    // root that never comes is this verdict and not the watchdog's.
+    watch.enter("<scene-ready wait>".to_string());
+    let ready_deadline = Instant::now() + step_ceiling().saturating_sub(Duration::from_secs(5));
+    while !stage.mounted() {
+        if Instant::now() > ready_deadline {
+            watch.published(1);
+            stage.finish(1, SCENE_READY_MISS);
+            watch.clear();
+            return 1;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if let Some((log, _)) = log {
+        log(&format!("KAYA_HARNESS: scene ready after {}ms", start.elapsed().as_millis()));
+    }
     let mut observed = Vec::new();
     let mut failures = Vec::new();
     // A FAULT ENDS THE RUN, carrying its sentence into the verdict list
@@ -4192,6 +4216,11 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // the moment it matches, so the width costs a green run nothing.
 pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
 
+/// The scene-ready wait's one sentence (tools/check-harness-ceiling.py
+/// holds the three harnesses to it, flattened).
+pub const SCENE_READY_MISS: &str =
+    "KAYA_SELFTEST: FAILED (the scene mounted no root inside the scene-ready wait — the first step's clock never started)";
+
 /// THE CEILING ON ONE STEP, HOP INCLUDED — the cover the deadline above
 /// cannot give, because it is read only after a step RETURNS and every step
 /// blocks in a hop to the platform's UI thread. A saturated app answers no
@@ -4988,6 +5017,9 @@ mod tests {
         fn root_fills(&self) -> String {
             String::new()
         }
+        fn mounted(&self) -> bool {
+            !UNMOUNTED.load(std::sync::atomic::Ordering::Relaxed)
+        }
         fn inset(&self) -> String {
             "16".into()
         }
@@ -5161,6 +5193,8 @@ mod tests {
     static RESOLVE_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static NORMALIZED_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static WEDGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// The scene-ready wait's negative: a stage that never mounts a root.
+    static UNMOUNTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static WEDGE_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     /// What MockStage::canvas_ink answers. Held for the whole of the
     /// one test that writes it, so two tests in the same binary cannot
@@ -5360,6 +5394,22 @@ mod tests {
                 crate::vtrace::dump("the ring test");
                 return;
             }
+            Ok("unmounted") => {
+                // The scene-ready wait's loss path: no root ever comes,
+                // and the verdict is that one sentence, not a step's.
+                UNMOUNTED.store(true, Relaxed);
+                let (tx, rx) = std::sync::mpsc::channel();
+                run(
+                    parse("expect label#0 \"ok-text\"").unwrap(),
+                    MockStage { seen: &SEEN, verdict: tx },
+                );
+                // The mock's finish hands the verdict to this channel;
+                // the parent reads it off stdout.
+                if let Ok((code, verdict)) = rx.try_recv() {
+                    println!("KAYA_TEST: verdict {code} {verdict}");
+                }
+                return;
+            }
             Ok("wedge") => {
                 // The highest-value dump: the harness thread is still
                 // inside the verb, so nothing else knows what it was
@@ -5389,6 +5439,22 @@ mod tests {
             let text = std::fs::read_to_string(&trace).unwrap_or_default();
             (out, trace, text)
         };
+
+        let (out, trace, _) = drive("unmounted");
+        let _ = std::fs::remove_file(&trace);
+        let unmounted_text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            unmounted_text.contains(SCENE_READY_MISS),
+            "a stage that never mounts must end in the scene-ready sentence, got: {unmounted_text}"
+        );
+        assert!(
+            !unmounted_text.contains("no such target"),
+            "the first step ran against an unmounted scene: {unmounted_text}"
+        );
 
         let (out, trace, text) = drive("fail");
         let _ = std::fs::remove_file(&trace);
@@ -5808,6 +5874,9 @@ mod tests {
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
         }
+        fn mounted(&self) -> bool {
+            true
+        }
         fn fold_state(&self, _: Target, _: Option<Target>) -> String {
             "<mock stage folds nothing>".into()
         }
@@ -6060,6 +6129,9 @@ mod tests {
             }
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
+        }
+        fn mounted(&self) -> bool {
+            true
         }
         fn fold_state(&self, _: Target, _: Option<Target>) -> String {
             "<mock stage folds nothing>".into()

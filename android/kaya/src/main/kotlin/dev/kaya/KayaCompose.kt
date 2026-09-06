@@ -1135,6 +1135,87 @@ object KayaVTrace {
     }
 }
 
+/**
+ * THE THREE-LINK TRACE a click crosses (docs/deferred.md's android
+ * `portfolio-python` WATCH): the verb's own dispatch with the identity it
+ * resolved, the widget's own handler, and the batch that answered — in a
+ * ring, printed only beside a FAILED verdict, so a sighting names the link
+ * that dropped it instead of the consequence three steps later.
+ * Same epoch as the `KAYA_HARNESS: +<n>ms` step lines, so the two interleave.
+ */
+object KayaDiag {
+    const val CAP = 256
+    private val lock = Object()
+    private val recs = ArrayList<String>()
+    private var head = 0
+    private var dropped = 0L
+    private var start = 0L
+
+    fun begin(startNanos: Long) {
+        synchronized(lock) {
+            start = startNanos
+            recs.clear()
+            head = 0
+            dropped = 0
+        }
+    }
+
+    fun note(what: String) {
+        synchronized(lock) {
+            if (start == 0L) return
+            val rec = "t=${(System.nanoTime() - start) / 1_000_000} $what"
+            if (recs.size < CAP) {
+                recs.add(rec)
+            } else {
+                recs[head] = rec
+                head = (head + 1) % CAP
+                dropped++
+            }
+        }
+    }
+
+    /** FAILURE ONLY, and before the verdict — the runner echoes these lines. */
+    fun dump() {
+        synchronized(lock) {
+            if (recs.isEmpty()) return
+            Log.e("kaya", "KAYA_DIAG: trace ${recs.size} record(s), $dropped dropped")
+            for (i in 0 until recs.size) {
+                Log.e("kaya", "KAYA_DIAG: ${recs[(head + i) % recs.size]}")
+            }
+        }
+    }
+}
+
+/** A wire tag in a sentence: its length and its first eight bytes. */
+internal fun kayaTagDigest(tag: ByteArray): String {
+    val head = tag.take(8).joinToString("") { "%02x".format(it) }
+    return "${tag.size}B/$head"
+}
+
+/** A box as `[left,top,width,height]`, rounded to whole pixels. */
+internal fun kayaBoxSpelled(left: Float, top: Float, w: Float, h: Float): String =
+    "[${Math.round(left)},${Math.round(top)},${Math.round(w)},${Math.round(h)}]"
+
+/**
+ * Where an injected point falls against a box, in that box's own space:
+ * the distance to the nearest edge on each axis, POSITIVE inside and
+ * NEGATIVE outside, so a drop that missed says by how much and on which
+ * axis (docs/deferred.md's android drag WATCH).
+ */
+internal fun kayaAimSpelled(
+    px: Int,
+    py: Int,
+    left: Float,
+    top: Float,
+    w: Float,
+    h: Float,
+): String {
+    val dx = Math.round(minOf(px - left, left + w - px))
+    val dy = Math.round(minOf(py - top, top + h - py))
+    val where = if (dx >= 0 && dy >= 0) "inside" else "OUTSIDE"
+    return "$where dx=${dx}px dy=${dy}px"
+}
+
 /// The height a scroll viewport claims when it is measured with NO bound
 /// (see the clamp in KayaTableSurface). The display's own pixel height:
 /// an unbounded ask cannot be answered from the constraint, and a window
@@ -1769,11 +1850,16 @@ object KayaCompose {
         // UI thread past the harness's 60s step ceiling.
         val doomed = HashSet<Long>()
         val bereaved = HashSet<Long>()
+        // The three-link trace's third link (KayaDiag): how big this
+        // batch was and how long the UI thread spent on it.
+        var records = 0
+        val began = System.nanoTime()
         while (b.remaining() >= 8) {
             val start = b.position()
             val size = b.int
             val kind = b.short.toInt()
             b.short // flags
+            records += 1
             when (kind) {
                 APPLY_CREATE -> {
                     val id = b.long
@@ -2500,6 +2586,12 @@ object KayaCompose {
                     node.tableSorted = sorted
                     node.tableDirection = direction
                     node.sortTag = tag
+                    // The sort's OWN apply — the third link of the trace
+                    // the portfolio WATCH reads, and the only record that
+                    // says the guest answered a header click.
+                    KayaDiag.note(
+                        "apply columns node=$id sorted=$sorted dir=$direction " +
+                            "cols=${titles.size} tag=${kayaTagDigest(tag)}")
                 }
                 APPLY_SET_DRAWING -> {
                     // THE RASTER, not the ops: { u64 id; u32 width;
@@ -2568,6 +2660,9 @@ object KayaCompose {
         // returns (see kayaAwaitAnswer) — written last, so the count
         // moves only once everything in the batch has landed.
         kayaBatches += 1
+        KayaDiag.note(
+            "batch #$kayaBatches records=$records " +
+                "took=${(System.nanoTime() - began) / 1_000_000}ms")
     }
 
     /**
@@ -2753,9 +2848,16 @@ object KayaCompose {
     /**
      * Wait until a widget's drag box reads the same on two consecutive frames
      * — the layout has settled where the pointer is about to go — or say so
-     * after 10s. The box is what `onGloballyPositioned` last wrote.
+     * after 10s. The box is what `onGloballyPositioned` last wrote. RETURNS
+     * that box, because the aim line below compares the injected point
+     * against THIS reading and not against the one the plan re-reads a
+     * moment later: the two agreeing is the claim, and a point compared to
+     * the box it was computed from is a sentence that can only say "inside".
      */
-    private fun kayaAwaitSettledBox(activity: ComponentActivity, nodeId: Long) {
+    private fun kayaAwaitSettledBox(
+        activity: ComponentActivity,
+        nodeId: Long,
+    ): List<Float>? {
         val deadline = System.nanoTime() + 10_000_000_000L
         var previous = onUi(activity) { kayaDragBoxes[nodeId]?.let { listOf(it.windowLeft, it.windowTop, it.width, it.height) } }
         var frames = 0
@@ -2765,11 +2867,12 @@ object KayaCompose {
             val now = onUi(activity) { kayaDragBoxes[nodeId]?.let { listOf(it.windowLeft, it.windowTop, it.width, it.height) } }
             if (now != null && now == previous) {
                 Log.i("kaya", "KAYA_DRAG_EVENT: destination node=$nodeId box=$now settled after $frames frame(s)")
-                return
+                return now
             }
             previous = now
         }
         Log.i("kaya", "KAYA_DRAG_EVENT: destination node=$nodeId box=$previous still moving after 10s")
+        return null
     }
 
     /**
@@ -2785,6 +2888,7 @@ object KayaCompose {
         sourceSpec: String,
         destinationSpec: String,
         reorder: Boolean?,
+        settled: List<Float>?,
     ): KayaDragPlan {
         val source = kayaWidgetTarget(sourceSpec)
             ?: return KayaDragPlan("no such source $sourceSpec")
@@ -2808,6 +2912,38 @@ object KayaCompose {
         }
         val y2 = (corner[1] + to.windowTop + landing).toInt()
         kayaDragRequests += 1
+        // THE AIM, AGAINST THE SETTLED BOX, IN ONE LINE and one space
+        // (docs/deferred.md's android drag WATCH, the reading the sixth
+        // sighting asked for and the seventeenth restated): the boxes and
+        // the two injected points in SCREEN pixels — the space
+        // `input draganddrop` takes — and the point's distance to the
+        // nearest edge of THE BOX THE SETTLE OBSERVED, positive inside
+        // and negative outside. Compared against the box the plan just
+        // re-read it could only ever say "inside", since the point is
+        // computed from that box; compared against the settle's reading
+        // it says whether the layout moved between the two, which is the
+        // fifth sighting's cause. The destination's ROOT box rides along
+        // because a DragEvent's own point is in root space, which is what
+        // the `entered … at=` line reports; the NODE ID says whether the
+        // plan resolved the target the step named.
+        Log.i(
+            "kaya",
+            "KAYA_DRAG_EVENT: aim seq=$kayaDragRequests duration=${DRAG_INJECT_MS}ms " +
+                "decor=${corner[0]},${corner[1]} source node=${source.id} " +
+                "screen=${kayaBoxSpelled(corner[0] + from.windowLeft, corner[1] + from.windowTop, from.width, from.height)} " +
+                "point=$x1,$y1 destination node=${destination.id} " +
+                "screen=${kayaBoxSpelled(corner[0] + to.windowLeft, corner[1] + to.windowTop, to.width, to.height)} " +
+                "root=${kayaBoxSpelled(to.rootLeft, to.rootTop, to.width, to.height)} " +
+                "point=$x2,$y2 against the settled box " +
+                if (settled == null) {
+                    "<none: it never settled, so nothing here says the box held still>"
+                } else {
+                    kayaBoxSpelled(corner[0] + settled[0], corner[1] + settled[1],
+                                   settled[2], settled[3]) + " " +
+                        kayaAimSpelled(x2, y2, corner[0] + settled[0],
+                                       corner[1] + settled[1], settled[2], settled[3])
+                },
+        )
         return KayaDragPlan(
             null,
             "KAYA_REQUEST: draganddrop $kayaDragRequests $x1 $y1 $x2 $y2 $DRAG_INJECT_MS",
@@ -5544,6 +5680,7 @@ object KayaCompose {
                         // THE WEDGE IS WHAT THE TRACE IS FOR (crates/kaya/src/
                         // vtrace.rs); the failed-verdict path dumps its own.
                         KayaVTrace.dump("the step ceiling fired: no verdict")
+                        KayaDiag.dump()
                         Log.e("kaya", wedgeVerdict(step, waitedMs))
                         Runtime.getRuntime().halt(1)
                     }
@@ -5578,6 +5715,43 @@ object KayaCompose {
         Log.i("kaya", "KAYA_HARNESS: epoch ${System.currentTimeMillis()}")
         // The verb trace counts from the same zero (crates/kaya/src/vtrace.rs).
         KayaVTrace.begin(start) { mountedActivity?.filesDir }
+        KayaDiag.begin(start)
+        // THE SCENE-READY WAIT (harness.rs is the norm; docs/deferred.md,
+        // the android `varied-python` WATCH): the first step's clock starts
+        // once a root is MOUNTED, not when the script is handed over — the
+        // python guest's 300-row first push outran the first step's poll on
+        // a starved host, and every later step of the same leg passed.
+        // Armed like a step, bounded short of the ceiling so a root that
+        // never comes is this verdict and not the watchdog's.
+        watchdog.enter("<scene-ready wait>")
+        val readyDeadline =
+            start + maxOf(1_000L, stepCeilingMs() - 5_000L) * 1_000_000
+        while (true) {
+            val here = mountedActivity
+            if (here != null &&
+                onUi(here) {
+                    KayaSceneModel.root != null || KayaSceneModel.sections.isNotEmpty()
+                }
+            ) {
+                break
+            }
+            if (System.nanoTime() > readyDeadline) {
+                watchdog.published(1)
+                Log.e(
+                    "kaya",
+                    "KAYA_SELFTEST: FAILED (the scene mounted no root inside the " +
+                        "scene-ready wait — the first step's clock never started)",
+                )
+                Runtime.getRuntime().halt(1)
+            }
+            // 50ms, the other two harnesses' period: each poll hops to
+            // the UI thread, which is the thread the guest's first push
+            // is competing for.
+            Thread.sleep(50)
+        }
+        Log.i(
+            "kaya",
+            "KAYA_HARNESS: scene ready after ${(System.nanoTime() - start) / 1_000_000}ms")
         // Whether the run already carried the core's fault into
         // `failures`, so the sweep after the loop cannot report the same
         // one twice.
@@ -5603,9 +5777,19 @@ object KayaCompose {
                 // appends exactly one failure on a miss, the wrapper
                 // retracts it and re-runs until it passes or the
                 // deadline lands the last text. Actions never re-run;
-                // the FIRST expect doubles as the scene-ready wait.
+                // the scene-ready wait above is what the first expect
+                // used to double as.
+                // 15s, THE CORE'S OWN NUMBER (harness.rs POLL_DEADLINE),
+                // not the mac's 5: this interpreter carried the fast
+                // lane's deadline on the slowest host in the roster, and
+                // an emulator under a five-lane matrix answered a filter
+                // and a sort after it — one red step with every later
+                // step of the same leg green, three matrices running
+                // (docs/deferred.md's android `portfolio-python` WATCH).
+                // A pass returns the moment it matches, so the width
+                // costs a green run nothing.
                 val stepStart = System.nanoTime()
-                var stepDeadline = stepStart + 5_000_000_000L
+                var stepDeadline = stepStart + 15_000_000_000L
                 var retryStep = true
                 var attempt = 0
                 while (retryStep) {
@@ -5666,11 +5850,20 @@ object KayaCompose {
                             val text = target(parts[1], "entry", KayaSceneModel.entryWidgets)
                                 ?: target(parts[1], "textarea", KayaSceneModel.textareas)
                             if (text != null) {
+                                KayaDiag.note(
+                                    "click ${parts[1]} -> focus node=${text.id} " +
+                                        "batches=$kayaBatches")
                                 KayaSceneModel.focusedId = text.id
                                 true
                             } else {
                                 target(parts[1], "button", KayaSceneModel.buttons)
-                                    ?.also { KayaPresent.emitClicked(it.tag) } != null
+                                    ?.also {
+                                        KayaDiag.note(
+                                            "click ${parts[1]} -> node=${it.id} " +
+                                                "tag=${kayaTagDigest(it.tag)} " +
+                                                "batches=$kayaBatches")
+                                        KayaPresent.emitClicked(it.tag)
+                                    } != null
                             }
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -5682,12 +5875,12 @@ object KayaCompose {
                             // click, rather than deduced three steps later
                             // from a title that did not move.
                             if (kayaBatches == answered) {
-                                Log.i(
-                                    "kaya",
-                                    "KAYA_DIAG click ${parts[1]} was emitted and no batch " +
+                                val said =
+                                    "click ${parts[1]} was emitted and no batch " +
                                         "answered it within the wait; entries=" +
                                         "${onUi(activity) { KayaSceneModel.navEntries.size }}"
-                                )
+                                KayaDiag.note(said)
+                                Log.i("kaya", "KAYA_DIAG $said")
                             }
                         }
                     }
@@ -5880,6 +6073,9 @@ object KayaCompose {
                                 else target(parts[1], "select", KayaSceneModel.selects)
                             node?.also {
                                 it.value = parts[2].toDouble()
+                                KayaDiag.note(
+                                    "choose ${parts[1]} -> node=${it.id} value=${it.value} " +
+                                        "tag=${kayaTagDigest(it.tag)} batches=$kayaBatches")
                                 KayaPresent.emitValueChanged(it.tag, it.value)
                             } != null
                         }
@@ -6189,6 +6385,14 @@ object KayaCompose {
                                 index !in node.tableColumns.indices ->
                                     "column ${parts.getOrNull(2)} of ${node.tableColumns.size}"
                                 else -> {
+                                    // LINK ONE of the trace: the identity
+                                    // this dispatch resolved, beside the
+                                    // batch count it left the app on.
+                                    KayaDiag.note(
+                                        "header_click ${parts[1]} -> node=${node.id} " +
+                                            "column=$index tag=${kayaTagDigest(node.sortTag)} " +
+                                            "sorted=${node.tableSorted} " +
+                                            "dir=${node.tableDirection} batches=$kayaBatches")
                                     KayaPresent.emitSortRequested(node.sortTag, index)
                                     null
                                 }
@@ -6255,9 +6459,11 @@ object KayaCompose {
                             // wait is for the destination's own box to hold
                             // still across frames, not for frames.
                             val destinationId = onUi(activity) { kayaWidgetTarget(words[2])?.id }
-                            if (destinationId != null) kayaAwaitSettledBox(activity, destinationId)
+                            val settled =
+                                if (destinationId == null) null
+                                else kayaAwaitSettledBox(activity, destinationId)
                             val plan = onUi(activity) {
-                                kayaDragPlan(activity, words[0], words[2], reorder)
+                                kayaDragPlan(activity, words[0], words[2], reorder, settled)
                             }
                             if (plan.error != null) {
                                 failures.add("drag: ${plan.error}")
@@ -7924,6 +8130,9 @@ object KayaCompose {
                     // KayaSwiftUI.swift.
                     for (i in failuresBefore until failures.size) {
                         Log.i("kaya", "KAYA_HARNESS: step-failed ${failures[i]}")
+                        // The trace's anchor: where the failure sits among
+                        // the dispatches and the batches around it.
+                        KayaDiag.note("step-failed after $attempt attempt(s): ${failures[i]}")
                     }
                 }
                 }
@@ -7989,6 +8198,7 @@ object KayaCompose {
             // FAILURE ONLY, and BEFORE the publish: after it the watchdog
             // may end the process at any moment (crates/kaya/src/vtrace.rs).
             KayaVTrace.dump("the verdict failed: KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
+            KayaDiag.dump()
             Log.e("kaya", "KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
             1
         }
@@ -8955,6 +9165,13 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clickable {
+                            // LINK TWO: the header's own handler, which
+                            // the `header_click` verb mirrors rather than
+                            // drives — a trace with link one and no link
+                            // two is a tap that never reached this lambda.
+                            KayaDiag.note(
+                                "header tap node=${node.id} column=$index " +
+                                    "tag=${kayaTagDigest(node.sortTag)}")
                             KayaPresent.emitSortRequested(node.sortTag, index)
                         }
                         .edge("${geometryGeneration}h/$index"),
@@ -9856,6 +10073,9 @@ private fun KayaRenderCore(
                             onClick = {
                                 expanded = false
                                 node.value = i.toDouble()
+                                KayaDiag.note(
+                                    "select tap node=${node.id} index=$i " +
+                                        "tag=${kayaTagDigest(node.tag)}")
                                 KayaPresent.emitValueChanged(node.tag, i.toDouble())
                             })
                     }
@@ -9956,6 +10176,9 @@ private fun KayaRenderCore(
                                 selected = node.value.toInt() == i,
                                 onClick = {
                                     node.value = i.toDouble()
+                                    KayaDiag.note(
+                                        "radio tap node=${node.id} index=$i " +
+                                            "tag=${kayaTagDigest(node.tag)}")
                                     KayaPresent.emitValueChanged(node.tag, i.toDouble())
                                 },
                             ),

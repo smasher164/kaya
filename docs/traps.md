@@ -4158,7 +4158,7 @@ The Haskell guests link against libkaya, which is not on any default
 search path: `guests/haskell/kaya-guests.cabal` declares
 `extra-libraries: kaya` and every caller supplies the directory —
 `--extra-lib-dirs="$ROOT/target/debug"` plus the matching `-L` and
-`-rpath` in `--ghc-options` (tools/validate-mac.py's `build_haskell`,
+`-rpath` in `--ghc-options` (tools/lib/lanes/mac.py's `build_haskell`,
 tools/check-abort.py).
 
 Run `cabal build <target>` WITHOUT those flags — the obvious thing to
@@ -6154,7 +6154,7 @@ minutes, and the symptom was three java legs on the MAC lane failing with
 
 while thirty-seven java legs on the same lane passed — the three sitting
 CONSECUTIVELY in the middle, with java legs green before and after. That
-shape is the whole diagnosis: validate-mac's `build_java` opens with
+shape is the whole diagnosis: the lane module's `build_java` (tools/lib/lanes/mac.py, validate-mac's own build) opens with
 `rm -rf target/java-guests`, so one matrix rebuilding the directory while
 the other's legs read it empties the classpath for exactly as long as the
 javac takes. Nothing in the tree was wrong, and the same lane had passed
@@ -9346,7 +9346,13 @@ runningboardd's exit context before hunting a crash report.
   0xa2bb42a3ce2fc3c9, this binding was generated from 0x27300640cf479cec`.
   The panic is the guard; the recipe is validate-mac.py's own `build_*`
   step for that language before the leg, until run-leg learns to run it
-  (docs/deferred.md).
+  (docs/deferred.md). FIXED 2026-09-06: run-leg builds the leg's language
+  through tools/lib/lanes/mac.py's own build under `--build`, and every
+  build that succeeds stamps the tree's KAYA_SPEC_HASH into
+  target/guest-specs/<lang>.spec, so a guest staged before a spec move
+  is refused by name — both hashes and the panic quoted — instead of
+  running. tools/check-staging.py watches the three refusals and the two
+  acceptances.
 - **A WinUI LayoutUpdated handler that cannot borrow the core must ask
   for another pass, or the width it saw is gone for good** (2026-09-06,
   crates/kaya/src/winui/mod.rs, the auto grid). A harness read calls
@@ -9377,3 +9383,39 @@ runningboardd's exit context before hunting a crash report.
   (`wrap_width`: the parent's ActualWidth less its padding), and once the
   breaks come from that, the re-stamped tracks make the row's own desired
   width fit inside it.
+- **`gtk_window_is_active()` is not the wayland focus premise: it reads
+  false for the whole life of a GREEN wayland clipboard leg** (2026-09-06,
+  crates/kaya/src/gtk.rs, the clipboard WATCH's instrument). Measured on
+  the linux lane, `clipboard-rust`, every clipboard record of a leg whose
+  every read succeeded: x11 `gtk_window_active=true` on all 19 records,
+  wayland `false` on all 19. The lane's own seat is why: headless sway
+  advertises no keyboard capability until `wtype` makes a virtual one, so
+  gdk is never sent `wl_keyboard.enter` and gtk's `is_active` never turns
+  true, while wlroots goes on handing that surface the selection, since
+  the seat's focused surface is tracked apart from whether the client
+  bound `wl_keyboard`. An instrument printing `window_active=false`
+  beside a red wayland leg would have CONFIRMED the ledger's focus theory
+  and sent every later reader after focus. The reading stays (it
+  discriminates on x11 and it is a measurement), named
+  `gtk_window_active` with its limits at the one site it is taken, and no
+  expiry sentence draws a cause from it; the discriminator that works is
+  what ANOTHER process reads (`foreign_targets`) against what THIS one
+  was handed (`app_formats`/`offers`), printed side by side. The seed's
+  own race — waiting for the foreign TARGETS list while `materialize`
+  answers from the app's own `formats()` — is the fix the same day
+  (docs/deferred.md, the clipboard WATCH).
+- **The Compose runner's step retry deadline was the Mac's five seconds
+  while the core and iOS carry fifteen, and the android emulator under a
+  five-lane matrix is the slowest host in the roster** (2026-09-06,
+  android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt, found reading for
+  the portfolio sort-click WATCH). Three matrix sightings failed the ONE
+  step after `choose select#0 2` — the count label read "15003 of 15003"
+  — and every step after it, both header clicks included, passed: the
+  filter landed, late. The 15s number was measured 2026-08-03 for this
+  exact shape one platform over (a loaded VM answered a first click in
+  more than five seconds and a 145/145 leg went red). A per-step deadline
+  is a per-HOST number, and the slowest host cannot carry the fastest
+  lane's clock; the runner's own poll grew 120 -> 240 rounds with it, or
+  a red leg's longer failing step could outrun the runner and be written
+  down as "no verdict". Of the Compose action verbs only `click` waits
+  for the app's answer (docs/deferred.md, the action-verbs GAP).

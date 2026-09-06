@@ -15,7 +15,18 @@ at the runner's sites) as single-language groups between drains.
 The runner is tools/validate-mac.py; check-steps, check-staging,
 check-appearance, check-stubs and tools/lib/scene-features.py import
 this instead of regexing the shell body.
+
+THE PER-LANGUAGE GUEST BUILDS LIVE HERE TOO, one copy, called and never
+copied: validate-mac.py runs all seven pooled and tools/run-leg.py runs
+the one its leg needs under --build. They do I/O when CALLED, never at
+import, so every census above still imports this module for its tables
+alone.
 """
+
+import re
+import shutil
+import subprocess
+import threading
 
 # THE scene list: the mechanical per-scene surfaces derive from it —
 # the cargo --example flags, the rust-guest staging, build_swift's
@@ -344,4 +355,258 @@ def leg_env(root, scene, lang, appearance=""):
     if appearance:
         env["KAYA_APPEARANCE"] = appearance
     return env
+
+
+# ------------------------------------------------------- the guest builds
+# ONE COPY OF EVERY BUILD (docs/deferred.md's run-leg entry): the lane
+# builds all seven pooled, a hand run builds the one language its leg
+# needs, and neither can drift into building it a different way.
+
+def _run(argv, log, **kw):
+    """One build command. `log` is a path opened in APPEND mode, or None
+    to stream to this process's own stdout — the hand run watches its
+    build, the lane keeps a per-language log to print on failure."""
+    if log is None:
+        return subprocess.run(argv, check=False, **kw)
+    with open(log, "a", encoding="utf-8") as f:
+        return subprocess.run(argv, check=False, stdout=f,
+                              stderr=subprocess.STDOUT, **kw)
+
+
+def build_ocaml(root, log=None):
+    # --root . BECAUSE DUNE WALKS UP: run from a git worktree under
+    # the repo, a bare `dune build` builds the PARENT checkout
+    # (measured 2026-08-28).
+    return _run(["dune", "build", "--root", "."], log, cwd=root)
+
+
+def build_haskell(root, log=None):
+    return _run(["cabal", "build", "all",
+                 f"--extra-lib-dirs={root}/target/debug",
+                 f"--ghc-options=-L{root}/target/debug "
+                 f"-optl-Wl,-rpath,{root}/target/debug", "-v0"],
+                log, cwd=root / "guests/haskell")
+
+
+def build_csharp(root, log=None):
+    # dotnet run rebuilds per invocation; build once, legs exec it.
+    return _run(["dotnet", "build", "--nologo", "-v", "q",
+                 "guests/csharp/kaya-guests.csproj"], log, cwd=root)
+
+
+def build_go(root, log=None):
+    # ONE BINARY FOR EVERY SCENE: guests/go/cmd imports every scene
+    # library and picks one from KAYA_SELFTEST. encodebench is
+    # guest-only and a benchmark, its own main package.
+    (root / "target/go-guests").mkdir(parents=True, exist_ok=True)
+    rc = _run(["go", "build", "-o", "target/go-guests/kaya-go",
+               "dev.kaya/guests/go/cmd"], log, cwd=root)
+    if rc.returncode != 0:
+        return rc
+    return _run(["go", "build", "-o", "target/go-guests/encodebench",
+                 "dev.kaya/guests/go/encodebench"], log, cwd=root)
+
+
+def build_swift(root, log=None):
+    """The same bindings the iOS bundles compile, linked against
+    libkaya.dylib. swiftc allows top-level code only in a file named
+    main.swift, so each scene gets its own staging dir and the
+    compiles pool. DEPTH_SCENES too: a depth slice's guests arrive one
+    language at a time, and the file test decides — a scene whose
+    Swift guest has not landed is skipped, not a build failure."""
+    (root / "target/swift-guests").mkdir(parents=True, exist_ok=True)
+    procs = []
+    for guest in [*SCENES, *DEPTH_SCENES]:
+        src = root / f"guests/swift/{guest}.swift"
+        if not src.is_file():
+            continue
+        stage = root / f"target/swift-guests/.stage-{guest}"
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True)
+        shutil.copy2(src, stage / "main.swift")
+        companions = []
+        if (root / f"guests/swift/{guest}+Kaya.swift").is_file():
+            companions = [f"guests/swift/{guest}+Kaya.swift"]
+        blog = open(stage / "build.log", "w", encoding="utf-8")
+        p = subprocess.Popen(
+            ["bash", "-c",
+             'source "$1/tools/lib/swift-toolchain.sh" && shift && '
+             'kaya_swiftc "$@"', "_", str(root),
+             "-import-objc-header", "crates/kaya/include/kaya.h",
+             "bindings/swift/KayaWire.swift",
+             "bindings/swift/KayaApp.swift",
+             "bindings/swift/KayaRecords.swift",
+             "bindings/swift/KayaSums.swift",
+             *companions, str(stage / "main.swift"),
+             "-L", "target/debug", "-lkaya",
+             "-Xlinker", "-rpath", "-Xlinker",
+             f"{root}/target/debug",
+             "-o", f"target/swift-guests/{guest}"],
+            stdout=blog, stderr=blog, cwd=root)
+        procs.append((guest, stage, p, blog))
+    rc = 0
+    for guest, stage, p, blog in procs:
+        failed = p.wait() != 0
+        blog.close()
+        if failed:
+            rc = 1
+            text = (stage / "build.log").read_text(encoding="utf-8",
+                                                   errors="replace")
+            if log is None:
+                print(text, end="")
+            else:
+                with open(log, "a", encoding="utf-8") as out:
+                    out.write(text)
+    for stage in (root / "target/swift-guests").glob(".stage-*"):
+        shutil.rmtree(stage, ignore_errors=True)
+    return subprocess.CompletedProcess([], rc)
+
+
+def build_c(root, log=None):
+    # THE C FLOOR, THE SCENES THIS LANE ACTUALLY RUNS: C_SCENES, which
+    # check-steps' sweep_c_floor reads from the other side — a guest
+    # built here and run nowhere is false coverage.
+    return _run(["make", "-C", "guests/c",
+                 f"SCENES={' '.join(C_SCENES)}",
+                 f"TARGET_DIR={root}/target/debug",
+                 f"OUT={root}/target/c-guests"], log, cwd=root)
+
+
+def build_java(root, log=None):
+    # The shared binding + the desktop transport + every scene + the
+    # Main selector, one javac.
+    shutil.rmtree(root / "target/java-guests", ignore_errors=True)
+    (root / "target/java-guests").mkdir(parents=True)
+    srcs = ["bindings/java-desktop/dev/kaya/KayaRing.java",
+            *sorted(str(p.relative_to(root))
+                    for p in (root / "bindings/java/dev/kaya"
+                              ).glob("*.java")),
+            *sorted(str(p.relative_to(root))
+                    for p in (root / "guests/java/dev/kaya/guests"
+                              ).glob("*.java"))]
+    return _run(["javac", "-encoding", "UTF-8", "-d",
+                 "target/java-guests", *srcs], log, cwd=root)
+
+
+# The COMPILED languages, in the order the lane starts them. rust is not
+# here: its example is built and staged per leg (validate-mac stages the
+# whole set up front, run-leg one stem every run). python and js run from
+# source, so their binding is always the tree's.
+GUEST_BUILDS = {
+    "ocaml": build_ocaml,
+    "haskell": build_haskell,
+    "csharp": build_csharp,
+    "go": build_go,
+    "swift": build_swift,
+    "java": build_java,
+    "c": build_c,
+}
+
+# THE SPEC A STAGED GUEST WAS BUILT AGAINST. A compiled guest carries the
+# wire hash its binding was generated from and refuses a library speaking
+# another one, so a guest staged before a spec move dies at LAUNCH naming
+# both hashes (docs/traps.md, 2026-09-06). Nothing on disk said which spec
+# the staged tree came from, so a hand run could only learn it by watching
+# the panic; every build that succeeds writes it here instead.
+SPEC_STAMPS = "target/guest-specs"
+
+
+def spec_hash(root):
+    """The tree's protocol fingerprint out of the generated C header, or
+    None if the header does not declare one. bindings/c/kaya_wire.h is the
+    right file to ask: gen-bindings.py writes every binding's copy from
+    the same spec in one pass, and tools/gen-bindings.py --check is a gate,
+    so the header and the nine bindings cannot disagree."""
+    text = (root / "bindings/c/kaya_wire.h").read_text(encoding="utf-8")
+    m = re.search(r"^#define KAYA_SPEC_HASH\s+(0x[0-9a-fA-F]+)", text, re.M)
+    return m.group(1) if m else None
+
+
+def spec_stamp(root, lang):
+    return root / SPEC_STAMPS / f"{lang}.spec"
+
+
+def stamp_spec(root, lang):
+    """Record the spec this build compiled against. Called only after a
+    build returned 0 — a stamp over a failed build is the stale artifact
+    with a fresh label on it. An unreadable header stamps NOTHING and
+    still says so: spec_stamp_problem reads the header first, so the
+    missing stamp is never the sentence the reader gets."""
+    got = spec_hash(root)
+    if got is None:
+        return
+    p = spec_stamp(root, lang)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(got + "\n", encoding="utf-8")
+
+
+def spec_stamp_problem(root, lang):
+    """None, or the sentence refusing to run a staged guest that is not
+    this tree's spec. THREE causes, THREE sentences, each printing only
+    what it measured (CLAUDE.md invariant 3)."""
+    if lang not in GUEST_BUILDS:
+        return None
+    want = spec_hash(root)
+    if want is None:
+        return (f"bindings/c/kaya_wire.h declares no KAYA_SPEC_HASH, so "
+                f"nothing here can say which protocol the staged {lang} "
+                f"guest speaks. Run tools/gen-bindings.py — the header is "
+                f"generated, and every binding's copy moves with it.")
+    p = spec_stamp(root, lang)
+    if not p.is_file():
+        return (f"nothing recorded which spec the staged {lang} guest was "
+                f"built against ({SPEC_STAMPS}/{lang}.spec is not there), "
+                f"and this tree's bindings/c/kaya_wire.h says {want}. A "
+                f"guest staged before a spec move dies at launch with "
+                f"`library speaks spec {want}, this binding was generated "
+                f"from <older>`. Re-run with --build.")
+    got = p.read_text(encoding="utf-8").strip()
+    if got != want:
+        return (f"the staged {lang} guest was built against spec {got} and "
+                f"this tree's bindings/c/kaya_wire.h says {want}: it would "
+                f"die at launch with `library speaks spec {want}, this "
+                f"binding was generated from {got}`. Re-run with --build.")
+    return None
+
+
+def build_guests(root, langs, log_dir=None):
+    """The named languages' builds, POOLED (measured 2026-07-22: 29-38s
+    serial, bounded by the slowest language pooled). Each writes
+    `<log_dir>/<lang>.log`, or streams to stdout when log_dir is None.
+    Returns {lang: returncode}, with 1 for a build whose thread died."""
+    rc = {}
+    threads = []
+    for lang in langs:
+        fn = GUEST_BUILDS[lang]
+        log = (log_dir / f"{lang}.log") if log_dir is not None else None
+
+        def go(lang=lang, fn=fn, log=log):
+            got = fn(root, log).returncode
+            if got == 0:
+                stamp_spec(root, lang)
+            rc[lang] = got
+
+        t = threading.Thread(target=go)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    return {lang: rc.get(lang, 1) for lang in langs}
+
+
+_HS_BINS = {}
+
+
+def hs_bin(root, name):
+    """A Haskell guest's binary, cached — cabal takes ~0.4s to answer and
+    the lane asks once per haskell leg."""
+    key = (str(root), name)
+    if key not in _HS_BINS:
+        got = subprocess.run(["cabal", "list-bin", name, "-v0"],
+                             cwd=root / "guests/haskell",
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, check=False,
+                             text=True, encoding="utf-8", errors="replace")
+        _HS_BINS[key] = got.stdout.strip()
+    return _HS_BINS[key]
 

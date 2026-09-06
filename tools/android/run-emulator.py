@@ -1088,7 +1088,13 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # ENDED, refused or taken; drags are serial, so the start count at a
     # seq's first injection dates every later start to that seq.
     served = {}
-    for _ in range(120):
+    # 240 ROUNDS, roughly 0.7s each: the budget has to outlast a leg that
+    # is FAILING, and a failing step costs this backend up to 15s now
+    # (KayaCompose.kt's stepDeadline, the core's own POLL_DEADLINE). At
+    # 120 a red leg with five failed steps could run past the poll and be
+    # written down as "no verdict" — a legible failure turned into an
+    # illegible one. A green leg breaks on its verdict and pays nothing.
+    for _ in range(240):
         dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat",
                        "-d", "-s", "kaya:*"])
         m = re.search(r"^.*KAYA_SELFTEST: (?:OK|FAILED).*$", dump, re.M)
@@ -1125,6 +1131,16 @@ def run_apk_on(serial, name, apk, component, script, extras,
         # target the pointer entered and where the drop landed.
         for line in re.findall(r"^.*KAYA_DRAG_EVENT: .*$", dump, re.M):
             print(f"{name}: {line.split('KAYA_DRAG_EVENT: ', 1)[1]}", file=log)
+    if "KAYA_SELFTEST: FAILED" in out:
+        # THE THREE-LINK TRACE (docs/deferred.md's android
+        # `portfolio-python` WATCH): the app dumps its ring just before
+        # the verdict, so the verb's own dispatch, the widget's handler
+        # and the batch that answered are all in THIS dump — printed
+        # here rather than left to the 60-line tail below, which a long
+        # scene's trace outruns.
+        for line in re.findall(r"^.*\bKAYA_DIAG:? .*$", dump, re.M):
+            print(f"{name}: {line.split('KAYA_DIAG', 1)[1].lstrip(': ')}",
+                  file=log)
     # THE RECREATION LEG'S OWN PROOF (docs/deferred.md's mount entry):
     # a green verdict does not say the relaunch happened. Both sentences
     # come out of the SAME process's harness thread, so the pair is the

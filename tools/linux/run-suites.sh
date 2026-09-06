@@ -420,6 +420,12 @@ drain() {
         echo "== $name =="
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
+            # THE CLIPBOARD INSTRUMENT, beside the verdict it explains
+            # (crates/kaya/src/gtk.rs's clip_note; docs/deferred.md's
+            # `clipboard-python-wayland` WATCH). It rides the verb trace's
+            # ring, so these records exist only on a failure and only in
+            # that file — a green leg carries none of it.
+            grep 'verb=clipboard' "$LEGS_DIR/$name.vtrace" 2>/dev/null || true
             # An empty log means the guest died or hung BEFORE the
             # harness printed its first line — a different failure from
             # a failed assertion, and the bare verdict cannot tell them

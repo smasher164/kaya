@@ -6097,6 +6097,40 @@ fn menu_activation_route(
 // gives the selection only with an input-event serial and a headless seat
 // never delivers one, so set_content is dropped SILENTLY (ensure_serial_primed).
 
+/// THE CLIPBOARD WATCH'S INSTRUMENT (docs/deferred.md,
+/// `clipboard-python-wayland`): the premises the entry names, buffered in the
+/// flight recorder's ring and written only when the run fails, so a green leg
+/// carries no noise and a red one carries each premise with its step and its
+/// millisecond.
+fn clip_note(what: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "harness")]
+    crate::vtrace::note("clipboard", what);
+    #[cfg(not(feature = "harness"))]
+    let _ = what;
+}
+
+/// What a materialized representation IS, without its bytes: which arm of
+/// `materialize` answered, never what was on the clipboard.
+fn clip_shape(clip: &Option<crate::protocol::Representation>) -> String {
+    use crate::protocol::Representation as R;
+    match clip {
+        None => "nothing".to_owned(),
+        Some(R::Text(t)) => format!("text {}b", t.len()),
+        Some(R::Html(h)) => format!("html {}b", h.len()),
+        Some(R::Image(b)) => format!("image {}b", b.0.len()),
+        Some(R::Files(f)) => format!("files {}", f.len()),
+        Some(R::Custom { id, bytes }) => format!("custom {id} {}b", bytes.0.len()),
+    }
+}
+
+/// How many times THIS PROCESS has been told the selection moved. gdk emits
+/// `changed` once it holds the new owner's formats, so this counter is the
+/// app's OWN view advancing — which is the thing a foreign TARGETS poll
+/// cannot speak for and the thing `clipboard_seed` waits on.
+#[cfg(feature = "harness")]
+static CLIP_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Everything a menu-role activation needs WITHOUT borrowing CORE: a stage
 /// verb activates actions while it holds the core borrow.
 struct ClipboardHub {
@@ -6251,11 +6285,40 @@ impl ClipboardHub {
                 true
             }
             "paste" => {
-                let Some(id) = self.focused_widget_id() else {
+                let focused = self.focused_widget_id();
+                let accepts = focused
+                    .and_then(|id| self.accepts.borrow().get(&id).cloned())
+                    .unwrap_or_default();
+                // The WATCH's instrument (docs/deferred.md): what this
+                // process could see of the selection at the moment of every
+                // paste, on EVERY route out of this arm — a paste that found
+                // no focused kaya widget and one the platform inserts for us
+                // are both silent otherwise, and all three routes read the
+                // same afterwards, as "the paste reached nobody". What the
+                // focus reading is worth is on ClipView::active.
+                {
+                    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+                    let active = focused_native()
+                        .and_then(|w| w.root())
+                        .and_then(|r| r.downcast::<gtk4::Window>().ok())
+                        .map(|w| w.is_active());
+                    let board = gdk::Display::default().map(|d| d.clipboard());
+                    clip_note(format_args!(
+                        "paste widget={} route={:?} accepts={accepts:?} \
+                         gtk_window_active={active:?} local={:?} offers={:?}",
+                        focused.map_or("none".to_owned(), |id| id.to_string()),
+                        match (focused, accepts.is_empty()) {
+                            (None, _) => "no kaya widget holds focus",
+                            (Some(_), true) => "platform insertion",
+                            (Some(_), false) => "kaya delivery",
+                        },
+                        board.as_ref().map(|b| b.is_local()),
+                        board.as_ref().map(|b| b.formats().to_str()),
+                    ));
+                }
+                let Some(id) = focused else {
                     return true;
                 };
-                let accepts =
-                    self.accepts.borrow().get(&id).cloned().unwrap_or_default();
                 if accepts.is_empty() {
                     if let Some(f) = focused_native() {
                         let _ = f.activate_action("clipboard.paste", None);
@@ -6269,24 +6332,14 @@ impl ClipboardHub {
                     return true;
                 };
                 let hub = self.clone();
-                // The wayland WATCH's instrument (docs/deferred.md): a wayland
-                // client reads the selection only while focused, so the
-                // premise is logged at the moment of every paste.
-                {
-                    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
-                    let active = focused_native()
-                        .and_then(|w| w.root())
-                        .and_then(|r| r.downcast::<gtk4::Window>().ok())
-                        .map(|w| w.is_active());
-                    eprintln!(
-                        "KAYA_CLIP_EVENT: paste widget={id} window_active={active:?} offers={}",
-                        display.clipboard().formats().to_str()
-                    );
-                }
                 materialize(
                     &ClipOffer::Board(display.clipboard()),
                     &accepts,
                     Box::new(move |clip| {
+                        clip_note(format_args!(
+                            "paste widget={id} answered {}",
+                            clip_shape(&clip)
+                        ));
                         // A paste that delivered nothing is not an
                         // occurrence (the read owns the empty answer).
                         let Some(clip) = clip else { return };
@@ -9059,16 +9112,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let sink = core.occurrences.clone();
             {
                 use gtk4::prelude::GtkWindowExt;
-                eprintln!(
-                    "KAYA_CLIP_EVENT: read_clipboard request={request} window_active={} offers={}",
+                clip_note(format_args!(
+                    "read_clipboard request={request} accepting={accepting:?} \
+                     gtk_window_active={} local={} offers={:?}",
                     core.window.is_active(),
+                    clipboard.is_local(),
                     clipboard.formats().to_str()
-                );
+                ));
             }
             materialize(
                 &ClipOffer::Board(clipboard),
                 &accepting,
                 Box::new(move |clip| {
+                    clip_note(format_args!(
+                        "read_clipboard request={request} answered {}",
+                        clip_shape(&clip)
+                    ));
                     // Answered exactly once; None IS an answer — the universal
                     // no (denied, absent, unfocused, nothing-accepted alike).
                     sink.send(Occurrence::ClipboardResult { request, clip });
@@ -10834,7 +10893,14 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             };
             if let Some(display) = gtk4::gdk::Display::default() {
                 let refresh = defer;
-                display.clipboard().connect_changed(move |_| refresh());
+                display.clipboard().connect_changed(move |_| {
+                    // The app's own view of the selection advancing
+                    // (CLIP_GENERATION): gdk emits this once it holds the new
+                    // owner's formats.
+                    #[cfg(feature = "harness")]
+                    CLIP_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    refresh()
+                });
             }
             {
                 use gtk4::prelude::ObjectExt;
@@ -11123,6 +11189,70 @@ fn foreign_clip_read(mime: &str) -> Vec<u8> {
         Ok(o) if o.status.success() => o.stdout,
         _ => Vec::new(),
     }
+}
+
+/// A tool's multi-line output as one instrument field.
+#[cfg(feature = "harness")]
+fn clip_one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// What THIS PROCESS can see of the clipboard right now, read on the UI
+/// thread. `gdk::ContentFormats` is not Send, so the verdict about the offer
+/// is taken there and only the answer travels.
+#[cfg(feature = "harness")]
+#[derive(Clone, Debug)]
+struct ClipView {
+    /// CLIP_GENERATION at the read.
+    generation: u64,
+    /// Whether the app's own offer carries what a read of this kind needs —
+    /// `materialize`'s own question, asked of the same formats.
+    sees: bool,
+    formats: String,
+    /// gtk's OWN reading of this window's focus (`gtk_window_is_active`),
+    /// which is NOT the compositor's and must not be read as it: measured
+    /// 2026-09-06 on the linux lane, it is `true` for every step of a green
+    /// x11 leg and `false` for every step of a green WAYLAND one, because a
+    /// headless sway seat advertises no keyboard until `wtype` makes a
+    /// virtual one, so gdk is never sent `wl_keyboard.enter` while wlroots
+    /// goes on handing this surface the selection. So a red wayland leg
+    /// showing `false` here has measured nothing about focus, and no
+    /// sentence below draws a cause from it (docs/deferred.md's
+    /// `clipboard-python-wayland` WATCH, whose premise this reading was
+    /// added to pin).
+    active: bool,
+    /// The app is its own last writer (gdk's is_local), so a foreign seed has
+    /// not arrived while this is still true.
+    local: bool,
+}
+
+/// `materialize`'s own test, one seeded kind at a time.
+#[cfg(feature = "harness")]
+fn clip_kind_offered(kind: &str, formats: &gdk::ContentFormats) -> bool {
+    match kind {
+        "text" => clipboard_offers_text(formats),
+        "html" => formats.contain_mime_type("text/html"),
+        "image" => formats.contain_mime_type("image/png"),
+        "files" => formats.contain_mime_type("text/uri-list"),
+        _ => false,
+    }
+}
+
+#[cfg(feature = "harness")]
+fn clip_app_view(kind: &str) -> ClipView {
+    let kind = kind.to_owned();
+    GtkStage::on_main(move |core| {
+        use gtk4::prelude::{GtkWindowExt, WidgetExt};
+        let clipboard = WidgetExt::display(&core.window).clipboard();
+        let formats = clipboard.formats();
+        ClipView {
+            generation: CLIP_GENERATION.load(std::sync::atomic::Ordering::SeqCst),
+            sees: clip_kind_offered(&kind, &formats),
+            formats: formats.to_str().to_string(),
+            active: core.window.is_active(),
+            local: clipboard.is_local(),
+        }
+    })
 }
 
 /// The first freshening tap of this process has completed (its slow
@@ -14033,36 +14163,51 @@ impl crate::harness::Stage for GtkStage {
     /// THERE (§3): wl-copy forks a server and its exit does not mean the
     /// offer landed, so the seed polls the foreign TARGETS until the seeded
     /// type is listed.
+    ///
+    /// AND UNTIL *THIS PROCESS* CAN READ IT, which is the half the WATCH
+    /// entry's sightings were (docs/deferred.md, `clipboard-python-wayland`).
+    /// `materialize` decides from THE APP'S OWN `formats()` and nothing else,
+    /// and a foreign TARGETS poll speaks only for the writer: between the two
+    /// there is a window in which the selection has moved and gdk has not yet
+    /// handed this process the new owner's formats (on x11 the TARGETS round
+    /// trip is still in flight; on wayland the compositor hands the selection
+    /// to one client at a time). A read taken there answers None, which the
+    /// scene reads as `"empty"`. So the seed also waits for CLIP_GENERATION
+    /// to move AND for
+    /// the app's own offer to carry the seeded kind; the generation is what
+    /// tells the arrival apart from the app's own earlier copy still sitting
+    /// on the board, which is the state every seed in the scene is written
+    /// over.
     fn clipboard_seed(&self, kind: &str, argument: &str) {
-        let expected: &str = match kind {
-            "text" => {
+        // What the foreign writer puts there, and the target its arrival is
+        // read by. The WRITE is separate from this match so the app's own
+        // view can be sampled first.
+        let (mime, bytes, expected): (Option<&str>, Vec<u8>, &str) = match kind {
+            "text" => (
                 // No explicit type: the platform tool declares its own
                 // standard text target set, exactly as a real app's
                 // copy would.
-                foreign_clip_write(None, argument.as_bytes().to_vec());
-                if linux_wayland_session() {
-                    "text/plain"
-                } else {
-                    "UTF8_STRING"
-                }
-            }
-            "html" => {
-                foreign_clip_write(Some("text/html"), argument.as_bytes().to_vec());
-                "text/html"
-            }
-            "image" => {
-                let bytes = std::fs::read(argument).unwrap_or_else(|e| {
+                None,
+                argument.as_bytes().to_vec(),
+                if linux_wayland_session() { "text/plain" } else { "UTF8_STRING" },
+            ),
+            "html" => (Some("text/html"), argument.as_bytes().to_vec(), "text/html"),
+            "image" => (
+                Some("image/png"),
+                std::fs::read(argument).unwrap_or_else(|e| {
                     panic!("kaya: clipboard_seed image cannot read {argument:?}: {e}")
-                });
-                foreign_clip_write(Some("image/png"), bytes);
-                "image/png"
-            }
+                }),
+                "image/png",
+            ),
             "files" => {
                 let uri = glib::filename_to_uri(argument, None).unwrap_or_else(|e| {
                     panic!("kaya: clipboard_seed files: {argument:?} is not a path: {e}")
                 });
-                foreign_clip_write(Some("text/uri-list"), format!("{uri}\r\n").into_bytes());
-                "text/uri-list"
+                (
+                    Some("text/uri-list"),
+                    format!("{uri}\r\n").into_bytes(),
+                    "text/uri-list",
+                )
             }
             custom => panic!(
                 "kaya: clipboard_seed cannot write {custom:?} from outside the app — \
@@ -14070,18 +14215,89 @@ impl crate::harness::Stage for GtkStage {
                  would be foreign in name only"
             ),
         };
+        let before = clip_app_view(kind);
+        foreign_clip_write(mime, bytes);
         let started = std::time::Instant::now();
         let deadline = started + std::time::Duration::from_secs(5);
+        let mut rounds = 0u32;
+        let mut targets = String::new();
+        let mut foreign_listed = false;
+        let mut view = before.clone();
         loop {
-            if foreign_clip_targets().contains(expected) {
-                eprintln!(
-                    "KAYA_CLIP_EVENT: seed {kind} listed after {}ms",
-                    started.elapsed().as_millis()
-                );
-                return;
+            rounds += 1;
+            if !foreign_listed {
+                targets = foreign_clip_targets();
+                foreign_listed = targets.contains(expected);
+            }
+            if foreign_listed {
+                view = clip_app_view(kind);
+                // THE GENERATION IS THE DISCRIMINATOR: every seed in the
+                // scene is written over an offer the app itself made, so
+                // `sees` alone is satisfied before the selection has moved.
+                if view.generation != before.generation && view.sees {
+                    clip_note(format_args!(
+                        "seed {kind} settled ms={} rounds={rounds} expected={expected} \
+                         foreign_targets={:?} app_formats={:?} app_generation={}->{} \
+                         gtk_window_active={} app_is_own_writer={}",
+                        started.elapsed().as_millis(),
+                        clip_one_line(&targets),
+                        view.formats,
+                        before.generation,
+                        view.generation,
+                        view.active,
+                        view.local,
+                    ));
+                    return;
+                }
             }
             if std::time::Instant::now() > deadline {
-                panic!("kaya: clipboard_seed {kind} never appeared on the clipboard");
+                // THREE CAUSES, NEVER ONE SENTENCE (invariant 3): the writer's
+                // own offer never appeared; it appeared and this process was
+                // never told; it was told and what it was handed does not
+                // carry the kind. Each says only what this loop measured.
+                let ms = started.elapsed().as_millis();
+                let seen = clip_one_line(&targets);
+                let cause = if !foreign_listed {
+                    format!(
+                        "the writer's own offer never listed {expected:?} — the last \
+                         TARGETS another process read on this clipboard were {seen:?}"
+                    )
+                } else if view.generation == before.generation {
+                    format!(
+                        "another process reads {seen:?} on this clipboard, but THIS one \
+                         was never told the selection moved (gdk's changed count is still \
+                         {}); the formats it still holds are {:?}",
+                        before.generation, view.formats
+                    )
+                } else {
+                    format!(
+                        "this process WAS told the selection moved ({} -> {}) and another \
+                         reads {seen:?} on the same clipboard, but the offer this one was \
+                         handed is {:?}, which carries nothing a {kind} read accepts — so \
+                         this client's view of the selection is not the writer's",
+                        before.generation, view.generation, view.formats
+                    )
+                };
+                clip_note(format_args!(
+                    "seed {kind} EXPIRED ms={ms} rounds={rounds} expected={expected} \
+                     foreign_listed={foreign_listed} foreign_targets={seen:?} \
+                     app_formats={:?} app_generation={}->{} gtk_window_active={} \
+                     app_is_own_writer={}",
+                    view.formats,
+                    before.generation,
+                    view.generation,
+                    view.active,
+                    view.local,
+                ));
+                // The ring holds every read this run took; the panic below
+                // leaves through no verdict, so the flight recorder's own
+                // failure path is entered here (crates/kaya/src/vtrace.rs).
+                #[cfg(feature = "harness")]
+                crate::vtrace::dump("clipboard_seed expired");
+                panic!(
+                    "kaya: clipboard_seed {kind} was not readable by this process {ms}ms \
+                     and {rounds} rounds after the foreign writer exited: {cause}"
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -14172,6 +14388,10 @@ impl crate::harness::Stage for GtkStage {
 
     fn alert_count(&self) -> usize {
         Self::on_main(move |core| usize::from(core.live_alert.borrow().is_some()))
+    }
+
+    fn mounted(&self) -> bool {
+        Self::on_main(move |core| window_content(core, 0).is_some())
     }
 
     fn root_fills(&self) -> String {
