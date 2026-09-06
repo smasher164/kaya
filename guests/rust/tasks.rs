@@ -346,6 +346,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let (lists, projects_coll, quick) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
+            // A desktop default that fits the details screen (GTK's own
+            // default is 540x330); advisory on the phones.
+            .size(960.0, 640.0)
             .sections_presentation(kaya::SectionsPresentation::Sidebar)
             .menu("Edit", |m| {
                 m.item("Undo").role(kaya::MenuRole::Undo).id();
