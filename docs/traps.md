@@ -9495,3 +9495,52 @@ runningboardd's exit context before hunting a crash report.
   scene-ready wait put the click at +19ms and the raise after the find.
   The write banks its text now. A faster harness is a new clock on every
   race the old one paid for.
+- **An injected Android press that is never released poisons the device**
+  (2026-09-06, tools/android/run-emulator.py). `adb shell input motionevent
+  DOWN x y` leaves the pointer down after the `input` process exits — that
+  is what makes a start-gated drag possible at all (the long press fires
+  497ms into a hold that carries no further events, measured on the API 35
+  pool 2026-09-06). The other side of it: the NEXT `DOWN` on that device is
+  refused, `InputDispatcher: Inconsistent event … Invalid DOWN event -
+  pointers already down for device DeviceId(-1)`, and the android pool stays
+  warm across runs, so an interrupted injection poisons an emulator for
+  every later run. The symptom is a drag that never starts — the same
+  reading as the bug the injection exists to fix. An `UP` with nothing down
+  is refused harmlessly (`Received ACTION_UP but no pointers are currently
+  down`), so the release goes in a `finally`, in the runner's teardown, AND
+  ahead of every press.
+- **A fixed pause before an XCUITest `typeText` is a coin toss that kills
+  the resident driver** (2026-09-06, tools/ios/xcuidrive/KayaDrive.swift).
+  `typeText` RAISES when the target has no keyboard focus, an XCTest issue
+  ends the resident test, xcodebuild answers 65, and every later leg on
+  that simulator has no hands. The save sheet's name field takes
+  0.35-0.43s to become typeable on an idle host; the driver slept 0.3s.
+  Two matrix sightings and one whole lane with no leg run (the admission
+  probe drives the same verb) were this one sleep. Every wait in the
+  driver is deadline-based now and prints what it waited for; a verb that
+  cannot get its signal refuses in a sentence rather than typing.
+- **The save sheet's name field never publishes `hasFocus`, and the
+  keyboard is the half that answers** (2026-09-06, the same driver, measured
+  with the typing signal made impossible): `focused=false keyboards=1`
+  while typing works, because the document picker is a remote view
+  controller whose field's focus is not the host app's to read. A wait on
+  `hasFocus` would never end; the wait is on a keyboard being up.
+- **A driver log in an unnamed mkdtemp is a log nobody will ever read**
+  (2026-09-06, tools/ios/run-sim.py): the ledger asked twice to "read the
+  driver's own log for the exit 65", and the path was never printed nor
+  copied — a search of /var/folders found zero surviving driver logs. A
+  dead driver's refusal carries its last words now and the logs land in
+  target/validate-failures.
+
+## A retry loop whose one round gets the whole budget is one attempt (2026-09-06)
+
+The XCUITest driver's `savepress` presses Save up to six times, because a
+press the picker shrugs off is a measured outcome. When every wait in the
+driver was clamped to the leg's deadline, the loop's inner wait for the
+sheet to go was handed `left(deadline)` — the verb's whole remaining
+budget — and matrix #18 spent 44s on ONE press with the five behind it
+never running; the loop counted `presses=1` in its own refusal. A loop's
+inner wait is `min(window, left(deadline))`, the window sized from the
+measured dismissal, and the reading per round is printed so the refusal
+can say what each attempt did. tools/check-steps.py holds the arm;
+docs/deferred.md's save-press WATCH holds the sighting.

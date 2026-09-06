@@ -7907,7 +7907,7 @@ named retained `dev.kaya.editorgo`, and the positive cleanup removed it.
 The full standalone iOS lane then passed; this still does not close the
 distinct six-delivered-and-ignored-taps face.
 
-## WATCH — `save-swiftui`: the XCUITest driver exited 65 before the sheet was driven (first sighting 2026-09-05)
+## ~~WATCH — `save-swiftui`: the XCUITest driver exited 65 before the sheet was driven (first sighting 2026-09-05)~~
 KEY: save-swiftui, driver exited 65, no file dialog live, file_choose draft, xcuidrive, matrix contention
 
 The task manager's fourth matrix (f65bd32e, one-minute load 3.7 at launch):
@@ -7926,6 +7926,79 @@ lost, the dialog never read, every later step reading the app with no
 file open; the iOS lane at 609s beside it. The class this entry holds;
 the same lane read ALL PASS standalone earlier the same day.
 
+CAUSE MEASURED AND FIXED 2026-09-06 (the robustness day's second round).
+The driver's `savename` tapped the save sheet's name field, slept a FIXED
+`pause(0.3)`, then called `XCUIApplication.typeText` — which RAISES
+("Neither element nor any descendant has keyboard focus") when the field
+is not typeable yet; the raise unwinds out of `testResident`, the resident
+loop ends, xcodebuild answers 65, and every later leg on that phone is
+handless. Measured with the driver's own log on an IDLE host: the field
+takes 0.35-0.43s to become typeable, so the sleep was at its limit with
+nothing else running and a coin toss at five-minute load 85. Two more
+raise-capable calls with no precondition (`save.tap()` in savepress,
+`hit.tap()` in press/sb_tap) were the same class. tools/ios/xcuidrive/KayaDrive.swift:
+every fixed poll count is a deadline-based `waitFor` that prints what it
+waited for and how long, clamped to the running leg's deadline the host
+writes beside it; `savename` waits for the field's own signal (the
+keyboard — the picker's field never publishes `hasFocus`, docs/traps.md)
+and REFUSES in a sentence naming both readings rather than typing
+unfocused; `continueAfterFailure` is explicit and every XCTest issue is
+written to `issues.log`. tools/ios/run-sim.py: a dead driver's refusal
+carries its last words and the three logs are copied to
+target/validate-failures/ios-xcuidrive-<udid>.log — the log this entry
+asked to have read was an unnamed mkdtemp nobody kept, which is why
+neither sighting could be read. Four watched negatives on the real pool
+(drivers killed, the typing signal made impossible, the slow-flow
+injection, the host timeout cut to 1s); the lane ALL PASS twice on 128
+legs with four drivers alive at the verdict. OPEN, for a ruling: nothing
+restarts a dead driver, so one death still costs the rest of that
+device's legs — a between-legs restart is a few lines and would make a
+red lane green with one leg lost.
+
+MATRIX #18 THE SAME EVENING was red on this leg again with the driver
+ALIVE — a different shape, held by the save-press WATCH below (the
+driver's own retry loop, one press long after this round's edit).
+
+
+## WATCH — `save-swiftui` under a matrix: the save sheet's Save was pressed once and the sheet stayed up (first sighting 2026-09-06)
+KEY: save-swiftui, savepress, still up after 1 presses, savePressWindow, swallowed press, xcuidrive, matrix contention
+
+Matrix #18 (the robustness day's second round, five-minute load 77 by the
+verdict): `file_save : the save dialog was still up after 1 presses of
+Save: Save was in the strip for 1 of them; it now offers
+["savers-swiftui", "kaya-save-24986, Actions Menu", "More", "Save"]`, the
+leg 118s, the lane 614s against its 600s ceiling on that leg alone; the
+driver alive throughout (the exit-65 class above is closed: `savename`
+typed `final` and read it back, `focused=false keyboards=1`). The app's
+own picker trace shows the sheet PRESENTED and never a `didPick` — the
+tap landed in the strip and the picker did not take it as Save.
+
+THE ROUND'S OWN REGRESSION, FIXED THE SAME HOUR: savepress has always
+been a six-press loop, since one press the sheet shrugs off is a known
+outcome, and its per-press wait was the driver's default window. The
+second round's edit — every wait clamped to the leg's deadline — handed
+that inner wait `left(deadline)`, the verb's WHOLE remaining budget, so
+the first press waited 44s for a dismissal that never came and the five
+presses behind it never ran; `left()`'s own doc comment names exactly
+this and the arm below it did it anyway. tools/ios/xcuidrive/KayaDrive.swift:
+the wait is `min(savePressWindow, left(deadline))` (6s, several times the
+0.7-1.4s a dismissal took under this matrix), and EVERY PRESS PRINTS ITS
+READING — Save offered or absent, keyboards before and after the tap,
+sheet gone or still up, the name field's text — into `drive.log` and
+into the refusal sentence, so the next sighting says what one swallowed
+press did to the sheet rather than that it happened. tools/check-steps.py
+holds the arm to the bounded window with a watched negative (the
+whole-budget wait doctored back in, count printed).
+
+OPEN: why a press on Save is not taken under load. The candidates the
+readings will separate: the tap ends the name field's editing (the
+keyboard drops, the sheet stays) and a second press saves — or the tap
+is delivered to a bar mid-layout and nothing changes. THE QUIET READING,
+taken the same hour on the swift suite standalone (ALL PASS): `press 1:
+Save offered keyboards 1->0 sheet gone` on every save leg — so on an
+idle host ONE press both drops the keyboard and saves, and the keyboard
+being up at the press is not by itself what swallows it. The per-press
+line under the next contended matrix is the measurement.
 
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
@@ -11053,6 +11126,75 @@ here: 1.5s is spent on every drag of every lane, and a retry on
 TWENTY-FOURTH, 2026-09-06, matrix #17 (`dnd-go`, 88s): the twenty-third's
 shape on the same leg, the android lane's only red.
 
+TWENTY-FIFTH ENTRY, 2026-09-06, NOT a sighting: the remedy the sixth
+sighting named and the twenty-third left standing is IN.
+tools/android/run-emulator.py no longer passes the request's 1500ms
+through to `input draganddrop` — it SCALES it by the host's one-minute
+load average read at the moment of injection (the request's own at or
+under 8, `asked x load / 8` above it, capped at 4500ms) and prints the
+number it used and the load it read on the injection line, so a failed
+leg's log names the schedule that actually ran:
+
+    dnd-compose: draganddrop #1 try 1 96 64 104 104 1581ms (asked 1500ms,
+      one-minute load 8.43) -> rc=0 in 1612ms
+
+The mechanism: `input draganddrop` runs a FIXED schedule inside one
+guest-side command — the press, Android's own long-press wait, the moves
+interpolated over the duration, the release — and a loaded emulator starts
+the system drag session so late that the moves are already spent, which is
+`KAYA_DRAG_STARTED` followed by `ended op=0 entered=0` with no
+DRAG_LOCATION ever reaching the app: the twenty-third and twenty-fourth
+sightings' exact reading, with the aim inside both boxes. The moves are
+the part a late session needs to still be running, so under load there are
+more of them over more wall time. NO RETRY rides on that outcome,
+deliberately: `ended op=0 entered=0` is also what the scene's own `drag
+ended none` step asserts and the runner cannot tell the two apart.
+MEASURED while calibrating: the android lane's own four emulators put an
+otherwise quiet host at a one-minute load of 7.4-8.4, so the lane alone
+pays the 1500ms it always paid and only a host carrying other lanes buys
+the longer schedule. The scaling is watched moving and watched holding
+still at every launch (`drag_duration_selftest`, its counts printed beside
+`drop_block`'s), and was watched red on four doctored copies: the scaling
+removed, the quiet threshold dropped to 1.0, the cap removed, and the
+injection line spelling the ASKED ms instead of the one that ran.
+
+THE AIM LINE'S `duration=1500ms` IS THE REQUEST, NOT THE SCHEDULE. The app
+mints it (KayaCompose.kt's DRAG_INJECT_MS) before the runner has read any
+load; the runner's own `draganddrop #N` line is the one that says what
+ran, and it carries both numbers.
+
+AND THE PRESS IS HELD UNTIL THE APP SAYS THE SESSION STARTED, which is
+the half that removes the race rather than estimating around it, and the
+reason the runner no longer runs `input draganddrop` at all. That command
+is ONE guest-side schedule with no point at which the runner can look or
+intervene, so its moves are spent whether or not the drag exists yet —
+which is the recorded shape exactly. `input motionevent DOWN|MOVE|UP` is
+on the pool's image (API 35), and MEASURED on a quiet emulator
+2026-09-06: the press survives between adb invocations, the long press
+fires 497ms after a DOWN followed by nothing, each `input motionevent`
+costs ~20ms (~190ms under a matrix-shaped load), and the drop is taken.
+So the injection is now an UP (clearing any stale press), a DOWN, a HOLD
+on the app's own `KAYA_DRAG_STARTED` bounded at 4s, eight MOVEs paced over
+the duration the load bought, and an UP in a `finally`. A press that never
+becomes a drag is released without moving and the existing three-try retry
+takes it; a press that DID start is never re-injected.
+
+THE HELD PRESS IS A DEVICE-GLOBAL SWITCH, and the measurement that says
+so: a pointer left down makes the next DOWN on that device `InputDispatcher:
+Inconsistent event … Invalid DOWN event - pointers already down`, this pool
+stays warm across runs, and the symptom would be a drag that never starts —
+the very reading being chased. An UP with nothing down is refused
+harmlessly, so the release is in `kaya_teardown` (beside the clipboard
+IME reset, for the same stated reason), in a `finally`, AND ahead of every
+press.
+
+READ ON THE LANE, all three suites ALL PASS: quiet, 1500ms and 187ms
+between moves; at one-minute loads of 22-365, the 4500ms cap with the
+moves 562ms apart, every drag starting 408-601ms after the press and
+walking all eight moves. `dnd-compose` costs 48s at the cap where it
+costs 18-27s otherwise, and `dnd-jvm`/`dnd-go` 49s each — the drag legs
+are the android lane's slowest by a wide margin now, which its 520s
+ceiling has to be re-read against.
 
 ## ~~GAP — tools/run-leg.py runs a compiled guest AS STAGED; it should build that language the lane's way first (2026-09-06)~~
 KEY: run-leg, compiled guest, staged guest, build_ step, spec hash mismatch, hand run
@@ -11083,7 +11225,7 @@ same move the rust build took: the per-language build into the lane
 module, run-leg calling it under `--build`, and a refusal (not a stale
 run) when a staged guest's binding hash is not the tree's.
 
-## WATCH — `kaya_app_checks` under a matrix: the bulk-insert growth bound read 5.75x against 3.0x (first sighting 2026-09-06)
+## ~~WATCH — `kaya_app_checks` under a matrix: the bulk-insert growth bound read 5.75x against 3.0x (first sighting 2026-09-06)~~
 KEY: kaya_app_checks, bulk insert, growth bound, BULK_GROWTH, 32_000 rows, gate sweep under load
 
 Matrix #16's gate sweep (niced, after the android lane, five-minute load
@@ -11098,7 +11240,41 @@ is not a wall clock (counted work, or two runs and the smaller), or the
 sweep's own load figure printed beside the growth so a reader can tell
 the two apart.
 
-## WATCH — the iOS lane under a matrix: one simulator's LocalStorage admission probe hit its slow flow and the lane ran no leg (first sighting 2026-09-06)
+RESOLVED 2026-09-06 — the clause no longer asks a wall clock the
+question. THE REFUSAL IS COUNTED WORK: an insert whose cost grows with
+the table has to READ the table, so counting containers stand in for
+the insert's two accumulators (the collection instance's mirror and
+the batch) for one abandoned transaction, and every entry the binding
+reads out of either is counted. The fixed body reads ZERO at 32,000
+inserts; the shipped defect reads ~2 per existing entry per insert and
+the run stops at a 4-whole-model-pass ceiling rather than proving a
+quadratic body quadratic for an hour. Overriding `__iter__` is what
+makes the copy visible at all — CPython's `dict(other)` copies the
+slots wholesale unless the argument's `tp_iter` differs from dict's —
+and a control clause refuses the zero unless one pass over each
+container still moves the counter, which is the negative that goes red
+when the instrument is simplified. The BINDING IS UNTOUCHED: both
+accumulators are objects the check substitutes from outside, so no
+counter rides the production path. THE CLOCK STAYS for the cost no
+counter here can see, restated so a busy host cannot decide it: one
+run to 32,000 timed in chunks of 100, each size's figure the MINIMUM
+chunk of the 1,000 rows before it, so both figures are the same ~0.3ms
+of work sampled ten times and the growth is marginal cost at 2,000
+entries against marginal cost at 32,000 (which the old whole-run
+averages diluted — the doctored body reads 23-25x here against the old
+9.7-12.6x). The load averages print beside the ratio. MEASURED
+AGAINST THE SIGHTING: the two estimators alternating in one process on
+an 18-core host under 48 spinners at one-minute load 107 read old
+0.41x / 1.09x / 3.21x / 0.61x — over its own bound, the flake
+reproduced on demand — against new 1.10x / 1.06x / 1.04x / 1.04x, and
+the gate whole under that load read growth 1.02x with 0 counted reads.
+Four watched negatives, substitution counts printed: the shipped
+pre-7d13429 body, a per-insert model scan, a per-insert pass over the
+queued batch (the Swift binding's shape), and the instrument itself
+half-dead. No lane time is added: one run of 32,000 replaces two of
+2,000 + 32,000.
+
+## ~~WATCH — the iOS lane under a matrix: one simulator's LocalStorage admission probe hit its slow flow and the lane ran no leg (first sighting 2026-09-06)~~
 KEY: LocalStorage admission, rc=76, device preparation failed, picker probe, slow flow, ios lane, matrix contention
 
 Matrix #15 (the robustness day; five lanes): `run-sim: LocalStorage
@@ -11113,6 +11289,18 @@ LocalStorage prompt under a loaded host. One sighting; the per-device
 admission times are already printed, so the next sighting reads whether
 the 77s was the probe waiting or the probe re-probing, and whether a
 second admission attempt on that one device would have admitted it.
+
+ONE MECHANISM WITH THE ENTRY ABOVE, FIXED 2026-09-06: the admission probe
+drives the save sheet with the SAME verbs (`attach`, `savename`,
+`savepress`), so the fixed 0.3s pause before typing killed the driver
+inside admission, the probe answered 76, the re-probe found no hands and
+answered 76 again, and the lane refused with no leg run — matrix #15's
+shape exactly. The retry the first sighting asked about already existed
+and is gate-held; what was missing was the reading: `picker_export_probe`
+prints attempt number, elapsed and code with the code's meaning, the
+admission line says how many attempts, and the refusal names both.
+`KAYA_IOS_SLOW_PROBE_TEST=<udid>` is the hand-only injection, watched on
+the real pool.
 
 ## ~~GAP — of the Compose action verbs only `click` waits for the app's answer; `choose`, `header_click`, `toggle` and `set_value` return the moment they emit (2026-09-06)~~
 KEY: kayaAwaitQuiet, kayaAwaitAnswer, action returns once the app has answered, choose, header_click, toggle, set_value, Compose runner
@@ -11159,7 +11347,7 @@ rust-swiftui suite ALL PASS.
 
 The verbs still outside the rule are their own entry, below.
 
-## GAP — ten action verbs still return before the app has answered: `set_date`, `set_time`, `select_range`, `set_text`, `type`, `scroll_end`, `menu_activate`, `back`, `close_window`, `resize_window` (2026-09-06)
+## ~~GAP — ten action verbs still return before the app has answered: `set_date`, `set_time`, `select_range`, `set_text`, `type`, `scroll_end`, `menu_activate`, `back`, `close_window`, `resize_window` (2026-09-06)~~
 KEY: ACTION_VERBS, await_answer, kayaAwaitAnswer, set_date, set_time, select_range, set_text, type, scroll_end, menu_activate, back, close_window, resize_window
 
 Named the day the rule landed for the five (the struck entry above): `set_date` and `set_time` (whose Compose arm calls itself
@@ -11171,6 +11359,44 @@ the private drain-to-quiet this rule generalizes), `scroll_end`,
 action whose answer is a transaction; extending the rule to them is the
 next slice, and tools/check-verbs.py's ACTION_VERBS is the one list to
 add them to.
+
+RESOLVED 2026-09-06: all ten take the rule in all three runners, from the
+same two helpers, and `ACTION_VERBS` is fifteen. ONE OF THE TEN WAS NOT A
+VERB: `select_range` is the GUEST's command (TX_SELECT_RANGE), read back
+with the `expect_selection` observation, and no runner has an arm for it
+— the harness's one `select_*` action is `select_section`, which was
+outside the rule and is the tenth verb this slice took. AND TWO OF THEM
+ARE NEVER ANSWERED: crates/kaya/src/spec.rs has no occurrence for a
+scroll or a resize, so what answers them is a BACKEND-ORIGINATED report
+(the row window, the window's metrics) whose ops never go through
+`Scene::apply` — the class the Rust runner's signal is built not to
+count. `scroll_end` and `resize_window` take the wait BEFORE alone, which
+is the half that does the work there (the previous step's answer has to
+be on the widgets before a container is driven to its end or a window is
+resized under it), and the wait after would have spent its whole bound
+measuring nothing. Compose's `close_window` and `resize_window` arms
+REFUSE the verb outright (Android owns neither chrome close nor window
+size) and so perform no action and take neither half. Both exemptions are
+tables in tools/check-verbs.py with their mechanism written down and four
+watched negatives of their own — a refusal that stops saying what it
+refuses, and a refusal that starts acting. The census reads 45 arms with
+16 watched negatives, including one of the ten on each runner and both
+quiet-only verbs' one half. Still outside the rule, their own entry below:
+the dialog and clipboard family (`alert_choose`, `file_dialog_goto`,
+`file_dialog_name`, `file_choose`, `file_save`, `clipboard_seed`),
+`drag`, `drag_file`, `context_open`, `shortcut`, `compose`,
+`scroll_to_row`.
+
+## GAP — the dialog, clipboard and gesture verbs still return before the app has answered: `alert_choose`, `file_dialog_goto`, `file_dialog_name`, `file_choose`, `file_save`, `clipboard_seed`, `drag`, `drag_file`, `context_open`, `shortcut`, `compose`, `scroll_to_row` (2026-09-06)
+KEY: ACTION_VERBS, await_answer, kayaAwaitAnswer, alert_choose, file_choose, file_save, clipboard_seed, drag, drag_file, context_open, shortcut, compose, scroll_to_row
+
+Named the day the fifteen took the rule (the struck entry above). Each
+is an action; several answer through a platform surface rather than a
+transaction (a dialog's own presentation, the drag session, the input
+method's composition), so each wants the same reading the ten had — is
+the app ASKED, and what answers — before a wait is wrapped around it.
+tools/check-verbs.py's ACTION_VERBS, QUIET_ONLY and REFUSALS tables are
+where the verdicts go.
 
 ## ~~WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)~~
 KEY: varied-python, no such target label#0, first step, starved host, android python guest, step ceiling

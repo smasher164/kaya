@@ -1019,8 +1019,9 @@ internal var kayaDragEndings = 0
 /**
  * Where each drag-and-drop surface sits, published by its own layout
  * reader. ROOT space is what a DragEvent's point is in; WINDOW space is
- * what the `drag` verb turns into screen pixels for `input draganddrop`
- * (docs/dnd-plan.md D10). Concurrent because the harness thread reads
+ * what the `drag` verb turns into screen pixels for the runner's injected
+ * pointer sequence (docs/dnd-plan.md D10; `input motionevent`, the press
+ * held until KAYA_DRAG_STARTED). Concurrent because the harness thread reads
  * what the UI thread wrote.
  */
 internal class KayaDragBox(
@@ -2916,8 +2917,8 @@ object KayaCompose {
         // THE AIM, AGAINST THE SETTLED BOX, IN ONE LINE and one space
         // (docs/deferred.md's android drag WATCH, the reading the sixth
         // sighting asked for and the seventeenth restated): the boxes and
-        // the two injected points in SCREEN pixels — the space
-        // `input draganddrop` takes — and the point's distance to the
+        // the two injected points in SCREEN pixels — the space the
+        // runner's `input motionevent` takes — and the point's distance to the
         // nearest edge of THE BOX THE SETTLE OBSERVED, positive inside
         // and negative outside. Compared against the box the plan just
         // re-read it could only ever say "inside", since the point is
@@ -2977,7 +2978,7 @@ object KayaCompose {
         return "the injected gesture did not finish in ${DRAG_ACK_MS}ms — " +
             "started=${session?.started ?: 0} entered=${session?.entered ?: 0} " +
             "dropped=${session?.dropped ?: 0} ended=${session?.ended ?: false} " +
-            "(the runner runs `input draganddrop` off the KAYA_REQUEST line)"
+            "(the runner injects the press, holds it for KAYA_DRAG_STARTED and walks the moves off the KAYA_REQUEST line)"
     }
 
     /**
@@ -5495,7 +5496,8 @@ object KayaCompose {
 
     /**
      * The `drag` verb's two numbers (docs/dnd-plan.md D10, docs/traps.md:
-     * `input draganddrop` holds the long press itself). The INJECTION is
+     * the runner holds the press until this app prints KAYA_DRAG_STARTED,
+     * since 2026-09-06). The INJECTION is
      * how long the pointer takes from source to destination once the
      * press has been held; the ACK is how long the verb waits for the
      * platform's ACTION_DRAG_ENDED, which covers the runner's own poll
@@ -5918,6 +5920,8 @@ object KayaCompose {
                         // minute snap run, the node the field draws from
                         // moves, and the occurrence fires — the toggle
                         // arm's shape, one kind over.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val isTime = parts[0] == "set_time"
                         val spelled = parts[2]
                         val packed =
@@ -5941,6 +5945,7 @@ object KayaCompose {
                                 node?.also { kayaPickerCommitted(it, isTime, packed) } != null
                             }
                             if (!ok) failures.add("no such target ${parts[1]}")
+                            else kayaAwaitAnswer(answered)
                         }
                     }
                     "expect_slider" -> {
@@ -6062,6 +6067,8 @@ object KayaCompose {
                         }
                     }
                     "select_section" -> {
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val index = parts[1].toInt()
                         val ok = onUi(activity) {
                             val section = KayaSceneModel.sections.getOrNull(index)
@@ -6069,6 +6076,7 @@ object KayaCompose {
                             section != null
                         }
                         if (!ok) failures.add("no such section ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     "choose" -> {
                         // Mirrors the item's own onClick: write the state
@@ -6095,11 +6103,19 @@ object KayaCompose {
                     // A8). A stand-in would LIE: writing the text
                     // CLEARS the native history the scene came to
                     // observe, and the leg would pass anyway.
-                    "type" ->
-                        kayaTypeAtFocus(activity, quoted(parts.drop(1)))?.let {
-                            failures.add(it)
-                        }
+                    "type" -> {
+                        // The driver blocks until the keys have landed IN
+                        // THE FIELD, which is not the app having answered
+                        // the text_changed they raised.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val why = kayaTypeAtFocus(activity, quoted(parts.drop(1)))
+                        if (why != null) failures.add(why)
+                        else kayaAwaitAnswer(answered)
+                    }
                     "set_text" -> {
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val ok = onUi(activity) {
                             val node =
                                 if (parts[1].startsWith("textarea"))
@@ -6115,6 +6131,7 @@ object KayaCompose {
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     "expect" -> {
                         val want = quoted(parts.drop(2))
@@ -6447,8 +6464,8 @@ object KayaCompose {
                         // INJECT A SYSTEM DRAG, so the verb is a RUNNER
                         // CHANNEL (docs/dnd-plan.md D10): it prints the
                         // two screen-pixel centres and the runner's own
-                        // per-leg logcat poll executes
-                        // `input draganddrop` on the leg's device. A
+                        // per-leg logcat poll injects the pointer sequence
+                        // on the leg's device. A
                         // refused drop is not this verb's failure — the
                         // source reads `none`.
                         var words = parts.drop(1)
@@ -6563,7 +6580,8 @@ object KayaCompose {
                     "close_window" -> {
                         // No chrome close on this host: the system
                         // owns surfaces, and back is not close
-                        // (DESIGN.md, Presentation contexts).
+                        // (DESIGN.md, Presentation contexts). No action,
+                        // so no wait (tools/check-verbs.py's REFUSED).
                         failures.add("close_window: this host has no chrome close")
                     }
                     "expect_dirty" -> {
@@ -6957,9 +6975,12 @@ object KayaCompose {
                         // both panes on screen the BackHandler is
                         // DISABLED. Keyed on the SCAFFOLD ARRANGEMENT,
                         // not the handler's composition-time `enabled`.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         onUi(activity) {
                             if (KayaSceneModel.splitPresentation != "split") kayaUserBack()
                         }
+                        kayaAwaitAnswer(answered)
                     }
                     "expect_grid_columns" -> {
                         val want = parts[2].toInt()
@@ -7014,6 +7035,14 @@ object KayaCompose {
                     "scroll_end" -> {
                         // The REAL scrolling API, driven to its end.
                         // Silent, like click.
+                        //
+                        // QUIET-WAIT ONLY (tools/check-verbs.py's
+                        // QUIET_ONLY): a scroll asks the guest nothing —
+                        // the spec has no scroll occurrence — so there is
+                        // no answer to wait for, while the previous
+                        // step's answer has to be on the widgets before
+                        // the container is driven to its end.
+                        kayaAwaitQuiet()
                         val spec = parts.getOrNull(1) ?: ""
                         onUi(activity) {
                             val rows = target(spec, "scroll", KayaSceneModel.scrolls)
@@ -7809,7 +7838,8 @@ object KayaCompose {
                     "resize_window" -> {
                         // Android does not command window size — the
                         // system owns it (DESIGN.md, Windows). LOUD
-                        // rather than a silent no-op.
+                        // rather than a silent no-op. No action, so no
+                        // wait (tools/check-verbs.py's REFUSED).
                         failures.add("resize_window: this host does not command window size")
                     }
                     "expect_split" -> {
@@ -8039,6 +8069,8 @@ object KayaCompose {
                         if (head == null || head.second.isNotEmpty()) {
                             failures.add("menu_activate wants a quoted path: $line")
                         } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
                             val ok = onUi(activity) {
                                 val hit = kayaResolveMenuPath(head.first)
                                 if (hit != null) {
@@ -8050,6 +8082,7 @@ object KayaCompose {
                                 hit != null
                             }
                             if (!ok) failures.add("no menu item at \"${head.first}\"")
+                            else kayaAwaitAnswer(answered)
                         }
                     }
                     "context_open" -> {
@@ -9696,7 +9729,7 @@ private fun kayaDragAndDropSurface(node: KayaNode): Modifier? {
     if (isSource) {
         // THE PLATFORM'S OWN GESTURE STARTS IT (D8): the default start
         // detector of this overload is a LONG PRESS on touch, which is
-        // the phone's affordance and what `input draganddrop` injects.
+        // the phone's affordance and what the runner's held press becomes.
         modifier = modifier.dragAndDropSource(transferData = {
             val declared = payload ?: KayaDragPayload(
                 custom = listOf(
@@ -11857,7 +11890,7 @@ fun KayaRoot() {
     // drew under the status bar and its last under the gesture bar — and
     // that strip is the status bar's TOUCHABLE region, so no real input
     // could reach it either. No lane could see it: every `click` is
-    // programmatic, and the dnd lane's real `input draganddrop` is the
+    // programmatic, and the dnd lane's real injected pointer is the
     // first injected touch this backend ever had.
     Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
         if (KayaSceneModel.menubar.isEmpty()) {

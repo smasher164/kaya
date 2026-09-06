@@ -34,6 +34,12 @@
 //
 // Coordinates are the app frame's points (its origin is the screen's).
 // Built and started by tools/ios/run-sim.py, stopped in its cleanup.
+//
+// TWO FILES BESIDE THE PROTOCOL'S, both read by the host when this dies:
+// `drive.log` holds one line per thing waited for and how long it took,
+// `issues.log` the XCTest issue that ended the resident loop. Every wait
+// is bounded by KAYA_DRIVE_WAIT_SECONDS, never by a fixed poll count
+// (docs/deferred.md, the save-dialog driver WATCH).
 import UIKit
 import XCTest
 
@@ -43,6 +49,52 @@ final class KayaDrive: XCTestCase {
     let fileView = "File View"
     let nameFieldId = "DOCPicker.filenameTextField"
     var app: XCUIApplication?
+    var driveDir = ""
+    /// How long a wait for the app's own signal may run. The host sets it
+    /// (run-sim.py's XCUIDRIVE_WAIT_SECONDS) under the GUEST's own simdrive
+    /// deadline, so this answers with a sentence while someone is still
+    /// reading. The fallback is only for a driver started by hand.
+    var budget: TimeInterval = 45
+
+    override func setUp() {
+        super.setUp()
+        // A recorded issue must not end the resident loop, and the loop is
+        // the whole lane's hands (docs/deferred.md, the save-dialog driver
+        // WATCH).
+        continueAfterFailure = true
+        let env = ProcessInfo.processInfo.environment
+        driveDir = env["KAYA_DRIVE_DIR"] ?? ""
+        if let raw = env["KAYA_DRIVE_WAIT_SECONDS"], let seconds = TimeInterval(raw), seconds > 0 {
+            budget = seconds
+        }
+    }
+
+    /// THE ONE THING THAT CAN END THIS TEST leaves its reason where the host
+    /// can read it. Without this the resident driver dies, xcodebuild answers
+    /// 65, and the exit code is every word anyone gets — which sent two
+    /// sightings of the save-dialog WATCH after the sheet instead.
+    override func record(_ issue: XCTIssue) {
+        append("issues.log", "\(stamp()) \(issue.compactDescription)\n")
+        note("XCTest issue: \(issue.compactDescription)")
+        super.record(issue)
+    }
+
+    func stamp() -> String { String(format: "%.3f", Date().timeIntervalSince1970) }
+    func append(_ name: String, _ text: String) {
+        guard !driveDir.isEmpty else { return }
+        let path = (driveDir as NSString).appendingPathComponent(name)
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            handle.write(Data(text.utf8))
+            try? handle.close()
+        } else {
+            FileManager.default.createFile(atPath: path, contents: Data(text.utf8))
+        }
+    }
+    /// One line per thing this driver waited for, and how long it took. The
+    /// host tails it into a failed leg's log and into the sentence a dead
+    /// driver answers with.
+    func note(_ what: String) { append("drive.log", "\(stamp()) \(what)\n") }
 
     func rect(_ r: CGRect) -> String {
         "\(Int(r.origin.x.rounded())),\(Int(r.origin.y.rounded())),\(Int(r.width.rounded())),\(Int(r.height.rounded()))"
@@ -51,10 +103,64 @@ final class KayaDrive: XCTestCase {
     func tapCentre(_ a: XCUIApplication, _ r: CGRect) {
         a.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: r.midX, dy: r.midY)).tap()
     }
+    /// A tap that cannot END THIS TEST: XCUIElement.tap() on an element that
+    /// exists but is not hittable raises, and a raise out of the resident
+    /// loop is the lane losing its hands. The frame is the app's own
+    /// coordinate space, which `choose` has always tapped confirm buttons in.
+    @discardableResult
+    func tapSafely(_ a: XCUIApplication, _ el: XCUIElement, _ what: String) -> Bool {
+        guard el.exists else {
+            note("nothing to tap for \(what)")
+            return false
+        }
+        if el.isHittable {
+            el.tap()
+        } else {
+            tapCentre(a, el.frame)
+        }
+        return true
+    }
     func byName(_ a: XCUIApplication, _ name: String) -> XCUIElement {
         a.descendants(matching: .any)
             .matching(NSPredicate(format: "label == %@ OR identifier == %@ OR title == %@", name, name, name))
             .firstMatch
+    }
+
+    /// THE LANE'S OWN CEILING, not this driver's: the host writes the
+    /// running leg's deadline into `<dir>/deadline` (its `timeout 120` less
+    /// the room the harness needs to publish a verdict), and every wait is
+    /// clamped to what is left of it. So a sheet that never comes cannot
+    /// spend a leg's whole life one verb at a time, and a leg still ends
+    /// with a sentence instead of being killed with its log.
+    func budgetNow(_ seconds: TimeInterval? = nil) -> TimeInterval {
+        var limit = seconds ?? budget
+        let path = (driveDir as NSString).appendingPathComponent("deadline")
+        if let text = try? String(contentsOfFile: path, encoding: .utf8),
+            let at = TimeInterval(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        {
+            limit = min(limit, max(1, at - Date().timeIntervalSince1970))
+        }
+        return limit
+    }
+
+    /// WAIT FOR THE APP'S OWN SIGNAL, bounded by the budget above rather
+    /// than a fixed number of polls, and say what was waited for and how
+    /// long. A fixed schedule is the shape both dialog WATCHes wear: six
+    /// seconds of polls is a whole answer on a quiet host and a coin toss
+    /// under a matrix.
+    @discardableResult
+    func waitFor(_ what: String, _ seconds: TimeInterval? = nil, _ ready: () -> Bool) -> Bool {
+        let limit = budgetNow(seconds)
+        let started = Date()
+        var arrived = ready()
+        while !arrived, Date().timeIntervalSince(started) < limit {
+            pause(0.15)
+            arrived = ready()
+        }
+        note(String(format: "%@ %@ after %.2fs of %.0fs",
+                    arrived ? "got" : "GAVE UP on", what,
+                    Date().timeIntervalSince(started), limit))
+        return arrived
     }
 
     // MARK: - the picker
@@ -66,23 +172,27 @@ final class KayaDrive: XCTestCase {
     func pickerUp(_ a: XCUIApplication) -> Bool {
         bar(a).exists || a.collectionViews[fileView].exists || nameField(a).exists
     }
-    func waitForPicker(_ a: XCUIApplication, _ tries: Int = 20) -> Bool {
-        for _ in 0..<tries {
-            if pickerUp(a) { return true }
-            pause(0.3)
-        }
-        return false
+    func waitForPicker(_ a: XCUIApplication) -> Bool {
+        waitFor("the picker") { pickerUp(a) }
     }
     /// Gone means THREE consecutive absent reads, 0.3s apart: one read
     /// answers "absent" for a picker under a menu, and a tap that opened
     /// one instead of dismissing the sheet then reads as success.
-    func waitForPickerGone(_ a: XCUIApplication, _ tries: Int = 20) -> Bool {
+    func waitForPickerGone(_ a: XCUIApplication, _ seconds: TimeInterval? = nil) -> Bool {
         var absent = 0
-        for _ in 0..<(tries + 2) {
+        let started = Date()
+        let limit = budgetNow(seconds)
+        repeat {
             absent = pickerUp(a) ? 0 : absent + 1
-            if absent >= 3 { return true }
+            if absent >= 3 {
+                note(String(format: "got the picker gone after %.2fs of %.0fs",
+                            Date().timeIntervalSince(started), limit))
+                return true
+            }
             pause(0.3)
-        }
+        } while Date().timeIntervalSince(started) < limit
+        note(String(format: "GAVE UP on the picker being gone after %.2fs of %.0fs",
+                    Date().timeIntervalSince(started), limit))
         return false
     }
     func strip(_ a: XCUIApplication) -> [(String, CGRect)] {
@@ -109,25 +219,58 @@ final class KayaDrive: XCTestCase {
     }
     /// simdrive's waitForRows: the chrome comes before the rows, so a
     /// read that lands between them reports the directory and no rows.
-    func waitForRows(_ a: XCUIApplication, _ tries: Int = 20) -> [(String, CGRect)]? {
+    func waitForRows(_ a: XCUIApplication) -> [(String, CGRect)]? {
         var last: [(String, CGRect)]? = nil
-        for _ in 0..<tries {
-            guard waitForPicker(a) else { return last }
+        waitFor("the picker's rows") {
+            guard pickerUp(a) else { return false }
             let r = rows(a)
             last = r
-            if !r.isEmpty { return r }
-            pause(0.3)
+            return !r.isEmpty
         }
         return last
     }
     func stem(_ name: String) -> String { (name as NSString).deletingPathExtension }
     func nameField(_ a: XCUIApplication) -> XCUIElement { a.textFields[nameFieldId] }
-    func waitForSaveSheet(_ a: XCUIApplication, _ tries: Int = 20) -> Bool {
-        for _ in 0..<tries {
-            if pickerUp(a), nameField(a).exists { return true }
-            pause(0.3)
-        }
-        return false
+    func waitForSaveSheet(_ a: XCUIApplication, _ seconds: TimeInterval? = nil) -> Bool {
+        waitFor("the save sheet", seconds) { pickerUp(a) && nameField(a).exists }
+    }
+    /// A whole verb's budget, shared out among its rounds: an inner wait
+    /// given the FULL budget on every round of a retry can outlive the
+    /// request the host is waiting on.
+    func left(_ deadline: Date) -> TimeInterval { max(0.5, deadline.timeIntervalSinceNow) }
+    /// One round of a retry loop's share of it: savepress presses again
+    /// after this long with the sheet still up (tools/check-steps.py holds
+    /// the loop to it).
+    let savePressWindow: TimeInterval = 6
+
+    /// TYPING IS THE ONE VERB THAT CAN KILL THIS DRIVER: `typeText` raises
+    /// "Neither element nor any descendant has keyboard focus" when the tap
+    /// that should have focused the field has not landed yet, the raise ends
+    /// the resident test, and xcodebuild answers 65 for the whole lane. So
+    /// the keyboard is WAITED FOR — the app's own signal that a keystroke
+    /// has somewhere to go — and a refusal is a sentence naming both
+    /// readings rather than a dead driver. Nil means go ahead.
+    /// THE KEYBOARD IS THE HALF THAT ANSWERS for the save sheet: measured
+    /// 2026-09-06 on iOS 26.5, the picker's own field reads
+    /// `hasFocus=false keyboards=1` while typing into it works, since
+    /// DOCPicker is a remote view controller. Both are read, either
+    /// admits, and the sentence prints the pair so a future reading that
+    /// changes is visible rather than assumed.
+    func typingRefusal(_ a: XCUIApplication, _ what: String, _ seconds: TimeInterval? = nil,
+                       focused: (() -> Bool)? = nil) -> String? {
+        let ready = waitFor("a keyboard for \(what)", seconds, {
+            (focused?() ?? false) || a.keyboards.count > 0
+        })
+        // WHICH OF THE TWO SIGNALS ARRIVED, always: the wait is satisfied by
+        // either, and a line that cannot tell them apart is a line the next
+        // reader will believe for the wrong one (CLAUDE.md invariant 3).
+        let reading = "focused=" + (focused == nil ? "<not asked>" : "\(focused!())")
+            + " keyboards=\(a.keyboards.count)"
+        note("typing into \(what): \(ready ? "safe" : "REFUSED"), \(reading)")
+        if ready { return nil }
+        return "nothing in \(what) can take a keystroke (\(reading)), so nothing "
+            + "was typed — typing here would end this driver and the lane "
+            + "would lose its hands"
     }
     func cancelSheet(_ a: XCUIApplication, _ what: String) -> (Bool, String) {
         // A hittable Cancel BUTTON when the picker offers one; otherwise
@@ -135,14 +278,15 @@ final class KayaDrive: XCTestCase {
         // into a subdirectory and one appears at the root (measured
         // 2026-09-02). The `Other` labelled Cancel under More is never
         // tapped: it opens a MENU.
+        let deadline = Date().addingTimeInterval(budgetNow())
         var rounds = 0
         var offers: [String] = []
         var how = ""
-        for _ in 0..<6 {
+        for _ in 0..<6 where Date() < deadline {
             rounds += 1
             let cancel = a.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Cancel'")).firstMatch
-            if cancel.exists && cancel.isHittable {
-                cancel.tap()
+            if cancel.exists {
+                tapSafely(a, cancel, "the \(what)'s Cancel")
                 how = "its Cancel button in round \(rounds)"
                 break
             }
@@ -161,7 +305,7 @@ final class KayaDrive: XCTestCase {
             from.press(forDuration: 0.1, thenDragTo: to)
             how = "a pull-down from its list after \(rounds) round(s) of walking back (the bar offered \(offers))"
         }
-        if !waitForPickerGone(a) {
+        if !waitForPickerGone(a, left(deadline)) {
             return (false, "the \(what) was still up after \(how); its bar offers \(strip(a).map { $0.0 })")
         }
         return (true, "cancelled by \(how)")
@@ -253,6 +397,7 @@ final class KayaDrive: XCTestCase {
             return a.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y))
         }
         fm.createFile(atPath: dir + "/ready", contents: Data("\(ProcessInfo.processInfo.processIdentifier)\n".utf8))
+        note("serving pid \(ProcessInfo.processInfo.processIdentifier), waits bounded at \(Int(budget))s")
         let deadline = Date().addingTimeInterval(6 * 3600)
         while Date() < deadline {
             guard let data = fm.contents(atPath: requestPath), let text = String(data: data, encoding: .utf8) else {
@@ -263,7 +408,12 @@ final class KayaDrive: XCTestCase {
             let words = text.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init)
             guard let verb = words.first else { answer(false, "empty request"); continue }
             let rest = words.dropFirst().joined(separator: " ")
+            note("verb `\(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))`")
+            let started = Date()
             let (ok, body) = handle(verb, words, rest, coordinate)
+            let why = ok ? "" : ": " + String((body.split(separator: "\n").first ?? "").prefix(160))
+            note(String(format: "verb `%@` -> %@ in %.2fs%@", verb, ok ? "ok" : "err",
+                        Date().timeIntervalSince(started), why))
             answer(ok, body)
             if verb == "quit" { return }
         }
@@ -278,7 +428,12 @@ final class KayaDrive: XCTestCase {
             guard words.count == 2 else { return (false, "attach <bundle-id>") }
             let a = XCUIApplication(bundleIdentifier: words[1])
             a.activate()
-            let ok = a.wait(for: .runningForeground, timeout: 20)
+            let started = Date()
+            let wait = budgetNow()
+            let ok = a.wait(for: .runningForeground, timeout: wait)
+            note(String(format: "%@ %@ in the foreground after %.2fs of %.0fs",
+                        ok ? "got" : "GAVE UP on", words[1],
+                        Date().timeIntervalSince(started), wait))
             app = ok ? a : nil
             return (ok, "state=\(a.state.rawValue) frame=\(rect(a.frame))")
         case "sb_describe":
@@ -292,7 +447,10 @@ final class KayaDrive: XCTestCase {
             if !hit.exists, verb == "press", let a = app { hit = byName(a, rest) }
             guard hit.exists else { return (false, "nothing carries the label \(rest)") }
             if verb == "sb_find" { return (true, "\(rect(hit.frame)) hittable=\(hit.isHittable)") }
-            hit.tap()
+            let host = (verb == "press" && !sb.buttons[rest].exists) ? (app ?? sb) : sb
+            guard tapSafely(host, hit, "the button labelled \(rest)") else {
+                return (false, "\(rest) went away between the read and the tap")
+            }
             return (true, "pressed \(rest)")
         case "pb_types": return (true, pbTypes())
         case "pb_read":
@@ -316,6 +474,7 @@ final class KayaDrive: XCTestCase {
             let hit = byName(a, rest)
             return hit.exists ? (true, hit.value.map { "\($0)" } ?? "") : (false, "no element labelled \(rest)")
         case "type":
+            if let why = typingRefusal(a, "the app") { return (false, why) }
             a.typeText(rest)
             return (true, "typed \(rest.count) character(s)")
         case "type_b64":
@@ -323,6 +482,7 @@ final class KayaDrive: XCTestCase {
             // the request line is word-split on the host.
             guard words.count == 2, let data = Data(base64Encoded: words[1]),
                   let text = String(data: data, encoding: .utf8) else { return (false, "type_b64 <base64>") }
+            if let why = typingRefusal(a, "the app") { return (false, why) }
             a.typeText(text)
             return (true, "typed \(text.count) character(s)")
         case "tap":
@@ -360,6 +520,9 @@ final class KayaDrive: XCTestCase {
             let dir = words[words.count - 1]
             let el = byName(a, words[1..<(words.count - 1)].joined(separator: " "))
             guard el.exists else { return (false, "no element to swipe") }
+            guard el.isHittable else {
+                return (false, "the element to swipe is not hittable, and swiping it would end this driver")
+            }
             switch dir {
             case "up": el.swipeUp()
             case "down": el.swipeDown()
@@ -384,20 +547,21 @@ final class KayaDrive: XCTestCase {
             // arrives before the list is interactive is swallowed with no
             // error, so the whole select-confirm round retries and the rows
             // are re-walked each round (simdrive's rule, kept as a guard).
+            let deadline = Date().addingTimeInterval(budgetNow())
             var rounds = 0, offered = 0
             var gone = false
-            while rounds < 6 && !gone {
+            while rounds < 6 && !gone && Date() < deadline {
                 rounds += 1
                 if let row = rows(a).first(where: { stem($0.0) == wanted }) {
                     offered += 1
                     tapCentre(a, row.1)
                 }
-                if !waitForPickerGone(a, 6) {
+                if !waitForPickerGone(a, min(2, left(deadline))) {
                     if let (_, confirm) = strip(a).first(where: { $0.0.hasPrefix("Open") || $0.0.hasPrefix("Done") }) {
                         tapCentre(a, confirm)
                     }
                 }
-                gone = waitForPickerGone(a)
+                gone = waitForPickerGone(a, left(deadline) / 2)
             }
             if !gone {
                 return (false, "the picker was still up after \(rounds) rounds of choosing \(wanted): the row was offered in \(offered) of them; it now lists \(rows(a).map { $0.0 }) and offers \(strip(a).map { $0.0 })")
@@ -411,18 +575,27 @@ final class KayaDrive: XCTestCase {
             return (true, currentDirectory(a) + "\n" + (nameField(a).value.map { "\($0)" } ?? ""))
         case "savename":
             guard !rest.isEmpty else { return (false, "savename needs a name") }
+            let deadline = Date().addingTimeInterval(budgetNow())
             var settled = ""
             var attempts = 0
-            while attempts < 5 && settled != rest {
+            while attempts < 5 && settled != rest && Date() < deadline {
                 attempts += 1
-                guard waitForSaveSheet(a) else { return (false, "no save dialog is up to name \(rest)") }
+                guard waitForSaveSheet(a, left(deadline)) else {
+                    return (false, "no save dialog is up to name \(rest)")
+                }
                 let field = nameField(a)
                 // The first tap on the sheet's field selects its whole
                 // suggested name (measured: typing replaced it); a later
                 // tap places a caret, so the caret is put at the end and
                 // the text deleted before typing again.
-                field.tap()
-                pause(0.3)
+                tapSafely(a, field, "the save sheet's name field")
+                // THE FIELD'S OWN SIGNAL, not a fixed 0.3s: under a matrix
+                // the tap takes longer to focus than the sleep it was given,
+                // and typing unfocused ends this driver.
+                if let why = typingRefusal(a, "the save sheet's name field", left(deadline),
+                                           focused: { [self] in nameField(a).hasFocus }) {
+                    return (false, why)
+                }
                 if attempts > 1 {
                     field.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
                     pause(0.2)
@@ -430,10 +603,9 @@ final class KayaDrive: XCTestCase {
                     if count > 0 { a.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count)) }
                 }
                 a.typeText(rest)
-                for _ in 0..<20 {
+                waitFor("the name field to read back \"\(rest)\"", left(deadline)) {
                     settled = (nameField(a).value as? String) ?? ""
-                    if settled == rest { break }
-                    pause(0.15)
+                    return settled == rest
                 }
             }
             guard settled == rest else {
@@ -441,22 +613,41 @@ final class KayaDrive: XCTestCase {
             }
             return (true, "named in \(attempts) attempt(s)")
         case "savepress":
-            guard waitForSaveSheet(a) else { return (false, "no save dialog is up to save") }
+            let deadline = Date().addingTimeInterval(budgetNow())
+            guard waitForSaveSheet(a, left(deadline)) else {
+                return (false, "no save dialog is up to save")
+            }
             var presses = 0, offered = 0
             var gone = false
-            while presses < 6 && !gone {
+            var readings: [String] = []
+            while presses < 6 && !gone && Date() < deadline {
                 presses += 1
                 let save = bar(a).buttons["Save"]
-                if save.exists {
+                let keyboardsBefore = a.keyboards.count
+                let offeredNow = save.exists
+                if offeredNow {
                     offered += 1
-                    save.tap()
+                    tapSafely(a, save, "the save sheet's Save")
                 } else if presses == 1 {
                     return (false, "no Save in the navigation strip; it offers \(strip(a).map { $0.0 })")
                 }
-                gone = waitForPickerGone(a)
+                // ONE PRESS GETS ONE WINDOW, never the verb's whole budget:
+                // matrix #18 (2026-09-06) spent all 44s on a single press
+                // the sheet did not take, and the five presses that would
+                // have followed never came (docs/deferred.md, the
+                // save-press WATCH). The window covers a dismissal measured
+                // at 0.7-1.4s under a matrix several times over.
+                gone = waitForPickerGone(a, min(savePressWindow, left(deadline)))
+                let field = nameField(a)
+                let reading = "press \(presses): Save \(offeredNow ? "offered" : "absent")"
+                    + " keyboards \(keyboardsBefore)->\(a.keyboards.count)"
+                    + " sheet \(gone ? "gone" : "still up")"
+                    + (gone ? "" : " field \(field.exists ? "\"\((field.value as? String) ?? "")\"" : "absent")")
+                note(reading)
+                readings.append(reading)
             }
             if !gone {
-                return (false, "the save dialog was still up after \(presses) presses of Save: Save was in the strip for \(offered) of them; it now offers \(strip(a).map { $0.0 })")
+                return (false, "the save dialog was still up after \(presses) presses of Save: Save was in the strip for \(offered) of them; it now offers \(strip(a).map { $0.0 }); \(readings.joined(separator: "; "))")
             }
             return (true, "saved in \(presses) press(es)")
         case "savecancel":

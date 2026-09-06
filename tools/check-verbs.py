@@ -1619,7 +1619,45 @@ print(f"check-verbs: step targets: {norm_variants} variants read, "
 # helper's definition and one arm's call both name the function, so a
 # file-wide search is satisfied by a runner that waits on `click` and
 # nothing else.
-ACTION_VERBS = ("click", "toggle", "set_value", "choose", "header_click")
+ACTION_VERBS = (
+    "click", "toggle", "set_value", "choose", "header_click",
+    # The ten the rule reached second (docs/deferred.md's ten-verb entry).
+    # `select_range` is NOT among them and never could be: it is the
+    # GUEST's command (TX_SELECT_RANGE), read back with the
+    # `expect_selection` OBSERVATION, and no runner has an arm for it —
+    # the harness's one `select_*` action is `select_section`.
+    "set_date", "set_time", "select_section", "set_text", "type",
+    "menu_activate", "back", "close_window", "scroll_end", "resize_window",
+)
+
+# A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
+# crates/kaya/src/spec.rs's occurrence table decides it: thirteen of the
+# fifteen reach the app (button_clicked, toggled, value_changed,
+# sort_requested, date_changed, time_changed, section_selected,
+# text_changed, menu_activated, back_requested, close_requested), while a
+# SCROLL and a RESIZE reach nothing — what answers them is a
+# BACKEND-ORIGINATED report (the row window, the window's metrics) whose
+# ops never go through Scene::apply, which is the one thing the Rust
+# runner's signal is built not to count. So the wait after them would
+# spend its whole bound measuring nothing. The wait BEFORE is kept and is
+# the half that works: the previous step's answer has to be on the
+# widgets before a container is driven to its end or a window is resized
+# under it.
+QUIET_ONLY = ("scroll_end", "resize_window")
+
+# A RUNNER THAT REFUSES A VERB OUTRIGHT PERFORMS NO ACTION, so neither
+# half applies — Android owns neither chrome close nor window size
+# (DESIGN.md). Each entry carries the sentence its arm refuses with and
+# is held to still saying it AND to still doing nothing, because an
+# exemption that has stopped matching a real arm is the next stale audit.
+REFUSALS = {
+    (KOTLIN, "close_window"): "close_window: this host has no chrome close",
+    (KOTLIN, "resize_window"):
+        "resize_window: this host does not command window size",
+}
+# What "does nothing" is, in the Compose runner: every arm that acts goes
+# to the UI thread to do it.
+KOTLIN_ACTS = "onUi("
 
 
 def rust_action_arm(src, verb):
@@ -1632,8 +1670,13 @@ def rust_action_arm(src, verb):
 
 
 def kotlin_action_arm(src, verb):
-    """One `"<verb>" -> { .. }` block of KayaCompose.kt's step `when`."""
-    hits = list(re.finditer(r'^\s*"' + re.escape(verb) + r'" -> \{', src, re.M))
+    """One `"<verb>" -> { .. }` block of KayaCompose.kt's step `when`. The
+    labels are read as a GROUP: `set_date` and `set_time` share one arm,
+    and a reader anchored on a lone label finds neither."""
+    hits = [
+        h for h in re.finditer(r'^\s*((?:"[a-z_]+"(?:, )?)+) -> \{', src, re.M)
+        if f'"{verb}"' in h.group(1)
+    ]
     if len(hits) != 1:
         return None
     return balanced(src, src.index("{", hits[0].end() - 1))
@@ -1642,8 +1685,11 @@ def kotlin_action_arm(src, verb):
 def swift_action_arm(src, verb):
     """One `case "<verb>":` arm of KayaSwiftUI.swift's step `switch`. It
     has no braces of its own, so it ends at the next label indented the
-    same way."""
-    hits = list(re.finditer(r'^(\s*)case "' + re.escape(verb) + r'":', src, re.M))
+    same way; the labels are read as a group, as Kotlin's are."""
+    hits = [
+        h for h in re.finditer(r'^(\s*)case ((?:"[a-z_]+"(?:, )?)+):', src, re.M)
+        if f'"{verb}"' in h.group(2)
+    ]
     if len(hits) != 1:
         return None
     indent = hits[0].group(1)
@@ -1685,7 +1731,27 @@ def answer_wait(harness_src=None, swift_src=None, kotlin_src=None):
                            f"with anything")
                 continue
             read += 1
-            for call, when in ((before, "before"), (after, "after")):
+            refusal = REFUSALS.get((rel, verb))
+            if refusal is not None:
+                if refusal not in body:
+                    bad.append(
+                        f"{rel}: the `{verb}` arm is exempt from the wait "
+                        f"because it REFUSES the verb ({refusal!r}) and it "
+                        f"no longer says that — an arm that acts takes both "
+                        f"halves like every other, so either the sentence "
+                        f"or this exemption is stale")
+                if KOTLIN_ACTS in body:
+                    bad.append(
+                        f"{rel}: the `{verb}` arm is exempt from the wait as "
+                        f"a refusal that does nothing, and it now calls "
+                        f"`{KOTLIN_ACTS}` — an arm that reaches the UI "
+                        f"thread ACTS, and an action returns once the app "
+                        f"has answered it")
+                continue
+            halves = ((before, "before"),)
+            if verb not in QUIET_ONLY:
+                halves += ((after, "after"),)
+            for call, when in halves:
                 if call not in body:
                     bad.append(
                         f"{rel}: the `{verb}` arm never calls `{call}` "
@@ -1714,6 +1780,16 @@ ANSWER_NEGATIVES = (
     (KOTLIN, "toggle", r"\n\s*else kayaAwaitAnswer\(answered\)",
      "kayaAwaitAnswer("),
     (KOTLIN, "header_click", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    # ... and one of the TEN on each runner, the two QUIET_ONLY verbs
+    # among them: their one half is the whole rule they carry, so an
+    # exemption from the wait after must not become an exemption from
+    # the wait before.
+    (HARNESS, "set_text", r"\n\s*await_answer\(answered\);", "await_answer("),
+    (HARNESS, "scroll_end", r"\n\s*await_quiet\(\);", "await_quiet()"),
+    (SWIFT, "menu_activate", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    (SWIFT, "resize_window", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    (KOTLIN, "back", r"\n\s*kayaAwaitAnswer\(answered\)", "kayaAwaitAnswer("),
+    (KOTLIN, "type", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
 )
 for rel, verb, pattern, call in ANSWER_NEGATIVES:
     reader = dict((r, fn) for r, fn, _ in ANSWER_RUNNERS)[rel]
@@ -1730,9 +1806,39 @@ for rel, verb, pattern, call in ANSWER_NEGATIVES:
             and call in line]:
         fail(f"check-verbs SELF-TEST: the action-wait census passed with "
              f"`{call}` cut out of {rel}'s `{verb}` arm")
+# AND THE EXEMPTIONS THEMSELVES, both ways: a refusal that stopped saying
+# what it refuses, and a refusal that started acting. An exemption nobody
+# watches is how a verb leaves the rule quietly.
+REFUSAL_NEGATIVES = 0
+for (refused_rel, refused_verb), sentence in REFUSALS.items():
+    reader = dict((r, fn) for r, fn, _ in ANSWER_RUNNERS)[refused_rel]
+    whole = real(refused_rel)
+    arm = reader(whole, refused_verb)
+    if arm is None:
+        fail(f"check-verbs SELF-TEST: {refused_rel} has no single "
+             f"`{refused_verb}` arm to doctor for the refusal exemption")
+        continue
+    for label, pattern, repl in (
+        ("the refusal sentence", re.escape(sentence), "gone"),
+        ("a refusal that started acting", r'failures\.add\(',
+         KOTLIN_ACTS + "activity) { true }; failures.add("),
+    ):
+        cut = g.doctor(
+            f"{label} in {refused_rel}'s `{refused_verb}` arm", arm,
+            pattern, repl)
+        found, _ = answer_wait(
+            **{ANSWER_KWARG[refused_rel]: whole.replace(arm, cut, 1)})
+        if not [line for line in found if line not in answer_out
+                and f"`{refused_verb}` arm" in line]:
+            fail(f"check-verbs SELF-TEST: the action-wait census passed "
+                 f"with {label} in {refused_rel}'s `{refused_verb}` arm")
+        REFUSAL_NEGATIVES += 1
 print(f"check-verbs: an action returns once the app has answered it: "
-      f"{answer_read} action arms in 3 runners, "
-      f"{len(ANSWER_NEGATIVES)} watched negatives refused", file=sys.stderr)
+      f"{answer_read} action arms in 3 runners "
+      f"({len(QUIET_ONLY)} verbs the guest is never asked about carry the "
+      f"wait before alone, {len(REFUSALS)} arms refuse the verb and carry "
+      f"neither), {len(ANSWER_NEGATIVES) + REFUSAL_NEGATIVES} watched "
+      f"negatives refused", file=sys.stderr)
 
 
 # --- THE REORDER'S INSERTION INDICATOR IS DRAWN --------------------

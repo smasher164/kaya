@@ -2860,11 +2860,17 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 None
             }
             Step::SetDate(t, d) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.set_date(*t, *d);
+                await_answer(answered);
                 None
             }
             Step::SetTime(t, tm) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.set_time(*t, *tm);
+                await_answer(answered);
                 None
             }
             Step::ExpectSlider(t, want) => Some(match t.kind {
@@ -2890,17 +2896,32 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 other => Err(format!("expect_picker reads date and time pickers — not {other:?}")),
             }),
             Step::SetText(t, s) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.set_text(*t, s);
+                await_answer(answered);
                 None
             }
             Step::Type(s) => {
+                // POINT 4 IS NOT THIS RULE: it blocks until the keys have
+                // landed IN THE CONTROL, which is a different thing from
+                // the app having answered the `text_changed` they raised.
+                // gtk.rs's arm carries a private copy of the quiet-wait
+                // for its own reason (grab_focus selects the contents),
+                // and this is the runner's, on every backend.
+                await_quiet();
+                let answered = crate::scene::answers();
                 vtrace::note("type", format_args!("-> stage.type_text {s:?}"));
                 stage.type_text(s);
                 vtrace::note("type", format_args!("<- stage.type_text {s:?}"));
+                await_answer(answered);
                 None
             }
             Step::SelectSection(i) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.select_section(*i);
+                await_answer(answered);
                 None
             }
             Step::ExpectSections(n) => Some(poll(|| {
@@ -2934,8 +2955,12 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             })),
             Step::CloseWindow(window) => {
                 // An action, silent like click: the veto grammar's
-                // observable is what the scene does next.
+                // observable is what the scene does next. The app is
+                // asked with `close_requested`, so the rule applies.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.close_window(*window);
+                await_answer(answered);
                 None
             }
             Step::FileDialogGoto(path) => {
@@ -3219,7 +3244,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // An action, silent like click: the observable is
                 // whether the stack popped (expect_entries) or the
                 // guest's back_requested reaction.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.back(window.unwrap_or(0));
+                await_answer(answered);
                 None
             }
             Step::ScrollEnd(t) => {
@@ -3232,6 +3260,17 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 } else {
                     // An action, silent like click: expect_at_end is
                     // the observable.
+                    //
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's
+                    // QUIET_ONLY): a scroll asks the guest NOTHING —
+                    // there is no scroll occurrence in the spec, and the
+                    // row window a virtualized table reports is a
+                    // BACKEND-ORIGINATED report whose ops never go
+                    // through Scene::apply. So there is no answer to
+                    // wait for, and the wait before is the half that
+                    // works: the previous step's answer has to be on the
+                    // widgets before the container is driven to its end.
+                    await_quiet();
                     stage.scroll_end(*t);
                     None
                 }
@@ -3837,7 +3876,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // An action, silent like click: the fold's reaction (or
                 // the next expect_menu) is the observable. Where the path
                 // resolves is the stage's own presentation state.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.menu_activate(path);
+                await_answer(answered);
                 None
             }
             Step::ContextOpen(t) => {
@@ -3929,6 +3971,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             })),
             Step::ResizeWindow(window, w, h) => {
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): a
+                // resize asks the guest nothing — the spec has no
+                // occurrence for it, and the window's metrics are a
+                // BACKEND-ORIGINATED report whose ops never go through
+                // Scene::apply, so there is no answer to wait for. The
+                // wait before keeps the resize from landing on a window
+                // the previous step's answer has not reached.
+                await_quiet();
                 stage.resize_window(window.unwrap_or(0), *w, *h);
                 None
             }
@@ -4239,7 +4289,8 @@ const ANSWER_SILENCE: Duration = Duration::from_secs(1);
 
 /// AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT — one rule, three
 /// runners (KayaCompose.kt's kayaAwaitAnswer, KayaSwiftUI.swift's twin;
-/// tools/check-verbs.py holds every action arm to calling both halves).
+/// tools/check-verbs.py holds every action arm to calling both halves,
+/// bar the two verbs the guest is never asked about — its QUIET_ONLY).
 /// An action is not retried and the step after it may be another action
 /// with no POLL_DEADLINE cover, so a verb that returns the moment it
 /// emits leaves its own answer in flight (`Stage::type_text` point 4, and

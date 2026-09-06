@@ -3303,12 +3303,19 @@ func kayaPresentSaveDialog(
     }
 
     /// What the live picker is really showing, read on the host: the directory
-    /// and the row names. Nil when no picker is up, which FAILS every
-    /// expect_file_dialog rather than passing quietly.
-    func kayaSimdriveState() -> (String, [String])? {
+    /// and the row names. Nil state PLUS the sentence to report, the save
+    /// side's shape: a refusal from the host used to read as "no file dialog
+    /// live" and sent the reader to the guest, which is why both save-swiftui
+    /// sightings' first failure named no cause (docs/deferred.md).
+    func kayaSimdriveState() -> ((String, [String])?, String) {
         let (ok, lines) = KayaSimdrive.ask("state")
-        guard ok, let directory = lines.first, !directory.isEmpty else { return nil }
-        return (directory, Array(lines.dropFirst()))
+        guard ok else {
+            return (nil, lines.first ?? "simdrive refused state without saying why")
+        }
+        guard let directory = lines.first, !directory.isEmpty else {
+            return (nil, "no file dialog live")
+        }
+        return ((directory, Array(lines.dropFirst())), "")
     }
 
     /// Choose a row or cancel. Nil on success, the failure's sentence otherwise
@@ -6549,6 +6556,8 @@ private func kayaRunScript(_ script: String) {
                 // THROUGH the control (docs/datetime-plan.md D8): its value
                 // moves and its own action fires, the path a user's pick
                 // takes, so the range police and the minute snap run too.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let isTime = parts[0] == "set_time"
                 let spelled = String(parts[2])
                 guard let packed = isTime ? kayaParseTime(spelled) : kayaParseDate(spelled) else {
@@ -6575,6 +6584,7 @@ private func kayaRunScript(_ script: String) {
                     kayaDrivePicker(
                         control, to: isTime ? kayaDateFromPackedTime(packed) : kayaDateFromPackedDate(packed))
                 }
+                kayaAwaitAnswer(answered)
             case "expect_picker":
                 // The CONTROL's value, never the node's: the one observation
                 // for the silent cases (docs/datetime-plan.md D8).
@@ -6625,6 +6635,8 @@ private func kayaRunScript(_ script: String) {
                     failures.append("no such target \(parts[1])")
                 }
             case "set_text":
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     let node =
                         parts[1].hasPrefix("textarea")
@@ -6637,15 +6649,26 @@ private func kayaRunScript(_ script: String) {
                     KayaHost.emitText(node, node.text)
                     return true
                 }
-                if !ok { failures.append("no such target \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "type":
                 // A8's verb: REAL KEYSTROKES at whatever holds focus, with no
                 // target because that is the platform's answer. set_text cannot
                 // stand in — by D7 a programmatic write CLEARS the native
                 // history the scene exists to observe.
+                // Point 4 blocks until the keys have landed IN THE CONTROL,
+                // which is not the app having answered the text_changed they
+                // raised — so the rule applies here as everywhere.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let typed = kayaQuoted(Array(parts[1...]))
                 #if os(macOS)
-                    if !kayaTypeAtFocus(typed) {
+                    if kayaTypeAtFocus(typed) {
+                        kayaAwaitAnswer(answered)
+                    } else {
                         failures.append(
                             "type \"\(typed)\" reached no window — nothing was typed")
                     }
@@ -6656,6 +6679,8 @@ private func kayaRunScript(_ script: String) {
                     // contract point 3 (caret to the end) and point 4.
                     if let why = kayaTypeThroughHost(typed) {
                         failures.append("type \"\(typed)\": \(why)")
+                    } else {
+                        kayaAwaitAnswer(answered)
                     }
                 #endif
             case "expect":
@@ -7170,6 +7195,8 @@ private func kayaRunScript(_ script: String) {
                 // The user's route: move the switcher's selection and
                 // emit — exactly what the TabView selection binding's
                 // setter does for a real tap (choose/toggle precedent).
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let index = Int(parts[1]) ?? -1
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     guard let window = kayaScene.windows[0],
@@ -7182,7 +7209,11 @@ private func kayaRunScript(_ script: String) {
                     }
                     return true
                 }
-                if !ok { failures.append("no such section \(parts[1])") }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such section \(parts[1])")
+                }
             case "expect_title":
                 // The REAL materialized title, never the model's copy on
                 // macOS — a backend that ignored the write must fail. An
@@ -7304,12 +7335,15 @@ private func kayaRunScript(_ script: String) {
                     failures.append("close_window wants an explicit window#N")
                     break
                 }
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 #if os(macOS)
                     let target = kayaAwaitWindow(wid)
                     DispatchQueue.main.sync {
                         target?.performClose(nil)
                     }
                 #endif
+                kayaAwaitAnswer(answered)
             case "expect_windows":
                 let want = Int(parts[1]) ?? -1
                 let got = DispatchQueue.main.sync { kayaScene.windows.count }
@@ -7336,6 +7370,8 @@ private func kayaRunScript(_ script: String) {
                 // The user's back affordance: drive the SAME path-shortening
                 // write the toolbar back button and swipe-back make, so
                 // interception and the post-fact reconcile run as a user pop.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let (wid, _, _) = kayaWindowTarget(Array(parts[1...]))
                 DispatchQueue.main.sync {
                     // NO back affordance while both panes are on screen:
@@ -7347,6 +7383,7 @@ private func kayaRunScript(_ script: String) {
                     let depth = max(0, kayaStackDepth(surface))
                     kayaUserPops(surface, to: max(0, depth - 1))
                 }
+                kayaAwaitAnswer(answered)
             case "expect_grid_columns":
                 let want = Int(parts[2])!
                 let off = DispatchQueue.main.sync { () -> String? in
@@ -7419,6 +7456,13 @@ private func kayaRunScript(_ script: String) {
             case "scroll_end":
                 // The REAL scrolling API: the reader proxy animates to
                 // the content's bottom anchor. Silent, like click.
+                //
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): a
+                // scroll asks the guest nothing — the spec has no scroll
+                // occurrence — so there is no answer to wait for, while
+                // the previous step's answer has to be on the widgets
+                // before the container is driven to its end.
+                kayaAwaitQuiet()
                 DispatchQueue.main.sync {
                     if let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
                         let proxy = kayaScrollProxies[node.id]
@@ -7496,7 +7540,7 @@ private func kayaRunScript(_ script: String) {
                     // OFF the main thread, deliberately: the read goes out to the
                     // host and back, and the picker is a remote view controller
                     // whose UI a blocked main thread would stall.
-                    let state = kayaSimdriveState()
+                    let (state, simdriveWhy) = kayaSimdriveState()
                 #endif
                 if let (where_, rows) = state {
                     if wantDir.isEmpty {
@@ -7529,7 +7573,7 @@ private func kayaRunScript(_ script: String) {
                         failures.append(
                             "no file dialog live, wanted \"\(wantDir)\" — \(kayaOpenPanelWhyNot())")
                     #else
-                        failures.append("no file dialog live, wanted \"\(wantDir)\"")
+                        failures.append("\(simdriveWhy), wanted \"\(wantDir)\"")
                     #endif
                 }
             case "clipboard_seed":
@@ -8615,6 +8659,13 @@ private func kayaRunScript(_ script: String) {
                 // The REAL resize, so the size class actually moves and the
                 // adaptive arms re-run. A model write would prove nothing: the
                 // whole point of the verb is to make the platform re-decide.
+                //
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): a
+                // resize asks the guest nothing — the metrics report is
+                // the backend's own — so there is no answer to wait for,
+                // while a resize must not land on a window the previous
+                // step's answer has not reached.
+                kayaAwaitQuiet()
                 let spec = parts.count > 1 ? String(parts[1]) : ""
                 let dims = spec.split(separator: "x", maxSplits: 1)
                 guard dims.count == 2, let rw = Double(dims[0]), let rh = Double(dims[1]) else {
@@ -8891,6 +8942,8 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(bad): \(line)")
                     break
                 }
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let failure = DispatchQueue.main.sync { () -> String? in
                     if let wid = kayaOpenContextWidget {
                         guard let roots = kayaScene.contextRoots[wid],
@@ -8923,7 +8976,11 @@ private func kayaRunScript(_ script: String) {
                         return nil
                     #endif
                 }
-                if let failure { failures.append(failure) }
+                if let failure {
+                    failures.append(failure)
+                } else {
+                    kayaAwaitAnswer(answered)
+                }
             case "context_open":
                 // An action, silent like click: opens the anchor's context
                 // catalog for the following menu_activate. Editable text is

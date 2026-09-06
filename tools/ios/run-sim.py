@@ -109,6 +109,12 @@ XCUIDRIVE_BUILD = ROOT / "target/ios-xcuidrive"
 # and refuses any that remains, and the driver is installed by xcodebuild
 # while that runs (measured 2026-09-02, the first run of this driver).
 XCUIDRIVE_RUNNER_ID = "dev.kayalane.drive.runner"
+# HOW LONG THE DRIVER MAY WAIT FOR THE APP'S OWN SIGNAL before answering
+# with a sentence. It has to be under the GUEST's simdrive deadline
+# (KayaSimdrive.ask's 60s, swift/KayaSwiftUI.swift), which is itself under
+# this runner's per-verb timeout (90s) and the leg's `timeout 120`: a
+# driver that answers after the guest stopped reading answers nobody.
+XCUIDRIVE_WAIT_SECONDS = 45
 IOS_MIN = "16.0"
 os.chdir(ROOT)
 
@@ -861,131 +867,168 @@ def picker_cleanup(udid):
     return True
 
 
+# WHAT EACH ADMISSION CODE MEANS, said in the attempt line rather than
+# left to a reader with the source open.
+PROBE_CODES = {
+    0: "admitted",
+    75: "a measured stale LocalStorage export",
+    76: "the flow did not finish, a slow host and not a verdict",
+    1: "the probe itself could not run",
+}
+_probe_attempts = {}
+
+
 def picker_export_probe(udid):
     """0 healthy, 75 the measured LocalStorage failure, 76 the flow that
     did not finish in time (a slow host, not a stale export — the two
     read alike under matrix load, and the second erased a healthy
-    device twice, 2026-09-01), 1 otherwise."""
-    probe_name = f"kaya-export-preflight-{os.getpid()}-{now_ms()}"
-    run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
-         EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
-    if run(["timeout", "60", "xcrun", "simctl", "install", udid,
-            EXPORT_PROBE_APP], stdout=subprocess.DEVNULL,
-           stderr=subprocess.DEVNULL).returncode != 0:
-        print(f"run-sim: the LocalStorage export probe would not install "
-              f"on {udid}", file=sys.stderr)
-        return 1
-    container = out_of(["timeout", "60", "xcrun", "simctl",
-                        "get_app_container", udid, EXPORT_PROBE_BUNDLE,
-                        "data"]).strip()
-    if not container:
-        print(f"run-sim: the LocalStorage export probe has no data "
-              f"container on {udid}", file=sys.stderr)
-        return 1
-    result_file = pathlib.Path(container) / \
-        "Library/Caches/kaya-export-preflight-result"
-    ready_file = pathlib.Path(container) / \
-        "Library/Caches/kaya-export-preflight-ready"
-    result_file.unlink(missing_ok=True)
-    ready_file.unlink(missing_ok=True)
-    started = time.strftime("%Y-%m-%d %H:%M:%S%z")
-    launch = subprocess.run(
-        ["timeout", "60", "xcrun", "simctl", "launch", udid,
-         EXPORT_PROBE_BUNDLE],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        env=dict(os.environ,
-                 SIMCTL_CHILD_KAYA_EXPORT_NAME=probe_name),
-        check=False, **TEXT)
-    if launch.returncode != 0:
-        print(f"run-sim: the LocalStorage export probe would not launch "
-              f"on {udid}: {launch.stdout}", file=sys.stderr)
-        return 1
-    pid = ""
-    for line in reversed(launch.stdout.splitlines()):
-        m = re.search(r":\s*([0-9]+)\s*$", line)
-        if m:
-            pid = m.group(1)
-            break
-    if not pid:
-        print(f"run-sim: the LocalStorage export probe launch named no "
-              f"pid on {udid}: {launch.stdout}", file=sys.stderr)
-        return 1
-    for _ in range(240):
-        if ready_file.is_file() and ready_file.stat().st_size:
-            break
-        time.sleep(0.25)
-    if not (ready_file.is_file() and ready_file.stat().st_size):
-        print(f"run-sim: the LocalStorage export probe never presented "
-              f"its picker on {udid} within 60s", file=sys.stderr)
+    device twice, 2026-09-01), 1 otherwise.
+
+    EVERY ATTEMPT PRINTS ITS OWN TIME AND CODE: the caller reports one
+    elapsed and the LAST code for the whole admission, and the ledger's
+    admission WATCH could not tell a single 77s probe from two fast
+    ones (docs/deferred.md, the LocalStorage-admission entry).
+    """
+
+    def attempt():
+        # FAULT INJECTION, by hand only, the reseed path's affordance one
+        # code over (KAYA_IOS_RESEED_TEST): the slow-flow answer with no
+        # wait in front of it, so the second attempt AND the refusal that
+        # follows two of them can be watched rather than trusted.
+        if os.environ.get("KAYA_IOS_SLOW_PROBE_TEST") == udid:
+            print(f"run-sim: KAYA_IOS_SLOW_PROBE_TEST — answering the "
+                  f"export probe on {udid} with the slow-flow code",
+                  file=sys.stderr)
+            return 76
+        probe_name = f"kaya-export-preflight-{os.getpid()}-{now_ms()}"
         run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
              EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
-        return 76
-    # THE SHEET IS DRIVEN BY THE RESIDENT DRIVER, using the verbs the
-    # legs use, so admission is the driver's first proof on every run.
-    ok, drive_out = xcuidrive(udid, f"attach {EXPORT_PROBE_BUNDLE}")
-    if ok:
-        ok, drive_out = xcuidrive(udid, f"savename {probe_name}", timeout=90)
-    if ok:
-        ok, drive_out = xcuidrive(udid, "savepress", timeout=90)
-    drive_rc = 0 if ok else 1
-    result = ""
-    # A drive that failed cannot finish the flow: a short grace for a
-    # late result, not the full minute (two slow phones held the
-    # admission join 99s past the builds, 2026-09-01).
-    for _ in range(240 if drive_rc == 0 else 20):
-        if result_file.is_file() and result_file.stat().st_size:
-            result = result_file.read_text(
-                encoding="utf-8", errors="replace").splitlines()[0]
-            break
-        time.sleep(0.25)
-    run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
-         EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
-    if result == "ok":
-        return 0
-    if not result and drive_rc != 0:
-        print(f"run-sim: the drive's last words on {udid}: "
-              + " | ".join(drive_out.strip().splitlines()[-3:]),
+        if run(["timeout", "60", "xcrun", "simctl", "install", udid,
+                EXPORT_PROBE_APP], stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL).returncode != 0:
+            print(f"run-sim: the LocalStorage export probe would not install "
+                  f"on {udid}", file=sys.stderr)
+            return 1
+        container = out_of(["timeout", "60", "xcrun", "simctl",
+                            "get_app_container", udid, EXPORT_PROBE_BUNDLE,
+                            "data"]).strip()
+        if not container:
+            print(f"run-sim: the LocalStorage export probe has no data "
+                  f"container on {udid}", file=sys.stderr)
+            return 1
+        result_file = pathlib.Path(container) / \
+            "Library/Caches/kaya-export-preflight-result"
+        ready_file = pathlib.Path(container) / \
+            "Library/Caches/kaya-export-preflight-ready"
+        result_file.unlink(missing_ok=True)
+        ready_file.unlink(missing_ok=True)
+        started = time.strftime("%Y-%m-%d %H:%M:%S%z")
+        launch = subprocess.run(
+            ["timeout", "60", "xcrun", "simctl", "launch", udid,
+             EXPORT_PROBE_BUNDLE],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            env=dict(os.environ,
+                     SIMCTL_CHILD_KAYA_EXPORT_NAME=probe_name),
+            check=False, **TEXT)
+        if launch.returncode != 0:
+            print(f"run-sim: the LocalStorage export probe would not launch "
+                  f"on {udid}: {launch.stdout}", file=sys.stderr)
+            return 1
+        pid = ""
+        for line in reversed(launch.stdout.splitlines()):
+            m = re.search(r":\s*([0-9]+)\s*$", line)
+            if m:
+                pid = m.group(1)
+                break
+        if not pid:
+            print(f"run-sim: the LocalStorage export probe launch named no "
+                  f"pid on {udid}: {launch.stdout}", file=sys.stderr)
+            return 1
+        for _ in range(240):
+            if ready_file.is_file() and ready_file.stat().st_size:
+                break
+            time.sleep(0.25)
+        if not (ready_file.is_file() and ready_file.stat().st_size):
+            print(f"run-sim: the LocalStorage export probe never presented "
+                  f"its picker on {udid} within 60s", file=sys.stderr)
+            run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
+                 EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            return 76
+        # THE SHEET IS DRIVEN BY THE RESIDENT DRIVER, using the verbs the
+        # legs use, so admission is the driver's first proof on every run.
+        ok, drive_out = xcuidrive(udid, f"attach {EXPORT_PROBE_BUNDLE}")
+        if ok:
+            ok, drive_out = xcuidrive(udid, f"savename {probe_name}", timeout=90)
+        if ok:
+            ok, drive_out = xcuidrive(udid, "savepress", timeout=90)
+        drive_rc = 0 if ok else 1
+        result = ""
+        # A drive that failed cannot finish the flow: a short grace for a
+        # late result, not the full minute (two slow phones held the
+        # admission join 99s past the builds, 2026-09-01).
+        for _ in range(240 if drive_rc == 0 else 20):
+            if result_file.is_file() and result_file.stat().st_size:
+                result = result_file.read_text(
+                    encoding="utf-8", errors="replace").splitlines()[0]
+                break
+            time.sleep(0.25)
+        run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
+             EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        if result == "ok":
+            return 0
+        if not result and drive_rc != 0:
+            print(f"run-sim: the drive's last words on {udid}: "
+                  + " | ".join(drive_out.strip().splitlines()[-3:]),
+                  file=sys.stderr)
+            # The flow never finished: nothing here says the export is
+            # STALE, only that the host was slow. The log below may carry an
+            # FP -1005 from the Files app's own warm-up, which is what made
+            # this read as 75 and erase a healthy device.
+            print(f"run-sim: the LocalStorage export probe did not finish on "
+                  f"{udid} (drive rc={drive_rc}); a slow host, not a verdict",
+                  file=sys.stderr)
+            return 76
+        logq = subprocess.run(
+            ["timeout", "30", "xcrun", "simctl", "spawn", udid, "log",
+             "show", "--style", "compact", "--start", started, "--predicate",
+             'eventMessage CONTAINS "FP -1005" OR eventMessage CONTAINS '
+             '"Index out of sync" OR eventMessage CONTAINS '
+             '"didPickDocumentURLs called with nil or 0 URLS"'],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+            **TEXT)
+        system_log = (logq.stdout if logq.returncode == 0 else
+                      f"log query failed with rc={logq.returncode}: "
+                      f"{logq.stdout}")
+        haystack = f"{result}:{system_log}"
+        if (result == "empty" or "FP -1005" in haystack
+                or "Index out of sync" in haystack
+                or "didPickDocumentURLs called with nil or 0 URLS"
+                in haystack):
+            print(f"run-sim: LocalStorage export health failed on {udid} "
+                  f"({result})", file=sys.stderr)
+            if system_log:
+                print(system_log, file=sys.stderr)
+            return 75
+        print(f"run-sim: LocalStorage export probe failed on {udid}",
               file=sys.stderr)
-        # The flow never finished: nothing here says the export is
-        # STALE, only that the host was slow. The log below may carry an
-        # FP -1005 from the Files app's own warm-up, which is what made
-        # this read as 75 and erase a healthy device.
-        print(f"run-sim: the LocalStorage export probe did not finish on "
-              f"{udid} (drive rc={drive_rc}); a slow host, not a verdict",
-              file=sys.stderr)
-        return 76
-    logq = subprocess.run(
-        ["timeout", "30", "xcrun", "simctl", "spawn", udid, "log",
-         "show", "--style", "compact", "--start", started, "--predicate",
-         'eventMessage CONTAINS "FP -1005" OR eventMessage CONTAINS '
-         '"Index out of sync" OR eventMessage CONTAINS '
-         '"didPickDocumentURLs called with nil or 0 URLS"'],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
-        **TEXT)
-    system_log = (logq.stdout if logq.returncode == 0 else
-                  f"log query failed with rc={logq.returncode}: "
-                  f"{logq.stdout}")
-    haystack = f"{result}:{system_log}"
-    if (result == "empty" or "FP -1005" in haystack
-            or "Index out of sync" in haystack
-            or "didPickDocumentURLs called with nil or 0 URLS"
-            in haystack):
-        print(f"run-sim: LocalStorage export health failed on {udid} "
-              f"({result})", file=sys.stderr)
+        print(f"  result={result or 'missing'} drive_rc={drive_rc} "
+              f"drive={drive_out or '<empty>'}", file=sys.stderr)
         if system_log:
             print(system_log, file=sys.stderr)
-        return 75
-    print(f"run-sim: LocalStorage export probe failed on {udid}",
-          file=sys.stderr)
-    print(f"  result={result or 'missing'} drive_rc={drive_rc} "
-          f"drive={drive_out or '<empty>'}", file=sys.stderr)
-    if system_log:
-        print(system_log, file=sys.stderr)
-    return 1
+        return 1
 
+    _probe_attempts[udid] = _probe_attempts.get(udid, 0) + 1
+    which = _probe_attempts[udid]
+    started = time.monotonic()
+    rc = attempt()
+    print(f"run-sim: LocalStorage export attempt {which} on {udid}: "
+          f"rc={rc} in {int(time.monotonic() - started)}s "
+          f"({PROBE_CODES.get(rc, 'an unclassified code')})",
+          file=sys.stderr, flush=True)
+    return rc
 
 def picker_reseed(udid):
     xcuidrive_stop(udid)
@@ -1294,6 +1337,20 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # fault.rs's KAYA_PANIC_LOG).
     env["SIMCTL_CHILD_KAYA_VERB_TRACE"] = f"verb-trace-{name}.txt"
     env["SIMCTL_CHILD_KAYA_PANIC_LOG"] = f"panic-{name}.txt"
+    # WHAT THE DRIVER WAS WAITING FOR while this leg ran: one device runs
+    # one leg at a time, so everything appended to its drive.log between
+    # here and the verdict belongs to this leg.
+    drive_dir = _drive_dirs.get(udid) or pathlib.Path("/nonexistent")
+    drive_log = drive_dir / "drive.log"
+    drive_log_at = drive_log.stat().st_size if drive_log.is_file() else 0
+    # THE LEG'S OWN CEILING, HANDED TO THE DRIVER: `timeout 120` below kills
+    # the guest with its log, so the driver's waits are clamped to 100s from
+    # here and the harness keeps the last 20 to publish a verdict. Without
+    # it a sheet that never comes is spent one 45s wait at a time and the
+    # leg dies unread.
+    if drive_dir.is_dir():
+        (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",
+                                            encoding="utf-8")
     got = subprocess.run(
         ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
          udid, bundle_id],
@@ -1303,6 +1360,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     if watcher is not None:
         watcher_stop.set()
         watcher.join()
+    (drive_dir / "deadline").unlink(missing_ok=True)
     print(out, file=log)
     rec_finish(name, out)
     # NO PER-LEG SCREENSHOT: `--console-pty` returns only when the guest
@@ -1310,6 +1368,15 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     ok = "KAYA_SELFTEST: OK" in out
     if not ok:
         pull_container_files(udid, bundle_id, name, log)
+        if drive_log.is_file():
+            with open(drive_log, "r", encoding="utf-8",
+                      errors="replace") as dl:
+                dl.seek(drive_log_at)
+                mine = dl.read().splitlines()
+            print(f"== what the xcui driver on {udid} waited for during "
+                  f"{name} ({len(mine)} line(s)) ==", file=log)
+            print("\n".join(mine[-40:]) if mine else
+                  "(the driver was never asked for anything)", file=log)
     if simdrive_log is not None:
         lines = (len(simdrive_log.read_text(
             encoding="utf-8", errors="replace").splitlines())
@@ -1363,6 +1430,10 @@ _drive_threads = []
 _drive_results = {}
 _drive_dirs = {}
 _drive_serial = {}
+# A dead driver's last words, read once (its logs stop changing).
+_drive_words = {}
+# Devices whose death has already been diagnosed on stderr.
+_drive_told = set()
 _drive_lock = threading.Lock()
 
 
@@ -1485,7 +1556,8 @@ def xcuidrive_start(udid):
         "TestingEnvironmentVariables": {
             "DYLD_FRAMEWORK_PATH": "__TESTROOT__/KayaDrive-Runner.app/Frameworks",
             "DYLD_LIBRARY_PATH": "__TESTROOT__/KayaDrive-Runner.app/Frameworks",
-            "KAYA_DRIVE_DIR": str(d)},
+            "KAYA_DRIVE_DIR": str(d),
+            "KAYA_DRIVE_WAIT_SECONDS": str(XCUIDRIVE_WAIT_SECONDS)},
         "DependentProductPaths": ["__TESTROOT__/KayaDrive-Runner.app",
                                   "__TESTROOT__/KayaDriveTarget.app"],
         "SystemAttachmentLifetime": "deleteOnSuccess",
@@ -1522,6 +1594,10 @@ def xcuidrive_launch_all():
     err = xcuidrive_build()
     if err:
         die(f"run-sim: {err}")
+    print(f"run-sim: xcui driver logs under {DRIVE_DIR} "
+          f"(<udid>-<serial>/xcodebuild.log, drive.log, issues.log); a "
+          f"driver that dies has them copied to "
+          f"target/validate-failures/", file=sys.stderr, flush=True)
     for udid in (*UDIDS, PAD_UDID):
         th = threading.Thread(target=xcuidrive_start, args=(udid,))
         th.start()
@@ -1541,7 +1617,8 @@ def xcuidrive_wait(udid):
     print(f"run-sim: xcui driver on {udid}: {got.splitlines()[0]}",
           file=sys.stderr, flush=True)
     if not got.startswith("ready in"):
-        die(f"run-sim: the xcui driver on {udid} is not serving:\n{got}")
+        die(f"run-sim: the xcui driver on {udid} is not serving:\n{got}\n"
+            f"{xcuidrive_last_words(udid)}")
 
 
 def xcuidrive_join():
@@ -1568,6 +1645,88 @@ def xcuidrive_stop(udid):
     run(["xcrun", "simctl", "terminate", udid, XCUIDRIVE_RUNNER_ID],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _drive_results.pop(udid, None)
+    _drive_words.pop(udid, None)
+
+
+def _drive_tail(path, keep, width=200):
+    if not path.is_file():
+        return []
+    return [line[:width] for line in path.read_text(
+        encoding="utf-8", errors="replace").splitlines()[-keep:]]
+
+
+# Every simulator's xcodebuild log carries this one, on every run, and it
+# says "mysterious crashes" — so a plain crash/failure grep answers with a
+# paragraph of noise for every cause (measured 2026-09-06, watched).
+XCODEBUILD_NOISE = "Class UIAccessibilityLoaderWebShared is implemented in both"
+XCODEBUILD_TROUBLE = re.compile(
+    r"error:|Testing failed|Test Case .* failed|Fatal error|"
+    r"unexpected exit, crash, or test timeout|unable to connect")
+
+
+def xcuidrive_last_words(udid):
+    """WHAT THE DRIVER SAID BEFORE IT DIED, and it is always something: an
+    exit code alone sent two sightings of the save-dialog WATCH to the
+    sheet when the answer was in a log this runner had in hand. Three
+    sources, in the order a reader wants them — the XCTest issue that
+    ended the resident loop (the driver's own `issues.log`), the last
+    thing it was waiting for (`drive.log`), and xcodebuild's own trouble
+    lines. Kept beside the lane's other evidence, since DRIVE_DIR is a
+    temp directory nobody can name after the run."""
+    d = _drive_dirs.get(udid)
+    if d is None:
+        return "no driver directory to read"
+    # A dead driver's logs never change again, and every later verb on that
+    # device asks: read them once.
+    if udid in _drive_words:
+        return _drive_words[udid]
+    issues = _drive_tail(d / "issues.log", 4)
+    waits = _drive_tail(d / "drive.log", 4)
+    build = [line for line in _drive_tail(d / "xcodebuild.log", 400)
+             if XCODEBUILD_TROUBLE.search(line)
+             and XCODEBUILD_NOISE not in line][-4:]
+    keep_dir = ROOT / "target/validate-failures"
+    keep_dir.mkdir(parents=True, exist_ok=True)
+    kept = keep_dir / f"ios-xcuidrive-{udid}.log"
+    with open(kept, "w", encoding="utf-8") as out:
+        for label, path in (("issues", d / "issues.log"),
+                            ("waits", d / "drive.log"),
+                            ("xcodebuild", d / "xcodebuild.log")):
+            out.write(f"== {label}: {path} ==\n")
+            if path.is_file():
+                out.write(path.read_text(encoding="utf-8",
+                                         errors="replace"))
+            else:
+                out.write("(the driver never wrote this file)\n")
+    parts = []
+    for label, got in (("XCTest issue", issues), ("last wait", waits),
+                       ("xcodebuild", build)):
+        parts.append(f"{label}: {' | '.join(got)}" if got
+                     else f"{label}: nothing recorded")
+    said = (" ; ".join(parts)
+            + f" ; whole log kept at target/validate-failures/"
+              f"ios-xcuidrive-{udid}.log")
+    proc = _drive_procs.get(udid)
+    if proc is not None and proc.poll() is not None:
+        _drive_words[udid] = said
+    return said
+
+
+def xcuidrive_death_note(udid):
+    """The dead-driver sentence a REFUSED VERB carries: short, because the
+    guest retries and the runner relays, so the long one was printed two
+    hundred times in one leg (watched 2026-09-06). The diagnosis itself
+    goes to this runner's stderr ONCE per device."""
+    with _drive_lock:
+        first = udid not in _drive_told
+        _drive_told.add(udid)
+    if first:
+        print(f"run-sim: the xcui driver on {udid} is gone — "
+              f"{xcuidrive_last_words(udid)}", file=sys.stderr, flush=True)
+    else:
+        xcuidrive_last_words(udid)
+    return (f"see target/validate-failures/ios-xcuidrive-{udid}.log and "
+            f"run-sim's own stderr for what it said")
 
 
 def xcuidrive_census():
@@ -1580,8 +1739,8 @@ def xcuidrive_census():
           f"started, {len(dead)} dead", flush=True)
     for udid in dead:
         print(f"run-sim: the xcui driver on {udid} exited "
-              f"{_drive_procs[udid].returncode} before the verdict",
-              file=sys.stderr)
+              f"{_drive_procs[udid].returncode} before the verdict — "
+              f"{xcuidrive_last_words(udid)}", file=sys.stderr)
     return not dead
 
 
@@ -1599,9 +1758,14 @@ def xcuidrive(udid, verb, timeout=30):
     while not resp.is_file():
         proc = _drive_procs.get(udid)
         if proc is not None and proc.poll() is not None:
-            return False, f"the driver on {udid} exited {proc.returncode}"
+            return False, (f"the driver on {udid} exited "
+                           f"{proc.returncode} with `{verb}` unanswered "
+                           f"after {time.monotonic() - started:.1f}s — "
+                           f"{xcuidrive_death_note(udid)}")
         if time.monotonic() - started > timeout:
-            return False, f"no answer to `{verb}` within {timeout}s"
+            return False, (f"no answer to `{verb}` within {timeout}s; the "
+                           f"driver is still alive and its last wait was "
+                           f"{' | '.join(_drive_tail(d / 'drive.log', 2)) or 'never recorded'}")
         time.sleep(0.02)
     lines = resp.read_text(encoding="utf-8").splitlines()
     resp.unlink(missing_ok=True)
@@ -1768,7 +1932,10 @@ def prep_join():
         rc = _prep_results.get(udid, "missing")
         if rc != 0:
             die(f"run-sim: device preparation failed (picker-{udid} "
-                f"rc={rc})")
+                f"rc={rc}, {PROBE_CODES.get(rc, 'an unclassified code')}"
+                f") after {_probe_attempts.get(udid, 0)} export "
+                f"attempt(s) — the attempt lines above carry each one's "
+                f"time and code")
     xcuidrive_join()
     if not clip_relay_check(UDIDS[0], PAD_UDID):
         sys.exit(1)
@@ -2001,7 +2168,8 @@ for _udid in UDIDS:
         _prep_results[u] = picker_prepare(u)
         print(f"run-sim: LocalStorage admission on {u} took "
               f"{int(time.monotonic() - _prep_started)}s (rc="
-              f"{_prep_results[u]})", file=sys.stderr, flush=True)
+              f"{_prep_results[u]}) over {_probe_attempts.get(u, 0)} "
+              f"export attempt(s)", file=sys.stderr, flush=True)
     _t = threading.Thread(target=_prep, kwargs={"u": _udid})
     _t.start()
     _prep_threads.append(_t)

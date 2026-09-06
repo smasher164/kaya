@@ -240,7 +240,13 @@ BUDGETS = {
     # full matrix on that roster read 441s where the previous had read
     # 306; the lane standalone the same hour read ~160s. 520 is 1.18x over
     # the one contended sample, to be re-read on the next quiet matrices.
-    "android": 520,
+    # 660 since 2026-09-06: the drag injection is START-GATED now (the
+    # press held until the app's own KAYA_DRAG_STARTED, eight moves paced
+    # over a load-scaled duration capped at 4.5s), so the three dnd legs
+    # cost 48-49s each under a matrix where they cost 22-27s, roughly
+    # +100s on a lane whose last five matrices read 458-495s; 660 is
+    # 1.12x over 590, to be re-read on the next quiet matrices.
+    "android": 660,
     # 490 since 2026-08-23. What it guards is the DELAYED-plus-NICED band
     # (the launch block above), which has ONE accepted sample: 348s
     # (2026-08-24). It deliberately does not cover the 467s reading from

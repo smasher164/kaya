@@ -267,7 +267,11 @@ and each lane prints its own instruments under a failed leg's log:
   injected points and each point's distance to the nearest edge of the
   box the SETTLE observed, with the destination's node id, in screen
   pixels. `entered=0` beside an aim inside the box is the gesture's; an
-  aim outside is the plan's.
+  aim outside is the plan's. The runner's own `draganddrop #N` line says
+  what schedule RAN: the press is held until the app's `KAYA_DRAG_STARTED`
+  (`started after Nms`), then eight moves paced over a duration scaled by
+  the host's one-minute load (the request's 1500ms at load 8 or under,
+  capped at 4500ms), both numbers printed beside the load read.
 - Linux `verb=clipboard` records — the flight recorder's, printed by
   tools/linux/run-suites.sh under a failed leg: each seed's settle
   (`rounds`/`ms`) and each read's premise AND answer (what another process

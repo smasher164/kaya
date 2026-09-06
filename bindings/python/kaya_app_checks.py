@@ -3,6 +3,7 @@ The core is never entered: records queue and the process exits."""
 
 import dataclasses
 import datetime
+import os
 import struct
 import sys
 import time
@@ -2304,14 +2305,35 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
 
 # ---- a mutation costs the same at 32,000 entries as at 2,000 --------
 #
-# THE ONLY GUARD AVAILABLE IS A MEASUREMENT: no deterministic observable
-# tells one rollback snapshot from N, so per-row cost is measured at two
-# sizes 16x apart and growth is the refusal (old body spliced back:
-# 9.7-12.6x; fixed: 0.97-1.01x; docs/deferred.md, "the Python binding's
-# insert is quadratic").
+# THE DEFECT: the rollback journal took a whole-model dict snapshot per
+# MUTATION, so N inserts cost N²/2 copies (docs/deferred.md, "the Python
+# binding's insert is quadratic"). Python has no compiler to refuse the
+# eager copy, so the guard is a measurement.
+#
+# A WALL CLOCK IS NOT A MEASUREMENT A LOADED HOST LEAVES ALONE: this
+# clause read 5.75x against its 3.0x bound in a matrix's gate sweep and
+# 1.05x standalone on the same tree forty minutes earlier
+# (docs/deferred.md's WATCH, 2026-09-06). So the refusal is COUNTED
+# WORK, and the clock stays beside it for the cost no counter here can
+# see.
+#
+# THE COUNT: the insert's two accumulators are the collection instance's
+# mirror and the batch, and counting containers stand in for both for
+# one abandoned transaction — the binding itself is untouched. An insert
+# whose cost grows with the table has to READ the table: the shipped
+# defect copied it, a scan would iterate it, and both arrive here as
+# touches. The fixed body reads neither at any size, and no host moves
+# an integer.
 BULK_SMALL = 2_000
 BULK_LARGE = 32_000
 BULK_GROWTH = 3.0
+BULK_CHUNK = 100  # rows per timed window
+BULK_WINDOW = 1_000  # rows of chunks each minimum is taken over
+# The fixed body reads the model ZERO times per transaction; the defect
+# reads it once per row. Four whole-model passes is far above the one
+# and far below the other, and the counted run stops AT the ceiling
+# rather than spending an hour proving a quadratic body quadratic.
+BULK_TOUCH_CEILING = 4 * BULK_LARGE
 
 
 @dataclass
@@ -2319,35 +2341,198 @@ class Bulk:
     a: str
 
 
-def _bulk_per_row_ms(n):
-    """ms per insert into a fresh collection, the transaction abandoned.
+class _BulkStop(Exception):
+    """Abandons a measuring transaction: none of them may commit."""
 
-    The rows are built BEFORE the clock starts: what is timed is the
-    binding's accumulation path, not Python's f-strings."""
-    class _Stop(Exception):
-        pass
 
-    took = None
+class _BulkTooMuch(Exception):
+    """The counted run passed the ceiling and stopped there."""
+
+
+class _BulkCount:
+    touches = 0
+
+    @classmethod
+    def bump(cls, n):
+        _BulkCount.touches += n
+        if _BulkCount.touches > BULK_TOUCH_CEILING:
+            raise _BulkTooMuch()
+
+
+class _BulkMirror(dict):
+    """A collection instance's mirror that counts the entries the
+    binding reads out of it.
+
+    __iter__ IS OVERRIDDEN FOR THE COPY'S SAKE: CPython's dict(other)
+    copies the slots wholesale unless the argument's tp_iter differs
+    from dict's, and only then goes through keys() and one __getitem__
+    per entry. A subclass counting __getitem__ alone reads ZERO for the
+    very defect this clause exists for.
+    """
+
+    def __getitem__(self, key):
+        _BulkCount.bump(1)
+        return dict.__getitem__(self, key)
+
+    def __contains__(self, key):
+        _BulkCount.bump(1)
+        return dict.__contains__(self, key)
+
+    def get(self, key, default=None):
+        _BulkCount.bump(1)
+        return dict.get(self, key, default)
+
+    def __iter__(self):
+        _BulkCount.bump(len(self))
+        return dict.__iter__(self)
+
+    def keys(self):
+        _BulkCount.bump(len(self))
+        return dict.keys(self)
+
+    def values(self):
+        _BulkCount.bump(len(self))
+        return dict.values(self)
+
+    def items(self):
+        _BulkCount.bump(len(self))
+        return dict.items(self)
+
+    def copy(self):
+        _BulkCount.bump(len(self))
+        return dict.copy(self)
+
+
+class _BulkBatch(list):
+    """The accumulating batch, counted the same way: a binding that
+    copies or scans what it has already queued pays per row too, which
+    is what the Swift binding's own quadratic was (docs/deferred.md,
+    "the Swift binding's insert is quadratic")."""
+
+    def __iter__(self):
+        _BulkCount.bump(len(self))
+        return list.__iter__(self)
+
+    def __getitem__(self, index):
+        _BulkCount.bump(len(range(*index.indices(len(self))))
+                        if isinstance(index, slice) else 1)
+        return list.__getitem__(self, index)
+
+
+def _bulk_rows(n):
+    """The rows, built BEFORE any counter is armed or any clock starts:
+    what is measured is the binding's accumulation path, not Python's
+    f-strings."""
+    return [(f"k{i:07d}", Bulk(a=f"a{i}")) for i in range(n)]
+
+
+def _bulk_counted(n):
+    """n inserts through counting containers, the transaction abandoned.
+
+    Answers the entries the binding read, whether it stopped at the
+    ceiling, what the two containers ended up holding, and what ONE
+    pass over each of them costs the counter — that last is the control,
+    since a counter reading zero because it counts nothing agrees with
+    every body there is.
+    """
+    rows = _bulk_rows(n)
+    mirror = _BulkMirror()
+    # Not None: a substitution that did not take must arrive as a
+    # container the binding never filled, not as a TypeError below.
+    batch = _BulkBatch()
+    bailed = False
+    _BulkCount.touches = 0
     try:
         with app.build():
             table = kaya.collection(Bulk).at()
-            rows = [(f"k{i:07d}", Bulk(a=f"a{i}")) for i in range(n)]
-            start = time.perf_counter()
+            # The two substitutions: the instance mirror the binding is
+            # about to fill, and the batch it queues its records into.
+            table._owner._instances[()] = mirror
+            batch = _BulkBatch(kaya._tx)
+            kaya._tx = batch
             for key, value in rows:
                 table.insert(key, value)
-            took = time.perf_counter() - start
-            raise _Stop()
-    except _Stop:
+            raise _BulkStop()
+    except _BulkStop:
         pass
-    return took * 1000 / n
+    except _BulkTooMuch:
+        bailed = True
+    work = _BulkCount.touches
+    _BulkCount.touches = 0
+    list(mirror)
+    list(batch)
+    return work, bailed, len(mirror), len(batch), _BulkCount.touches
 
 
-bulk_small = _bulk_per_row_ms(BULK_SMALL)
-bulk_large = _bulk_per_row_ms(BULK_LARGE)
+def _bulk_marks(n):
+    """(entries already in the table, seconds) per chunk of one run to n,
+    the transaction abandoned."""
+    rows = _bulk_rows(n)
+    chunks = [rows[i:i + BULK_CHUNK] for i in range(0, n, BULK_CHUNK)]
+    marks = []
+    try:
+        with app.build():
+            table = kaya.collection(Bulk).at()
+            at = 0
+            for chunk in chunks:
+                start = time.perf_counter()
+                for key, value in chunk:
+                    table.insert(key, value)
+                marks.append((at, time.perf_counter() - start))
+                at += len(chunk)
+            raise _BulkStop()
+    except _BulkStop:
+        pass
+    return marks
+
+
+def _bulk_per_row_ms(marks, at):
+    """The FASTEST chunk of the 1,000 rows before the table held `at`
+    entries, per row.
+
+    THE MINIMUM OF TEN SHORT WINDOWS, NOT ONE LONG AVERAGE: both figures
+    are then the same ~0.4ms of work sampled ten times, so a scheduler
+    that steals a window does not move either, while an insert that
+    grows with the table still costs more in the later window. A
+    whole-run average — what this clause used to compare — measures a
+    0.8s span at 32,000 against a 9ms span at 2,000, and a busy host
+    charges the long one more per row for reasons that are not the
+    binding's.
+    """
+    return min(t for start, t in marks
+               if at - BULK_WINDOW <= start < at) * 1000 / BULK_CHUNK
+
+
+bulk_work, bulk_bailed, bulk_rows_held, bulk_records, bulk_control = \
+    _bulk_counted(BULK_LARGE)
+print(f"bulk insert (counted): {BULK_LARGE} inserts read the model and "
+      f"the batch {bulk_work} time(s), ceiling {BULK_TOUCH_CEILING}"
+      f"{', STOPPED THERE' if bulk_bailed else ''}; the instruments "
+      f"hold {bulk_rows_held} rows and {bulk_records} records, and one "
+      f"pass over both counts {bulk_control}")
+check(
+    "the counted run's containers are the ones the binding filled",
+    bulk_control == bulk_rows_held + bulk_records
+    and (bulk_bailed or (bulk_rows_held == BULK_LARGE
+                         and bulk_records >= BULK_LARGE)),
+)
+check(
+    "32,000 inserts read the model and the batch a bounded number of "
+    "times, not once per row",
+    not bulk_bailed and bulk_work <= BULK_TOUCH_CEILING,
+)
+
+bulk_marks = _bulk_marks(BULK_LARGE)
+bulk_small = _bulk_per_row_ms(bulk_marks, BULK_SMALL)
+bulk_large = _bulk_per_row_ms(bulk_marks, BULK_LARGE)
 bulk_growth = bulk_large / bulk_small
-print(f"bulk insert: {BULK_SMALL} rows {bulk_small:.5f} ms/row, "
-      f"{BULK_LARGE} rows {bulk_large:.5f} ms/row, "
-      f"growth {bulk_growth:.2f}x (bound {BULK_GROWTH}x)")
+bulk_load = ("/".join(f"{x:.2f}" for x in os.getloadavg())
+             if hasattr(os, "getloadavg") else "n/a")
+print(f"bulk insert (timed): {BULK_SMALL} entries {bulk_small:.5f} "
+      f"ms/row, {BULK_LARGE} entries {bulk_large:.5f} ms/row, growth "
+      f"{bulk_growth:.2f}x (bound {BULK_GROWTH}x), min of "
+      f"{BULK_WINDOW // BULK_CHUNK} chunks of {BULK_CHUNK} each, load "
+      f"{bulk_load}")
 check(
     "an insert costs the same at 32,000 entries as at 2,000",
     bulk_growth < BULK_GROWTH,

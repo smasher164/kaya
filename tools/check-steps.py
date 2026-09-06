@@ -3547,20 +3547,41 @@ if out:
 # THE iOS PICKER'S SILENT WIRINGS: each fails in a way that looks like a
 # backend bug rather than a harness one. (The file_mode clause lives in
 # tools/check-file-modes.py, which reads the numbers out of spec.rs.)
-def ios_picker():
+def ios_picker(driver):
     bad = []
     # 1. THE DRIVER NAMES THE PICKER BY THE TWO IDENTIFIERS ITS CONTRACT
     #    RESTS ON: the picker's navigation bar and the save sheet's
     #    filename field, both measured on iOS 26.5
     #    (docs/xcuidrive-plan.md §1). Lose either and every picker verb
     #    answers "no picker" for a picker that is on screen.
-    driver = read_rel("tools/ios/xcuidrive/KayaDrive.swift")
     for ident in ("FullDocumentManagerViewControllerNavigationBar",
                   "DOCPicker.filenameTextField", "File View"):
         if ident not in driver:
             bad.append(f"tools/ios/xcuidrive/KayaDrive.swift no longer "
                        f"names {ident!r}, the identifier its picker "
                        f"verbs find the sheet by")
+    # 3. ONE PRESS OF SAVE GETS ONE WINDOW. savepress presses up to six
+    #    times because a press the sheet does not take is a measured
+    #    outcome under a matrix (docs/deferred.md, the save-press WATCH);
+    #    an inner wait handed the verb's whole remaining budget makes the
+    #    loop one press long, which is what matrix #18 (2026-09-06) ran
+    #    into with the five presses that would have followed never coming.
+    arm = re.search(r'case "savepress":(.*?)case "savecancel":', driver,
+                    re.S)
+    if not arm:
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift has no savepress "
+                   "arm between the savename and savecancel cases")
+    else:
+        waits = re.findall(r"waitForPickerGone\(a, ([^)]*\))\)", arm.group(1))
+        if not waits:
+            bad.append("tools/ios/xcuidrive/KayaDrive.swift: savepress "
+                       "never waits for the picker to go after a press")
+        for w in waits:
+            if "savePressWindow" not in w:
+                bad.append(f"tools/ios/xcuidrive/KayaDrive.swift: savepress "
+                           f"waits `{w}` after a press — one press must "
+                           f"get min(savePressWindow, ...) so the next "
+                           f"press can follow inside the verb's budget")
     # 2. THE BUNDLE MUST PUBLISH ITS DOCUMENTS: without both keys the
     #    picker cannot see the app's own files at all, and one aimed at
     #    them opens somewhere else with no error anywhere.
@@ -3575,12 +3596,25 @@ def ios_picker():
     return bad
 
 
-out = ios_picker()
+DRIVER_SRC = read_rel("tools/ios/xcuidrive/KayaDrive.swift")
+out = ios_picker(DRIVER_SRC)
 if out:
     print("check-steps: the iOS picker wiring has a silent hole:",
           file=sys.stderr)
     print("\n".join(out), file=sys.stderr)
     status = 1
+
+# The press window watched red: the whole-budget wait matrix #18 ran.
+doc, hits = sub_count(r"waitForPickerGone\(a, min\(savePressWindow, "
+                      r"left\(deadline\)\)\)",
+                      "waitForPickerGone(a, left(deadline))", DRIVER_SRC)
+print(f"check-steps: savepress window negative — {hits} wait(s) handed "
+      f"the whole budget")
+if hits != 1:
+    selftest_fail("the savepress window perturbation did not apply once")
+if not any("savePressWindow" in b for b in ios_picker(doc)):
+    selftest_fail("a savepress that spends its whole budget on one press "
+                  "passed")
 
 
 # THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED (docs/traps.md: "A

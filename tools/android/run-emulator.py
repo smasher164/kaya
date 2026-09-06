@@ -142,10 +142,160 @@ TABLET_SERIAL = f"emulator-{TABLET_PORT}"
 
 # The `drag` verb's injection budget (docs/dnd-plan.md D10): how many
 # times one request may be injected while the app has not acked it, and
-# how long after an injection ends before the next is allowed. Three
-# tries at ~1.5s each fit inside the verb's own 20s ack ceiling.
+# how long after an injection ends before the next is allowed. The retry
+# is for a press that never became a drag, and that try costs the hold
+# alone — three of them and their two gaps come to 16s of the verb's own
+# 20s ack ceiling. A try that DID start is not retried at all (the
+# in-flight check below), so the long ones are never repeated.
 DRAG_INJECT_TRIES = 3
 DRAG_INJECT_RETRY_S = 2.0
+
+# THE GESTURE IS BUILT BY HAND, GATED ON THE APP'S OWN START AND PACED BY
+# THE HOST'S LOAD (docs/deferred.md's android `dnd-compose` drag WATCH,
+# twenty-four sightings). `input draganddrop` is ONE guest-side command
+# running a FIXED schedule the runner cannot look into — the press,
+# Android's own long-press wait, the moves, the release — so its moves are
+# spent whether or not the drag session exists yet, which is exactly what
+# the twenty-third sighting read: `KAYA_DRAG_STARTED`, then `ended op=0
+# entered=0` with an aim inside both boxes and no DRAG_LOCATION ever
+# reaching the app. `input motionevent DOWN|MOVE|UP` (on the pool's image,
+# API 35) lets the runner press, WAIT for KAYA_DRAG_STARTED and only then
+# walk the moves, so no move can precede the session. Measured on a quiet
+# emulator 2026-09-06: the long press fires 497ms after a DOWN followed by
+# nothing, each `input motionevent` costs ~20ms, and the drop is taken.
+#
+# THE WALK'S OWN WINDOW still follows the load, for the OTHER suspect in
+# the same reading — a system that compressed the moves past a small
+# target: the request's ms at or under DRAG_QUIET_LOAD, proportional above
+# it, capped. Deterministic given the host, free when quiet, longest
+# exactly when the emulator is slowest. NO RETRY rides on the outcome:
+# `ended op=0 entered=0` is also what the dnd scene's own `drag ended
+# none` step asserts, and the runner cannot tell the two apart.
+DRAG_QUIET_LOAD = 8.0
+DRAG_DURATION_CAP_MS = 4500
+
+# THE HELD PRESS IS A DEVICE-GLOBAL SWITCH: a pointer left down makes the
+# next DOWN on that device "Invalid DOWN event - pointers already down"
+# (InputDispatcher, measured the same day), and this pool stays warm
+# across runs — so the release is in the teardown, in a `finally`, AND
+# ahead of every press, an UP costing one logged line when nothing is
+# down.
+DRAG_HOLD_MS = 4000
+DRAG_MOVE_MIN_MS = 150
+# EIGHT, because every move is its own `adb shell input` and the guest
+# pays an app_process for each: ~20ms on a quiet emulator and ~190ms
+# under a matrix-shaped load (measured 2026-09-06, sixteen moves costing
+# 3.8s of round trip on top of the 4.5s they were pacing). Eight is the
+# walk the two-command probe was measured green with.
+DRAG_MOVES_MAX = 8
+
+# The scaling's own doctored reading, and NOTHING a lane records: a
+# whole-lane run (`all`, which is the matrix's own invocation) refuses it,
+# because a forced reading there would put a duration on the record that
+# the host never justified. A single-suite run is a hand probe by
+# definition and takes it, with the forcing printed here and again on
+# every injection line.
+DRAG_LOAD_FORCED = os.environ.get("KAYA_DRAG_LOAD", "")
+if DRAG_LOAD_FORCED:
+    try:
+        _forced = float(DRAG_LOAD_FORCED)
+    except ValueError:
+        die(f"run-emulator: KAYA_DRAG_LOAD={DRAG_LOAD_FORCED!r} is not a "
+            f"number")
+    if _forced < 0:
+        die(f"run-emulator: KAYA_DRAG_LOAD={DRAG_LOAD_FORCED} is negative")
+    if SUITE == "all":
+        die("run-emulator: KAYA_DRAG_LOAD forces the drag duration's load "
+            "reading and this is a whole-lane run — its log would record "
+            "durations the host never justified. Probe one suite "
+            f"({', '.join(lane.SUITES)}) instead.")
+    print(f"run-emulator: KAYA_DRAG_LOAD={DRAG_LOAD_FORCED} — every drag's "
+          f"duration is scaled off THAT reading and not this host's. A "
+          f"probe run; nothing here is a measurement of the host.",
+          flush=True)
+
+
+def drag_load():
+    """The one-minute load average the next injection is scaled by."""
+    return float(DRAG_LOAD_FORCED) if DRAG_LOAD_FORCED else os.getloadavg()[0]
+
+
+def drag_duration(asked_ms, load1):
+    """The ms the walk is spread over for a request that asked for
+    `asked_ms` on a host reading `load1`. Pure, so the scaling can be
+    watched moving and watched holding still (drag_duration_selftest)."""
+    if load1 <= DRAG_QUIET_LOAD:
+        return asked_ms
+    return max(asked_ms, min(DRAG_DURATION_CAP_MS,
+                             round(asked_ms * load1 / DRAG_QUIET_LOAD)))
+
+
+def drag_duration_spelled(asked_ms, load1):
+    """(the ms, the injection line's own clause) — a failed leg's reading
+    names the schedule that actually ran, not the one that was asked for."""
+    ms = drag_duration(asked_ms, load1)
+    return ms, (f"{ms}ms (asked {asked_ms}ms, one-minute load "
+                f"{load1:.2f}{' FORCED' if DRAG_LOAD_FORCED else ''})")
+
+
+def drag_moves(ms):
+    """(how many moves the walk takes, the wall gap between them) for a
+    gesture the host's load bought `ms` for. Paced rather than burst: the
+    other half of the sixth sighting's reading is a system that compressed
+    the moves past a small target, and a walk fired as fast as adb can
+    round-trip is 20ms a move."""
+    n = max(4, min(DRAG_MOVES_MAX, int(ms // DRAG_MOVE_MIN_MS)))
+    return n, ms / n / 1000.0
+
+
+def drag_duration_selftest():
+    """The scaling watched moving AND watched holding still, on every
+    launch — the runner is the only place this rule exists, and a guard
+    nobody has seen fail is worse than none (CLAUDE.md invariant 3)."""
+    held = 0
+    for load1 in (0.0, 1.9, DRAG_QUIET_LOAD):
+        got, line = drag_duration_spelled(1500, load1)
+        if got != 1500 or "1500ms (asked 1500ms" not in line:
+            die(f"run-emulator: SELF-TEST FAIL — a one-minute load of "
+                f"{load1} moved the drag duration to {got}ms ({line}); at "
+                f"or under {DRAG_QUIET_LOAD} it is the request's own")
+        held += 1
+    moved = 0
+    for load1, want in ((12.0, 2250), (16.0, 3000), (24.0, 4500),
+                        (264.0, DRAG_DURATION_CAP_MS)):
+        got, line = drag_duration_spelled(1500, load1)
+        if got != want:
+            die(f"run-emulator: SELF-TEST FAIL — a one-minute load of "
+                f"{load1} bought {got}ms of drag, wanted {want}ms")
+        if f"{want}ms (asked 1500ms, one-minute load {load1:.2f}" not in line:
+            die(f"run-emulator: SELF-TEST FAIL — the injection line reads "
+                f"{line!r}, which does not carry the {want}ms it ran")
+        moved += 1
+    if drag_duration(6000, 400.0) != 6000:
+        die("run-emulator: SELF-TEST FAIL — the cap shortened a request "
+            "that already asked for longer than it")
+    paced = 0
+    for ms in (1500, 2250, 3000, DRAG_DURATION_CAP_MS):
+        n, gap = drag_moves(ms)
+        if n < 4 or n > DRAG_MOVES_MAX:
+            die(f"run-emulator: SELF-TEST FAIL — {ms}ms of drag walks in "
+                f"{n} moves, outside 4..{DRAG_MOVES_MAX}")
+        if abs(n * gap * 1000 - ms) > 1:
+            die(f"run-emulator: SELF-TEST FAIL — {n} moves {gap * 1000:.0f}ms "
+                f"apart spend {n * gap * 1000:.0f}ms of the {ms}ms the load "
+                f"bought")
+        if gap * 1000 < DRAG_MOVE_MIN_MS:
+            die(f"run-emulator: SELF-TEST FAIL — {ms}ms of drag paces its "
+                f"moves {gap * 1000:.0f}ms apart, under the "
+                f"{DRAG_MOVE_MIN_MS}ms a move needs to not be coalesced")
+        paced += 1
+    print(f"run-emulator: the drag duration held at 1500ms for {held} "
+          f"quiet loads and grew for {moved} loaded ones (cap "
+          f"{DRAG_DURATION_CAP_MS}ms), and {paced} durations walked in "
+          f"4..{DRAG_MOVES_MAX} paced moves", flush=True)
+
+
+drag_duration_selftest()
 
 
 def adb(serial, *args, **kw):
@@ -513,6 +663,9 @@ FR = flightrec_lane.AndroidRecorder(ROOT)
 # path and not at the end of the script, since a failed leg, a ^C and an
 # abort all leave the same mess.
 CLIPHELPER_IME_ON = []
+# The held presses, {serial: (x, y)} — a drag gesture is such a switch
+# now that the runner holds the press itself (DRAG_HOLD_MS above).
+DRAG_POINTER_DOWN = {}
 _torn = threading.Lock()
 
 
@@ -521,6 +674,9 @@ def kaya_teardown():
         return
     FR.flush()
     shutil.rmtree(LEGS_DIR, ignore_errors=True)
+    for serial, (x, y) in list(DRAG_POINTER_DOWN.items()):
+        adb(serial, "shell", "input", "motionevent", "UP", str(x), str(y),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for serial in CLIPHELPER_IME_ON:
         adb(serial, "shell", "ime", "reset", stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
@@ -1095,14 +1251,13 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # written down as "no verdict" — a legible failure turned into an
     # illegible one. A green leg breaks on its verdict and pays nothing.
     for _ in range(240):
-        dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat",
-                       "-d", "-s", "kaya:*"])
+        dump = kaya_logcat(serial)
         m = re.search(r"^.*KAYA_SELFTEST: (?:OK|FAILED).*$", dump, re.M)
         if m:
             out = m.group(0)
             break
         acked = set(re.findall(r"KAYA_ACK: draganddrop (\d+)", dump))
-        starts = len(re.findall(r"KAYA_DRAG_STARTED: draganddrop", dump))
+        starts = kaya_starts(dump)
         for seq, *point in re.findall(
                 r"KAYA_REQUEST: draganddrop (\d+) (-?\d+) (-?\d+) (-?\d+) "
                 r"(-?\d+) (\d+)", dump):
@@ -1114,14 +1269,14 @@ def run_apk_on(serial, name, apk, component, script, extras,
                 continue
             if tries and time.monotonic() - last < DRAG_INJECT_RETRY_S:
                 continue
+            *aim, asked = point
+            ms, spelled = drag_duration_spelled(int(asked), drag_load())
             began = time.monotonic()
-            rc = run(["timeout", "60", "adb", "-s", serial, "shell",
-                      "input", "draganddrop", *point],
-                     stdout=log, stderr=log).returncode
+            told = inject_drag(serial, aim, ms, starts, log)
             served[seq] = (tries + 1, time.monotonic(),
                            starts_at if tries else starts)
             print(f"{name}: draganddrop #{seq} try {tries + 1} "
-                  f"{' '.join(point)} -> rc={rc} in "
+                  f"{' '.join(aim)} {spelled} -> {told} in "
                   f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         time.sleep(0.5)
     print(out, file=log)
@@ -1596,6 +1751,68 @@ def script_for(scene):
 
 for _scene in sorted({lane.scene_of(_leg) for _leg in lane.legs()}):
     script_for(_scene)
+
+
+def kaya_logcat(serial):
+    return out_of(["timeout", "10", "adb", "-s", serial, "logcat", "-d",
+                   "-s", "kaya:*"])
+
+
+def kaya_starts(dump):
+    return len(re.findall(r"KAYA_DRAG_STARTED: draganddrop", dump))
+
+
+def motionevent(serial, kind, x, y, log):
+    return run(["timeout", "30", "adb", "-s", serial, "shell", "input",
+                "motionevent", kind, str(int(x)), str(int(y))],
+               stdout=log, stderr=log).returncode
+
+
+def inject_drag(serial, aim, ms, started_before, log):
+    """One gesture, GATED ON THE APP'S OWN START (docs/deferred.md's
+    android drag WATCH): press, hold until KAYA_DRAG_STARTED says the
+    platform drag session exists, then walk the moves over the ms the
+    host's load bought and release. No move can precede the session, which
+    is the shape twenty-four sightings recorded — STARTED, then `ended
+    op=0 entered=0` with no DRAG_LOCATION ever reaching the app.
+
+    Returns the clause the injection line prints. The pointer is released
+    on every path, including a failure, and DRAG_POINTER_DOWN carries it
+    to the teardown for the paths a `finally` cannot reach."""
+    x1, y1, x2, y2 = (int(v) for v in aim)
+    # A pointer left down refuses the next DOWN on this device ("Invalid
+    # DOWN event - pointers already down") and the pool stays warm across
+    # runs, so a release comes FIRST too — with nothing down it is one
+    # logged line and no event.
+    motionevent(serial, "UP", x1, y1, log)
+    if motionevent(serial, "DOWN", x1, y1, log) != 0:
+        return "the DOWN was refused by adb"
+    DRAG_POINTER_DOWN[serial] = (x1, y1)
+    try:
+        pressed = time.monotonic()
+        held = None
+        while time.monotonic() - pressed < DRAG_HOLD_MS / 1000.0:
+            if kaya_starts(kaya_logcat(serial)) > started_before:
+                held = int((time.monotonic() - pressed) * 1000)
+                break
+            time.sleep(0.15)
+        if held is None:
+            return (f"NO START while the press was held {DRAG_HOLD_MS}ms — "
+                    f"released without moving")
+        moves, gap = drag_moves(ms)
+        walked = 0
+        for i in range(1, moves + 1):
+            time.sleep(gap)
+            x, y = x1 + (x2 - x1) * i / moves, y1 + (y2 - y1) * i / moves
+            if motionevent(serial, "MOVE", x, y, log) != 0:
+                break
+            DRAG_POINTER_DOWN[serial] = (int(x), int(y))
+            walked += 1
+        return (f"started after {held}ms, {walked} of {moves} moves "
+                f"{int(gap * 1000)}ms apart")
+    finally:
+        x, y = DRAG_POINTER_DOWN.pop(serial, (x1, y1))
+        motionevent(serial, "UP", x, y, log)
 
 
 def kaya_write_compose_marker():
