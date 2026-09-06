@@ -223,7 +223,7 @@ pass, not this one's.
   in tasks.steps on every lane.
 - **R11 — the Details screen is a form of labelled rows** (TAKEN
   2026-09-06 in the overnight grant; docs/forms-plan.md is the design and
-  its §7 the rulings, all PROPOSED-overnight): four `labeled` rows —
+  its §7 the rulings, ratified 2026-09-06): four `labeled` rows —
   When, Deadline, Reminder, Project — each label naming its value with the
   Clear trailing, the column derived into the platform's form. The grid
   and its compact fold went with it; the guard is the relation,

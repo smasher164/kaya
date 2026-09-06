@@ -5,7 +5,8 @@ docs/forms-plan.md are the first two). The maintainer's brief: "is there a
 way to make this all more flexible and scalable? ... good layout behavior
 for applications out of the box, sometimes with user-defined stuff, and
 sometimes via the defaults." The first two slices are the defaults; these
-three are the user-defined side. Rulings marked PROPOSED-overnight.
+three are the user-defined side. The rulings were taken overnight and
+RATIFIED by the maintainer on the morning of 2026-09-06.
 
 ## §1 — `fill`: one child's cross-axis stretch
 

@@ -2,8 +2,9 @@
 
 Design pass, written overnight 2026-09-06 under the maintainer's grant
 ("yeah all three of those things in order honestly. just work on it now").
-The rulings here are PROPOSED-overnight: taken so the slice could be built,
-marked for his morning, and churn is free if he wants any of them changed.
+The rulings here were taken overnight so the slice could be built and
+RATIFIED by the maintainer on the morning of 2026-09-06 ("yes" to the
+lot, presented in plain English; the per-row phone fold stays).
 
 ## §0 — what the captures said
 
@@ -220,7 +221,7 @@ bindings' sugar in both zones as one agent, verified by the gallery scene
 guests (§7); then the phone and desktop lanes by hand for captures, all
 twenty screens reviewed, ONE matrix, commit.
 
-## §7 — rulings, all PROPOSED-overnight
+## §7 — rulings, RATIFIED 2026-09-06 (the maintainer's morning review, "yes" to the lot; the per-row fold stays)
 
 - F1 a KIND, not a prop on row: the shape is validated at the root and
   the constructors are censused; a prop would let a bare row carry a

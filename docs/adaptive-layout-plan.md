@@ -254,7 +254,7 @@ tools/check-table-card.py pins the screen ground, its two wearers and
 the card's one spelling; a side-by-side screen (two table-bearing
 children, e.g. the pad's unstacked row) grounds but does not section.
 
-WIDENED TO FORMS 2026-09-06 (PROPOSED-overnight, docs/forms-plan.md): the
+WIDENED TO FORMS 2026-09-06 (ratified that morning, docs/forms-plan.md): the
 carrier is a table OR a form — a column of two or more labelled rows.
 The task manager's Details screen has no table, and its form's
 inset-grouped card was invisible on the white ground (captured
