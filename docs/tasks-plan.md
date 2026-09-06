@@ -212,6 +212,15 @@ pass, not this one's.
 - **R9 — a pushed screen on Compose shows a back arrow** in its top bar
   (TAKEN 2026-09-05, off the Android Details capture that offered no way
   back but the system gesture), taking the route the gesture takes.
+- **R10 — a text field fills its column's width** (TAKEN 2026-09-06 in
+  the maintainer's overnight grant, off his review of the phone Details
+  screen: "the text area at the top doesn't stretch to the width"). An
+  entry or textarea in a vertical container spans the cross axis, the
+  scroll rule's shape — an input region, not content; in a row it keeps
+  its intrinsic width unless it grows. Backend rules on all four (the
+  core has no per-child cross-axis prop yet; slice three's `fill` is the
+  general knob and the opt-out). Guard: `expect_breadth textarea@notes`
+  in tasks.steps on every lane.
 - **The Details screen is one grid**, three rows of caption, picker and
   Clear, so the Clear buttons share a column edge — the maintainer's
   first ask on the captures ("The Clear buttons should be aligned with

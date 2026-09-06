@@ -9642,7 +9642,10 @@ private fun KayaRenderCore(
         // left a 79pt pannable strip in a 375pt window on iOS
         // (docs/traps.md); the scene's expect_breadth holds this on every lane.
         val scrollSpans = node.kind == KayaCompose.KIND_SCROLL
-        if (flexStretch || crossing || scrollSpans) {
+        // A text field fills its column's width (docs/tasks-plan.md §4, R10).
+        val textFills = flexVertical &&
+            (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA)
+        if (flexStretch || crossing || scrollSpans || textFills) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
         }

@@ -582,6 +582,20 @@ fn set_scroll_kind(widget: &gtk4::Widget) {
     unsafe { widget.set_data(SCROLL_KEY, true) }
 }
 
+/// A text field's LAYOUT widget (the entry, the textarea's scroller): in a
+/// column it fills the width, an input region rather than content
+/// (docs/tasks-plan.md §4, R10).
+const TEXT_FIELD_KEY: &str = "kaya-text-field";
+fn is_text_field(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to
+    // `true` by set_text_field below.
+    unsafe { widget.data::<bool>(TEXT_FIELD_KEY).is_some() }
+}
+fn set_text_field(widget: &gtk4::Widget) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(TEXT_FIELD_KEY, true) }
+}
+
 /// A container a For has stamped ROW copies into (docs/tasks-plan.md §4, R7).
 const STAMPED_ROWS_KEY: &str = "kaya-stamps-rows";
 fn stamps_rows(widget: &gtk4::Widget) -> bool {
@@ -653,6 +667,10 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     // left a 79pt pannable strip in a 375pt window on iOS and an 84px one
     // here (docs/traps.md); the scene's expect_breadth holds this.
     if is_scroll_kind(child) {
+        align = gtk4::Align::Fill;
+    }
+    // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
+    if vertical_container && is_text_field(child) {
         align = gtk4::Align::Fill;
     }
     if vertical_container {
@@ -7548,6 +7566,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 // set_text too, so the USER/programmatic split rides apply_quiet —
 // the stage's direct writes and the clear command emit like a user.
                     let entry = gtk4::Entry::new();
+                    set_text_field(entry.upcast_ref());
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
                     let quiet = core.apply_quiet.clone();
@@ -7759,6 +7778,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scroller.set_propagate_natural_width(false);
                     scroller.set_propagate_natural_height(false);
                     scroller.set_size_request(240, 96);
+                    set_text_field(scroller.upcast_ref());
                     scroller.set_child(Some(&view));
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");

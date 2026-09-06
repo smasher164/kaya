@@ -13209,7 +13209,7 @@ struct KayaRender: View {
             KayaPickerSurface(node: node, isTime: true)
                 .fixedSize()
         case kindEntry:
-            KayaEntry(node: node)
+            KayaEntry(node: node, flexVertical: flexVertical)
         case kindTextarea:
             KayaTextarea(node: node, flexVertical: flexVertical, flexStretch: flexStretch)
         case kindSelect:
@@ -16755,6 +16755,7 @@ struct KayaSplitRoot3: View {
 /// KayaRender switch cannot carry per-node.
 struct KayaEntry: View {
     let node: KayaNode
+    var flexVertical: Bool? = nil
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -16774,10 +16775,10 @@ struct KayaEntry: View {
         )
         .textFieldStyle(.roundedBorder)
         // 200 stands in for the intrinsic width every other toolkit's entry
-        // has; a grower keeps its track (the slider's rule — a cap below the
-        // track let the quick-add field stop short while GTK's and WinUI's
-        // filled it, tools/scenes/tasks.steps' captures, 2026-09-05).
-        .frame(maxWidth: node.grow > 0 ? .infinity : 200)
+        // has in a ROW; a grower keeps its track, and IN A COLUMN a text
+        // field fills the width — an input region, not content (DESIGN.md
+        // Layout, docs/tasks-plan.md R10).
+        .frame(maxWidth: (node.grow > 0 || flexVertical == true) ? .infinity : 200)
         .focused($focused)
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in
@@ -16800,7 +16801,10 @@ struct KayaEntry: View {
 extension View {
     func kayaTextareaFrame(grow: Double, flexVertical: Bool?, stretch: Bool) -> some View {
         let grows = grow > 0
-        let fillsWidth = (grows && flexVertical == false) || (stretch && flexVertical == true)
+        // In a column a text area fills the width (docs/tasks-plan.md R10).
+        let fillsWidth =
+            (grows && flexVertical == false) || (stretch && flexVertical == true)
+            || flexVertical == true
         let fillsHeight = (grows && flexVertical == true) || (stretch && flexVertical == false)
         return frame(
             minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,

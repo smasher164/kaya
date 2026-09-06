@@ -1006,6 +1006,12 @@ The known normalization worklist:
   drift (docs/tasks-plan.md R5 — Compose drew a list row's title flush
   against its top edge beside a taller checkbox, which nobody had
   chosen).
+- A text field fills its column's width. An entry or a textarea is an
+  input region, not content, so in a vertical container it spans the
+  cross axis the way a scroll does; in a row it keeps its intrinsic
+  width unless it grows (docs/tasks-plan.md R10 — the task manager's
+  notes field hugged a 240 minimum on four backends and an arbitrary
+  480 cap on the fifth, the maintainer's review of 2026-09-05).
 - A stamped row spans its host column, as a live nested row does. A
   For's copies obey the nested-container rule above; three widget
   backends applied it to live children only, and a spacer inside a

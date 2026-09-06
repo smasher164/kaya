@@ -2069,6 +2069,9 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // (DESIGN.md Layout; the scene's expect_breadth holds it): a
         // viewport is a region, not content.
         let crossing = crossing || matches!(widget, NativeWidget::Scroll(_));
+        // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
+        let crossing = crossing
+            || (vertical && matches!(widget, NativeWidget::Entry(_) | NativeWidget::Textarea(_)));
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks

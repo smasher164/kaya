@@ -10709,6 +10709,11 @@ each a stub the runner reads (tools/check-stubs.py):
     sighting read the `KAYA_DIAG dragdrive` geometry beside the witness's
     handover, since a press at (760, 54) released at (73, 161) crosses
     two windows on a pool slot other legs share.
+    SECOND SIGHTING 2026-09-06 (matrix #10 on the text-field fill slice,
+    load 16 at launch): the same shape, label#5 "no drag yet" for the whole
+    leg while the witness handed over; the only red on the linux lane.
+    The `KAYA_DIAG dragdrive` read the first sighting asked for is still
+    owed.
   - ~~**DEPTH STUB: dnd on winui**~~ — LANDED 2026-09-03: BOTH routes, as
     probes 1 and 2 ruled. XAML `CanDrag`/`DragStarting`/`DropCompleted` and
     `AllowDrop`/`DragEnter`/`DragOver`/`Drop` carry every WinRT drag with
@@ -10940,6 +10945,9 @@ ended none`). Both matrices green on every other android leg; the compose
 suite ALL PASS 50 legs standalone four times the same evening between
 them. Still the emulator's drag session under five-lane contention; still
 no fix taken.
+SIXTEENTH SIGHTING, 2026-09-06, matrix #10 (the text-field fill slice):
+`dnd-go` alone again; the compose suite standalone ALL PASS 50 an hour
+earlier on the reshaped 360dp pool.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
