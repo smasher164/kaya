@@ -21,16 +21,18 @@ app.build { tx in
     let base = tx.signal(.str("base"))
     let anchor = tx.signal(.str("anchor"))
     let fit = tx.signal(.str("fit"))
+    let plain = tx.signal(.str("plain probe"))
 
     let root = tx.column(align: .stretch) {
             let centered = tx.column(align: .center) {  // column#1: the center trio
                 tx.label(bind: probe)  // label#0
                 tx.button("mid")
-                tx.row(align: .baseline) {  // row#0: the baseline trio
+                let baseline = tx.row(align: .baseline) {  // the baseline trio
                     tx.label(bind: base)  // label#1
                     tx.button("tick")
                     tx.image(tallPNG)
                 }
+                tx.setA11yId(baseline, "baseline")
             }
             tx.setA11yId(centered, "centered")
             tx.row {  // row#1: the stretch pair's host
@@ -42,6 +44,13 @@ app.build { tx in
                 }
                 tx.setA11yId(fitcol, "fitcol")
             }
+            // row@plain: NO align, so the core's centre default is what
+            // the scene reads
+            let plainRow = tx.row {
+                tx.setA11yId(tx.label(bind: plain), "plainlabel")  // label#4
+                tx.image(tallPNG)
+            }
+            tx.setA11yId(plainRow, "plain")
         }
     tx.setA11yId(root, "root")
     tx.mount(root)

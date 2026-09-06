@@ -524,6 +524,9 @@ pub(crate) struct Scene {
     /// breakpoint restores (falling back to the creation kind's own).
     /// Breakpoint applies deliberately do not write here.
     authored_axis: HashMap<WidgetId, i64>,
+    /// The guest-authored column count a reverting breakpoint restores
+    /// (docs/adaptive-layout-plan.md D6.2); absent means the grid's own 1.
+    authored_columns: HashMap<WidgetId, f64>,
     /// Live containers that DECLARED COLUMNS — a table is a column
     /// whose header bar makes it one, and that declaration is what gives
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
@@ -1324,21 +1327,26 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             // users skim by, and the footnote under it. Only a label
             // carries either.
             3 | 4 => kind == WidgetKind::Label,
+            // plain: an action's LOW emphasis — a row's accessory that must
+            // not out-shout the row (docs/tasks-plan.md R6).
+            5 => kind == WidgetKind::Button,
             other => panic!(
                 "kaya: {other} is not a role (destructive=1, prominent=2, \
-                 heading=3, caption=4)"
+                 heading=3, caption=4, plain=5)"
             ),
         };
         let name = match *role {
             1 => "destructive",
             2 => "prominent",
             3 => "heading",
-            _ => "caption",
+            4 => "caption",
+            _ => "plain",
         };
         assert!(
             ok,
-            "kaya: role {name} does not fit {kind:?} — destructive and \
-             prominent are button emphasis, heading is label hierarchy"
+            "kaya: role {name} does not fit {kind:?} — destructive, \
+             prominent and plain are button emphasis, heading and caption \
+             are label hierarchy"
         );
     }
     // The accept list's own domain: at least one token, no token twice.
@@ -1545,10 +1553,13 @@ impl Scene {
                         });
                         Value::I64(base)
                     }
-                    // The setter list is axis-only (the arm above
-                    // enforces it); a second prop arrives with its own
-                    // base rule when D6 widens the list.
-                    _ => unreachable!("breakpoint setters are axis-only"),
+                    Prop::Columns => {
+                        Value::F64(self.authored_columns.get(widget).copied().unwrap_or(1.0))
+                    }
+                    // The setter list is axis and columns (the arm above
+                    // enforces it); a third prop arrives with its own
+                    // base rule when D6 widens the list again.
+                    _ => unreachable!("breakpoint setters are axis or columns"),
                 }
             };
             out.push(ApplyOp::SetProp { id: *widget, prop: *prop, value });
@@ -1792,6 +1803,15 @@ impl Scene {
                         .then(|| Self::button_tag(id.0, &vec![]))
                         .flatten();
                     out.push(ApplyOp::Create { id, kind, tag });
+                    if kind == WidgetKind::Row {
+                        // A row centres its children on the cross axis unless
+                        // the app says otherwise (DESIGN.md Layout, R5).
+                        out.push(ApplyOp::SetProp {
+                            id,
+                            prop: Prop::Align,
+                            value: Value::I64(crate::wire::ALIGN_CENTER as i64),
+                        });
+                    }
                 }
                 TxOp::SetProperty {
                     widget,
@@ -1837,6 +1857,11 @@ impl Scene {
                                     self.authored_axis.insert(widget, *mode);
                                 }
                                 self.layout_dirty = true;
+                            }
+                            if prop == Prop::Columns {
+                                if let Value::F64(cols) = &v {
+                                    self.authored_columns.insert(widget, *cols);
+                                }
                             }
                             // The fold rule's input (D7): a grower is a
                             // grower at evaluation time, not at write time.
@@ -2691,11 +2716,14 @@ impl Scene {
                         });
                         Self::refuse_axis_on_table(&self.tables, *widget);
                         // THE RULED SETTER LIST (docs/adaptive-layout-plan.md
-                        // D6.2): axis alone until the maintainer widens it.
+                        // D6.2): a container's axis, and since 2026-09-05 a
+                        // grid's columns (docs/tasks-plan.md §5).
                         assert!(
-                            *prop == Prop::Axis,
-                            "kaya: breakpoint setters may set `axis` only for now \
-                             (docs/adaptive-layout-plan.md D6), got {prop:?}"
+                            *prop == Prop::Axis
+                                || (*prop == Prop::Columns && kind == WidgetKind::Grid),
+                            "kaya: breakpoint setters may set `axis` on a container or \
+                             `columns` on a grid (docs/adaptive-layout-plan.md D6), \
+                             got {prop:?} on {kind:?}"
                         );
                         check_prop(kind, *prop);
                         check_prop_value(kind, *prop, value);
@@ -4607,6 +4635,13 @@ impl Scene {
                 assert!(!clash, "kaya: template node id {} already exists", id.0);
                 top.current.declared.push(id.0);
                 top.current.ops.push(TplOp::Widget { node: id.0, kind });
+                if kind == WidgetKind::Row {
+                    top.current.ops.push(TplOp::SetProp {
+                        node: id.0,
+                        prop: Prop::Align,
+                        value: PropValue::Const(Value::I64(crate::wire::ALIGN_CENTER as i64)),
+                    });
+                }
             }
             TxOp::SetProperty {
                 widget,
@@ -7219,7 +7254,7 @@ mod tests {
 
     /// The ruled setter list (D6.2): anything but axis dies at the root.
     #[test]
-    #[should_panic(expected = "breakpoint setters may set `axis` only")]
+    #[should_panic(expected = "breakpoint setters may set `axis` on a container or `columns` on a grid")]
     fn a_breakpoint_setter_off_the_ruled_list_fails_the_batch() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -7774,6 +7809,105 @@ mod tests {
                 value: PropValue::Const(Value::F64(-1.0)),
             },
         ]);
+    }
+
+    /// THE ROW'S CENTRE DEFAULT (docs/tasks-plan.md R5): a new Row carries
+    /// `align = center` right after its Create, so every backend sees an
+    /// explicit prop; a Column carries nothing.
+    #[test]
+    fn a_new_row_carries_the_centre_default() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let centre = ApplyOp::SetProp {
+            id: WidgetId(1),
+            prop: Prop::Align,
+            value: Value::I64(crate::wire::ALIGN_CENTER as i64),
+        };
+        assert!(matches!(&ops[0], ApplyOp::Create { id: WidgetId(1), .. }));
+        assert_eq!(ops[1], centre);
+        assert!(matches!(&ops[2], ApplyOp::Create { id: WidgetId(2), .. }));
+        let aligns = ops
+            .iter()
+            .filter(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Align, .. }))
+            .count();
+        assert_eq!(aligns, 1, "the column adds no align: {ops:?}");
+    }
+
+    /// An app's own align FOLLOWS the default in the stream, so the backend
+    /// applying in order ends on the app's choice.
+    #[test]
+    fn an_explicit_row_align_follows_the_default() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Align,
+                value: PropValue::Const(Value::I64(crate::wire::ALIGN_START as i64)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let aligns: Vec<i64> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { id: WidgetId(1), prop: Prop::Align, value: Value::I64(v) } => Some(*v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(aligns, vec![1, 0], "centre first, the app's start last");
+    }
+
+    /// A TEMPLATE row carries the same default: every stamped copy's Create
+    /// is followed by its `align = center`.
+    #[test]
+    fn a_stamped_row_carries_the_centre_default() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(11),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let ops = scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            record: vec![v("buy milk")],
+        }]);
+        let row = ops
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::Create { id, kind: WidgetKind::Row, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("the stamp creates the row copy");
+        assert!(
+            ops.contains(&ApplyOp::SetProp {
+                id: row,
+                prop: Prop::Align,
+                value: Value::I64(crate::wire::ALIGN_CENTER as i64),
+            }),
+            "no centre default on the stamped row: {ops:?}"
+        );
     }
 
     #[test]
@@ -12928,7 +13062,9 @@ mod tests {
 
     /// The stream `table_scene(2)` + three accounts + a nested insert +
     /// an update + a move + a remove produced at the base commit
-    /// (0bc8ce1, parent a5f6189), BEFORE row windowing existed.
+    /// (0bc8ce1, parent a5f6189), BEFORE row windowing existed. The two
+    /// `Align` lines joined 2026-09-05 with the row's centre default
+    /// (docs/tasks-plan.md R5), the one change to this stream since.
     const BASE_BRIDGE_STREAM: &str = r#"Create { id: WidgetId(1), kind: Column, tag: None }
 Create { id: WidgetId(4), kind: Column, tag: None }
 AddChild { parent: WidgetId(1), child: WidgetId(4) }
@@ -12943,6 +13079,7 @@ Create { id: WidgetId(9223372036854775811), kind: Column, tag: None }
 SetColumnHeaders { id: WidgetId(9223372036854775811), sorted: 4294967295, direction: 0, titles: ["Ticker", "Qty"], tag: [20, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 51, 0, 0, 0, 0, 0, 0] }
 AddChild { parent: WidgetId(4), child: WidgetId(9223372036854775811) }
 Create { id: WidgetId(9223372036854775812), kind: Row, tag: Some([21, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
+SetProp { id: WidgetId(9223372036854775812), prop: Align, value: I64(1) }
 Create { id: WidgetId(9223372036854775813), kind: Label, tag: Some([22, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775813), prop: Text, value: Str("AAPL") }
 Create { id: WidgetId(9223372036854775814), kind: Label, tag: Some([23, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 49, 0, 0, 0, 0, 0, 0]) }
@@ -12951,6 +13088,7 @@ AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(92233720368547
 AddChild { parent: WidgetId(9223372036854775812), child: WidgetId(9223372036854775814) }
 AddChild { parent: WidgetId(9223372036854775810), child: WidgetId(9223372036854775812) }
 Create { id: WidgetId(9223372036854775815), kind: Row, tag: Some([21, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }
+SetProp { id: WidgetId(9223372036854775815), prop: Align, value: I64(1) }
 Create { id: WidgetId(9223372036854775816), kind: Label, tag: Some([22, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }
 SetProp { id: WidgetId(9223372036854775816), prop: Text, value: Str("MSFT") }
 Create { id: WidgetId(9223372036854775817), kind: Label, tag: Some([23, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 97, 50, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 116, 50, 0, 0, 0, 0, 0, 0]) }

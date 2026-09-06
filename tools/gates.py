@@ -385,7 +385,27 @@ def selftest():
     return ok
 
 
-def fingerprint():
+def gate_keys():
+    """Every keyed gate's key by name — the fingerprint's own input,
+    handed to the mac lane beside the token so a MISMATCH names the
+    gate whose inputs moved instead of silently costing the lane a
+    full sweep under peak load (matrix #9, 2026-09-05: 601s of a 933s
+    lane, and nothing said why)."""
+    keys = {}
+    for n, _c, k, _w in sorted(GATES):
+        if not k:
+            continue
+        key = subprocess.run(
+            ["tools/build-id.py", "--gate", n],
+            stdout=subprocess.PIPE, text=True, check=False)
+        if key.returncode != 0:
+            print(f"gates.py: could not key {n}", file=sys.stderr)
+            return None
+        keys[n] = key.stdout.strip()
+    return keys
+
+
+def fingerprint_of(keys):
     """One hash over every keyed gate's key, in name order: the token
     validate-all hands the mac lane after running this sweep itself.
     The keyed keys' input sets jointly cover every source root a gate
@@ -394,17 +414,8 @@ def fingerprint():
     re-runs the gates instead of skipping them."""
     import hashlib
     h = hashlib.sha256()
-    for n, _c, k, _w in sorted(GATES):
-        if not k:
-            continue
-        key = subprocess.run(
-            ["tools/build-id.py", "--gate", n],
-            stdout=subprocess.PIPE, text=True, check=False)
-        if key.returncode != 0:
-            print(f"gates.py: --fingerprint could not key {n}",
-                  file=sys.stderr)
-            return None
-        h.update(f"{n}={key.stdout.strip()}\n".encode())
+    for n in sorted(keys):
+        h.update(f"{n}={keys[n]}\n".encode())
     return h.hexdigest()[:16]
 
 
@@ -426,10 +437,13 @@ def main(args):
         # sweep itself starts with.
         return 0 if build() else 1
     if args == ["--fingerprint"]:
-        fp = fingerprint()
-        if fp is None:
+        # Line one is the token; line two the per-gate keys behind it, so
+        # a lane whose token misses can name the gate that moved.
+        keys = gate_keys()
+        if keys is None:
             return 1
-        print(fp)
+        print(fingerprint_of(keys))
+        print(json.dumps(keys, sort_keys=True))
         return 0
 
     if args:

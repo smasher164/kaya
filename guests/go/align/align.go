@@ -23,16 +23,17 @@ func App() *kaya.App {
 		base := tx.Signal("base")
 		anchor := tx.Signal("anchor")
 		fit := tx.Signal("fit")
+		plain := tx.Signal("plain probe")
 
 		tx.Mount(tx.Column(func() {
 			tx.Column(func() { // the center trio
 				tx.Label(probe) // label#0
 				tx.Button("mid", nil)
-				tx.Row(func() { // row#0: the baseline trio
+				tx.Row(func() { // the baseline trio
 					tx.Label(base) // label#1
 					tx.Button("tick", nil)
 					tx.Image(tallPNG)
-				}).Align(kaya.AlignBaseline)
+				}).Align(kaya.AlignBaseline).A11yID("baseline")
 			}).Align(kaya.AlignCenter).A11yID("centered")
 			tx.Row(func() { // row#1: the stretch pair's host
 				tx.Label(anchor) // label#2
@@ -41,6 +42,12 @@ func App() *kaya.App {
 					tx.Button("wide", nil)
 				}).Grow(1).Align(kaya.AlignStretch).A11yID("fitcol")
 			})
+			// row@plain: NO align, so the core's centre default is what the
+			// scene reads
+			tx.Row(func() {
+				tx.Label(plain).A11yID("plainlabel") // label#4
+				tx.Image(tallPNG)
+			}).A11yID("plain")
 		}).Align(kaya.AlignStretch).A11yID("root"))
 	})
 

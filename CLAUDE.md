@@ -364,7 +364,14 @@ in docs/deferred.md.
    REFUSED — by type where the zone has its own handle, and in one
    BYTE-FROZEN SENTENCE, compared FLATTENED, in the two whose single
    handle serves both zones. Sixteen watched census reds plus the
-   sentence's own),
+   sentence's own.
+   AND THE ROLE VOCABULARY SINCE 2026-09-05: every role's NAME in all
+   nine bindings (Go's is its wire constant, so its row reads the
+   generated file). The sugar sweep above sees only the two roles that
+   have constructors, so `plain` (docs/tasks-plan.md R6) would have
+   shipped with the number in nine wire files and the name in two. Nine
+   patterns per role, one watched negative — a role that exists nowhere
+   must fire all nine),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -662,7 +669,13 @@ in docs/deferred.md.
    wire.rs's 600-point boundary is PINNED at the ruled value, since
    the scenes hold it only to (560, 900]. Six watched negatives,
    counts printed, plus the wiring itself watched red once on the
-   real file),
+   real file.
+   AND THE ROLE AND ALIGN FAMILIES SINCE 2026-09-05: the constant
+   sweep's alternation names them now, with a floor of five roles,
+   because the `plain` role reached both interpreters by hand with
+   no gate reading either copy — the sweep had been holding six
+   families and the two that change with a ruling were not among
+   them),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

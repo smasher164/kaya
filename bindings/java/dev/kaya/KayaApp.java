@@ -149,7 +149,10 @@ public final class KayaApp {
         /** The footnote tier under the content it explains — labels.
          * The heading's counterpart, and the section-footer seat on a
          * grouped screen. */
-        CAPTION(KayaWire.ROLE_CAPTION);
+        CAPTION(KayaWire.ROLE_CAPTION),
+        /** An action at low emphasis — a row's accessory (Details, Open).
+         * Buttons only. */
+        PLAIN(KayaWire.ROLE_PLAIN);
 
         final long wire;
 
@@ -2307,6 +2310,22 @@ public final class KayaApp {
             return this;
         }
 
+        /**
+         * Lay this grid out in {@code columns} columns while the
+         * window's SIZE CLASS is {@code when}, restoring the authored
+         * count on leaving it (docs/adaptive-layout-plan.md D6.2). LIVE
+         * ZONE ONLY, like {@link #stackWhen}.
+         */
+        public Widget columnsWhen(SizeClass when, int columns) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: columnsWhen on a widget outside its build transaction"
+                    + " — a breakpoint is declared where the grid is built");
+            }
+            tx.columnsWhen(id, when, columns);
+            return this;
+        }
+
         /** This container's inter-child gap at construction:
          * tx.column(() -> {...}).spacing(12). */
         public Widget spacing(double gap) {
@@ -3664,6 +3683,15 @@ public final class KayaApp {
         private void stackWhen(long widget, SizeClass when) {
             emit(KayaWire.txCreateBreakpoint(0, when.wire, 1, new Object[] {
                 widget, (long) KayaWire.PROP_AXIS, (long) KayaWire.AXIS_VERTICAL }));
+        }
+
+        /**
+         * The same one setter on a grid's column count, which rides as a
+         * Double exactly as {@link KayaWire#txSetColumns} writes it.
+         */
+        private void columnsWhen(long widget, SizeClass when, int columns) {
+            emit(KayaWire.txCreateBreakpoint(0, when.wire, 1, new Object[] {
+                widget, (long) KayaWire.PROP_COLUMNS, (double) columns }));
         }
 
         /**

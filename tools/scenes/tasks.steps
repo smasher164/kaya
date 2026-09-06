@@ -9,6 +9,12 @@ expect_sections 5
 expect_section "Inbox"
 expect label@inbox_count "2 in inbox"
 expect label@title[t1] "Buy milk"
+# The list spans its section and a task row spans the list (R7): the
+# list is the one that hugged. The row's centre default (R5) is held by
+# align.steps, whose row is built to separate centre from baseline; a
+# row of same-size text reads both on Compose.
+expect_breadth column@inbox_list
+expect_fills row@task[t1]
 expect label@title[t2] "Call the plumber"
 expect label@caption[t2] ""
 

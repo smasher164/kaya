@@ -308,6 +308,15 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.NavigationViewPaneDisplayMode".to_string(),
         "Microsoft.UI.Xaml.Controls.NavigationViewSelectionChangedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.NavigationViewBackButtonVisible".to_string(),
+        // The pane's own back button (docs/tasks-plan.md R9's Windows half):
+        // BackRequested is the user route, FocusManager seats the initial
+        // focus in the content instead of on the pane toggle.
+        "Microsoft.UI.Xaml.Controls.NavigationViewBackRequestedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Input.FocusManager".to_string(),
+        // The pane toggle hides while the pane is expanded (the Windows 11
+        // Settings shape) and returns with the collapsed modes.
+        "Microsoft.UI.Xaml.Controls.NavigationViewDisplayMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewDisplayModeChangedEventArgs".to_string(),
         // The runner's REAL press: the open dialog lives in the popup
         // layer (GetOpenPopupsForXamlRoot), its template buttons are
         // found by part name, and ButtonAutomationPeer.Invoke runs

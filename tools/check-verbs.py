@@ -1114,11 +1114,13 @@ for name, text in (("KayaSwiftUI.swift", swift),
              f"step's text still dies with an abort")
 
 # --- Wire constants the interpreters mirror privately. ----------------
-# APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
-# types reachable through the spec's PROPS PropKinds (the scene's prop
-# typing keeps the rest off the pump).
+# APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP/ROLE/ALIGN: all of them. VALUE:
+# only the types reachable through the spec's PROPS PropKinds (the
+# scene's prop typing keeps the rest off the pump). ROLE and ALIGN joined
+# 2026-09-05: the `plain` role reached both interpreters by hand with no
+# gate reading either copy (docs/tasks-plan.md R6).
 rows = re.findall(r"pub(?:\(crate\))? const ((?:APPLY|KIND|PROP|COMMAND|VALUE|"
-                  r"MENU_KIND|MPROP)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
+                  r"MENU_KIND|MPROP|ROLE|ALIGN)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
 # THE CANVAS VOCABULARIES ride the op stream as i64 rather than u32, so
 # the sweep above cannot see them by type and their prefixes are not in
 # its alternation — five enums hand-copied into two interpreters, the
@@ -1131,6 +1133,10 @@ if len(canvas_rows) < 21:
     fail(f"only {len(canvas_rows)} canvas constants found in wire.rs — "
          f"the sweep reads nothing and would agree with everything")
 rows += canvas_rows
+role_rows = [r for r in rows if r[0].startswith("ROLE_")]
+if len(role_rows) < 5:
+    fail(f"only {len(role_rows)} role constants found in wire.rs — the "
+         f"sweep reads nothing and would agree with everything")
 props_block = spec[spec.index("pub const PROPS"):
                    spec.index("];", spec.index("pub const PROPS"))]
 prop_kinds = set(re.findall(r"PropKind::(\w+)", props_block))

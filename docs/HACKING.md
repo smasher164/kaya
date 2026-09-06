@@ -66,7 +66,12 @@ lanes collect it into the flight-recorder bundle themselves).
 3. `tools/gen-header.py` (kaya.h via cbindgen), `tools/gen-bindings.py`
    (the 9 wire files). `cargo build --lib` so the dylib carries the new
    hash — every runtime asserts hash agreement at load, so stale
-   artifacts fail loudly rather than decoding garbage.
+   artifacts fail loudly rather than decoding garbage. THE TWO
+   INTERPRETERS COPY THE HASH BY HAND: `kayaSpecHash` near the top of
+   swift/KayaSwiftUI.swift and `SPEC_HASH` in KayaCompose.kt take the
+   value bindings/c/kaya_wire.h now carries (tools/check-verbs.py pins
+   both, and a SwiftUI dylib built with the old one refuses to load
+   against the new core at the first leg).
 4. If guest-visible record/sum surfaces changed: `tools/gen-guests.py`.
    Commit generators together with their outputs (the `--check` form
    diffs against git HEAD).
@@ -203,6 +208,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   accessibility tree (gtk.rs, winui/mod.rs and KayaSwiftUI.swift all
   honour it — this is the tool for the class that cost most of a day),
   `KAYA_WINUI_TRACE` prints every WinUI op before applying it,
+  `KAYA_ALIGN_TRACE` prints every child's cross rect, aligns, baseline
+  and preferred sizes as GTK's `expect_aligned` classifier reads them
+  (the instrument that found GtkPicture's 0x0 minimum),
   `KAYA_MENU_TRACE` proved the iPadOS menu-build laziness, and
   `KAYA_WINUI_NAV_PROBE` / `KAYA_WINUI_MENU_PROBE` isolate those two
   subsystems.

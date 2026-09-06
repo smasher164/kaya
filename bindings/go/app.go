@@ -713,6 +713,19 @@ func (w Widget) StackWhen(when SizeClass) Widget {
 	return w
 }
 
+// ColumnsWhen lays this grid out in the named number of columns while
+// the window's SIZE CLASS is the named one, restoring the authored count
+// on leaving the class (docs/adaptive-layout-plan.md D6.2). Live zone
+// only, like StackWhen.
+func (w Widget) ColumnsWhen(when SizeClass, columns int) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: ColumnsWhen on a widget outside its build transaction — a breakpoint's setters name live widgets, so it belongs in the build expression that created the grid")
+	}
+	w.tx.emit(TxCreateBreakpoint(0, int64(when), 1,
+		[]any{int64(w.id), int64(PropColumns), float64(columns)}))
+	return w
+}
+
 // SetAlign sets a container's cross-axis child placement — one of the
 // generated align constants. Containers only; baseline is rows-only,
 // and the root rejects misuse. The chain is the declarative spelling.

@@ -507,6 +507,7 @@ pub(crate) const ROLE_DESTRUCTIVE: u32 = 1;
 pub(crate) const ROLE_PROMINENT: u32 = 2;
 pub(crate) const ROLE_HEADING: u32 = 3;
 pub(crate) const ROLE_CAPTION: u32 = 4;
+pub(crate) const ROLE_PLAIN: u32 = 5;
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its

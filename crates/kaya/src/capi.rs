@@ -999,11 +999,13 @@ pub const KAYA_ROLE_DESTRUCTIVE: u32 = 1;
 pub const KAYA_ROLE_PROMINENT: u32 = 2;
 pub const KAYA_ROLE_HEADING: u32 = 3;
 pub const KAYA_ROLE_CAPTION: u32 = 4;
+pub const KAYA_ROLE_PLAIN: u32 = 5;
 const _: () = assert!(
     KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
         && KAYA_ROLE_HEADING == wire::ROLE_HEADING
         && KAYA_ROLE_CAPTION == wire::ROLE_CAPTION
+        && KAYA_ROLE_PLAIN == wire::ROLE_PLAIN
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md

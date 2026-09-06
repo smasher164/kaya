@@ -593,6 +593,9 @@ struct CoreState {
     /// and the keyed harness target resolves through it (gtk.rs keeps the
     /// same map; docs/deferred.md's keyed-target entry).
     widget_tags: HashMap<u64, Vec<u8>>,
+    /// Columns a For has stamped ROW copies into (docs/tasks-plan.md §4,
+    /// R7): such a host spans a vertical parent as its rows span it.
+    stamps_rows: std::collections::HashSet<u64>,
     /// The three drag-and-drop declarations (docs/dnd-plan.md D1, D8), by
     /// widget id: what a source hands over, what a destination will do,
     /// and which live For reorders its own rows.
@@ -1898,8 +1901,11 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     slots.Clear()?;
     for (i, child) in children.iter().enumerate() {
         let i = i as i32;
-        Grid::SetColumn(&child.cast::<FrameworkElement>()?, i % cols)?;
-        Grid::SetRow(&child.cast::<FrameworkElement>()?, i / cols)?;
+        let cell = child.cast::<FrameworkElement>()?;
+        Grid::SetColumn(&cell, i % cols)?;
+        Grid::SetRow(&cell, i / cols)?;
+        // A cell centres in its row, as a row's children do (R5).
+        cell.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
         slots.Append(child)?;
     }
     Ok(())
@@ -2053,12 +2059,16 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // spans the parent's breadth (container_fills' breadth clause holds it).
         let crossing = matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
             && effective_vertical(core, *child) != vertical;
-        // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode
-        // and under stretch (ruled 2026-09-02; the scene's expect_breadth
-        // holds it): a viewport is a region, not content. Center and end
-        // still position a hugging one.
+        // A For's column of stamped rows spans its vertical host as its rows
+        // span it (docs/tasks-plan.md §4, R7).
         let crossing = crossing
-            || (matches!(widget, NativeWidget::Scroll(_)) && matches!(mode, 0 | 3));
+            || (vertical
+                && matches!(widget, NativeWidget::Column(_))
+                && core.stamps_rows.contains(&child.0));
+        // A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode
+        // (DESIGN.md Layout; the scene's expect_breadth holds it): a
+        // viewport is a region, not content.
+        let crossing = crossing || matches!(widget, NativeWidget::Scroll(_));
         // THE MAIN AXIS IS STAMPED STRETCH ON EVERY FLEX CHILD: an Auto
         // track renders identically (track = desired), a star track is
         // the grower's box, and a declared Width/Height still outranks
@@ -3795,6 +3805,10 @@ fn mount_entry(
     });
     back.Click(&handler)?;
     let back_el: FrameworkElement = back.cast()?;
+    if core.section_panes.contains_key(&host) {
+        let el: UIElement = back.cast()?;
+        el.SetVisibility(Visibility::Collapsed)?;
+    }
     Grid::SetRow(&back_el, 0)?;
     wrapper.Children()?.Append(&back_el)?;
     let content_el: FrameworkElement = element.cast()?;
@@ -3820,11 +3834,55 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
     if ids.is_empty() {
         return Ok(());
     }
-    if !core.section_navs.contains_key(&window) {
+    let created = !core.section_navs.contains_key(&window);
+    if created {
         let nav = NavigationView::new()?;
         nav.SetIsSettingsVisible(false)?;
+        // THE PANE'S OWN BACK BUTTON is the Windows placement (the Settings
+        // app's top-left arrow; DESIGN.md Navigation): enabled while the
+        // ACTIVE section's stack has an entry, its press the user_back route
+        // the harness takes too. The in-content bar stays collapsed on a
+        // section host (mount_entry).
         nav.SetIsBackButtonVisible(
-            bindings::Microsoft::UI::Xaml::Controls::NavigationViewBackButtonVisible::Collapsed,
+            bindings::Microsoft::UI::Xaml::Controls::NavigationViewBackButtonVisible::Visible,
+        )?;
+        nav.SetIsBackEnabled(false)?;
+        // ONE CONTROL AT THE PANE'S TOP LEFT, the Windows 11 Settings shape:
+        // the toggle hides while the pane is expanded (stock NavigationView
+        // stacks the back arrow over the hamburger there) and returns with
+        // the collapsed modes, where NavigationView itself has folded the
+        // pane away and the toggle is the only way back to it.
+        nav.SetIsPaneToggleButtonVisible(false)?;
+        let mode_handler = TypedEventHandler::<
+            NavigationView,
+            bindings::Microsoft::UI::Xaml::Controls::NavigationViewDisplayModeChangedEventArgs,
+        >::new(|sender, args| {
+            let (Some(nav), Some(args)) = (sender.as_ref(), args.as_ref()) else {
+                return Ok(());
+            };
+            let expanded = args.DisplayMode()?
+                == bindings::Microsoft::UI::Xaml::Controls::NavigationViewDisplayMode::Expanded;
+            nav.SetIsPaneToggleButtonVisible(!expanded)
+        });
+        nav.DisplayModeChanged(&mode_handler)?;
+        let back_handler = TypedEventHandler::<
+            NavigationView,
+            bindings::Microsoft::UI::Xaml::Controls::NavigationViewBackRequestedEventArgs,
+        >::new(move |_, _| {
+            // Fires from the message loop, never under an apply borrow.
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return Ok(()) };
+                user_back(core, window)
+            })
+        });
+        nav.BackRequested(&back_handler)?;
+        // A SECTION'S ROOT FILLS ITS PANE (docs/tasks-plan.md §4 R7): the
+        // template binds its ContentPresenter's alignment to these two, whose
+        // Control defaults are Left and Top, so a section's whole content was
+        // laid out at its desired size in the corner.
+        nav.SetHorizontalContentAlignment(HorizontalAlignment::Stretch)?;
+        nav.SetVerticalContentAlignment(
+            bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch,
         )?;
         let swallow =
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3918,6 +3976,33 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
     if let Some(sel) = core.selected_sections.get(&window).copied() {
         nav_set_selected(core, window, sel)?;
         show_section_pane(core, window, sel)?;
+        if created {
+            if let Some(pane) = core.section_panes.get(&sel).map(|r| r.pane.clone()) {
+                // INITIAL FOCUS SEATS IN THE CONTENT, not on the pane toggle:
+                // a window with nothing focused hands focus to its first tab
+                // stop, and WinUI draws the keyboard focus visual there on a
+                // launch no pointer touched (the boxed hamburger of the first
+                // Windows capture). On the pane's Loaded, once it has a tree:
+                // a dispatcher tick after SetContent was measured too early.
+                let loaded = RoutedEventHandler::new(move |_, _| {
+                    let scope: bindings::Microsoft::UI::Xaml::DependencyObject = pane.cast()?;
+                    if let Ok(first) =
+                        bindings::Microsoft::UI::Xaml::Input::FocusManager::FindFirstFocusableElement(
+                            &scope,
+                        )
+                    {
+                        if let Ok(control) =
+                            first.cast::<bindings::Microsoft::UI::Xaml::Controls::Control>()
+                        {
+                            let _ = control.Focus(FocusState::Programmatic)?;
+                        }
+                    }
+                    Ok(())
+                });
+                let pane_el: FrameworkElement = core.section_panes[&sel].pane.cast()?;
+                pane_el.Loaded(&loaded)?;
+            }
+        }
     }
     Ok(())
 }
@@ -3960,6 +4045,7 @@ fn show_section_pane(
         return Ok(());
     };
     nav.SetContent(&record.pane)?;
+    nav.SetIsBackEnabled(core.nav_stacks.get(&section).is_some_and(|s| !s.is_empty()))?;
     Ok(())
 }
 
@@ -3980,6 +4066,11 @@ fn refresh_section_pane(core: &mut CoreState, sid: u64) -> windows_core::Result<
     children.Clear()?;
     if let Some(widget) = desired {
         children.Append(&widget)?;
+    }
+    if core.selected_sections.get(&record.window) == Some(&sid) {
+        if let Some(nav) = core.section_navs.get(&record.window) {
+            nav.SetIsBackEnabled(top.is_some())?;
+        }
     }
     Ok(())
 }
@@ -10979,6 +11070,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Grid => {
                     let grid = Grid::new()?;
+                    // A grid's cells are separated by default, as a row's
+                    // controls are by their own margins (docs/tasks-plan.md
+                    // §4, R5); a bare Grid packs them edge to edge.
+                    grid.SetRowSpacing(8.0)?;
+                    grid.SetColumnSpacing(8.0)?;
                     core.grid_children.insert(id.0, Vec::new());
                     core.grid_cols.insert(id.0, 1);
                     core.grids.push(grid.clone());
@@ -12221,6 +12317,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // the user's Windows accent.
                     button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
                 }
+                (NativeWidget::Button { button, .. }, Prop::Role, Value::I64(5)) => {
+                    // PLAIN (docs/tasks-plan.md §4 R6): Fluent's own keyed
+                    // low-emphasis Button style — transparent ground and border
+                    // over the primary text fill, hovering to
+                    // `SubtleFillColorSecondaryBrush`.
+                    button.SetStyle(&theme_resource::<Style>("SubtleButtonStyle")?)?;
+                }
                 (NativeWidget::Button { caption, .. }, Prop::Role, Value::I64(1)) => {
                     // DESTRUCTIVE, AND FLUENT SHIPS NO DESTRUCTIVE BUTTON, so
                     // kaya lowers the platform's severity palette onto the
@@ -12368,6 +12471,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // A new child means a new track and a shifted set of indices —
             // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
+            // A stamped ROW copy marks its host, whose own cross placement in
+            // ITS parent is re-read for it (docs/tasks-plan.md §4, R7); a
+            // declared table's rows already live in a viewport that spans.
+            let stamped_row = matches!(
+                core.widgets.get(&child).expect("scene validated the id"),
+                NativeWidget::Row(_)
+            ) && core
+                .widget_tags
+                .get(&child.0)
+                .is_some_and(|tag| tag_keys(tag).is_some());
+            if stamped_row
+                && matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_)))
+                && !TABLES.with_borrow(|t| t.contains_key(&parent.0))
+                && core.stamps_rows.insert(parent.0)
+            {
+                if let Some(above) = core.child_order.parent_of(parent) {
+                    core.child_order.mark(above);
+                }
+            }
         }
         ApplyOp::SetDragSource { id, clip, operations, tag } => {
             let element = core
@@ -13815,6 +13937,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             textareas: Vec::new(),
             textarea_ids: Vec::new(),
             grid_children: HashMap::new(),
+            stamps_rows: std::collections::HashSet::new(),
             grid_cols: HashMap::new(),
             radio_options: HashMap::new(),
             select_options: HashMap::new(),
@@ -16952,11 +17075,23 @@ impl crate::harness::Stage for WinUiStage {
             // holds. With sections present the stack is the ACTIVE
             // section's, exactly as user_back routes (DESIGN.md,
             // Sections; tools/scenes/tasks.steps).
-            let window = if core.sections.contains_key(&window) {
-                core.selected_sections.get(&window).copied().unwrap_or(window)
-            } else {
-                window
-            };
+            if let Some(nav) = core.section_navs.get(&window) {
+                // The pane's own back button is the affordance here
+                // (refresh_sections); a DISABLED one is not one, so the
+                // verb stops exactly where a user's press would.
+                if !nav.IsBackEnabled()? {
+                    return Ok(());
+                }
+                let queue = DispatcherQueue::GetForCurrentThread()?;
+                let handler = DispatcherQueueHandler::new(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return Ok(()) };
+                        user_back(core, window)
+                    })
+                });
+                queue.TryEnqueue(&handler)?;
+                return Ok(());
+            }
             let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
                 return Ok(());
             };

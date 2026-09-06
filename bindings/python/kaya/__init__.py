@@ -2765,12 +2765,14 @@ class Role:
     DESTRUCTIVE marks the press that destroys something; PROMINENT THE
     primary action; HEADING a text hierarchy heading (the platform's
     style AND the accessibility trait); CAPTION the footnote tier under
-    the content it explains."""
+    the content it explains; PLAIN an action at low emphasis (a row's
+    accessory)."""
 
     DESTRUCTIVE = wire.ROLE_DESTRUCTIVE
     PROMINENT = wire.ROLE_PROMINENT
     HEADING = wire.ROLE_HEADING
     CAPTION = wire.ROLE_CAPTION
+    PLAIN = wire.ROLE_PLAIN
 
 
 _ROLE_NAMES = {
@@ -2778,6 +2780,7 @@ _ROLE_NAMES = {
     "prominent": wire.ROLE_PROMINENT,
     "heading": wire.ROLE_HEADING,
     "caption": wire.ROLE_CAPTION,
+    "plain": wire.ROLE_PLAIN,
 }
 
 
@@ -2807,7 +2810,7 @@ def _role_value(role):
         raise ValueError(
             f"kaya: {role} is not a role — the vocabulary is "
             f"{sorted(_ROLE_NAMES)} "
-            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION)"
+            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN)"
         )
     return role
 
@@ -2919,13 +2922,45 @@ def scroll(grow=None):
     return _Container(handle)
 
 
-def grid(columns, grow=None, spacing=None, inset=None):
+def grid(columns, grow=None, spacing=None, inset=None, columns_when=None):
     """A grid container laying its children out row-major into `columns`
     columns — each column at its NATURAL width, aligned across rows.
     `spacing` is the inter-cell gap on both axes; `inset` its own
-    padding."""
+    padding.
+
+    `columns_when` is a `(size class, count)` pair laying the grid out in
+    that many columns while the window's SIZE CLASS is the named one — a
+    core-evaluated breakpoint, reverting when the class is left
+    (docs/adaptive-layout-plan.md D6.2)."""
     handle = _widget(wire.KIND_GRID)
     _records().append(wire.tx_set_columns(handle.id, float(columns)))
+    if columns_when is not None:
+        if (
+            not isinstance(columns_when, tuple)
+            or len(columns_when) != 2
+            or columns_when[0] is not COMPACT
+            or not isinstance(columns_when[1], int)
+            or isinstance(columns_when[1], bool)
+        ):
+            raise TypeError(
+                f"kaya: columns_when takes a (size class, count) pair — "
+                f"kaya.COMPACT is the only class today — not "
+                f"{columns_when!r} (docs/adaptive-layout-plan.md D6.2)"
+            )
+        if _tpl_depth > 0:
+            raise TypeError(
+                "kaya: columns_when is live-only — a breakpoint's setters "
+                "name live widgets, and a template grid is a blueprint "
+                "stamped per entry (docs/adaptive-layout-plan.md D6.2)"
+            )
+        _records().append(
+            wire.tx_create_breakpoint(
+                0,
+                wire.SIZE_CLASS_COMPACT,
+                1,
+                [handle.id, wire.PROP_COLUMNS, float(columns_when[1])],
+            )
+        )
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_inset(handle, inset)

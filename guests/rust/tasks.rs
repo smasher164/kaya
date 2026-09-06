@@ -407,8 +407,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         })
                         .id();
                     }
-                    for mut row in coll.rows(tx) {
-                        row.row(|t| {
+                    let rows = coll.rows(tx);
+                    let list_column = rows.id();
+                    for mut row in rows {
+                        let (task_row, _) = row.row(|t| {
                             let done = t.checkbox(TaskRow::done());
                             t.a11y_id(done, "done");
                             msgs.on_toggle_node(done, Msg::Toggle);
@@ -421,9 +423,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             t.spacer();
                             let details = t.button("Details");
                             t.a11y_id(details, "details");
+                            t.role(details, kaya::Role::Plain);
                             msgs.on_click_node(details, Msg::Details);
                         });
+                        row.a11y_id(task_row, "task");
                     }
+                    // The list's column is named so the scene can hold it to
+                    // the section's width (R7): a hugging list hides behind
+                    // rows that fill it.
+                    tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
                 })
                 .id();
             tx.mount_in(section, root);
@@ -447,6 +455,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         t.spacer();
                         let open = t.button("Open");
                         t.a11y_id(open, "open");
+                        t.role(open, kaya::Role::Plain);
                         msgs.on_click_node(open, Msg::OpenProject);
                     });
                 }
@@ -583,34 +592,34 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let deadline_sig = tx.signal(parse_date(&row.deadline).unwrap_or(today));
                     let reminder_sig = tx.signal(parse_time(&row.reminder).unwrap_or(kaya::Time::new(9, 0).unwrap()));
                     let project_label = tx.signal("Project");
+                    // A form scrolls: on a phone it is taller than the screen.
                     let root = tx
-                        .column(|tx| {
+                        .scroll(|tx| {
+                            tx.column(|tx| {
                             let notes = tx.textarea().a11y_id("notes").id();
                             tx.set_text(notes, &row.notes);
                             msgs.on_change(notes, Msg::Notes);
-                            tx.caption(when_text).a11y_id("when_text").id();
-                            tx.row(|tx| {
+                            // One grid, three rows of [caption][picker][Clear]: the
+                            // column shares its width, so the Clear buttons line up.
+                            tx.grid(3, |tx| {
+                                tx.caption(when_text).a11y_id("when_text").id();
                                 let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
                                 msgs.on_date(picker, Msg::When);
                                 let clear = tx.button("Clear").a11y_id("clear_when").id();
                                 msgs.on_click(clear, Msg::ClearWhen);
-                            })
-                            .id();
-                            tx.caption(deadline_text).a11y_id("deadline_text").id();
-                            tx.row(|tx| {
+                                tx.caption(deadline_text).a11y_id("deadline_text").id();
                                 let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
                                 msgs.on_date(picker, Msg::Deadline);
                                 let clear = tx.button("Clear").a11y_id("clear_deadline").id();
                                 msgs.on_click(clear, Msg::ClearDeadline);
-                            })
-                            .id();
-                            tx.caption(reminder_text).a11y_id("reminder_text").id();
-                            tx.row(|tx| {
+                                tx.caption(reminder_text).a11y_id("reminder_text").id();
                                 let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
                                 msgs.on_time(picker, Msg::Reminder);
                                 let clear = tx.button("Clear").a11y_id("clear_reminder").id();
                                 msgs.on_click(clear, Msg::ClearReminder);
                             })
+                            // A phone folds the three columns to one (D6.2).
+                            .columns_when(kaya::SizeClass::Compact, 1)
                             .id();
                             tx.caption(project_label).id();
                             let project = tx.select(&options, selected).a11y_id("project").id();
@@ -621,6 +630,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                 .a11y_id("delete")
                                 .id();
                             msgs.on_click(delete, Msg::Delete);
+                            })
+                            .id();
                         })
                         .id();
                     tx.mount_in(entry, root);

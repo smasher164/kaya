@@ -40,6 +40,13 @@ let () =
            (* row#1: the breakpoint subject, which no handler touches. *)
            row ~a11y_id:"narrow" ~stack_when:Compact
              [ label ~bind:one (* label#3 *); label ~bind:two (* label#4 *) ];
+           (* grid@sheet: three columns regular, one compact (D6.2). *)
+           grid ~columns:3 ~a11y_id:"sheet" ~columns_when:(Compact, 1)
+             (List.map
+                (fun text ->
+                  let cell = signal (Str text) in
+                  fun () -> label ~bind:cell () (* label#5..#10 *))
+                [ "c1"; "c2"; "c3"; "c4"; "c5"; "c6" ]);
          ]
          ()
      in

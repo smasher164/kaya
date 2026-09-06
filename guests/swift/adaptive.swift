@@ -41,6 +41,14 @@ app.build { tx in
         }
         tx.setA11yId(narrow, "narrow")
         narrow.stackWhen(.compact)
+        // grid@sheet: three columns regular, one compact (D6.2).
+        let sheet = tx.grid(columns: 3) {
+            for text in ["c1", "c2", "c3", "c4", "c5", "c6"] {
+                tx.label(bind: tx.signal(.str(text)))  // label#5..#10
+            }
+        }
+        tx.setA11yId(sheet, "sheet")
+        sheet.columnsWhen(.compact, 1)
     }
     tx.mount(root)
 }

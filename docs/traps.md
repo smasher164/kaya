@@ -9265,3 +9265,42 @@ runningboardd's exit context before hunting a crash report.
   (which refuses a hidden button) popped nothing. `refresh_section_back`
   follows the ACTIVE section's stack; WinUI's harness back had the twin
   fault one level down and routes through the selected section now.
+- **A rule keyed on the old default reads the ABSENCE of a choice, and
+  breaks when the default moves** (2026-09-05, the row's centre default,
+  docs/tasks-plan.md R5). The scroll breadth rule of 2026-09-02 spanned a
+  scroll "under start and stretch" in all four backends; start was then
+  what every unaligned row and column carried, so the condition meant
+  "unless the app positioned it". The moment the core began emitting
+  `align = center` on every new Row, a scroll directly inside a row would
+  have hugged on every backend with no scene to say so — the Compose
+  agent read it off the arm. The rule is now unconditional (a viewport is
+  a region), and the lesson is general: when a backend condition names a
+  default VALUE, ask whether it means the value or the silence, and if the
+  silence, key it on something the core states explicitly.
+- **A geometry classifier cannot separate centre from baseline in a row
+  of look-alike text** (2026-09-05, `expect_aligned row@task[t1]
+  "center"`, green on three lanes and `ambiguous (center|baseline)` on
+  Compose). Text children of one font size centred in a row have
+  coinciding baselines within the 2px tolerance wherever the toolkit's
+  metrics happen to agree; the classifier is right to refuse a guess.
+  Assert alignment only on geometry built to separate the modes — the
+  align scene's tall no-baseline image beside one label — never on an
+  app's own row of text.
+- **GtkPicture shrinks to nothing under pressure; the other three
+  backends' images do not** (2026-09-05, align.steps' `row@plain` reading
+  "stretch" on the linux lane alone). GtkPicture's default `can_shrink`
+  reports a 0x0 minimum, so a vertical box short of room hands the row
+  its label's height and the 2x64 image squeezes to 40px — the row is
+  then as tall as its label, which therefore spans it. Read with
+  `KAYA_ALIGN_TRACE` (min 0x0 nat 2x64 on the picture, extent 39 in 40
+  on the label). GTK images hold their intrinsic size now
+  (`set_can_shrink(false)`), the semantics the other three already had.
+- **A WinUI window with no initial focus draws a focus rectangle on its
+  first tab stop** (2026-09-05, the boxed hamburger of the task
+  manager's Windows captures). XAML seats focus on the first focusable
+  control when a window activates with nothing focused, and on a launch
+  that no pointer touched (a scheduled task, a keyboard launch) it draws
+  the keyboard focus visual there. Seat initial focus in the content
+  yourself, on the pane's `Loaded` — a dispatcher tick after SetContent
+  is too early, the pane has no visual tree yet and
+  FindFirstFocusableElement finds nothing.

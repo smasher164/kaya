@@ -152,7 +152,11 @@ if MODE == "parallel":
                          check=False)
     if got.returncode != 0:
         sys.exit(1)
-    os.environ["KAYA_MATRIX_GATES_TOKEN"] = got.stdout.strip()
+    # Line one is the token, line two the per-gate keys behind it, so
+    # the lane can say which gate's inputs moved when the handshake misses.
+    fp_lines = got.stdout.strip().splitlines()
+    os.environ["KAYA_MATRIX_GATES_TOKEN"] = fp_lines[0] if fp_lines else ""
+    os.environ["KAYA_MATRIX_GATES_KEYS"] = fp_lines[1] if len(fp_lines) > 1 else "{}"
     run_lane("mac", ["tools/validate-mac.py"])
     # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
     # bare KAYA_JOBS would resize the mac pool too. Empty means the

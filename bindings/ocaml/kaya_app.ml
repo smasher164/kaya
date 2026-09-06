@@ -698,13 +698,14 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
    never how it looks. [Destructive] and [Prominent] are an ACTION's
    emphasis and belong to a button; [Heading] and [Caption] are text
    hierarchy facts and belong to a label. *)
-type role = Destructive | Prominent | Heading | Caption
+type role = Destructive | Prominent | Heading | Caption | Plain
 
 let role_wire = function
   | Destructive -> Int64.of_int Kaya_wire.role_destructive
   | Prominent -> Int64.of_int Kaya_wire.role_prominent
   | Heading -> Int64.of_int Kaya_wire.role_heading
   | Caption -> Int64.of_int Kaya_wire.role_caption
+  | Plain -> Int64.of_int Kaya_wire.role_plain
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
@@ -1277,12 +1278,28 @@ let container ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?h
 (* A grid from its children, laid out row-major into [~columns] columns —
    each column takes its NATURAL width, aligned across rows (the thing
    nested rows cannot express). The columns record lands BEFORE the
-   add_childs (backends re-flow either way). *)
-let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset children () =
+   add_childs (backends re-flow either way).
+
+   [~columns_when] is a (size class, count) pair laying the grid out in
+   that many columns while the window's SIZE CLASS is the named one,
+   reverting on leaving it (docs/adaptive-layout-plan.md D6.2). LIVE
+   ONLY: [Tpl.grid] carries no such label. *)
+let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset ?columns_when children () =
   let tx = the_tx () in
   let parent = widget Kaya_wire.kind_grid in
   let (Widget id) = parent in
   emit tx (Kaya_wire.tx_set_columns id (float_of_int columns));
+  Option.iter
+    (fun (Compact, count) ->
+      emit tx
+        (Kaya_wire.tx_create_breakpoint 0L
+           (Kaya_wire.I64 (Int64.of_int Kaya_wire.size_class_compact)) 1
+           [
+             Kaya_wire.I64 id;
+             Kaya_wire.I64 (Int64.of_int Kaya_wire.prop_columns);
+             Kaya_wire.F64 (float_of_int count);
+           ]))
+    columns_when;
   Option.iter (fun g -> set_grow parent g) grow;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind parent;
   Option.iter (fun s -> set_spacing parent s) spacing;

@@ -1918,6 +1918,23 @@ unpicked.
   manager's Logbook and Settings went behind the View menu instead.
   KEY: root list presentation, sections_presentation list, lists of
   lists, More tab
+- ~~**The task manager's Details grid overflows a compact phone**~~ —
+  CLOSED 2026-09-05, both remedies taken the same evening: Compose's
+  picker field is as wide as its value, and the breakpoint setters
+  widened to a grid's `columns` (adaptive-layout D6.2), so the form
+  folds to one column under compact through `columns_when(compact, 1)`
+  in all nine bindings, held by adaptive.steps' `grid@sheet` on every
+  lane. The original entry (2026-09-05,
+  docs/tasks-plan.md §5): three columns of caption, picker and Clear
+  fit the desktops and the iPhone and overflow a 320dp Android screen,
+  because Compose lowers a date or time picker as a 280dp text field
+  where every other platform draws a content-sized control. Two
+  rulings on offer: breakpoint setters widened from axis-only to
+  `columns` (adaptive-layout D6's open slot; the core's evaluate arm
+  says "a second prop arrives with its own base rule when D6 widens
+  the list"), or Compose pickers lowered as content-sized buttons
+  opening the M3 dialogs. KEY: Details grid, compact columns,
+  breakpoint setters axis-only, Compose picker width, D6
 - **A layout scene of the common list-row shapes** (2026-09-05, after
   three captures found three hugging-or-filling divergences in one day:
   the iPhone switch and the WinUI checkbox claiming a row's free width, the
@@ -1926,14 +1943,16 @@ unpicked.
   captioned checkbox — each asserted with `expect_fills`/`expect_shares`
   on every lane, so a control that hugs where it should fill or fills
   where it should hug fails a gate rather than a reviewer's eye. Small;
-  nine guests or a rust-only depth scene. ITS FIRST CASE IS ALREADY
-  KNOWN: a For's stamped row spans its column on SwiftUI and hugs its
-  content on GTK, WinUI and Compose (the task manager's captures, same
-  day), so a spacer in the row reaches the window's edge on two platforms
-  and the content's on three — a three-backend fix under DESIGN's
-  nested-container rule once the scene asserts it. KEY: list-row layout
-  scene, hugging control, grown entry, checkbox MinWidth, fixedSize,
-  stamped row spans, hexpand
+  nine guests or a rust-only depth scene. ITS FIRST CASE CLOSED
+  2026-09-05: a For's stamped row spanned its column on SwiftUI and
+  hugged its content on GTK, WinUI and Compose (the task manager's
+  captures), and now spans on all four under docs/tasks-plan.md R7,
+  asserted by tasks.steps' `expect_breadth column@inbox_list` on every
+  lane (the For's own column was the hugger, not the row);
+  the row's cross-axis centre (R5) rides the same target. The scene of
+  the OTHER shapes (grown entry + button, captioned checkbox) stays
+  open. KEY: list-row layout scene, hugging control, grown entry,
+  checkbox MinWidth, fixedSize, stamped row spans, hexpand
 - Horizontal scroll axis: an axis enum prop — decide when a scene
   needs it (the scroll depth ledger's remaining item).
 - Command completion observability (awaitable commands — the Compose
@@ -10910,6 +10929,17 @@ afternoon, five with a drag sighting on one android leg or another.
 
 TWELFTH SIGHTING, 2026-09-05, the seventh matrix (75b3b36a): `dnd-compose`,
 shape (b), `dropped=1 ended=false`; the tasks leg's reorder green beside it.
+
+THIRTEENTH TO FIFTEENTH SIGHTINGS, 2026-09-05 evening, the list-row
+polish's two matrices: #8 red on `dnd-jvm` AND `dnd-go` (`label#4 reads
+"text target got text hello (copy)", wanted "... y (copy)"` — the EARLIER
+drag's payload delivered to the later drop, the keyed-drag-earlier-payload
+shape, plus `item y drag ended none`), #9 red on `dnd-go` alone (`"text
+target got text y (copy)", wanted "item x got text hello (copy)"`; `drag
+ended none`). Both matrices green on every other android leg; the compose
+suite ALL PASS 50 legs standalone four times the same evening between
+them. Still the emulator's drag session under five-lane contention; still
+no fix taken.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention

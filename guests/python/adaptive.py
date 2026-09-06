@@ -39,5 +39,10 @@ with app.window(title="adaptive", width=900, height=600):
             kaya.label(bind=one)  # label#3
             kaya.label(bind=two)  # label#4
         narrow.a11y_id("narrow")
+        # grid@sheet: three columns regular, one compact (D6.2).
+        with kaya.grid(3, columns_when=(kaya.COMPACT, 1)) as sheet:
+            for text in ("c1", "c2", "c3", "c4", "c5", "c6"):
+                kaya.label(bind=kaya.signal(text))  # label#5..#10
+        sheet.a11y_id("sheet")
 
 sys.exit(app.run())

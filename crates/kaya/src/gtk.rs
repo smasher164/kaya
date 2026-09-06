@@ -582,6 +582,18 @@ fn set_scroll_kind(widget: &gtk4::Widget) {
     unsafe { widget.set_data(SCROLL_KEY, true) }
 }
 
+/// A container a For has stamped ROW copies into (docs/tasks-plan.md §4, R7).
+const STAMPED_ROWS_KEY: &str = "kaya-stamps-rows";
+fn stamps_rows(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to
+    // `true` by set_stamps_rows below.
+    unsafe { widget.data::<bool>(STAMPED_ROWS_KEY).is_some() }
+}
+fn set_stamps_rows(widget: &gtk4::Widget) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(STAMPED_ROWS_KEY, true) }
+}
+
 /// A row in a column, or a column in a row — the child's main axis IS the
 /// parent's cross axis, so its own breadth is what the parent's cross box
 /// hands out.
@@ -632,13 +644,15 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     if align != gtk4::Align::Baseline && crosses_container(child, vertical_container) {
         align = gtk4::Align::Fill;
     }
-    // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
-    // under stretch (ruled 2026-09-02): a viewport is a region, not
-    // content, and every platform's own scrolling surface fills its
-    // container — hugging left a 79pt pannable strip in a 375pt window
-    // on iOS and an 84px one here (docs/traps.md). Center and end still
-    // POSITION a hugging scroll; the scene's expect_breadth holds this.
-    if is_scroll_kind(child) && matches!(mode, 0 | 3) {
+    // A For's stamped rows span it (docs/tasks-plan.md §4, R7).
+    if vertical_container && stamps_rows(child) {
+        align = gtk4::Align::Fill;
+    }
+    // A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode
+    // (DESIGN.md Layout): a viewport is a region, not content — hugging
+    // left a 79pt pannable strip in a 375pt window on iOS and an 84px one
+    // here (docs/traps.md); the scene's expect_breadth holds this.
+    if is_scroll_kind(child) {
         align = gtk4::Align::Fill;
     }
     if vertical_container {
@@ -4444,6 +4458,8 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     }
     for (i, child) in children.iter().enumerate() {
         let i = i as i32;
+        // A cell centres in its row, as a row's children do (R5).
+        child.set_valign(gtk4::Align::Center);
         grid.attach(child, i % cols, i / cols, 1, 1);
     }
 }
@@ -7797,6 +7813,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // take their natural width (homogeneous off is the
                     // default), aligned across rows by the toolkit itself.
                     let grid = gtk4::Grid::new();
+                    // A grid's cells are separated by default, as a row's
+                    // controls are by their own margins; a bare GtkGrid
+                    // packs them edge to edge (docs/tasks-plan.md §4, R5).
+                    grid.set_row_spacing(CONTAINER_SPACING as u32);
+                    grid.set_column_spacing(CONTAINER_SPACING as u32);
                     core.grid_children.insert(id.0, Vec::new());
                     core.grid_cols.insert(id.0, 1);
                     core.grids.push(grid.clone());
@@ -7836,6 +7857,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // Display-only, like Label: no tag, no signal. The source
                     // arrives as a SetProp blob and decodes there.
                     let picture = gtk4::Picture::new();
+                    // AN IMAGE HOLDS ITS INTRINSIC SIZE, as it does on the
+                    // other three backends: GtkPicture's default can_shrink
+                    // reports a 0x0 minimum, so a squeezed row collapsed a
+                    // 2x64 image to the row's height and the row to its
+                    // label's (align.steps' row@plain read "stretch" on the
+                    // linux lane alone).
+                    picture.set_can_shrink(false);
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
@@ -9376,17 +9404,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // SEMANTIC EMPHASIS (docs/styling-plan.md D4): what the widget
                 // MEANS, lowered to libadwaita's own documented style classes
                 // — inventing a `.brand-action` would mean writing colors,
-                // which is leaving the tier. Both classes come off before one
-                // goes on: they are mutually exclusive in the stylesheet, and a
-                // re-applied role would leave the previous one underneath.
-                (NativeWidget::Button(button), Prop::Role, Value::I64(role @ (1 | 2))) => {
+                // which is leaving the tier. All three classes come off before
+                // one goes on: they are mutually exclusive in the stylesheet,
+                // and a re-applied role would leave the previous one
+                // underneath. `.flat` is the plain role (docs/tasks-plan.md §4,
+                // R6).
+                (NativeWidget::Button(button), Prop::Role, Value::I64(role @ (1 | 2 | 5))) => {
                     use gtk4::prelude::WidgetExt;
                     button.remove_css_class("destructive-action");
                     button.remove_css_class("suggested-action");
-                    button.add_css_class(if role == 1 {
-                        "destructive-action"
-                    } else {
-                        "suggested-action"
+                    button.remove_css_class("flat");
+                    button.add_css_class(match role {
+                        1 => "destructive-action",
+                        2 => "suggested-action",
+                        _ => "flat",
                     });
                 }
                 // THE HEADING ROLE IS TWO FACTS AT ONCE: the platform's
@@ -9733,6 +9764,37 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scrolled.set_child(Some(&child_widget));
                 }
                 _ => panic!("kaya: add_child parent is not a container"),
+            }
+            // A stamped ROW copy marks its host, whose own cross alignment is
+            // re-read for it (docs/tasks-plan.md §4, R7); a declared table's
+            // rows are reflow_table's, inside a viewport that already fills.
+            if core.tables.get(&parent.0).is_none()
+                && matches!(
+                    core.widgets.get(&parent).expect("scene validated the id"),
+                    NativeWidget::Column(_)
+                )
+                && matches!(
+                    core.widgets.get(&child).expect("scene validated the id"),
+                    NativeWidget::Row(_)
+                )
+                && core
+                    .widget_tags
+                    .get(&child.0)
+                    .is_some_and(|tag| tag_path(tag).is_some())
+            {
+                let host = core
+                    .widgets
+                    .get(&parent)
+                    .expect("scene validated the id")
+                    .widget();
+                set_stamps_rows(&host);
+                // A For's container is attached AFTER the copies it already
+                // holds, and that AddChild reads the key instead.
+                if let Some(above) = host.parent() {
+                    if let Some(vertical) = container_vertical(&above) {
+                        apply_cross_align(&host, vertical, container_align(&above));
+                    }
+                }
             }
             // Only now is the parent — and so the main axis — known, so
             // a weight that arrived before the child was attached gets
@@ -12920,6 +12982,22 @@ impl crate::harness::Stage for GtkStage {
                     if b >= 0 {
                         baselines.push(alloc.y() + b);
                     }
+                }
+                if std::env::var("KAYA_ALIGN_TRACE").is_ok() {
+                    let (min, nat) = widget.preferred_size();
+                    eprintln!(
+                        "KAYA_ALIGN_TRACE: {t:?} child {} at {start} extent {extent} \
+                         halign {:?} valign {:?} baseline {} in {inner} \
+                         (min {}x{} nat {}x{})",
+                        widget.type_().name(),
+                        widget.halign(),
+                        widget.valign(),
+                        widget.allocated_baseline(),
+                        min.width(),
+                        min.height(),
+                        nat.width(),
+                        nat.height(),
+                    );
                 }
             }
             if rects.is_empty() {

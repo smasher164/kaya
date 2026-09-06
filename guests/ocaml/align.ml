@@ -22,6 +22,7 @@ let () =
      let base = signal (Str "base") in
      let anchor = signal (Str "anchor") in
      let fit = signal (Str "fit") in
+     let plain = signal (Str "plain probe") in
 
      let root =
        column ~a11y_id:"root" ~align:Stretch
@@ -31,8 +32,8 @@ let () =
              [
                label ~bind:probe (* label#0 *);
                button ~text:"mid";
-               (* row#0: the baseline trio *)
-               row ~align:Baseline
+               (* the baseline trio *)
+               row ~a11y_id:"baseline" ~align:Baseline
                  [
                    label ~bind:base (* label#1 *);
                    button ~text:"tick";
@@ -46,6 +47,13 @@ let () =
                (* column#2 *)
                column ~grow:1.0 ~a11y_id:"fitcol" ~align:Stretch
                  [ label ~bind:fit (* label#3 *); button ~text:"wide" ];
+             ];
+           (* row@plain: NO align, so the core's centre default is what
+              the scene reads *)
+           row ~a11y_id:"plain"
+             [
+               label ~a11y_id:"plainlabel" ~bind:plain (* label#4 *);
+               image ~source:tall_png;
              ];
          ]
          ()

@@ -146,6 +146,76 @@ pass, not this one's.
   (a role on entry), the switch's (a role on checkbox, or a kind), the
   storage shape (§3), the sheet's grammar, the rich-text subset, the
   tree's model. None blocks S0.
+- **R5 — a row centres its children on the cross axis by default**
+  (TAKEN 2026-09-05, off the Android capture where "Buy milk" sat flush
+  against the row's top beside a taller checkbox; the maintainer: "we
+  can make the defaults for how things are laid out a lot more
+  aesthetically pleasing than how the platform does it"). Mechanism: the
+  CORE emits `align = center` right after every new Row, live and
+  template, unless the app sets `align` itself, so all four backends see
+  an explicit prop and none carries a default of its own. Columns keep
+  `start`. A GRID'S CELLS FOLLOW THE SAME RULE — each centres in its
+  row — and a grid's cells are separated by default (GTK's and WinUI's
+  bare grids packed them edge to edge, the Linux and Windows captures
+  showed four buttons' corners meeting), so GTK and WinUI grids take
+  their platform's container gap unless the app sets `spacing`;
+  Compose's grid already carried 8dp and NSGridView its own. The scene
+  byte on every lane is align.steps' `expect_aligned row@plain
+  "center"`: a row declaring no align, holding one label beside the
+  scene's tall no-baseline image, built so centre is the only reading.
+  It is NOT held on the task row itself — see §5, the classifier
+  finding.
+- **R6 — a `plain` button role** (TAKEN 2026-09-05, same captures: the
+  Details button was the platform's full bordered button against small
+  text). Wire 5, buttons only, the LOW emphasis for a row's accessory —
+  a Material TextButton, borderless on Apple (an NSButton with
+  `isBordered = false` in the accent tint on the mac, `.borderless` on
+  iOS), Adwaita `.flat`, WinUI's subtle text button. All nine bindings
+  name it; tools/check-sugar-surface.py's role-vocabulary census holds
+  every role's NAME in all nine, since the sugar sweep saw only the two
+  roles that have constructors. The task rows' Details and the project
+  rows' Open wear it.
+- **R7 — a stamped row spans its host column** (TAKEN 2026-09-05, the
+  §5 finding of the same day): a For's stamped root Row takes the
+  column's width on GTK, WinUI and Compose as it already did on SwiftUI
+  — DESIGN's nested-container rule applied to stamped copies. THE
+  MECHANISM WAS NOT THE ROW: a For is a real Column widget (the core's
+  CreateFor), a Column inside a Column does not cross, and under the
+  start default it hugged while its stamped rows dutifully filled IT —
+  so `expect_fills row@task[t1]` passes with the defect intact (the GTK
+  agent's reading, confirmed by the readers). GTK and Compose mark a
+  vertical host that holds stamped Row copies and give it fill; WinUI
+  marks the same host (its reindex reads the mark as a crossing child)
+  AND had a second hug one layer up, NavigationView's content presenter
+  templatebound to Left/Top, now stamped Stretch — the first Windows
+  capture after the pane fix alone still showed Details beside the
+  title, which is how the For column's own hug was told apart. Held by
+  `expect_breadth column@inbox_list` on every lane, for which
+  expect_breadth accepts a nested container (it refused one before,
+  and no other verb reads a container's own extent in its parent). The
+  list is NOT grown for it: a first draft grew it so `expect_fills`
+  could read tracks, and on the iPhone a grown column of two rows
+  spread them into equal bands down the screen — the maintainer caught
+  it on the capture; breadth reads a plain column's geometry as it is.
+- **R8 — `expect_order` keeps its bare-label reading** (REFUSED
+  2026-09-05, after being built on three harnesses and run on one). The
+  proposal was that a container child that is not itself a label report
+  the first label inside it, so a row carrying a checkbox and a button
+  could still be ordered by its title. The iOS lane refused it on
+  tools/scenes/feed.steps, whose first line documents the rule it leans
+  on: the order is the notes ALONE because a promoted note becomes a row
+  and LEAVES the order — that is how the scene observes a variant
+  switch, and a deeper reading would have kept the promoted note in
+  place and blinded the scene. A container of mixed rows wants a verb of
+  its own if a scene ever needs one; none does today, and the project
+  screen's rows stay bare labels.
+- **R9 — a pushed screen on Compose shows a back arrow** in its top bar
+  (TAKEN 2026-09-05, off the Android Details capture that offered no way
+  back but the system gesture), taking the route the gesture takes.
+- **The Details screen is one grid**, three rows of caption, picker and
+  Clear, so the Clear buttons share a column edge — the maintainer's
+  first ask on the captures ("The Clear buttons should be aligned with
+  themselves").
 
 ## §5 — findings ledger
 
@@ -228,9 +298,90 @@ the gate or trap it became.
   Compose: the For's stamped rows take the column's width on SwiftUI and
   hug their content elsewhere, so the spacer has nothing to take. DESIGN's
   layout rule says a nested container maximizes its own main axis; the
-  three widget backends do not apply it to a stamped row. Unfixed as of
-  this note; it is the first case the ledgered list-row layout scene
-  should assert, and a three-backend fix once it does.
+  three widget backends did not apply it to a stamped row. FIXED
+  2026-09-05 under R7 on all three (R7 records the true mechanism, which
+  was the For's own column and, on WinUI, the section pane), held by
+  `expect_breadth column@inbox_list` in tasks.steps on every lane; the
+  ledgered list-row layout scene keeps its other shapes.
+- **2026-09-05, the same captures — the platform's row defaults are not
+  the app's.** A row aligned its children to the top (Compose drew "Buy
+  milk" flush against the row's top edge beside a taller checkbox; the
+  mac and WinUI happened to look centred only because their controls
+  were of a height), and the trailing Details was the platform's default
+  bordered button, on Material a large rounded rectangle beside small
+  text. Both were kaya's defaults, not bugs in any backend, and the
+  maintainer rejected them on sight. R5 (rows centre) and R6 (the plain
+  role) are the answer; the row default is emitted by the core so no
+  backend's own default can drift from it.
+- **2026-09-05 — a row of same-size text reads centre AND baseline.**
+  `expect_aligned row@task[t1] "center"` passed on the mac, the iPhone
+  and GTK and failed on Compose with `aligns "ambiguous
+  (center|baseline)"`: the classifier answers from geometry alone, and
+  a centred row whose text children share a font size has coinciding
+  baselines too, within its 2px tolerance, on the one toolkit where the
+  label and the text button happened to agree. The classifier is right
+  to refuse a guess; the guard moved to align.steps' `row@plain`, whose
+  tall no-baseline image beside one label leaves centre the only fit.
+  The lesson for any future `expect_aligned` line: pick geometry that
+  separates the modes, never a row of look-alike text.
+- **2026-09-05 — the Details grid overflows a 320dp Android phone.**
+  Three columns of caption, picker and Clear fit the desktops and the
+  iPhone (whose pickers are compact buttons), and overflow on Compose,
+  whose date and time pickers are 280dp text fields: the grid centres
+  in the screen and clips both the captions and the Clear buttons. Two
+  remedies, both rulings: widen the breakpoint setters from axis-only to
+  `columns` (adaptive-layout D6's open slot — compact -> one column),
+  or lower Compose's pickers as content-sized buttons that open the M3
+  dialogs, the shape iOS and the three desktops already have. BOTH TAKEN
+  2026-09-05 ("okay sounds good"): the Compose field is as wide as its
+  value (Material's 280dp text-field minimum dropped; measured by
+  rememberTextMeasurer, a grower still takes its track), which alone
+  still overflowed a 320dp phone by some 30dp a side, and the grid
+  folds to ONE column under compact through `columns_when(compact, 1)`
+  — the breakpoint setters widened from axis-only to a grid's columns
+  (adaptive-layout D6.2, all nine bindings, adaptive.steps' grid@sheet
+  asserting 1 and 3 on every lane). And the Details column scrolls
+  now: folded to one column the form is taller than a phone, and the
+  first Android capture of the fold showed its tail under the tab bar
+  and its first caption drawn over the notes field — a column squeezed
+  past its content on Compose; a form's platform idiom is a scrolling
+  one on every platform, and on the desktops the scroll is invisible.
+- **2026-09-05, the folded iPhone form — mechanical, not idiomatic.**
+  Under compact the Details grid folds to caption, value and Clear
+  stacked three deep per field, which fits and scrolls but reads heavy
+  against the platform's own form idiom (one row per field, the value
+  trailing, clearing inside the value's own control). The fold is what
+  `columns` alone can say; a phone-shaped form is a layout question for
+  a later slice, not a defect of the breakpoint.
+- **2026-09-05, seen on the folded Android form — a section's scroll runs
+  under the bottom bar.** The Details form's last field is cut at the
+  NavigationBar's top edge and continues behind it: on Compose a
+  section's content extends to the window's bottom and the opaque bar
+  covers it, where Material's own Scaffold ends content above the bar
+  (iOS's translucent tab bar is the one platform where content under
+  the bar is the idiom). Recorded, not fixed here: a Compose sections
+  layout question for its own slice.
+- **2026-09-05, the Windows captures — a boxed hamburger, and a back
+  arrow inside the content.** Both were kaya's WinUI arm, not the
+  platform: the window gave no control initial focus, so XAML seated it
+  on the first tab stop (the pane toggle) and drew its keyboard focus
+  visual there on a launch no pointer had touched; and a pushed entry's
+  back button was the backend's own row above the content, a shape from
+  before sections. The maintainer's ruling on the layout ("dont
+  vertically stack the back arrow above the hamburger icon"): the
+  Windows 11 Settings shape — NavigationView's own back button alone at
+  the pane's top left, the pane toggle hidden while the pane is
+  expanded and shown only in the collapsed modes, and initial focus
+  seated in the section's content (its first focusable control, on the
+  pane's Loaded). The harness `back` drives the pane's button through
+  the same user_back route and stops where the button is disabled.
+- **2026-09-05 — GTK's picture shrinks under pressure, the other three
+  do not.** align.steps' `row@plain` read "stretch" on the linux lane
+  alone: GtkPicture's default can_shrink reports a 0x0 minimum, so a
+  root column short of room squeezed the plain row to its label's
+  height and the 2x64 image to 40px, and the label then spanned the row.
+  Measured with the classifier's new `KAYA_ALIGN_TRACE` instrument
+  (docs/HACKING.md); GTK images hold their intrinsic size now.
 - **2026-09-05 — there is no checkbox-state observation.** `expect
   checkbox@done[t3] checked` reads a LABEL on every harness; no scene had
   ever asserted a checkbox's state. The scene proves completion through

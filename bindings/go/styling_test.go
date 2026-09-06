@@ -282,7 +282,7 @@ func TestTheRootIsTheStylingWall(t *testing.T) {
 		want    string
 	}{
 		{"role-on-label", true, "role destructive does not fit Label"},
-		{"role-unknown", true, "9 is not a role (destructive=1, prominent=2, heading=3, caption=4)"},
+		{"role-unknown", true, "9 is not a role (destructive=1, prominent=2, heading=3, caption=4, plain=5)"},
 		{"inset-negative", true, "window inset must be finite and non-negative, got -1"},
 		{"brand-twice", true, "set_brand_accent called twice"},
 		{"role-on-button", false, "THE ROOT ACCEPTED IT"},

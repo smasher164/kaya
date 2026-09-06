@@ -54,6 +54,65 @@ func TestStackWhenRidesOneBreakpointRecord(t *testing.T) {
 	}
 }
 
+// The twin one prop over: the count rides as an F64, which is what
+// TxSetColumns writes and what the core's Prop::Columns arm reads.
+func TestColumnsWhenRidesOneBreakpointRecord(t *testing.T) {
+	app := NewApp()
+	var sheet uint64
+	recs := queued(t, app, func(tx *Tx) {
+		sheet = tx.Grid(3, func() {}).A11yID("sheet").ColumnsWhen(SizeClassCompact, 1).id
+	})
+
+	at := recordsOfKind(recs, txCreateBreakpoint)
+	if len(at) != 1 {
+		t.Fatalf("ColumnsWhen queued %d breakpoint records, want exactly 1", len(at))
+	}
+	rec := recs[at[0]]
+	if w := binary.LittleEndian.Uint64(rec[8:]); w != 0 {
+		t.Fatalf("the breakpoint named window %d, want the primary (0) — it keys "+
+			"on WINDOW width, never the grid's own", w)
+	}
+	when, next := parseValue(rec, 16)
+	if when != int64(SizeClassCompact) {
+		t.Fatalf("size class rode as %#v, want i64 SizeClassCompact — the core "+
+			"panics on any other tag", when)
+	}
+	if n := binary.LittleEndian.Uint32(rec[next:]); n != 1 {
+		t.Fatalf("the record declares %d setters, want 1", n)
+	}
+	if n := binary.LittleEndian.Uint32(rec[next+8:]); n != 3 {
+		t.Fatalf("one setter carries %d values, want 3 — the core asserts "+
+			"count*3", n)
+	}
+	want := []any{int64(sheet), int64(PropColumns), float64(1)}
+	flat := next + 16
+	for i, w := range want {
+		var got any
+		got, flat = parseValue(rec, flat)
+		if got != w {
+			t.Fatalf("setter value %d is %#v, want %#v — the thirds are widget, "+
+				"prop, value BY POSITION, and the count is an f64", i, got, w)
+		}
+	}
+}
+
+// THE SENTENCE IS THE ASSERTION, as StackWhen's is: emit's own chokepoint
+// panics here too.
+func TestColumnsWhenOutsideItsBuildPanicsNamingItself(t *testing.T) {
+	app := NewApp()
+	var sheet Widget
+	app.Build(func(tx *Tx) { sheet = tx.Grid(3, func() {}) })
+
+	defer func() {
+		got, _ := recover().(string)
+		if !strings.Contains(got, "ColumnsWhen on a widget outside its build transaction") {
+			t.Fatalf("a late ColumnsWhen panicked with %q — the breakpoint would never "+
+				"ship and the grid would never adapt, so the refusal names the call", got)
+		}
+	}()
+	sheet.ColumnsWhen(SizeClassCompact, 1)
+}
+
 // The dynamic path writes the same property the breakpoint moves, so a
 // handler's flip and a width crossing are one observable.
 func TestSetAxisWritesTheAxisPropConstant(t *testing.T) {

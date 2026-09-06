@@ -561,6 +561,58 @@ if role_fake != 18:
                   f"constructor that exists nowhere)")
 
 
+# --- THE ROLE VOCABULARY, in all nine --------------------------------
+# A role is a wire NUMBER the generator hands every binding, and a NAME
+# each binding spells by hand in its own enum, class or table — the
+# sugar sweep above sees only the two roles that have constructors, so
+# `plain` (ruled 2026-09-05, docs/tasks-plan.md R6) would have shipped
+# with the number in nine wire files and the name in two. Go alone
+# spells a role AS its wire constant (`Role(RoleCaption)`), which is why
+# its row reads the generated file. One call per role, nine patterns.
+def check_role_name(snake, pascal, upper, findings=None):
+    def want(lang, rel, pattern):
+        global status
+        if not grep_file(pattern, rel):
+            msg = (f"check-sugar-surface: {lang} does not spell the "
+                   f"'{snake}' role (wanted /{pattern}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+    want("rust", "crates/kaya/src/app.rs", f"^    {pascal} = \\d,$")
+    want("python", "bindings/python/kaya/__init__.py",
+         f"^    {upper} = wire.ROLE_{upper}$")
+    want("go", "bindings/go/kaya_wire.go", f"^\\tRole{pascal} = \\d+$")
+    want("csharp", "bindings/csharp/KayaApp.cs",
+         f"^    {pascal} = KayaWire.Role{pascal},$")
+    want("java", "bindings/java/dev/kaya/KayaApp.java",
+         f"^        {upper}\\(KayaWire.ROLE_{upper}\\)[,;]$")
+    want("swift", "bindings/swift/KayaApp.swift", f"^    case {snake} = \\d$")
+    want("haskell", "bindings/haskell/KayaApp.hs", f"^roleWire {pascal} = \\d$")
+    want("ocaml", "bindings/ocaml/kaya_app.ml",
+         f"^  \\| {pascal} -> Int64.of_int Kaya_wire.role_{snake}$")
+    want("js", "bindings/js/kaya/index.ts", f"^  {upper}: wire.ROLE_{upper},$")
+
+
+for role in (("destructive", "Destructive", "DESTRUCTIVE"),
+             ("prominent", "Prominent", "PROMINENT"),
+             ("heading", "Heading", "HEADING"),
+             ("caption", "Caption", "CAPTION"),
+             ("plain", "Plain", "PLAIN")):
+    check_role_name(*role)
+
+fake = []
+check_role_name("kaya_fake_role", "KayaFakeRole", "KAYA_FAKE_ROLE",
+                findings=fake)
+name_fake = sum(1 for m in fake
+                if "does not spell the 'kaya_fake_role' role" in m)
+if name_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({name_fake}/9 role-name patterns fired for a role "
+                  f"that exists nowhere)")
+
+
 # --- THE SIZE-POLICY SURFACE, in all nine ---------------------------
 # WHAT A CANVAS DOES WITH A TRACK THAT IS NOT ITS VIEWBOX
 # (docs/canvas-plan.md §3.2.1), invisible to every sweep above for the

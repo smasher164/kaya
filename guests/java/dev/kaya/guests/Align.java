@@ -25,16 +25,17 @@ public final class Align {
             KayaApp.Signal<String> base = tx.signal("base");
             KayaApp.Signal<String> anchor = tx.signal("anchor");
             KayaApp.Signal<String> fit = tx.signal("fit");
+            KayaApp.Signal<String> plain = tx.signal("plain probe");
 
             tx.mount(tx.column(() -> {
                 tx.column(() -> { // the center trio
                     tx.label(probe); // label#0
                     tx.button("mid");
-                    tx.row(() -> { // row#0: the baseline trio
+                    tx.row(() -> { // the baseline trio
                         tx.label(base); // label#1
                         tx.button("tick");
                         tx.image(TALL_PNG);
-                    }).align(KayaApp.Align.BASELINE);
+                    }).align(KayaApp.Align.BASELINE).a11yId("baseline");
                 }).align(KayaApp.Align.CENTER).a11yId("centered");
                 tx.row(() -> { // row#1: the stretch pair's host
                     tx.label(anchor); // label#2
@@ -43,6 +44,12 @@ public final class Align {
                         tx.button("wide");
                     }).grow(1.0).align(KayaApp.Align.STRETCH).a11yId("fitcol");
                 });
+                // row@plain: NO align, so the core's centre default is what
+                // the scene reads
+                tx.row(() -> {
+                    tx.label(plain).a11yId("plainlabel"); // label#4
+                    tx.image(TALL_PNG);
+                }).a11yId("plain");
             }).align(KayaApp.Align.STRETCH).a11yId("root"));
             return null;
         });

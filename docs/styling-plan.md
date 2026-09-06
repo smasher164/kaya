@@ -173,7 +173,14 @@ UIA and Compose have none — the destructive/prominent carve-out one
 role over, so the scene does not pretend to freeze it. On a grouped
 screen (adaptive-layout-plan D7.5) heading and caption are the section
 header and footer seats, and `heading()`/`caption()` are one-word sugar
-for label+role in all eight bindings. Lowerings:
+for label+role in all eight bindings. `plain` (buttons) joined
+2026-09-05 (docs/tasks-plan.md R6) as the LOW emphasis — a list row's
+accessory, which must not out-shout the row: a Material TextButton,
+borderless on Apple (AppKit `isBordered = false` in the accent tint,
+SwiftUI `.borderless`), Adwaita `.flat`, WinUI's subtle text button.
+Every role's NAME is held in all nine bindings by
+tools/check-sugar-surface.py's role-vocabulary census, because the sugar
+sweep sees only the two roles that have constructors. Lowerings:
 
 - destructive: `.buttonRole(.destructive)` / M3 error-role container /
   `.destructive-action` / (WinUI has no first-class destructive

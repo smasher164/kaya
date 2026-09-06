@@ -933,6 +933,8 @@
 
 #define KAYA_ROLE_CAPTION 4
 
+#define KAYA_ROLE_PLAIN 5
+
 /**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
  * D6). A closed set of CONCEPTS each backend maps to its own platform's

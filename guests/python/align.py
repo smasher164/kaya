@@ -1,6 +1,6 @@
 """The align conformance scene, Python port — see
 guests/rust/align.rs and tools/scenes/align.steps for the full
-rationale. The stretched root spans two container children across the
+rationale. The stretched root spans three container children across the
 window; column#1 centers children of three different natural widths;
 the row aligns baselines across a label, a button, and a tall
 no-baseline image whose bottom sits ON the baseline (the CSS
@@ -25,6 +25,7 @@ with app.window():
     base = kaya.signal("base")
     anchor = kaya.signal("anchor")
     fit = kaya.signal("fit")
+    plain = kaya.signal("plain probe")
 
     with kaya.column(align="stretch") as root:
         root.a11y_id("root")
@@ -32,7 +33,8 @@ with app.window():
             centered.a11y_id("centered")
             kaya.label(bind=probe)  # label#0
             kaya.button("mid")
-            with kaya.row(align="baseline"):  # row#0: the baseline trio
+            with kaya.row(align="baseline") as baseline:  # the baseline trio
+                baseline.a11y_id("baseline")
                 kaya.label(bind=base)  # label#1
                 kaya.button("tick")
                 kaya.image(TALL_PNG)
@@ -42,5 +44,11 @@ with app.window():
                 fitcol.a11y_id("fitcol")
                 kaya.label(bind=fit)  # label#3
                 kaya.button("wide")
+        # row@plain: NO align, so the core's centre default is what the
+        # scene reads
+        with kaya.row() as plain_row:
+            plain_row.a11y_id("plain")
+            kaya.label(bind=plain).a11y_id("plainlabel")  # label#4
+            kaya.image(TALL_PNG)
 
 sys.exit(app.run())

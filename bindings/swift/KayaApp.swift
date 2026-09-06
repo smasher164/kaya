@@ -343,6 +343,9 @@ enum KayaRole: Int64 {
     /// A heading's counterpart under the content it explains: the
     /// platform's caption/footnote tier.
     case caption = 4
+    /// An action at low emphasis: a row's accessory (Details, Open).
+    /// Buttons only.
+    case plain = 5
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
@@ -409,6 +412,19 @@ struct KayaWidget {
         tx.tx.createBreakpoint(
             0, .i64(when.wire), 1,
             [.i64(Int64(id)), .i64(Int64(KAYA_PROP_AXIS)), .i64(Int64(KAYA_AXIS_VERTICAL))])
+        return self
+    }
+
+    /// Lay this grid out in `columns` columns while the window's SIZE
+    /// CLASS is `when`; the authored count returns when the class does
+    /// (docs/adaptive-layout-plan.md D6.2). The root refuses a non-grid
+    /// target at batch.
+    @discardableResult
+    func columnsWhen(_ when: KayaSizeClass, _ columns: Int) -> KayaWidget {
+        let (_, tx) = kayaDeclaring()
+        tx.tx.createBreakpoint(
+            0, .i64(when.wire), 1,
+            [.i64(Int64(id)), .i64(Int64(KAYA_PROP_COLUMNS)), .f64(Double(columns))])
         return self
     }
 

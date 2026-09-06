@@ -2716,9 +2716,10 @@ export const Role = Object.freeze({
   PROMINENT: wire.ROLE_PROMINENT,
   HEADING: wire.ROLE_HEADING,
   CAPTION: wire.ROLE_CAPTION,
+  PLAIN: wire.ROLE_PLAIN,
 });
 export type RoleValue = (typeof Role)[keyof typeof Role];
-export type RoleName = "destructive" | "prominent" | "heading" | "caption";
+export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain";
 const ROLE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Role).map(([k, v]) => [k.toLowerCase(), v]));
 
 function roleValue(role: unknown): number {
@@ -2785,12 +2786,29 @@ export function scroll(optsOrBody?: GrowOption | (() => void), body?: () => void
   return new Container(handle).run(run);
 }
 
+export type GridOptions = ContainerOptions & { columnsWhen?: [SizeClass, number] };
+
 /** A grid container laying its children out row-major into `columns`
- * columns, each at its NATURAL width, aligned across rows. */
-export function grid(columns: number, optsOrBody?: ContainerOptions | (() => void), body?: () => void): Widget {
+ * columns, each at its NATURAL width, aligned across rows. `columnsWhen`
+ * is a `[size class, count]` pair laying it out in that many columns
+ * while the window's size class is the named one — a core-evaluated
+ * breakpoint (docs/adaptive-layout-plan.md D6.2). */
+export function grid(columns: number, optsOrBody?: GridOptions | (() => void), body?: () => void): Widget {
   const [opts, run] = optsAndOptionalBody(optsOrBody, body);
   const handle = widget(wire.KIND_GRID);
   records().push(wire.tx_set_columns(handle.id, Number(columns)));
+  if (opts.columnsWhen !== undefined) {
+    const pair = opts.columnsWhen;
+    if (!Array.isArray(pair) || pair.length !== 2 || pair[0] !== COMPACT || !Number.isInteger(pair[1])) {
+      throw new TypeError(
+        `kaya: columnsWhen takes a [size class, count] pair — kaya.COMPACT is the only class today — not ${runtime.describe(opts.columnsWhen)} (docs/adaptive-layout-plan.md D6.2)`,
+      );
+    }
+    if (_tplDepth > 0) {
+      throw new TypeError("kaya: columnsWhen is live-only — a breakpoint's setters name live widgets, and a template grid is a blueprint stamped per entry (docs/adaptive-layout-plan.md D6.2)");
+    }
+    records().push(wire.tx_create_breakpoint(0, new I64(wire.SIZE_CLASS_COMPACT), 1, [new I64(handle.id), new I64(wire.PROP_COLUMNS), Number(pair[1])]));
+  }
   setLayout(handle, opts);
   return new Container(handle).run(run);
 }

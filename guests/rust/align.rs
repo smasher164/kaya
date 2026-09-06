@@ -9,6 +9,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let base = tx.signal("base");
         let anchor = tx.signal("anchor");
         let fit = tx.signal("fit");
+        let plain = tx.signal("plain probe");
 
         let root = tx
             .column(|tx| {
@@ -17,12 +18,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.label(probe); // label#0
                     tx.button("mid");
                     tx.row(|tx| {
-                        // row#0: the baseline trio
+                        // row@baseline: the baseline trio
                         tx.label(base); // label#1
                         tx.button("tick");
                         tx.image(&TALL_PNG[..]);
                     })
-                    .align(Align::Baseline);
+                    .align(Align::Baseline)
+                    .a11y_id("baseline");
                 })
                 .align(Align::Center)
                 .a11y_id("centered");
@@ -38,6 +40,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .align(Align::Stretch)
                     .a11y_id("fitcol");
                 });
+                tx.row(|tx| {
+                    // row@plain: NO align, so the core's centre default is
+                    // what the scene reads
+                    tx.label(plain).a11y_id("plainlabel"); // label#4
+                    tx.image(&TALL_PNG[..]);
+                })
+                .a11y_id("plain");
             })
             .align(Align::Stretch)
             .a11y_id("root")

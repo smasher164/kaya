@@ -43,5 +43,11 @@ main = kayaMain $ \app -> do
           labelBound two -- label#4
         ]
 
-    root <- column [pure dash, pure steadyCol, pure flipButton, pure narrow]
+    -- grid@sheet: three columns regular, one compact (D6.2).
+    cells <- mapM (signal . VStr) ["c1", "c2", "c3", "c4", "c5", "c6"]
+    sheet <- grid 3 (map labelBound cells) -- label#5..#10
+    setA11yId sheet "sheet"
+    columnsWhen sheet Compact 1
+
+    root <- column [pure dash, pure steadyCol, pure flipButton, pure narrow, pure sheet]
     mount root

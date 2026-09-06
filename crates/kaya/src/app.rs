@@ -952,6 +952,13 @@ impl BreakpointSetters {
         self.setters
             .push((widget, Prop::Axis, Value::I64(axis.wire())));
     }
+
+    /// Set this grid's column count while the breakpoint holds (ruled
+    /// 2026-09-05: a three-column form folds to one on a phone).
+    pub fn columns(&mut self, widget: WidgetId, columns: usize) {
+        self.setters
+            .push((widget, Prop::Columns, Value::F64(columns as f64)));
+    }
 }
 
 /// A just-built widget: the chain handle every live-zone constructor
@@ -981,6 +988,17 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         let id = self.id;
         self.tx.breakpoint_when(when, |bp| {
             bp.axis(id, Axis::Vertical);
+        });
+        self
+    }
+
+    /// Lay this grid out in `columns` columns while the window's size class
+    /// is `when` — [`Tx::breakpoint_when`] chained; the authored count
+    /// returns when the class does. The root refuses a non-grid target.
+    pub fn columns_when(self, when: SizeClass, columns: usize) -> Self {
+        let id = self.id;
+        self.tx.breakpoint_when(when, |bp| {
+            bp.columns(id, columns);
         });
         self
     }
@@ -5341,6 +5359,10 @@ pub enum Role {
     /// the platform has one (GTK's Caption role), the same carve-out
     /// destructive and prominent live under.
     Caption = 4,
+    /// An action at LOW emphasis — a row's accessory (Details, Open) that
+    /// must not out-shout the content beside it: a text button on Material,
+    /// borderless on Apple, `.flat` on GTK, the subtle style on WinUI.
+    Plain = 5,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum "platform";

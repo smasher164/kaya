@@ -15,7 +15,10 @@ expect_axis row@dash "horizontal"
 # (the MODS tables in tools/lib/lanes/{ios,android}.py).
 resize_window 480x400
 expect_axis row@narrow "vertical"
+# The grid's columns follow the class too (D6.2, ruled 2026-09-05).
+expect_grid_columns grid@sheet 1
 # Crossing back AUTO-REVERTS: the diff-against-base rule, so there is no
 # second declaration anywhere.
 resize_window 900x600
 expect_axis row@narrow "horizontal"
+expect_grid_columns grid@sheet 3

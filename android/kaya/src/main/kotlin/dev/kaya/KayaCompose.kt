@@ -220,6 +220,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -1137,7 +1138,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x07f8f30026825b06uL
+    private const val SPEC_HASH: ULong = 0x80fb73fecaaf397fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1378,6 +1379,7 @@ object KayaCompose {
     const val ROLE_PROMINENT = 2L
     const val ROLE_HEADING = 3L
     const val ROLE_CAPTION = 4L
+    const val ROLE_PLAIN = 5L
     // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     // docs/styling-plan.md D6). Long, like the role values: the prop
     // rides as an i64 and the model's field is what the render arms
@@ -1649,7 +1651,7 @@ object KayaCompose {
      * (materialized as the Activity task label, the surface-title
      * path expect_title reads), the window's own when it empties. */
     internal fun refreshNavTitle() {
-        val top = KayaSceneModel.navEntries.lastOrNull()
+        val top = kayaActiveEntries().lastOrNull()
         mountedActivity?.title = top?.title ?: KayaSceneModel.windowTitle
     }
 
@@ -2128,6 +2130,7 @@ object KayaCompose {
                     // Programmatic and QUIET (the echo doctrine).
                     b.long // window
                     KayaSceneModel.selectedSection = b.long
+                    refreshNavTitle()
                 }
                 APPLY_SET_SECTION_PROP -> {
                     val sid = b.long
@@ -7253,15 +7256,11 @@ object KayaCompose {
                     }
                     "expect_breadth" -> {
                         // The cross-axis twin of expect_fills' widget half
-                        // (harness.rs Step::ExpectBreadth): the widget's
+                        // (harness.rs Step::ExpectBreadth): the target's
                         // recorded cross rect against its container's
                         // recorded cross breadth, the readers expect_aligned
-                        // classifies from. A container target is refused as
-                        // harness.rs refuses it.
+                        // classifies from; a nested container is a target too.
                         val short = onUi(activity) {
-                            if (parts[1].startsWith("row") || parts[1].startsWith("column")) {
-                                return@onUi "${parts[1]} is a container; expect_breadth reads a widget"
-                            }
                             kayaWidgetTarget(parts[1])?.let { widget ->
                                 val parent = (KayaSceneModel.columns + KayaSceneModel.rows)
                                     .firstOrNull { c -> c.children.any { it.id == widget.id } }
@@ -9423,15 +9422,14 @@ fun KayaRender(
     isRoot: Boolean = false,
     flexVertical: Boolean? = null,
     flexStretch: Boolean = false,
-    flexAlign: Long = KayaCompose.ALIGN_START,
 ) {
     val dnd = kayaDragAndDropSurface(node)
     if (dnd == null) {
-        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch)
         return
     }
     Box(modifier = dnd) {
-        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch)
     }
 }
 
@@ -9452,10 +9450,9 @@ private fun KayaRenderHelped(
     isRoot: Boolean,
     flexVertical: Boolean?,
     flexStretch: Boolean,
-    flexAlign: Long,
 ) {
     if (node.help.isEmpty()) {
-        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch)
         return
     }
     TooltipBox(
@@ -9471,7 +9468,7 @@ private fun KayaRenderHelped(
         // docs/tooltip-plan.md §6).
         modifier = Modifier.semantics { onLongClick(label = node.help, action = null) },
     ) {
-        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch)
     }
 }
 
@@ -9483,11 +9480,10 @@ private fun KayaRenderAnchored(
     isRoot: Boolean,
     flexVertical: Boolean?,
     flexStretch: Boolean,
-    flexAlign: Long,
 ) {
     val attachment = KayaSceneModel.contextMenus[node.id]
     if (attachment == null) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
         return
     }
     Box(
@@ -9498,7 +9494,7 @@ private fun KayaRenderAnchored(
             onLongClick = { KayaSceneModel.openContextWidget = node.id },
         )
     ) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch, flexAlign)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
         val open = KayaSceneModel.openContextWidget == node.id
         DropdownMenu(
             expanded = open,
@@ -9559,6 +9555,16 @@ private fun KayaRenderAnchored(
     }
 }
 
+// A For over a row template: its host arranges vertically and its
+// children are stamped copies rooted in a Row (docs/tasks-plan.md §4, R7).
+private fun kayaStampsRows(node: KayaNode): Boolean {
+    val vertical =
+        (node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 1L
+    return vertical && node.children.any {
+        it.kind == KayaCompose.KIND_ROW && KayaCompose.tableStamp(it.tag) != null
+    }
+}
+
 /**
  * A HUGGING CONTAINER PINS ITSELF TO ITS CONTENT before the breadth
  * ruling's fill resolves against it: `fillMaxWidth()` takes the
@@ -9574,6 +9580,8 @@ private fun kayaHugCross(
 ): Modifier {
     val crossVertical = node.kind == KayaCompose.KIND_ROW
     if (!crossVertical && node.kind != KayaCompose.KIND_COLUMN) return Modifier
+    // A For's stamped rows span it (docs/tasks-plan.md §4, R7).
+    if (!crossVertical && kayaStampsRows(node)) return Modifier
     val pinned =
         isRoot || if (flexVertical == crossVertical) node.grow > 0 else flexStretch
     val crossingKind =
@@ -9607,12 +9615,6 @@ private fun KayaRenderCore(
      * nested-container GAP).
      */
     flexStretch: Boolean = false,
-    /**
-     * That container's align MODE, for the one kind whose cross-axis
-     * default is not the container's: a scroll spans under start and
-     * stretch (ruled 2026-09-02) and is positioned by center and end.
-     */
-    flexAlign: Long = KayaCompose.ALIGN_START,
 ) {
     // The mounted root fills its window — the same normalization GTK
     // and UIKit needed. A Compose Column wraps its width even when
@@ -9635,13 +9637,11 @@ private fun KayaRenderCore(
             boxFill =
                 if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
         }
-        // A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
-        // under stretch (ruled 2026-09-02): a viewport is a region, not
-        // content — hugging left a 79pt pannable strip in a 375pt window
-        // on iOS (docs/traps.md). Center and end still position a hugging
-        // one; the scene's expect_breadth holds this on every lane.
-        val scrollSpans = node.kind == KayaCompose.KIND_SCROLL &&
-            (flexAlign == KayaCompose.ALIGN_START || flexAlign == KayaCompose.ALIGN_STRETCH)
+        // A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode
+        // (DESIGN.md Layout): a viewport is a region, not content — hugging
+        // left a 79pt pannable strip in a 375pt window on iOS
+        // (docs/traps.md); the scene's expect_breadth holds this on every lane.
+        val scrollSpans = node.kind == KayaCompose.KIND_SCROLL
         if (flexStretch || crossing || scrollSpans) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
@@ -9774,7 +9774,8 @@ private fun KayaRenderCore(
                         for (c in 0 until cols) {
                             val i = r * cols + c
                             if (i >= placeables.size) break
-                            placeables[i].placeRelative(x, y)
+                            // A cell centres in its row, as a row's children do (R5).
+                            placeables[i].placeRelative(x, y + (rowH[r] - placeables[i].height) / 2)
                             KayaSceneModel.cellMinX[node.children[i].id] = x
                             x += colW[c] + gapPx
                         }
@@ -9901,7 +9902,6 @@ private fun KayaRenderCore(
                                 child,
                                 flexVertical = true,
                                 flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
-                                flexAlign = node.align,
                             )
                         }
                     }
@@ -9963,7 +9963,6 @@ private fun KayaRenderCore(
                                 child,
                                 flexVertical = false,
                                 flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
-                                flexAlign = node.align,
                             )
                         }
                     }
@@ -9997,6 +9996,14 @@ private fun KayaRenderCore(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
+                    ) {
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                    }
+                // The row accessory's low-emphasis rung (docs/tasks-plan.md §4, R6).
+                KayaCompose.ROLE_PLAIN ->
+                    TextButton(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = boxFill.then(a11y),
                     ) {
                         Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
@@ -11346,12 +11353,13 @@ fun KayaRoot() {
     }
 
     // The system back gesture, the user-sovereign POP: enabled only
-    // while the stack has entries, and DISABLED while both panes are on
-    // screen — in the split arm the top entry covers nothing, so an
-    // enabled handler pops to a blank detail pane. Compose's own rule,
-    // where canNavigateBack reports false once both panes are visible.
+    // while the ACTIVE surface's stack has entries, and DISABLED while
+    // both panes are on screen — in the split arm the top entry covers
+    // nothing, so an enabled handler pops to a blank detail pane.
+    // Compose's own rule, where canNavigateBack reports false once both
+    // panes are visible.
     androidx.activity.compose.BackHandler(
-        enabled = KayaSceneModel.navEntries.isNotEmpty() && !kayaSplitArm()
+        enabled = kayaActiveEntries().isNotEmpty() && !kayaSplitArm()
     ) { kayaUserBack() }
 
     KayaSceneModel.alertId?.let { alert ->
@@ -11685,10 +11693,20 @@ fun KayaMenuTopBar() {
             // the title's visible materialization on this platform, and
             // the task label is the other one (see TOOLBAR_TITLE_TAG).
             Text(
-                KayaSceneModel.navEntries.lastOrNull()?.title
+                kayaActiveEntries().lastOrNull()?.title
                     ?: KayaSceneModel.windowTitle,
                 modifier = Modifier.testTag(KayaCompose.TOOLBAR_TITLE_TAG),
             )
+        },
+        navigationIcon = {
+            if (kayaActiveEntries().isNotEmpty()) {
+                IconButton(onClick = { kayaUserBack() }) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                    )
+                }
+            }
         },
         actions = {
             // Promotion is CATALOG PREORDER, recomputed on every
@@ -12122,33 +12140,30 @@ fun KayaSectionsScaffold(active: KayaSection) {
 fun kayaUserSelectsSection(sid: Long) {
     if (KayaSceneModel.selectedSection == sid) return
     KayaSceneModel.selectedSection = sid
+    KayaCompose.refreshNavTitle()
     KayaPresent.emitSectionSelected(0, sid)
 }
+
+// The ACTIVE surface's stack: the selected section's when sections
+// exist, else the window's — the reading [kayaUserBack] takes
+// (docs/tasks-plan.md §4, R9). Every field it touches is snapshot
+// state, so a composable that calls it recomposes on a push or a pop.
+private fun kayaActiveEntries(): MutableList<KayaNavEntry> =
+    KayaSceneModel.selectedSection
+        ?.let { KayaSceneModel.sectionIndex[it] }
+        ?.entries
+        ?.takeIf { KayaSceneModel.sections.isNotEmpty() }
+        ?: KayaSceneModel.navEntries
 
 fun kayaUserBack() {
     // Back routes to the ACTIVE section's stack when sections are
     // present (back never switches sections — DESIGN.md, Sections).
-    val activeStack =
-        KayaSceneModel.selectedSection
-            ?.let { KayaSceneModel.sectionIndex[it] }
-            ?.entries
-            ?.takeIf { KayaSceneModel.sections.isNotEmpty() }
-    if (activeStack != null) {
-        val top = activeStack.lastOrNull() ?: return
-        if (top.interceptBack) {
-            KayaPresent.emitBackRequested(top.id)
-        } else {
-            activeStack.removeAt(activeStack.size - 1)
-            KayaSceneModel.navIndex.remove(top.id)
-            KayaPresent.emitEntryPopped(top.id)
-        }
-        return
-    }
-    val top = KayaSceneModel.navEntries.lastOrNull() ?: return
+    val stack = kayaActiveEntries()
+    val top = stack.lastOrNull() ?: return
     if (top.interceptBack) {
         KayaPresent.emitBackRequested(top.id)
     } else {
-        KayaSceneModel.navEntries.removeAt(KayaSceneModel.navEntries.size - 1)
+        stack.removeAt(stack.size - 1)
         KayaSceneModel.navIndex.remove(top.id)
         KayaCompose.refreshNavTitle()
         KayaPresent.emitEntryPopped(top.id)
@@ -12420,8 +12435,18 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
             if (it is PressInteraction.Release) open = true
         }
     }
+    val shown = if (isTime) kayaShownTime(context, packed) else kayaShownDate(context, packed)
+    // THE FIELD IS AS WIDE AS ITS VALUE, not Material's 280dp text-field
+    // minimum: every other platform draws a content-sized picker, and the
+    // minimum put a three-column form off both edges of a 320dp phone
+    // (docs/tasks-plan.md §5). A grower still takes its track.
+    val measurer = rememberTextMeasurer()
+    val textStyle = LocalTextStyle.current
+    val contentWidth = with(LocalDensity.current) {
+        measurer.measure(shown, style = textStyle).size.width.toDp() + 16.dp + 48.dp + 16.dp
+    }
     OutlinedTextField(
-        value = if (isTime) kayaShownTime(context, packed) else kayaShownDate(context, packed),
+        value = shown,
         onValueChange = {},
         readOnly = true,
         singleLine = true,
@@ -12431,6 +12456,7 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         // names the control instead of leaving an unnamed box beside it
         // (the checkbox arm's measurement).
         modifier = boxFill.then(a11y)
+            .then(if (node.grow > 0) Modifier else Modifier.width(contentWidth))
             .semantics(mergeDescendants = true) { this[KayaPickerKind] = "datetime" },
         trailingIcon = {
             IconButton(onClick = { open = true }) {

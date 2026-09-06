@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x07f8f30026825b06
+let kayaSpecHash: UInt64 = 0x80fb73fecaaf397f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -153,6 +153,7 @@ private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
 private let roleCaption: Int64 = 4
+private let rolePlain: Int64 = 5
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol"). APPEND-ONLY wire
 /// values; the SF Symbols spelling each maps to is kayaSFSymbol below.
 private let symbolAdd: Int64 = 1
@@ -8027,13 +8028,10 @@ private func kayaRunScript(_ script: String) {
                 }
             case "expect_breadth":
                 // The cross-axis twin of expect_fills' widget half (harness.rs
-                // Step::ExpectBreadth): the widget's cross rect against its
-                // container's breadth, both from expect_aligned's readers. A
-                // container target is refused as harness.rs refuses it.
+                // Step::ExpectBreadth): the target's cross rect against its
+                // container's breadth, both from expect_aligned's readers; a
+                // nested container is a target too.
                 let short = DispatchQueue.main.sync { () -> String? in
-                    if parts[1].hasPrefix("row") || parts[1].hasPrefix("column") {
-                        return "\(parts[1]) is a container; expect_breadth reads a widget"
-                    }
                     guard let widget = kayaAnyTarget(parts[1]) else { return nil }
                     guard
                         let parent = (kayaScene.columns + kayaScene.rows).first(where: { c in
@@ -12880,9 +12878,12 @@ func kayaIconQuadrants(_ image: CGImage) -> String? {
 /// other platform's lane.
 private struct KayaButtonStyle: PrimitiveButtonStyle {
     let prominent: Bool
+    var plain = false
     func makeBody(configuration: Configuration) -> some View {
         if prominent {
             BorderedProminentButtonStyle().makeBody(configuration: configuration)
+        } else if plain {
+            BorderlessButtonStyle().makeBody(configuration: configuration)
         } else {
             BorderedButtonStyle().makeBody(configuration: configuration)
         }
@@ -13113,7 +13114,8 @@ struct KayaRender: View {
                 ) {
                     KayaHost.emit(node.tag)
                 }
-                .buttonStyle(KayaButtonStyle(prominent: node.role == roleProminent))
+                .buttonStyle(KayaButtonStyle(
+                    prominent: node.role == roleProminent, plain: node.role == rolePlain))
                 .alignmentGuide(.top) { d in
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
@@ -13318,7 +13320,7 @@ struct KayaRender: View {
             // PARENT'S CROSS AXIS (ruled 2026-09-02): a vertical ScrollView is
             // as wide as its content, which left a 79pt pannable strip in a
             // 375pt window (docs/traps.md).
-            let scrollSpans = flexVertical != nil && (flexAlign == alignStart || flexAlign == alignStretch)
+            let scrollSpans = flexVertical != nil
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     if let content = node.children.first {
@@ -13453,6 +13455,8 @@ struct KayaRender: View {
             // default-button key equivalent.
             button.hasDestructiveAction = role == roleDestructive
             button.keyEquivalent = role == roleProminent ? "\r" : ""
+            button.isBordered = role != rolePlain
+            button.contentTintColor = role == rolePlain ? .controlAccentColor : nil
             // THE TYPEFACE'S PIPE INTO APPKIT, the tint finding's twin: an
             // NSButton never reads SwiftUI's `.font` (measured). `button.font`,
             // never `attributedTitle`: both change the pixels, but after the

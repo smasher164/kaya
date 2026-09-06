@@ -44,6 +44,15 @@ static class AdaptiveScene
                     tx.Label(bind: two); // label#4
                 }, stackWhen: SizeClass.Compact);
                 tx.SetA11yId(narrow, "narrow");
+                // grid@sheet: three columns regular, one compact (D6.2).
+                var sheet = tx.Grid(3, () =>
+                {
+                    foreach (var text in new[] { "c1", "c2", "c3", "c4", "c5", "c6" })
+                    {
+                        tx.Label(bind: tx.Signal(text)); // label#5..#10
+                    }
+                }, columnsWhen: (SizeClass.Compact, 1));
+                tx.SetA11yId(sheet, "sheet");
             }));
         });
 

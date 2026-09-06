@@ -75183,7 +75183,11 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     HeaderTemplate: usize,
                     SetHeaderTemplate: usize,
-                    DisplayMode: usize,
+                    pub DisplayMode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut NavigationViewDisplayMode,
+                    )
+                        -> windows_core::HRESULT,
                     pub IsSettingsVisible: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut bool,
@@ -75321,7 +75325,12 @@ pub mod Microsoft {
                         i64,
                     )
                         -> windows_core::HRESULT,
-                    DisplayModeChanged: usize,
+                    pub DisplayModeChanged: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveDisplayModeChanged:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -75381,7 +75390,12 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    BackRequested: usize,
+                    pub BackRequested: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveBackRequested: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         i64,
@@ -75503,6 +75517,39 @@ pub mod Microsoft {
                     pub Collapse: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    INavigationViewBackRequestedEventArgs,
+                    INavigationViewBackRequestedEventArgs_Vtbl,
+                    0xae752207_bd1b_5afa_a872_e9bbaeea0ede
+                );
+                impl windows_core::RuntimeType for INavigationViewBackRequestedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct INavigationViewBackRequestedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    INavigationViewDisplayModeChangedEventArgs,
+                    INavigationViewDisplayModeChangedEventArgs_Vtbl,
+                    0x58dcf1ea_9e56_522c_b3f8_34bd55ecaca4
+                );
+                impl windows_core::RuntimeType for INavigationViewDisplayModeChangedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct INavigationViewDisplayModeChangedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub DisplayMode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut NavigationViewDisplayMode,
                     )
                         -> windows_core::HRESULT,
                 }
@@ -112082,6 +112129,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn DisplayMode(&self) -> windows_core::Result<NavigationViewDisplayMode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DisplayMode)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn IsSettingsVisible(&self) -> windows_core::Result<bool> {
                         let this = self;
                         unsafe {
@@ -112396,6 +112454,26 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn DisplayModeChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                NavigationView,
+                                NavigationViewDisplayModeChangedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DisplayModeChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveDisplayModeChanged(&self, token: i64) -> windows_core::Result<()> {
                         let this = self;
                         unsafe {
@@ -112499,6 +112577,26 @@ pub mod Microsoft {
                                 core::mem::transmute_copy(value),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn BackRequested<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                NavigationView,
+                                NavigationViewBackRequestedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = &windows_core::Interface::cast::<INavigationView2>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).BackRequested)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveBackRequested(&self, token: i64) -> windows_core::Result<()> {
@@ -114636,6 +114734,89 @@ pub mod Microsoft {
                             b"enum(Microsoft.UI.Xaml.Controls.NavigationViewBackButtonVisible;i4)",
                         );
                 }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct NavigationViewBackRequestedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    NavigationViewBackRequestedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl NavigationViewBackRequestedEventArgs {}
+                impl windows_core::RuntimeType for NavigationViewBackRequestedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            INavigationViewBackRequestedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for NavigationViewBackRequestedEventArgs {
+                    type Vtable =
+                        <INavigationViewBackRequestedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <INavigationViewBackRequestedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for NavigationViewBackRequestedEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.NavigationViewBackRequestedEventArgs";
+                }
+                unsafe impl Send for NavigationViewBackRequestedEventArgs {}
+                unsafe impl Sync for NavigationViewBackRequestedEventArgs {}
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct NavigationViewDisplayMode(pub i32);
+                impl NavigationViewDisplayMode {
+                    pub const Minimal: Self = Self(0i32);
+                    pub const Compact: Self = Self(1i32);
+                    pub const Expanded: Self = Self(2i32);
+                }
+                impl windows_core::TypeKind for NavigationViewDisplayMode {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for NavigationViewDisplayMode {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Controls.NavigationViewDisplayMode;i4)",
+                        );
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct NavigationViewDisplayModeChangedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    NavigationViewDisplayModeChangedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl NavigationViewDisplayModeChangedEventArgs {
+                    pub fn DisplayMode(&self) -> windows_core::Result<NavigationViewDisplayMode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DisplayMode)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for NavigationViewDisplayModeChangedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            INavigationViewDisplayModeChangedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for NavigationViewDisplayModeChangedEventArgs {
+                    type Vtable = < INavigationViewDisplayModeChangedEventArgs as windows_core::Interface >::Vtable ;
+                    const IID :windows_core::GUID = < INavigationViewDisplayModeChangedEventArgs as windows_core::Interface >::IID ;
+                }
+                impl windows_core::RuntimeName for NavigationViewDisplayModeChangedEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.NavigationViewDisplayModeChangedEventArgs";
+                }
+                unsafe impl Send for NavigationViewDisplayModeChangedEventArgs {}
+                unsafe impl Sync for NavigationViewDisplayModeChangedEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct NavigationViewItem(windows_core::IUnknown);
@@ -203677,6 +203858,219 @@ pub mod Microsoft {
                 }
             }
             pub mod Input {
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct FocusManager(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    FocusManager,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl FocusManager {
+                    pub fn RemoveGotFocus(token: i64) -> windows_core::Result<()> {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveGotFocus)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn RemoveLostFocus(token: i64) -> windows_core::Result<()> {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveLostFocus)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn RemoveGettingFocus(token: i64) -> windows_core::Result<()> {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveGettingFocus)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn RemoveLosingFocus(token: i64) -> windows_core::Result<()> {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).RemoveLosingFocus)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn FindFirstFocusableElement<P0>(
+                        searchscope: P0,
+                    ) -> windows_core::Result<super::DependencyObject>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FindFirstFocusableElement)(
+                                windows_core::Interface::as_raw(this),
+                                searchscope.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn FindLastFocusableElement<P0>(
+                        searchscope: P0,
+                    ) -> windows_core::Result<super::DependencyObject>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FindLastFocusableElement)(
+                                windows_core::Interface::as_raw(this),
+                                searchscope.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetFocusedElement() -> windows_core::Result<windows_core::IInspectable> {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetFocusedElement)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetFocusedElementWithRoot<P0>(
+                        xamlroot: P0,
+                    ) -> windows_core::Result<windows_core::IInspectable>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        Self::IFocusManagerStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetFocusedElementWithRoot)(
+                                windows_core::Interface::as_raw(this),
+                                xamlroot.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IFocusManagerStatics<
+                        R,
+                        F: FnOnce(&IFocusManagerStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            FocusManager,
+                            IFocusManagerStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for FocusManager {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IFocusManager>();
+                }
+                unsafe impl windows_core::Interface for FocusManager {
+                    type Vtable = <IFocusManager as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IFocusManager as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for FocusManager {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Input.FocusManager";
+                }
+                unsafe impl Send for FocusManager {}
+                unsafe impl Sync for FocusManager {}
+                windows_core::imp::define_interface!(
+                    IFocusManager,
+                    IFocusManager_Vtbl,
+                    0x9fd07bc5_d2d4_53fe_a31a_846de8b7a257
+                );
+                impl windows_core::RuntimeType for IFocusManager {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IFocusManager_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IFocusManagerStatics,
+                    IFocusManagerStatics_Vtbl,
+                    0xe73dce04_e23a_5fb3_96ab_7df04c51dff2
+                );
+                impl windows_core::RuntimeType for IFocusManagerStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IFocusManagerStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    GotFocus: usize,
+                    pub RemoveGotFocus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    LostFocus: usize,
+                    pub RemoveLostFocus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    GettingFocus: usize,
+                    pub RemoveGettingFocus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    LosingFocus: usize,
+                    pub RemoveLosingFocus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                    TryFocusAsync: usize,
+                    TryMoveFocusAsync: usize,
+                    TryMoveFocusWithOptionsAsync: usize,
+                    TryMoveFocusWithOptions: usize,
+                    FindNextElement: usize,
+                    pub FindFirstFocusableElement:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                    pub FindLastFocusableElement:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                    FindNextElementWithOptions: usize,
+                    FindNextFocusableElement: usize,
+                    FindNextFocusableElementWithHint: usize,
+                    TryMoveFocus: usize,
+                    pub GetFocusedElement: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GetFocusedElementWithRoot:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                }
                 windows_core::imp::define_interface!(
                     IKeyboardAccelerator,
                     IKeyboardAccelerator_Vtbl,

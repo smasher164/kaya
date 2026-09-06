@@ -125,6 +125,7 @@ module KayaApp
     setAlign,
     setAxis,
     stackWhen,
+    columnsWhen,
     setA11yId,
     setA11yLabel,
     setA11yHint,
@@ -2054,6 +2055,23 @@ stackWhen (Widget w) when =
         ]
     )
 
+-- | Lay this grid out in the named number of columns while the window's
+-- SIZE CLASS is the named one, restoring the authored count on leaving
+-- it (docs\/adaptive-layout-plan.md D6.2). Taking a 'Widget' is the
+-- template zone's refusal, as 'stackWhen'\'s is.
+columnsWhen :: Widget -> SizeClass -> Int -> Build ()
+columnsWhen (Widget w) when columns =
+  emitB
+    ( W.txCreateBreakpoint
+        0
+        (W.VI64 (sizeClassWire when))
+        1
+        [ W.VI64 (fromIntegral w),
+          W.VI64 (fromIntegral W.propColumns),
+          W.VF64 (fromIntegral columns)
+        ]
+    )
+
 -- | The role vocabulary (docs/styling-plan.md D4): SEMANTIC EMPHASIS — what a
 -- widget MEANS, never how it looks.
 data Role
@@ -2068,6 +2086,9 @@ data Role
   | -- | The heading's counterpart one tier down: the platform's footnote
     -- text, under the content it explains. Labels only.
     Caption
+  | -- | An action at low emphasis: a row's accessory (Details, Open).
+    -- Buttons only.
+    Plain
   deriving (Eq, Show)
 
 roleWire :: Role -> Int64
@@ -2075,6 +2096,7 @@ roleWire Destructive = 1
 roleWire Prominent = 2
 roleWire Heading = 3
 roleWire Caption = 4
+roleWire Plain = 5
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
 setRole :: Widget -> Role -> Build ()

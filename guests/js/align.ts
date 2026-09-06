@@ -18,17 +18,19 @@ app.window(() => {
   const base = kaya.signal("base");
   const anchor = kaya.signal("anchor");
   const fit = kaya.signal("fit");
+  const plain = kaya.signal("plain probe");
 
   const root = kaya.column({ align: "stretch" }, () => {
     const centered = kaya.column({ align: "center" }, () => {
       kaya.label({ bind: probe }); // label#0
       kaya.button("mid");
-      kaya.row({ align: "baseline" }, () => {
-        // row#0: the baseline trio
+      const baseline = kaya.row({ align: "baseline" }, () => {
+        // the baseline trio
         kaya.label({ bind: base }); // label#1
         kaya.button("tick");
         kaya.image(TALL_PNG);
       });
+      baseline.a11yId("baseline");
     });
     centered.a11yId("centered");
     kaya.row(() => {
@@ -40,6 +42,13 @@ app.window(() => {
       });
       fitcol.a11yId("fitcol");
     });
+    // row@plain: NO align, so the core's centre default is what the scene
+    // reads
+    const plainRow = kaya.row(() => {
+      kaya.label({ bind: plain }).a11yId("plainlabel"); // label#4
+      kaya.image(TALL_PNG);
+    });
+    plainRow.a11yId("plain");
   });
   root.a11yId("root");
 });

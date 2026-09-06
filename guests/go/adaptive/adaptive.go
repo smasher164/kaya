@@ -43,6 +43,12 @@ func App() *kaya.App {
 				tx.Label(one) // label#3
 				tx.Label(two) // label#4
 			}).A11yID("narrow").StackWhen(kaya.SizeClassCompact)
+			// grid@sheet: three columns regular, one compact (D6.2).
+			tx.Grid(3, func() {
+				for _, text := range []string{"c1", "c2", "c3", "c4", "c5", "c6"} {
+					tx.Label(tx.Signal(text)) // label#5..#10
+				}
+			}).A11yID("sheet").ColumnsWhen(kaya.SizeClassCompact, 1)
 		}))
 	})
 

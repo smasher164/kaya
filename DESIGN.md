@@ -999,6 +999,18 @@ The known normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,
   AppKit reserves space, XAML distinguishes Collapsed from Hidden.
+- A row centres its children on the cross axis; a column starts them.
+  The core emits the row's `align = center` at creation, live and
+  template alike, unless the app sets an `align` of its own, so every
+  backend sees an explicit prop and none keeps a default that could
+  drift (docs/tasks-plan.md R5 — Compose drew a list row's title flush
+  against its top edge beside a taller checkbox, which nobody had
+  chosen).
+- A stamped row spans its host column, as a live nested row does. A
+  For's copies obey the nested-container rule above; three widget
+  backends applied it to live children only, and a spacer inside a
+  stamped row reached the window's edge on the mac and the content's
+  edge everywhere else (docs/tasks-plan.md R7).
 - The mounted root fills its window. Nothing does this "by
   construction" except AppKit (the root IS the contentView) — every
   other backend needed the normalization stated explicitly, and two of
@@ -1093,17 +1105,21 @@ The known normalization worklist:
   stretched nested column beside a hugging label); start rides every
   other scene's geometry, and end keeps a live classification arm
   with the recordings as its visual record until a scene earns it.
-  A SCROLL SPANS ITS PARENT'S CROSS AXIS under the default mode and
-  under stretch (ruled 2026-09-02): a viewport is a region, not
-  content, and every platform's own scrolling surface fills its
-  container. Under `start` every backend had hugged the scroll's
-  content — 79pt in a 375pt window on iOS, 84px in 530 on GTK — which
-  the iOS driver's real pans found and no scene could, since
-  scroll_end drives the toolkit's scroll API and never touches the
-  width. `center` and `end` still position a hugging scroll; in a
-  row a scroll already crosses. Gate: `expect_breadth <widget>`, the
-  cross-axis twin of expect_fills' widget half — the widget's
-  recorded breadth against its container's content box, ±2 — on the
+  A SCROLL SPANS ITS PARENT'S CROSS AXIS in every align mode (ruled
+  2026-09-02 for start and stretch; widened 2026-09-05 when rows took
+  a centre default — docs/tasks-plan.md R5 — since a rule keyed on
+  "start" had been reading the ABSENCE of a choice, and a centred
+  hugging viewport is a strip nobody asked for): a viewport is a
+  region, not content, and every platform's own scrolling surface
+  fills its container. Under `start` every backend had hugged the
+  scroll's content — 79pt in a 375pt window on iOS, 84px in 530 on
+  GTK — which the iOS driver's real pans found and no scene could,
+  since scroll_end drives the toolkit's scroll API and never touches
+  the width. Gate: `expect_breadth <target>`, the
+  cross-axis twin of expect_fills' widget half — the target's
+  recorded breadth against its container's content box, ±2, a nested
+  container being a target too since 2026-09-05 (a hugging list hides
+  behind rows that fill it; docs/tasks-plan.md R7) — on the
   scroll scene, plus the iOS driver's pan at the window's middle.
   Stretch earned its scene 2026-08-22, the day the portfolio
   dashboard's first photograph caught the mode inexpressible on the
@@ -1985,7 +2001,12 @@ The ratified shape:
   of the same generalization mount made; each section carries its own
   stack, and the back affordance routes to the ACTIVE section's
   stack. Back never switches sections — at stack-empty it does the
-  platform default.
+  platform default. On Windows that affordance is NavigationView's own
+  back button alone at the pane's top left, the pane toggle hidden
+  while the pane is expanded and shown only in the collapsed modes
+  (the Windows 11 Settings shape; stock NavigationView stacks the two,
+  which the maintainer refused 2026-09-05), and a sectioned window
+  seats its initial focus in the section's content, not on the pane.
 - **Observations**: `expect_sections N` (count from the real
   control), `expect_section "title"` (the ACTIVE section's title from
   the platform's own selection state), `select_section` driven

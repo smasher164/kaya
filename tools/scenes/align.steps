@@ -2,15 +2,19 @@
 # answers stretch FIRST when all children span (docs/deferred.md):
 #   - column@centered's children have DIFFERENT natural widths, so
 #     coinciding centers can only be center.
-#   - row#0's TALL no-baseline image (2x64) is what stops a hug-height
-#     row collapsing the four modes into the tolerance (docs/traps.md —
-#     on macOS baseline placement equals center).
+#   - row@baseline's TALL no-baseline image (2x64) is what stops a
+#     hug-height row collapsing the four modes into the tolerance
+#     (docs/traps.md — on macOS baseline placement equals center).
 #   - column@fitcol is grow=1 AND align=stretch, the shape that drew a
 #     third of itself with every model observable green; its two asserts
 #     hold the grow half and the stretch half separately.
 expect label#0 "align probe"
 expect_aligned column@root "stretch"
 expect_aligned column@centered "center"
-expect_aligned row#0 "baseline"
+expect_aligned row@baseline "baseline"
 expect_aligned column@fitcol "stretch"
 expect_fills column@fitcol
+# row@plain sets NO align: the core's row default is centre (docs/tasks-plan.md R5),
+# and a tall no-baseline image beside one label is what makes centre the only reading.
+expect label@plainlabel "plain probe"
+expect_aligned row@plain "center"

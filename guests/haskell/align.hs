@@ -25,6 +25,7 @@ main = kayaMain $ \app -> do
     base <- signal (VStr "base")
     anchor <- signal (VStr "anchor")
     fit <- signal (VStr "fit")
+    plain <- signal (VStr "plain probe")
 
     root <-
       column
@@ -34,9 +35,9 @@ main = kayaMain $ \app -> do
             [Align AlignCenter, A11yId "centered"]
             [ labelBound probe, -- label#0
               buttonOn "mid" (return ()),
-              -- row#0: the baseline trio
+              -- the baseline trio
               row
-                [Align AlignBaseline]
+                [Align AlignBaseline, A11yId "baseline"]
                 [ labelBound base, -- label#1
                   buttonOn "tick" (return ()),
                   imageBytes tallPng
@@ -51,6 +52,13 @@ main = kayaMain $ \app -> do
                 [ labelBound fit, -- label#3
                   buttonOn "wide" (return ())
                 ]
+            ],
+          -- row@plain: NO align, so the core's centre default is what the
+          -- scene reads
+          row
+            [A11yId "plain"]
+            [ labelBound plain [A11yId "plainlabel"], -- label#4
+              imageBytes tallPng
             ]
         ]
     mount root

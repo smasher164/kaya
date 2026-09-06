@@ -3634,21 +3634,18 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             }
             Step::ExpectBreadth(t) => {
                 // The cross-axis twin of expect_fills' widget half: the
-                // widget's breadth against its container's content box.
-                // A container target is refused — its children's breadth
-                // is expect_aligned's question.
-                if matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    Some(Err(format!("{t:?} is a container; expect_breadth reads a widget")))
-                } else {
-                    Some(poll(|| {
-                        let short = stage.widget_spans_breadth(*t);
-                        if short.is_empty() {
-                            Ok(format!("{} spans its breadth", target_spec(t)))
-                        } else {
-                            Err(format!("{} is short of its breadth ({short})", target_spec(t)))
-                        }
-                    }))
-                }
+                // target's breadth against its container's content box. A
+                // nested container is a target too (docs/tasks-plan.md R7):
+                // a hugging list hides behind rows that fill it, so the
+                // list itself is what the scene has to hold.
+                Some(poll(|| {
+                    let short = stage.widget_spans_breadth(*t);
+                    if short.is_empty() {
+                        Ok(format!("{} spans its breadth", target_spec(t)))
+                    } else {
+                        Err(format!("{} is short of its breadth ({short})", target_spec(t)))
+                    }
+                }))
             }
             Step::ExpectAxis(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {

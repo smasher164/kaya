@@ -12,6 +12,7 @@ static class AlignScene
             var @base = tx.Signal("base");
             var anchor = tx.Signal("anchor");
             var fit = tx.Signal("fit");
+            var plain = tx.Signal("plain probe");
 
             var root = tx.Column(() =>
             {
@@ -19,12 +20,13 @@ static class AlignScene
                 {
                     tx.Label(bind: probe); // label#0
                     tx.Button("mid");
-                    tx.Row(() =>
+                    var baseline = tx.Row(() =>
                     {
                         tx.Label(bind: @base); // label#1
                         tx.Button("tick");
                         tx.Image(TallPng);
-                    }, align: Align.Baseline); // row#0: the baseline trio
+                    }, align: Align.Baseline); // the baseline trio
+                    tx.SetA11yId(baseline, "baseline");
                 }, align: Align.Center); // the center trio
                 tx.SetA11yId(centered, "centered");
                 tx.Row(() => // row#1: the stretch pair's host
@@ -37,6 +39,14 @@ static class AlignScene
                     }, grow: 1, align: Align.Stretch);
                     tx.SetA11yId(fitcol, "fitcol");
                 });
+                // row@plain: NO align, so the core's centre default is what
+                // the scene reads
+                var plainRow = tx.Row(() =>
+                {
+                    tx.SetA11yId(tx.Label(bind: plain), "plainlabel"); // label#4
+                    tx.Image(TallPng);
+                });
+                tx.SetA11yId(plainRow, "plain");
             }, align: Align.Stretch);
             tx.SetA11yId(root, "root");
             tx.Mount(root);

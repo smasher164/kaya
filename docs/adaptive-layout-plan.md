@@ -66,8 +66,9 @@ width LATCHED (a breakpoint declared before any report applies at the
 first — the phone that never resizes), same-width reports emitting
 nothing, and the revert restoring the GUEST-AUTHORED value
 (`authored_axis`, written only by guest SetProperty) or the creation
-kind's own. The setter list is axis-only at the root until D6.2 rules
-wider, with the refusal unit-watched. Reporters: SwiftUI through the
+kind's own. The setter list was axis-only at the root until D6.2 widened
+it on 2026-09-05 to a grid's `columns` (the same authored-value revert,
+`authored_columns`), with the refusal of anything else unit-watched. Reporters: SwiftUI through the
 vtable (`window_metrics` beside `canvas_track` — a flat-namespace call
 was measured unresolvable, the vtable IS the interpreters' contract),
 whole-window beside the form-factor recorder; GTK into ITS OWN scene
@@ -149,6 +150,11 @@ serve actually exists.
    2026-08-31 by the size-class ruling — D8.)
 2. The settable-prop list: which properties a setter body may touch
    day one (axis, grow, visibility are the survey's usual trio).
+   (Settled 2026-08-28 as axis alone; WIDENED 2026-09-05 by the
+   maintainer to a GRID's `columns` — `columns_when(compact, n)` in all
+   nine bindings — when the task manager's three-column Details form
+   overflowed a 320dp phone, docs/tasks-plan.md §5. Grow and visibility
+   stay unruled.)
 3. Day-one scope: sugar alone, or sugar plus the general `when`
    spelling together (one mechanism either way).
 
@@ -304,7 +310,8 @@ portfolio adopted the feature after the scene was green, as §2 requires:
 
 D6's three rulings, settled by building: the threshold spelling is
 `stack_below=<points>` (below, logical points, matching the platforms'
-convergence); the setter list is axis-only, refused at the root by name;
+convergence); the setter list is axis-only, refused at the root by name
+(widened to a grid's columns 2026-09-05, see D6 item 2);
 and day one is the SUGAR ALONE — the general `when` spelling is D4's
 neighbour on the ledger, unbuilt, since no scene or app needs a
 multi-prop diff yet. (The threshold half is SUPERSEDED 2026-08-31 by

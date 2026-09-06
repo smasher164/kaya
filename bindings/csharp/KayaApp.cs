@@ -371,6 +371,9 @@ enum Role : long
     /// A heading's counterpart under the content it explains: the
     /// platform's caption/footnote text tier.
     Caption = KayaWire.RoleCaption,
+    /// An action at low emphasis: a row's accessory (Details, Open).
+    /// Buttons only.
+    Plain = KayaWire.RolePlain,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
@@ -1714,8 +1717,8 @@ sealed class Tx
         Records.Add(KayaWire.TxBindHelp(w.Id, s.Id));
 
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
-    /// looks. Destructive and Prominent are button emphasis, Heading and
-    /// Caption are label hierarchy, and the root refuses a role on a kind
+    /// looks. Destructive, Prominent and Plain are button emphasis, Heading
+    /// and Caption are label hierarchy, and the root refuses a role on a kind
     /// it does not fit.
     public void SetRole(Widget w, Role role) =>
         Records.Add(KayaWire.TxSetRole(w.Id, (long)role));
@@ -2079,12 +2082,16 @@ sealed class Tx
 
     /// A grid laying its children out row-major into `columns` columns —
     /// each column takes its NATURAL width, aligned across rows;
-    /// `spacing` is the inter-cell gap on both axes.
+    /// `spacing` is the inter-cell gap on both axes. `columnsWhen:` is a
+    /// (size class, count) pair laying it out in that many columns while
+    /// the window's SIZE CLASS is the named one, reverting on leaving it
+    /// (docs/adaptive-layout-plan.md D6.2).
     public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null,
-        double? inset = null)
+        double? inset = null, (SizeClass, int)? columnsWhen = null)
     {
         var parent = Widget(KayaWire.KindGrid);
         Records.Add(KayaWire.TxSetColumns(parent.Id, columns));
+        if (columnsWhen is (SizeClass when, int count)) ColumnsWhen(parent, when, count);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (grow is double g) SetGrow(parent, g);
         if (inset is double pad) SetInset(parent, pad);
@@ -2128,6 +2135,14 @@ sealed class Tx
         Records.Add(KayaWire.TxCreateBreakpoint(0, (long)when, 1, new object[]
         {
             (long)w.Id, (long)KayaWire.PropAxis, (long)KayaWire.AxisVertical,
+        }));
+
+    // The same one setter, on a grid's column count: the count rides as
+    // an F64, exactly as TxSetColumns writes it.
+    void ColumnsWhen(Widget w, SizeClass when, int columns) =>
+        Records.Add(KayaWire.TxCreateBreakpoint(0, (long)when, 1, new object[]
+        {
+            (long)w.Id, (long)KayaWire.PropColumns, (double)columns,
         }));
 
     /// A For as a child: ForEach whose body keeps no handles.

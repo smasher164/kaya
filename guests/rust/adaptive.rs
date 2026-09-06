@@ -42,6 +42,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 })
                 .a11y_id("narrow")
                 .stack_when(kaya::SizeClass::Compact);
+                // grid@sheet: three columns at a regular width, one under
+                // compact (docs/adaptive-layout-plan.md D6.2).
+                tx.grid(3, |tx| {
+                    for text in ["c1", "c2", "c3", "c4", "c5", "c6"] {
+                        let cell = tx.signal(text);
+                        tx.label(cell); // label#5..#10
+                    }
+                })
+                .a11y_id("sheet")
+                .columns_when(kaya::SizeClass::Compact, 1);
             })
             .id();
         tx.mount(root);
