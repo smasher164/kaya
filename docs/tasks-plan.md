@@ -221,7 +221,14 @@ pass, not this one's.
   core has no per-child cross-axis prop yet; slice three's `fill` is the
   general knob and the opt-out). Guard: `expect_breadth textarea@notes`
   in tasks.steps on every lane.
-- **The Details screen is one grid**, three rows of caption, picker and
+- **R11 — the Details screen is a form of labelled rows** (TAKEN
+  2026-09-06 in the overnight grant; docs/forms-plan.md is the design and
+  its §7 the rulings, all PROPOSED-overnight): four `labeled` rows —
+  When, Deadline, Reminder, Project — each label naming its value with the
+  Clear trailing, the column derived into the platform's form. The grid
+  and its compact fold went with it; the guard is the relation,
+  `expect_ax date_picker@when "datetime/When: none"` on every lane.
+- **The Details screen was one grid** (superseded by R11), three rows of caption, picker and
   Clear, so the Clear buttons share a column edge — the maintainer's
   first ask on the captures ("The Clear buttons should be aligned with
   themselves").
@@ -417,6 +424,14 @@ the gate or trap it became.
   Fixed (`fixedSize` on iOS, a grower keeping its track); no layout
   scene asserts a checkbox's hug inside a row, which is why the capture
   was the first witness.
+
+- Compose (2026-09-06): the exposed-dropdown select draws Material's own
+  trailing icon — sized to its value with no arrow it read as a plain
+  box — and its width follows the picker's rule exactly (text + 16 +
+  48 + 16dp; a hand-counted 24dp icon slot wrapped "Thesis"). A bottom
+  bar label is one line: five sections on a 360dp phone give each label
+  56dp, and "Upcoming" wrapped to "Upcomin" / "g"; a long title now
+  overflows its padding rather than breaking a word.
 
 ## §6 — sequencing (the evidence's order, one forced feature per stage)
 

@@ -403,6 +403,9 @@ static class Program
         Fwd("Column", ["System.Action body"], "body");
         Fwd("Scroll", ["System.Action body"], "body");
         Fwd("Grid", ["int columns", "System.Action body"], "columns, body");
+        Fwd("Labeled", ["string label", "System.Action body"], "label, body");
+        Fwd("Labeled", ["Signal label", "System.Action body"], "label, body");
+        Fwd("Labeled", ["Field<string> label", "System.Action body"], "label, body");
         Fwd("Spacer", [], "");
         // THE NESTED-FOR VOCABULARY, forwarded for the reason the
         // constructors are: a row that cannot open a For cannot name the

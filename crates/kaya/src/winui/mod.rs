@@ -130,6 +130,9 @@ enum NativeWidget {
     /// CalendarDatePicker and not DatePicker, whose bounds are years only.
     DatePicker(CalendarDatePicker),
     TimePicker(TimePicker),
+    /// The labelled row (docs/forms-plan.md §3): a Grid of Auto label,
+    /// star control and Auto trailing action.
+    Labeled(Grid),
 }
 
 impl NativeWidget {
@@ -153,6 +156,7 @@ impl NativeWidget {
             NativeWidget::Canvas(image) => image.cast(),
             NativeWidget::DatePicker(picker) => picker.cast(),
             NativeWidget::TimePicker(picker) => picker.cast(),
+            NativeWidget::Labeled(panel) => panel.cast(),
         }
     }
 
@@ -435,6 +439,13 @@ struct CoreState {
     #[cfg(feature = "harness")]
     column_ids: Vec<WidgetId>,
     rows: Vec<Grid>,
+    /// The labelled rows, creation-ordered like `rows` (docs/forms-plan.md).
+    labeleds: Vec<Grid>,
+    /// Columns whose children are labelled rows — the FORM mark, taken at
+    /// AddChild the way `stamps_rows` is. Whether the column still
+    /// QUALIFIES is `column_is_form`, read at every re-stamp, so a mixed
+    /// column falls back to per-row Auto label tracks on its own.
+    forms: std::collections::HashSet<u64>,
     window: Window,
     /// Auxiliary surfaces by kaya window id (the primary is
     /// `window`); created hidden, presented (Activated) at mount.
@@ -1858,7 +1869,10 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
     };
     match core.widgets.get(&id) {
         Some(
-            NativeWidget::Column(grid) | NativeWidget::Row(grid) | NativeWidget::Grid2D(grid),
+            NativeWidget::Column(grid)
+            | NativeWidget::Row(grid)
+            | NativeWidget::Grid2D(grid)
+            | NativeWidget::Labeled(grid),
         ) => grid.SetPadding(pad),
         Some(NativeWidget::Scroll(_)) => match core.scroll_root_hosts.get(&id) {
             Some(host) => host.SetPadding(pad),
@@ -1917,7 +1931,7 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
 fn container_panel(core: &CoreState, parent: WidgetId) -> Option<Grid> {
     let own = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) => g.clone(),
-        Some(NativeWidget::Row(g)) => return Some(g.clone()),
+        Some(NativeWidget::Row(g)) | Some(NativeWidget::Labeled(g)) => return Some(g.clone()),
         _ => return None,
     };
     Some(TABLES.with_borrow(|t| t.get(&parent.0).map(|w| w.band.clone())).unwrap_or(own))
@@ -1933,9 +1947,126 @@ fn effective_vertical(core: &CoreState, id: WidgetId) -> bool {
     )
 }
 
+/// Whether a vertical container is a FORM — two or more laid-out children,
+/// every one of them a labelled row (docs/forms-plan.md §2).
+fn column_is_form(core: &CoreState, column: WidgetId) -> bool {
+    if !matches!(core.widgets.get(&column), Some(NativeWidget::Column(_))) {
+        return false;
+    }
+    let rows: Vec<WidgetId> = core
+        .child_order
+        .children(column)
+        .iter()
+        .copied()
+        .filter(|c| !core.folded_into.contains_key(&c.0))
+        .collect();
+    rows.len() >= 2
+        && rows
+            .iter()
+            .all(|c| matches!(core.widgets.get(c), Some(NativeWidget::Labeled(_))))
+}
+
+/// THE FORM'S SHARED LABEL TRACK (docs/forms-plan.md §3): WinUI has no
+/// SharedSizeGroup, so each labelled row in a qualifying column pins its
+/// first ColumnDefinition to the widest label among its siblings.
+///
+/// The width is ASKED FOR — an unbounded Measure and the label's own
+/// DesiredSize, `table_measure`'s pattern — never read back off the track,
+/// which is the pinned number itself and could only ever agree.
+fn shared_label_width(core: &CoreState, row: WidgetId) -> Option<f64> {
+    let column = core.child_order.parent_of(row)?;
+    if !column_is_form(core, column) {
+        return None;
+    }
+    let unbounded = bindings::Windows::Foundation::Size {
+        Width: f32::INFINITY,
+        Height: f32::INFINITY,
+    };
+    let mut widest = 0.0f64;
+    for sibling in core.child_order.children(column) {
+        if core.folded_into.contains_key(&sibling.0) {
+            continue;
+        }
+        let Some(first) = core.child_order.children(*sibling).first() else {
+            continue;
+        };
+        let Some(NativeWidget::Label(block)) = core.widgets.get(first) else {
+            continue;
+        };
+        if block.Measure(unbounded).is_ok() {
+            if let Ok(size) = block.DesiredSize() {
+                widest = widest.max(f64::from(size.Width));
+            }
+        }
+    }
+    // A HAIR OVER, NEVER UNDER, and integral: kaya's TextBlocks WRAP
+    // (`text_block`), so a track rounded a fraction below the widest label's
+    // own measure would break it onto a second line.
+    (widest > 0.0).then_some(widest.ceil() + 1.0)
+}
+
+/// THE LABELLED ROW (docs/forms-plan.md §3): label Auto, control star,
+/// trailing action Auto — and the label-for relation on the control.
+fn reindex_labeled(core: &CoreState, id: WidgetId, grid: &Grid) -> windows_core::Result<()> {
+    let order: Vec<WidgetId> = core
+        .child_order
+        .children(id)
+        .iter()
+        .copied()
+        .filter(|c| !core.folded_into.contains_key(&c.0))
+        .collect();
+    let shared = shared_label_width(core, id);
+    grid.RowDefinitions()?.Clear()?;
+    let defs = grid.ColumnDefinitions()?;
+    defs.Clear()?;
+    for slot in 0..order.len() {
+        let def = ColumnDefinition::new()?;
+        def.SetWidth(match (slot, shared) {
+            (0, Some(width)) => GridLength { Value: width, GridUnitType: GridUnitType::Pixel },
+            (0, None) => GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto },
+            (1, _) => GridLength { Value: 1.0, GridUnitType: GridUnitType::Star },
+            _ => GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto },
+        })?;
+        defs.Append(&def)?;
+    }
+    for (slot, child) in order.iter().enumerate() {
+        let Some(widget) = core.widgets.get(child) else {
+            continue;
+        };
+        let element: FrameworkElement = widget.element()?.cast()?;
+        Grid::SetColumn(&element, slot as i32)?;
+        Grid::SetRow(&element, 0)?;
+        element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+        // The label sits at its OWN width inside the shared track; the
+        // control takes the star track it was given, and the action hugs.
+        element.SetHorizontalAlignment(if slot == 0 {
+            bindings::Microsoft::UI::Xaml::HorizontalAlignment::Left
+        } else {
+            bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
+        })?;
+    }
+    // THE RELATION (docs/forms-plan.md §4): UIA's LabeledBy, which
+    // FrameworkElementAutomationPeer answers GetName from when the control
+    // carries no AutomationProperties.Name of its own — so an app-authored
+    // a11y_label still outranks it.
+    if let (Some(label), Some(control)) = (order.first(), order.get(1)) {
+        if let (Some(label), Some(control)) = (core.widgets.get(label), core.widgets.get(control)) {
+            bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(
+                &control.element()?,
+                &label.element()?,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let grid = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
+        Some(NativeWidget::Labeled(g)) => {
+            let g = g.clone();
+            return reindex_labeled(core, parent, &g);
+        }
         // Destroyed, or never a container: nothing to place.
         _ => return Ok(()),
     };
@@ -2057,8 +2188,10 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // and gets its margin compensation below. THE BREADTH RULE outranks
         // the mode: a nested container whose main axis crosses its parent's
         // spans the parent's breadth (container_fills' breadth clause holds it).
-        let crossing = matches!(widget, NativeWidget::Row(_) | NativeWidget::Column(_))
-            && effective_vertical(core, *child) != vertical;
+        let crossing = matches!(
+            widget,
+            NativeWidget::Row(_) | NativeWidget::Column(_) | NativeWidget::Labeled(_)
+        ) && effective_vertical(core, *child) != vertical;
         // A For's column of stamped rows spans its vertical host as its rows
         // span it (docs/tasks-plan.md §4, R7).
         let crossing = crossing
@@ -2127,6 +2260,22 @@ fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
         match core.widgets.get(&container) {
             Some(NativeWidget::Grid2D(_)) => reflow_grid(core, container.0)?,
             _ => reindex(core, container)?,
+        }
+        // A FORM'S ROWS SHARE ONE LABEL TRACK (docs/forms-plan.md §3), so a
+        // column that moved re-stamps every one of them: a row whose label
+        // grew or went widens or narrows the track its siblings pinned.
+        // Terminates — a labelled row's own re-stamp marks nothing.
+        if core.forms.contains(&container.0) {
+            let rows: Vec<WidgetId> = core
+                .child_order
+                .children(container)
+                .iter()
+                .copied()
+                .filter(|row| matches!(core.widgets.get(row), Some(NativeWidget::Labeled(_))))
+                .collect();
+            for row in rows {
+                core.child_order.mark(row);
+            }
         }
     }
     Ok(())
@@ -10827,6 +10976,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
+                // docs/forms-plan.md §3: the row's three tracks are stamped
+                // by `reindex_labeled`, which also carries the shared pin.
+                WidgetKind::Labeled => {
+                    let grid = Grid::new()?;
+                    grid.SetColumnSpacing(8.0)?;
+                    core.labeleds.push(grid.clone());
+                    NativeWidget::Labeled(grid)
+                }
                 WidgetKind::Checkbox => {
                     // WinUI raises Checked/Unchecked for programmatic
                     // SetIsChecked too — the USER/programmatic split
@@ -11242,7 +11399,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             };
             let as_element = |core: &CoreState, id: WidgetId| -> UIElement {
                 match core.widgets.get(&id).expect("scene validated the id") {
-                    NativeWidget::Column(p) | NativeWidget::Row(p) => {
+                    NativeWidget::Column(p)
+                    | NativeWidget::Row(p)
+                    | NativeWidget::Labeled(p) => {
                         windows_core::Interface::cast(p).expect("panel is a UIElement")
                     }
                     NativeWidget::Button { button, .. } => {
@@ -11799,6 +11958,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // dictionary can redefine, while a TextBlock takes it from a
             // local value only (`typeface_dictionary`, `text_block`).
             apply_typeface(&req)?;
+            // A form's shared label track is MEASURED TEXT
+            // (docs/forms-plan.md §3), so a new face re-stamps every form.
+            let forms: Vec<WidgetId> = core.forms.iter().copied().map(WidgetId).collect();
+            for form in forms {
+                core.child_order.mark(form);
+            }
         }
         ApplyOp::SetBrand { accent } => {
             // VALUES IN, VALUES OUT: the core derived the eleven words
@@ -11998,6 +12163,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 return Ok(());
             }
+            // A FORM'S SHARED LABEL TRACK IS MEASURED FROM THE LABELS
+            // (docs/forms-plan.md §3), so a bound label's new text re-stamps
+            // its row and the column, which re-stamps every sibling row.
+            if matches!(prop, Prop::Text)
+                && matches!(core.widgets.get(&id), Some(NativeWidget::Label(_)))
+            {
+                if let Some(row) = core.child_order.parent_of(id) {
+                    if matches!(core.widgets.get(&row), Some(NativeWidget::Labeled(_))) {
+                        core.child_order.mark(row);
+                        if let Some(column) = core.child_order.parent_of(row) {
+                            core.child_order.mark(column);
+                        }
+                    }
+                }
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
@@ -12167,8 +12347,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         grid.SetRowSpacing(0.0)?;
                     }
                 }
+                (NativeWidget::Labeled(grid), Prop::Spacing, Value::F64(gap)) => {
+                    core.spacings.insert(id, gap);
+                    grid.SetColumnSpacing(gap)?;
+                    grid.SetRowSpacing(0.0)?;
+                }
                 (
-                    NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Grid2D(_),
+                    NativeWidget::Column(_)
+                    | NativeWidget::Row(_)
+                    | NativeWidget::Grid2D(_)
+                    | NativeWidget::Labeled(_),
                     Prop::Inset,
                     Value::F64(pad),
                 ) => {
@@ -12453,7 +12641,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             };
             let children = panel.Children()?;
             match core.widgets.get(&child).expect("scene validated the id") {
-                NativeWidget::Column(p) | NativeWidget::Row(p) => children.Append(p)?,
+                NativeWidget::Column(p) | NativeWidget::Row(p) | NativeWidget::Labeled(p) => {
+                    children.Append(p)?
+                }
                 NativeWidget::Button { button, .. } => children.Append(button)?,
                 NativeWidget::Label(label) => children.Append(label)?,
                 NativeWidget::Entry(field) => children.Append(field)?,
@@ -12474,6 +12664,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // A new child means a new track and a shifted set of indices —
             // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
+            // THE FORM MARK (docs/forms-plan.md §2), `stamps_rows`' shape: a
+            // column that has taken a labelled row re-stamps all of them at
+            // every flush, so the shared label track follows the widest one.
+            if matches!(
+                core.widgets.get(&child).expect("scene validated the id"),
+                NativeWidget::Labeled(_)
+            ) && matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_)))
+            {
+                core.forms.insert(parent.0);
+            }
             // A stamped ROW copy marks its host, whose own cross placement in
             // ITS parent is re-read for it (docs/tasks-plan.md §4, R7); a
             // declared table's rows already live in a viewport that spans.
@@ -13949,6 +14149,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             #[cfg(feature = "harness")]
             column_ids: Vec::new(),
             rows: Vec::new(),
+            labeleds: Vec::new(),
+            forms: std::collections::HashSet::new(),
             child_order: ChildOrder::default(),
             grow: HashMap::new(),
             aligns: HashMap::new(),
@@ -14247,19 +14449,25 @@ fn table_of<T>(
     TABLES.with_borrow(|tables| tables.values().find(|table| table.grid == grid).map(f))
 }
 
-/// The WIDGET ID a `column#N`/`row#N` target names — the id the window
+/// The WIDGET ID a `column#N`/`row#N`/`labeled#N` target names — the id the window
 /// verbs report on and the id TABLES is keyed by. Recovered by COM
 /// identity from the creation-ordered registry, the `cross_mode` idiom.
 #[cfg(feature = "harness")]
 fn container_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
-    let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
-    if !vertical && !matches!(t.kind, crate::harness::TargetKind::Row) {
+    if !matches!(
+        t.kind,
+        crate::harness::TargetKind::Column
+            | crate::harness::TargetKind::Row
+            | crate::harness::TargetKind::Labeled
+    ) {
         return None;
     }
-    let registry = if vertical { &core.columns } else { &core.rows };
+    let registry = container_registry(core, t.kind);
     let grid = registry[crate::harness::try_resolve(t.index, registry.len())?].clone();
     core.widgets.iter().find_map(|(id, w)| match w {
-        NativeWidget::Column(g) | NativeWidget::Row(g) if *g == grid => Some(id.0),
+        NativeWidget::Column(g) | NativeWidget::Row(g) | NativeWidget::Labeled(g) if *g == grid => {
+            Some(id.0)
+        }
         _ => None,
     })
 }
@@ -14331,7 +14539,7 @@ fn assigned_track(core: &CoreState, grid: &Grid) -> windows_core::Result<f64> {
         let padding = parent.Padding()?;
         return Ok(parent.ActualWidth()? - padding.Left - padding.Right);
     }
-    if core.rows.iter().any(|g| g == &parent) {
+    if core.rows.iter().any(|g| g == &parent) || core.labeleds.iter().any(|g| g == &parent) {
         let at = Grid::GetColumn(&element)? as u32;
         let defs = parent.ColumnDefinitions()?;
         if at < defs.Size()? {
@@ -14412,7 +14620,12 @@ fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Res
     // The container's own registry decides the axis, the way reindex
     // decided it when it built the tracks — never the element's shape.
     let vertical = core.columns.iter().any(|g| g == &grid);
-    if !vertical && !core.rows.iter().any(|g| g == &grid) {
+    // A labelled row lays its children out in column tracks as a row does
+    // (docs/forms-plan.md §3), so it is a flex parent here too.
+    if !vertical
+        && !core.rows.iter().any(|g| g == &grid)
+        && !core.labeleds.iter().any(|g| g == &grid)
+    {
         return Ok(FlexTrack::NoParent);
     }
     // Measure/arrange are lazy; force them or the first read after
@@ -14447,6 +14660,19 @@ fn flex_track(core: &CoreState, element: &FrameworkElement) -> windows_core::Res
     }
 }
 
+/// The Grid registry a CONTAINER target reads through. A labelled row is a
+/// horizontal container with its own registry (docs/forms-plan.md §3), so the
+/// vertical/horizontal fold the container verbs used cannot serve alone.
+#[cfg(feature = "harness")]
+fn container_registry(core: &CoreState, kind: crate::harness::TargetKind) -> &Vec<Grid> {
+    use crate::harness::TargetKind as K;
+    match kind {
+        K::Column => &core.columns,
+        K::Labeled => &core.labeleds,
+        _ => &core.rows,
+    }
+}
+
 /// The element a `kind#index` target names, from the per-kind registry every
 /// WinUI verb resolves through — creation order, which is what `kind#index`
 /// means. `None` is "no such target", never a panic. ONE copy of the
@@ -14476,6 +14702,7 @@ fn target_element(
         K::Slider => nth!(core.sliders),
         K::Row => nth!(core.rows),
         K::Column => nth!(core.columns),
+        K::Labeled => nth!(core.labeleds),
         K::Image => nth!(core.images),
         K::Progress => nth!(core.progresses),
         K::Select => nth!(core.selects),
@@ -14537,6 +14764,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Label => ids!(core.labels, NativeWidget::Label(label), label),
         K::Column => core.column_ids.iter().map(|id| id.0).collect(),
         K::Row => ids!(core.rows, NativeWidget::Row(panel), panel),
+        K::Labeled => ids!(core.labeleds, NativeWidget::Labeled(panel), panel),
         K::Image => ids!(core.images, NativeWidget::Image(image), image),
         K::Scroll => ids!(core.scrolls, NativeWidget::Scroll(viewer), viewer),
         K::Progress => ids!(core.progresses, NativeWidget::Progress(bar), bar),
@@ -16417,6 +16645,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Label => find(&core.labels, &id),
                 K::Column => find(&core.columns, &id),
                 K::Row => find(&core.rows, &id),
+                K::Labeled => find(&core.labeleds, &id),
                 K::Image => find(&core.images, &id),
                 K::Scroll => find(&core.scrolls, &id),
                 K::Progress => find(&core.progresses, &id),
@@ -16435,11 +16664,7 @@ impl crate::harness::Stage for WinUiStage {
 
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
-                &core.columns
-            } else {
-                &core.rows
-            };
+            let registry = container_registry(core, t.kind);
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -16467,7 +16692,7 @@ impl crate::harness::Stage for WinUiStage {
             // columns: row#0 resolved against the COLUMNS registry and
             // reported the column's own splits.
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
-            let registry = if vertical { &core.columns } else { &core.rows };
+            let registry = container_registry(core, t.kind);
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -16500,7 +16725,7 @@ impl crate::harness::Stage for WinUiStage {
     fn container_fills(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
-            let registry = if vertical { &core.columns } else { &core.rows };
+            let registry = container_registry(core, t.kind);
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -16514,7 +16739,11 @@ impl crate::harness::Stage for WinUiStage {
                 .widgets
                 .iter()
                 .find_map(|(wid, w)| match w {
-                    NativeWidget::Column(g) | NativeWidget::Row(g) if g == grid => Some(*wid),
+                    NativeWidget::Column(g) | NativeWidget::Row(g) | NativeWidget::Labeled(g)
+                        if g == grid =>
+                    {
+                        Some(*wid)
+                    }
                     _ => None,
                 })
                 .and_then(|wid| core.spacings.get(&wid).copied())
@@ -16665,7 +16894,9 @@ impl crate::harness::Stage for WinUiStage {
             // vertically, so its cross axis is width.
             let parent_vertical = if core.columns.iter().any(|g| g == &parent) {
                 true
-            } else if core.rows.iter().any(|g| g == &parent) {
+            } else if core.rows.iter().any(|g| g == &parent)
+                || core.labeleds.iter().any(|g| g == &parent)
+            {
                 false
             } else {
                 return Ok("parent is not a flex container".to_owned());
@@ -16700,8 +16931,7 @@ impl crate::harness::Stage for WinUiStage {
             // other, so the populated side IS the direction the layout
             // used — never the model's axis map, which would echo the
             // apply arm back (docs/adaptive-layout-plan.md §2).
-            let from_columns = matches!(t.kind, crate::harness::TargetKind::Column);
-            let registry = if from_columns { &core.columns } else { &core.rows };
+            let registry = container_registry(core, t.kind);
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -16776,7 +17006,7 @@ impl crate::harness::Stage for WinUiStage {
     fn cross_mode(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
-            let registry = if vertical { &core.columns } else { &core.rows };
+            let registry = container_registry(core, t.kind);
             let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
                 return Ok("<no such target>".to_string());
             };
@@ -16795,7 +17025,11 @@ impl crate::harness::Stage for WinUiStage {
                 .widgets
                 .iter()
                 .find_map(|(id, w)| match w {
-                    NativeWidget::Column(g) | NativeWidget::Row(g) if *g == grid => Some(*id),
+                    NativeWidget::Column(g) | NativeWidget::Row(g) | NativeWidget::Labeled(g)
+                        if *g == grid =>
+                    {
+                        Some(*id)
+                    }
                     _ => None,
                 })
                 .expect("registry grids live in the widget table");

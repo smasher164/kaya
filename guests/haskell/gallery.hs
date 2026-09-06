@@ -45,6 +45,9 @@ main = kayaMain $ \app -> do
               buttonOn "quarter" onQuarter
             ],
           {- Deliberately invalid bytes: a decode failure reads 0x0. -}
-          row [imageBytes testPng, imageBytes (BC.pack "not an image")]
+          row [imageBytes testPng, imageBytes (BC.pack "not an image")],
+          {- The labelled row: the control's accessibility name IS the
+             label's text, with no A11yLabel of its own. -}
+          labeled "Level" [sliderOn 0 1 0.5 (const (return ())) [A11yId "level"]]
         ]
     mount root

@@ -608,6 +608,18 @@ fn set_stamps_rows(widget: &gtk4::Widget) {
     unsafe { widget.set_data(STAMPED_ROWS_KEY, true) }
 }
 
+/// A column the derived form's boxed list holds (docs/forms-plan.md §2).
+const FORM_KEY: &str = "kaya-form";
+fn is_form(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever written by
+    // set_form below, always with a bool.
+    unsafe { widget.data::<bool>(FORM_KEY).is_some_and(|v| *v.as_ref()) }
+}
+fn set_form(widget: &gtk4::Widget, on: bool) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(FORM_KEY, on) }
+}
+
 /// A row in a column, or a column in a row — the child's main axis IS the
 /// parent's cross axis, so its own breadth is what the parent's cross box
 /// hands out.
@@ -671,6 +683,12 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     }
     // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
     if vertical_container && is_text_field(child) {
+        align = gtk4::Align::Fill;
+    }
+    // A DERIVED FORM SPANS ITS COLUMN (docs/forms-plan.md §2): the boxed
+    // list is a surface the platform draws, like a scroll's viewport, and
+    // every other backend's form surface takes the width it is offered.
+    if vertical_container && is_form(child) {
         align = gtk4::Align::Fill;
     }
     if vertical_container {
@@ -1579,6 +1597,9 @@ enum NativeWidget {
     /// the way GNOME's own apps build theirs.
     DatePicker(GtkDateField),
     TimePicker(GtkTimeField),
+    /// The labelled row (docs/forms-plan.md §3): Adwaita's own labelled
+    /// row, whose seats the AddChild arm fills by child order.
+    Labeled(adw::ActionRow),
 }
 
 impl NativeWidget {
@@ -1603,6 +1624,7 @@ impl NativeWidget {
             NativeWidget::Canvas(w) => w.clone().upcast(),
             NativeWidget::DatePicker(f) => f.button.clone().upcast(),
             NativeWidget::TimePicker(f) => f.button.clone().upcast(),
+            NativeWidget::Labeled(row) => row.clone().upcast(),
         }
     }
 
@@ -1619,6 +1641,24 @@ impl NativeWidget {
         }
     }
 }
+
+/// A labelled row's seats (docs/forms-plan.md §2): how many children have
+/// been seated, the live label widget the first one put in the prefix — the
+/// control's accessible name is a RELATION to that widget, never a copy of its
+/// text, so a label bound to a signal renames its control as it moves — and
+/// the row's declared spacing, which is the gap before the trailing action
+/// (SwiftUI's `HStack(spacing:)` around the same pair) and arrives in either
+/// order with the children.
+struct GtkLabeledRow {
+    seated: usize,
+    label: Option<gtk4::Widget>,
+    action: Option<gtk4::Widget>,
+    spacing: Option<i32>,
+}
+
+/// The style class libadwaita's boxed list wears — the derived form's
+/// surface (docs/forms-plan.md §3).
+const BOXED_LIST_CLASS: &str = "boxed-list";
 
 /// The table's column gap — the one number every synthesized tier
 /// spells (docs/tables-plan.md decision 6; SwiftUI and Compose say 24
@@ -2085,6 +2125,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Select => core.selects.iter().map(|w| w.clone().upcast()).collect(),
         K::Radio => core.radios.iter().map(|w| w.clone().upcast()).collect(),
         K::Grid => core.grids.iter().map(|w| w.clone().upcast()).collect(),
+        K::Labeled => core.labeleds.iter().map(|w| w.clone().upcast()).collect(),
         K::Textarea => core.textareas.iter().map(|w| w.clone().upcast()).collect(),
         K::Canvas => core.canvases.iter().map(|w| w.clone().upcast()).collect(),
         // The COMPOSED ROOT, which is also what NativeWidget::widget answers
@@ -2805,7 +2846,13 @@ struct CoreState {
     selects: Vec<gtk4::DropDown>,
     radios: Vec<gtk4::Box>,
     grids: Vec<gtk4::Grid>,
+    labeleds: Vec<adw::ActionRow>,
     textareas: Vec<gtk4::TextView>,
+    /// Each labelled row's seats (docs/forms-plan.md §3), by widget id.
+    labeled_rows: HashMap<u64, GtkLabeledRow>,
+    /// The boxed list a QUALIFYING column's rows live in — the derived
+    /// form (docs/forms-plan.md §2), by that column's widget id.
+    form_lists: HashMap<u64, gtk4::ListBox>,
     /// Grid layout state: ordered children + column count. Children can
     /// arrive BEFORE the columns prop (children-first sugars), so both paths
     /// re-flow the attach positions.
@@ -4482,6 +4529,64 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     }
 }
 
+/// THE DERIVED FORM (docs/forms-plan.md §2): a column whose laid-out children
+/// are ALL labelled rows, two or more, IS one — libadwaita's boxed list, so
+/// the rows share one card and the list's own separators. A column that stops
+/// qualifying hands its rows back in order and goes on being a column, and its
+/// labelled rows go on being ActionRows one at a time.
+fn refresh_form(core: &mut CoreState, column_id: u64) {
+    let Some(NativeWidget::Column(column)) = core.widgets.get(&WidgetId(column_id)) else {
+        return;
+    };
+    let column = column.clone();
+    // A declared table's rows are its viewport's, never this column's.
+    if core.tables.contains_key(&column_id) {
+        return;
+    }
+    let list = core.form_lists.get(&column_id).cloned();
+    let seated: Vec<gtk4::Widget> = list.as_ref().map(children_of).unwrap_or_default();
+    let loose: Vec<gtk4::Widget> = children_of(&column)
+        .into_iter()
+        .filter(|w| !list.as_ref().is_some_and(|l| l.clone().upcast::<gtk4::Widget>() == *w))
+        .collect();
+    let kids: Vec<gtk4::Widget> = seated.iter().chain(loose.iter()).cloned().collect();
+    let qualifies = kids.len() >= 2 && kids.iter().all(|w| w.is::<adw::ActionRow>());
+    match (qualifies, list) {
+        (true, None) => {
+            let list = gtk4::ListBox::new();
+            list.set_selection_mode(gtk4::SelectionMode::None);
+            list.add_css_class(BOXED_LIST_CLASS);
+            list.set_halign(gtk4::Align::Fill);
+            for row in &kids {
+                column.remove(row);
+                list.append(row);
+            }
+            column.append(&list);
+            core.form_lists.insert(column_id, list);
+        }
+        (false, Some(list)) => {
+            let mut after: Option<gtk4::Widget> = None;
+            for row in &seated {
+                list.remove(row);
+                column.insert_child_after(row, after.as_ref());
+                after = Some(row.clone());
+            }
+            column.remove(&list);
+            core.form_lists.remove(&column_id);
+        }
+        _ => {}
+    }
+    // Its own breadth is re-read for it, the stamped-rows shape: a column
+    // attached to its parent BEFORE it qualified took the hugging align.
+    let widget = column.upcast::<gtk4::Widget>();
+    set_form(&widget, qualifies);
+    if let Some(above) = widget.parent() {
+        if let Some(vertical) = container_vertical(&above) {
+            apply_cross_align(&widget, vertical, container_align(&above));
+        }
+    }
+}
+
 // --- Menus: the command vocabulary (DESIGN.md, Menus) -----------------
 // One GMenu model per window in a PopoverMenuBar strip, every actionable item
 // a window-scoped GSimpleAction (`win.kmi-<id>`), a context catalog a
@@ -5720,6 +5825,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Select => core.selects[resolve(t.index, core.selects.len())].clone().upcast(),
         K::Radio => core.radios[resolve(t.index, core.radios.len())].clone().upcast(),
         K::Grid => core.grids[resolve(t.index, core.grids.len())].clone().upcast(),
+        K::Labeled => core.labeleds[resolve(t.index, core.labeleds.len())].clone().upcast(),
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
@@ -7843,6 +7949,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Labeled => {
+                    // THE LABELLED ROW (docs/forms-plan.md §3): Adwaita's own
+                    // labelled row, its title left to kaya's LABEL WIDGET in
+                    // the prefix — a title string would be a copy of text a
+                    // signal can move.
+                    let row = adw::ActionRow::new();
+                    // A row crosses the column it sits in, which is what
+                    // spans it (`crosses_container`).
+                    set_container_vertical(row.upcast_ref::<gtk4::Widget>(), false);
+                    core.labeled_rows.insert(
+                        id.0,
+                        GtkLabeledRow { seated: 0, label: None, action: None, spacing: None },
+                    );
+                    core.labeleds.push(row.clone());
+                    NativeWidget::Labeled(row)
+                }
                 WidgetKind::Radio => {
                     // The choice contract inline: GTK's radio idiom is
                     // grouped CheckButtons (set_group renders the circle) and
@@ -8219,13 +8341,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 attachment.popover.unparent();
             }
+            // A destroyed labelled row takes its seats with it, and a
+            // destroyed column its boxed list (docs/forms-plan.md §2).
+            core.labeled_rows.remove(&id.0);
+            core.form_lists.remove(&id.0);
             let widget = core
                 .widgets
                 .remove(&id)
                 .expect("scene validated the id")
                 .widget();
             if let Some(parent) = widget.parent() {
-                if let Ok(column) = parent.downcast::<gtk4::Box>() {
+                // A FORM'S ROWS ARE ITS BOXED LIST'S CHILDREN, and that
+                // parent is no GtkBox; a labelled row's seats are inside the
+                // ActionRow's own prefix and suffix boxes, which are.
+                if let Ok(list) = parent.clone().downcast::<gtk4::ListBox>() {
+                    list.remove(&widget);
+                } else if let Ok(column) = parent.downcast::<gtk4::Box>() {
                     column.remove(&widget);
                 }
             }
@@ -9362,6 +9493,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                                 | NativeWidget::Grid(_)
                                 | NativeWidget::Scroll(_)
                                 | NativeWidget::Radio(_)
+                                | NativeWidget::Labeled(_)
                         ) {
                             widget.set_accessible_role(gtk4::AccessibleRole::Group);
                         }
@@ -9597,6 +9729,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let widget = grid.clone().upcast::<gtk4::Widget>();
                     set_container_inset(core, &widget, pad);
                 }
+                (NativeWidget::Labeled(row), Prop::Inset, Value::F64(pad)) => {
+                    let widget = row.clone().upcast::<gtk4::Widget>();
+                    set_container_inset(core, &widget, pad);
+                }
+                // A LABELLED ROW'S SPACING IS THE GAP BEFORE ITS TRAILING
+                // ACTION, which is the one gap kaya owns here: the label's
+                // and the control's seats are the platform's, and their gaps
+                // come with them. SwiftUI's arm spends the same number on the
+                // same pair (docs/forms-plan.md §3). Undeclared, the row keeps
+                // Adwaita's own.
+                (NativeWidget::Labeled(_), Prop::Spacing, Value::F64(gap)) => {
+                    let gap = gap.round() as i32;
+                    if let Some(seats) = core.labeled_rows.get_mut(&id.0) {
+                        seats.spacing = Some(gap);
+                        if let Some(action) = seats.action.clone() {
+                            action.set_margin_start(gap);
+                        }
+                    }
+                }
                 // The arrangement axis (docs/adaptive-layout-plan.md D1):
                 // the GtkBox IS one orientable node, so the flip is the
                 // toolkit's own property — the axis-as-data precedent.
@@ -9712,6 +9863,67 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.radio_options.insert(child.0, (parent.0, row));
                 return;
             }
+            if let NativeWidget::Labeled(row) = core.widgets.get(&parent).expect("scene validated the id")
+            {
+                // THE SEATS ARE THE CHILD ORDER (docs/forms-plan.md §2): the
+                // label, the control it names, then the trailing action. The
+                // root refuses every other shape, so the order is the seat.
+                use adw::prelude::ActionRowExt;
+                let row = row.clone();
+                let native = core.widgets.get(&child).expect("scene validated the id");
+                let child_widget = native.widget();
+                let control = native.control();
+                let seat = core.labeled_rows.get(&parent.0).map_or(0, |r| r.seated);
+                child_widget.set_valign(gtk4::Align::Center);
+                if seat == 0 {
+                    // The label takes the leftover, which is what leaves the
+                    // control and its action on the row's trailing edge: an
+                    // empty ActionRow title hides the title box that would
+                    // otherwise expand there.
+                    child_widget.set_hexpand(true);
+                    child_widget.set_halign(gtk4::Align::Fill);
+                    row.add_prefix(&child_widget);
+                    if let Some(seats) = core.labeled_rows.get_mut(&parent.0) {
+                        seats.label = Some(child_widget.clone());
+                    }
+                } else {
+                    child_widget.set_halign(gtk4::Align::End);
+                    row.add_suffix(&child_widget);
+                }
+                if seat == 2 {
+                    // The trailing action's own gap — the row's spacing when
+                    // one was declared, in either order (see GtkLabeledRow).
+                    if let Some(gap) = core.labeled_rows.get(&parent.0).and_then(|r| r.spacing) {
+                        child_widget.set_margin_start(gap);
+                    }
+                    if let Some(seats) = core.labeled_rows.get_mut(&parent.0) {
+                        seats.action = Some(child_widget.clone());
+                    }
+                }
+                if seat == 1 {
+                    // THE RELATION (docs/forms-plan.md §4): the control's
+                    // accessible name IS the label's text — GTK's name
+                    // computation reads LABELLED_BY first, and the relation
+                    // points at the LIVE label, so a signal that moves the
+                    // text renames the control with it. An app that named the
+                    // control itself keeps its name: the A11yLabel arm resets
+                    // this relation for exactly that reason, and this skips a
+                    // name that arrived first.
+                    let label = core.labeled_rows.get(&parent.0).and_then(|r| r.label.clone());
+                    if let Some(label) = label {
+                        if !core.a11y_labels.contains_key(&child.0) {
+                            use gtk4::prelude::{AccessibleExtManual, Cast};
+                            control.update_relation(&[gtk4::accessible::Relation::LabelledBy(
+                                &[label.upcast_ref::<gtk4::Accessible>()],
+                            )]);
+                        }
+                    }
+                }
+                if let Some(seats) = core.labeled_rows.get_mut(&parent.0) {
+                    seats.seated += 1;
+                }
+                return;
+            }
             if let NativeWidget::Select(_) = core.widgets.get(&parent).expect("scene validated the id")
             {
                 // The row initializes from the label's CURRENT text:
@@ -9772,7 +9984,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 NativeWidget::Column(column) => {
                     match core.tables.get(&parent.0).map(|t| t.content.clone()) {
                         Some(content) => content.append(&child_widget),
-                        None => column.append(&child_widget),
+                        // A FORM'S ROWS LIVE IN ITS BOXED LIST
+                        // (docs/forms-plan.md §2); anything else lands in the
+                        // column itself and ends the form below.
+                        None => match core.form_lists.get(&parent.0) {
+                            Some(list) if child_widget.is::<adw::ActionRow>() => {
+                                list.append(&child_widget)
+                            }
+                            _ => column.append(&child_widget),
+                        },
                     }
                 }
                 NativeWidget::Row(row) => row.append(&child_widget),
@@ -9815,6 +10035,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         apply_cross_align(&host, vertical, container_align(&above));
                     }
                 }
+            }
+            // Only a column that HOLDS a labelled row can become or stop
+            // being a form, and the walk inside is per-child: a For's
+            // container takes thousands of stamped rows and must not pay
+            // for a shape it can never have.
+            if child_widget.is::<adw::ActionRow>() || core.form_lists.contains_key(&parent.0) {
+                refresh_form(core, parent.0);
             }
             // Only now is the parent — and so the main axis — known, so
             // a weight that arrived before the child was attached gets
@@ -10481,7 +10708,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 selects: Vec::new(),
                 radios: Vec::new(),
                 grids: Vec::new(),
+                labeleds: Vec::new(),
                 textareas: Vec::new(),
+                labeled_rows: HashMap::new(),
+                form_lists: HashMap::new(),
                 grid_children: HashMap::new(),
                 grid_cols: HashMap::new(),
                 radio_options: HashMap::new(),
@@ -14155,6 +14385,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Select => nth!(core.selects),
         K::Radio => nth!(core.radios),
         K::Grid => nth!(core.grids),
+        K::Labeled => nth!(core.labeleds),
         K::Scroll => nth!(core.scrolls),
         K::Row => nth!(core.rows),
         K::Column => nth!(core.columns),

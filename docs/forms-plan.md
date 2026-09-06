@@ -87,6 +87,29 @@ own widths. kaya declares the pairs and rides the native engine
   (a text field) goes under the label as supportingContent, which is
   Material's own fold.
 
+## §3.1 — the nine spellings (built 2026-09-06)
+
+Each binding's own container idiom, the label first and the body after,
+in BOTH zones; a signal-bound label where the binding binds text:
+
+- Rust: `tx.labeled(label, |tx| ...)` / `tpl.labeled(...)`, and on the
+  `Row` façade.
+- Python: `with kaya.labeled("When"): ...` (a context manager, like
+  `row`/`column`).
+- JS: `kaya.labeled(label, () => { ... })`, a string or a signal.
+- Go: `tx.LabeledText("When", func() {...})` / `tx.Labeled(sig, ...)`, and
+  `LabeledBound` in the template zone — two names because Go cannot
+  overload and the sugar census reads `Labeled[A-Za-z]*(`.
+- C#: `tx.Labeled("When", () => {...})` with `Signal` and `Field<string>`
+  overloads; the generated `<Rec>Row` façade forwards it.
+- Java: `tx.labeled("When", () -> {...})` with `Signal<String>` and
+  `Field<String>` overloads, on `RowSurface` too.
+- Swift: `tx.labeled("When") { ... }` with a `KayaSignal` overload.
+- OCaml: `labeled ?label ?label_bind children ()` (+ `?label_field` in
+  `Tpl`) — the binding's own constant-or-signal pair of optionals.
+- Haskell: `labeled src children` / `labeledOf` in the template zone,
+  after `rowOf`/`columnOf`.
+
 ## §4 — observables
 
 - The relation: `expect_ax <control> "<kind>/<label text>"` — the labelled
@@ -101,6 +124,8 @@ own widths. kaya declares the pairs and rides the native engine
   (`grid_columns`) already clusters leading edges and is the model. Held
   on the desktops; a phone that stacks reports one cluster, which the
   phone cuts assert as their own truth (the adaptive scene's pattern).
+  NOT BUILT in the overnight slice: the relation is the guard that
+  shipped; the geometry verb is ledgered.
 - A `labeled` with the wrong children fails the unit tests at the root;
   the sugar census demands the constructor in all nine bindings in both
   zones (check-sugar-surface's KIND clause, once `labeled` is in the
@@ -118,6 +143,66 @@ hint; decided at build time by what reads well on the mac. Existing
 asserts keep their ids (`date_picker@when`, `button@clear_when`,
 `label@when_text`). New: `expect_ax date_picker@when` on every lane,
 `expect_form_columns column@details` on the desktops.
+
+## §5.1 — what the mac build found (2026-09-06)
+
+- `LabeledContent` gives a HOSTED control (the NSDatePicker) no accessible
+  name of its own, so the relation is stated on the control:
+  `.accessibilityLabel(label.text)` unless the app named it. With it the
+  picker reads `id=when desc=When: none` in KAYA_AX_TRACE and
+  `expect_ax date_picker@when "datetime/When: none"` holds.
+- A labelled row must NOT carry an a11y_id of its own on macOS today: the
+  container's identifier overrides its children's in the AX tree
+  (docs/traps.md), and the picker vanished from `expect_ax`'s walk. The
+  task manager addresses the pickers and buttons, never the rows.
+- The mac's grouped Form insets its card from the column's edges, so the
+  notes field above and the Delete button below sit wider than the form:
+  the platform's own settings look, kept as is; a column that is ALL form
+  would show no seam, and the task manager's is not.
+- WinUI shares the label column by PINNING each row's first column to the
+  widest label, measured (an unbounded Measure on every sibling's label,
+  re-run when a bound label's text changes or the typeface moves), not by
+  one big Grid: reparenting the rows' children into one grid takes each
+  row's own Grid out of the visual tree, and the readers and the row's
+  spacing and inset need it there. The relation is
+  `AutomationProperties.LabeledBy`, which UIA answers only when the
+  control has no name of its own, so an app's a11y_label still wins.
+- Compose folds every control but a checkbox UNDER its label
+  (supportingContent), the settings-screen shape; trailing content
+  starved the headline on a 360dp phone ("Project" one letter per line
+  beside a 280dp select). The select's field is sized to its value too.
+- iOS draws the form as the inset-grouped card the table and the fold
+  already draw: a List-backed Form inside a scroll collapses to nothing
+  (measured 2026-09-06, the whole form gone from the phone). macOS keeps
+  the grouped Form.
+- A FORM IS A GROUPED-SCREEN CARRIER on iOS (docs/adaptive-layout-plan.md
+  D7.5, widened): the card was invisible on the Details screen's white
+  ground (captured 2026-09-06), because only a table made a screen
+  grouped. A screen holding a form takes the grouped ground, the form is
+  a section body of its own, and its neighbours card as runs — the
+  Settings shape the form was drawn to match. Three things the first
+  grouped build taught (captured and measured 2026-09-06): the form
+  branch of the column arm must precede the flex branch, since the
+  section stream renders the form stretched and the flex branch took it
+  first (card and dividers gone); a grouped flow's CONTENT BOX is its
+  cards' interior, so KayaBoxReader records the cross less the card
+  inset and kayaCarded gives each child a cell reader — `expect_breadth
+  textarea@notes` had read "no cross box recorded"; and a text area
+  inside a card draws no border of its own (`kayaInGroupedCard`), the
+  card being the boundary, as Reminders' notes field has none.
+- iOS folds a labelled row through one `Layout` (`KayaLabeledFold`): side
+  by side when the three fit the width, the value and its action under the
+  label when they do not. LabeledContent alone crushed a Clear beside a
+  date to one letter per line on the iPhone (measured 2026-09-06). The
+  first fold was a `ViewThatFits`, which measures a second copy of the
+  picker; the copy's dismantle emptied the harness registry and `set_date`
+  found no control (docs/traps.md). A Layout holds one control, so the
+  fit test is kaya's own arithmetic over the platform's measured sizes —
+  the one place F5 yields, and only because the platform's fit test
+  duplicates the subtree.
+- The scene's caption reads (`label@when_text "When: none"`) became the
+  relation reads: the label is the row's own child now and the picker's
+  accessible name is the observation that matters.
 
 ## §6 — sequencing
 
@@ -144,3 +229,11 @@ twenty screens reviewed, ONE matrix, commit.
 - F6 the gallery scene gains one labelled row so every binding's
   constructor is exercised by a compiled guest, the adaptive scene's
   reasoning (docs/adaptive-layout-plan.md §2).
+
+- The phone fold is PER ROW (KayaLabeledFold folds the one row whose
+  label, control and action do not fit): on the iPhone the When row
+  folds while Deadline, Reminder and Project sit side by side. A form
+  could instead fold every row once any row folds, the shared-label
+  column's phone analogue. Taken per row overnight because it is the
+  platform's own ViewThatFits behaviour one Layout over; the per-form
+  alternative is one line in the Layout if you prefer it.

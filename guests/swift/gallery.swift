@@ -42,6 +42,11 @@ app.build { tx in
             tx.image(testPNG)
             tx.image(Data("not an image".utf8))
         }
+        // The labelled row: the control's accessibility name IS the
+        // label's text, with no a11yLabel of its own.
+        tx.labeled("Level") {
+            tx.setA11yId(tx.slider(min: 0.0, max: 1.0, value: 0.5), "level")
+        }
     }
     tx.mount(root)
 }

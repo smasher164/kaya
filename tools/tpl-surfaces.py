@@ -27,7 +27,7 @@ ROOT = "."
 DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea canvas "
-    "date_picker time_picker"
+    "date_picker time_picker labeled"
 ).split()
 
 

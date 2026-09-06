@@ -2813,6 +2813,24 @@ export function grid(columns: number, optsOrBody?: GridOptions | (() => void), b
   return new Container(handle).run(run);
 }
 
+export type LabeledOptions = GrowOption & { spacing?: number; inset?: number };
+
+/** A LABELLED ROW (docs/forms-plan.md): `label` names the one control the
+ * body declares, with an optional trailing button after it. A column of
+ * nothing but these renders as the platform's form. The label is a
+ * constant, a Signal, or — in a template — the enclosing For's element or
+ * one of its fields. */
+export function labeled(label: string | Bindable, optsOrBody?: LabeledOptions | (() => void), body?: () => void): Widget {
+  const [opts, run] = optsAndOptionalBody(optsOrBody, body);
+  const handle = widget(wire.KIND_LABELED);
+  setLayout(handle, opts);
+  return new Container(handle).run(() => {
+    if (typeof label === "string") labelOf(label);
+    else labelOf({ bind: label });
+    if (run !== undefined) run();
+  });
+}
+
 /** A spacer: PURE SUGAR for an empty grown column. */
 export function spacer(opts: GrowOption = {}): Widget {
   const handle = widget(wire.KIND_COLUMN);
@@ -3074,6 +3092,10 @@ export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
   setGrow(handle, opts);
   return handle;
 }
+
+// `labeled`'s own parameter is named `label`, which shadows the
+// constructor it has to call.
+const labelOf = label;
 
 /** A label wearing the heading role, in one word (the h1 tradition). */
 export function heading(text: string, opts?: LabelOptions): Widget;

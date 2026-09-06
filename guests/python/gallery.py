@@ -49,5 +49,9 @@ with app.window():
             # A decode failure is the placeholder class, never a crash.
             kaya.image(TEST_PNG)
             kaya.image(b"not an image")
+        # The labelled row: the control's accessibility name IS the
+        # label's text, with no a11y_label of its own.
+        with kaya.labeled("Level"):
+            kaya.slider(value=0.5, min=0.0, max=1.0).a11y_id("level")
 
 sys.exit(app.run())

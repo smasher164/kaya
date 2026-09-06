@@ -254,6 +254,17 @@ tools/check-table-card.py pins the screen ground, its two wearers and
 the card's one spelling; a side-by-side screen (two table-bearing
 children, e.g. the pad's unstacked row) grounds but does not section.
 
+WIDENED TO FORMS 2026-09-06 (PROPOSED-overnight, docs/forms-plan.md): the
+carrier is a table OR a form — a column of two or more labelled rows.
+The task manager's Details screen has no table, and its form's
+inset-grouped card was invisible on the white ground (captured
+2026-09-06): the card only reads against `systemGroupedBackground`. A
+form is a section body of its own, like a table, rendered by the form
+arm (which draws the card); the run before it (the notes field) and the
+run after it (the Delete button) are cards of their own, the Settings
+shape. The flatten does not dissolve a form. macOS is unchanged, since
+`kayaIsGroupedFlow` is false there by construction.
+
 ### D8 — the breakpoint speaks size classes (ruled and built 2026-08-31)
 
 THE RAW NUMBER DIED. `stack_below=<points>` made the author invent the

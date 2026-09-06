@@ -9295,6 +9295,17 @@ runningboardd's exit context before hunting a crash report.
   `KAYA_ALIGN_TRACE` (min 0x0 nat 2x64 on the picture, extent 39 in 40
   on the label). GTK images hold their intrinsic size now
   (`set_can_shrink(false)`), the semantics the other three already had.
+- **On macOS a container's a11y_id overrides its children's identifiers
+  in the accessibility tree** (2026-09-06, the labelled row's first mac
+  run: `expect_ax date_picker@when` read "<not in the accessibility
+  tree>"). The SwiftUI a11y wrapper marks an identified container as one
+  accessibility element containing its children, and the picker and the
+  Clear button inside a row tagged `when_row` then both reported
+  `id=when_row` in KAYA_AX_TRACE while their own "when" and "clear_when"
+  were gone; the untagged Deadline row beside it kept its picker's id.
+  Address the children, not a labelled row, when the children must stay
+  reachable to `expect_ax`; the general fix (an identified container
+  that keeps its children's ids) is ledgered with the finding.
 - **A WinUI window with no initial focus draws a focus rectangle on its
   first tab stop** (2026-09-05, the boxed hamburger of the task
   manager's Windows captures). XAML seats focus on the first focusable
@@ -9304,3 +9315,25 @@ runningboardd's exit context before hunting a crash report.
   yourself, on the pane's `Loaded` — a dispatcher tick after SetContent
   is too early, the pane has no visual tree yet and
   FindFirstFocusableElement finds nothing.
+
+- **A ViewThatFits measures a SECOND copy of a bridged control, and the
+  copy's own dismantle empties the harness registry** (2026-09-06,
+  swift/KayaSwiftUI.swift, the iOS labelled row). The first fold of the
+  labelled row put the row's picker inside both ViewThatFits candidates.
+  Each candidate's UIViewRepresentable is made in order to be measured, so
+  the picker was made twice: the live one registered in kayaPickerControls,
+  a measured copy registered over it and was dismantled, and the
+  identity-guarded dismantle removed the entry that was by then its own.
+  The window held a UIDatePicker carrying the id (expect_ax read it,
+  class=UIDatePicker) while set_date reported "has no picker control after
+  5000ms". A bridged control lives in exactly one view: a fold that needs
+  two arrangements is a Layout over ONE set of subviews (KayaLabeledFold),
+  never two candidates each holding the control.
+- **Copying a rebuilt Mach-O over its staged path keeps the inode, and the
+  kernel kills the guest at exec with NO output** (2026-09-06,
+  tools/run-leg.py). shutil.copy2 over an existing file writes into the
+  same inode, whose cached signature is now wrong; macOS reports `SIGKILL
+  (Code Signature Invalid)` / `Taskgated Invalid Signature` in
+  ~/Library/Logs/DiagnosticReports/<guest>-*.ips and the leg prints
+  nothing at all. Unlink first, then copy: run-leg does; a hand copy must
+  too.

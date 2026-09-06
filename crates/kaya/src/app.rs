@@ -2145,6 +2145,22 @@ impl<'a> Tx<'a> {
         self.container_of(WidgetKind::Scroll, body)
     }
 
+    /// A LABELLED ROW (docs/forms-plan.md): `label` names the one control
+    /// the body declares, with an optional trailing button after it. A
+    /// column of nothing but these renders as the platform's form.
+    pub fn labeled<R>(
+        &mut self,
+        label: impl Into<LiveSource<StrKind>>,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> Widget<'_, 'a, R> {
+        let label = label.into();
+        self.container_of(WidgetKind::Labeled, |tx| {
+            let l = tx.widget(WidgetKind::Label);
+            tx.set_live(l, Prop::Text, label);
+            body(tx)
+        })
+    }
+
     /// A grid laying its children out row-major into `columns` columns —
     /// each column takes its NATURAL width, aligned across rows;
     /// `spacing` is the inter-cell gap on both axes.
@@ -3431,6 +3447,14 @@ impl<'b> Row<'_, 'b> {
 
     pub fn spacer(&mut self) -> TemplateNodeId {
         self.tpl().spacer()
+    }
+
+    pub fn labeled<R>(
+        &mut self,
+        label: impl Into<TplSource<StrKind>>,
+        body: impl FnOnce(&mut Tpl<'_, 'b>) -> R,
+    ) -> (TemplateNodeId, R) {
+        self.tpl().labeled(label, body)
     }
 
     pub fn progress(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
@@ -6120,6 +6144,21 @@ impl<'b> Tpl<'_, 'b> {
         let (node, out) = self.container_of(WidgetKind::Grid, body);
         self.set(node, Prop::Columns, columns as f64);
         (node, out)
+    }
+
+    /// A LABELLED ROW in the template zone (docs/forms-plan.md): `label`
+    /// names the one control the body declares, an optional trailing
+    /// button after it.
+    pub fn labeled<R>(
+        &mut self,
+        label: impl Into<TplSource<StrKind>>,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> (TemplateNodeId, R) {
+        let label = label.into();
+        self.container_of(WidgetKind::Labeled, |t| {
+            t.label(label);
+            body(t)
+        })
     }
 
     /// A spacer: an empty grown column, the same pure sugar the live

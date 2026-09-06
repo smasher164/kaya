@@ -35,6 +35,10 @@ static class GalleryScene
                     tx.Image(TestPng);
                     tx.Image(System.Text.Encoding.ASCII.GetBytes("not an image"));
                 });
+                // The labelled row: the control's accessibility name IS the
+                // label's text, with no a11yLabel of its own.
+                tx.Labeled("Level", () =>
+                    tx.SetA11yId(tx.Slider(0.0, 1.0, 0.5), "level"));
             }));
         });
 

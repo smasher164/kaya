@@ -2101,6 +2101,30 @@ sealed class Tx
         return parent;
     }
 
+    /// A LABELLED ROW (docs/forms-plan.md): `label` names the one control
+    /// the body declares, with an optional trailing button after it. A
+    /// column of nothing but these renders as the platform's form.
+    public Widget Labeled(string label, Action body, double? spacing = null,
+        double? grow = null, double? inset = null) =>
+        LabeledOf(() => Label(label), body, spacing, grow, inset);
+
+    public Widget Labeled(Signal label, Action body, double? spacing = null,
+        double? grow = null, double? inset = null) =>
+        LabeledOf(() => Label(bind: label), body, spacing, grow, inset);
+
+    Widget LabeledOf(Action name, Action body, double? spacing, double? grow, double? inset)
+    {
+        var parent = Widget(KayaWire.KindLabeled);
+        if (spacing is double gap) SetSpacing(parent, gap);
+        if (grow is double g) SetGrow(parent, g);
+        if (inset is double pad) SetInset(parent, pad);
+        App.Parents.Add(parent.Id);
+        name();
+        body?.Invoke();
+        App.Parents.RemoveAt(App.Parents.Count - 1);
+        return parent;
+    }
+
     /// A spacer: PURE SUGAR for an empty grown column — it consumes
     /// the leftover main-axis space between its siblings.
     public Widget Spacer()
@@ -3762,6 +3786,28 @@ sealed class Tpl
         var n = ContainerOf(KayaWire.KindGrid, body);
         tx.Records.Add(KayaWire.TxSetColumns(n.Id, columns));
         return n;
+    }
+
+    /// A LABELLED ROW per stamped copy (docs/forms-plan.md): `label`
+    /// names the one control the body declares, with an optional trailing
+    /// button after it.
+    public Node Labeled(string label, Action body) =>
+        LabeledOf(() => Label(label), body);
+
+    public Node Labeled(Signal label, Action body) =>
+        LabeledOf(() => Label(label), body);
+
+    public Node Labeled(Field<string> label, Action body) =>
+        LabeledOf(() => Label(label), body);
+
+    Node LabeledOf(Action name, Action body)
+    {
+        var parent = Widget(KayaWire.KindLabeled);
+        tx.App.Parents.Add(parent.Id);
+        name();
+        body?.Invoke();
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
+        return parent;
     }
 
     /// A spacer: PURE SUGAR for an empty grown column, in every stamped

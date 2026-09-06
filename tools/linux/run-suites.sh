@@ -600,19 +600,26 @@ for proto in x11 wayland; do
     run "$proto" entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
     run "$proto" entry-java env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    run "$proto" gallery-rust env KAYA_SELFTEST=gallery "$CARGO_TARGET_DIR/debug/examples/gallery"
-    run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/c-guests/gallery
+    # THROUGH a11y-leg.sh: the gallery's labelled row is read by the
+    # control's accessible name (docs/forms-plan.md §4, F6).
+    run "$proto" gallery-rust env KAYA_SELFTEST=gallery \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/gallery"
+    run "$proto" gallery-c env KAYA_SELFTEST=gallery \
+        tools/linux/a11y-leg.sh /tmp/c-guests/gallery
     run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        python3 guests/python/gallery.py
+        tools/linux/a11y-leg.sh python3 guests/python/gallery.py
     run "$proto" gallery-js env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        node guests/js/gallery.ts
-    run "$proto" gallery-go env KAYA_SELFTEST=gallery /tmp/go-guests/kaya-go
+        tools/linux/a11y-leg.sh node guests/js/gallery.ts
+    run "$proto" gallery-go env KAYA_SELFTEST=gallery \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        dotnet exec "$CS_GUEST"
-    run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/gallery.exe
-    run "$proto" gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/gallery.exe
+    run "$proto" gallery-haskell env KAYA_SELFTEST=gallery \
+        tools/linux/a11y-leg.sh "$(hs_bin gallery)"
     run "$proto" gallery-java env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.guests.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" todos-rust env KAYA_SELFTEST=todos "$CARGO_TARGET_DIR/debug/examples/todos"
     run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/c-guests/todos
     run "$proto" todos-python env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
@@ -1046,8 +1053,10 @@ for proto in x11 wayland; do
     run "$proto" windowed-rust env KAYA_SELFTEST=windowed \
         "$CARGO_TARGET_DIR/debug/examples/windowed"
     # THE TASK MANAGER, a RUST app by design (docs/tasks-plan.md §0).
+    # THROUGH a11y-leg.sh: the Details form's pickers are read by their
+    # accessible names (docs/forms-plan.md §4).
     run "$proto" tasks-rust env KAYA_SELFTEST=tasks \
-        "$CARGO_TARGET_DIR/debug/examples/tasks"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
     # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2).
     run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
         "$CARGO_TARGET_DIR/debug/examples/adaptive"

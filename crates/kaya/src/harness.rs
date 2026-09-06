@@ -77,6 +77,9 @@ pub enum TargetKind {
     /// set_time through the platform control, read back by expect_picker.
     DatePicker,
     TimePicker,
+    /// The labelled row (docs/forms-plan.md), targetable under the
+    /// container convention like Row.
+    Labeled,
     /// Grids are targetable under the container convention: only index
     /// 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.py).
@@ -2076,6 +2079,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "canvas" => TargetKind::Canvas,
         "date_picker" => TargetKind::DatePicker,
         "time_picker" => TargetKind::TimePicker,
+        "labeled" => TargetKind::Labeled,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -4037,6 +4041,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Canvas => "canvas",
         TargetKind::DatePicker => "date_picker",
         TargetKind::TimePicker => "time_picker",
+        TargetKind::Labeled => "labeled",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -6132,12 +6137,14 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_ne!(code, 0);
         assert!(verdict.contains("short of its breadth (spans 79pt of its parent's 375pt breadth)"), "{verdict}");
+        // A nested container is a target too (2026-09-05, docs/tasks-plan.md
+        // R7): a hugging list hides behind rows that fill it.
         let steps = parse("expect_breadth column#0").unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         run(steps, MockStage { seen: &SEEN, verdict: tx });
         let (code, verdict) = rx.recv().unwrap();
-        assert_ne!(code, 0);
-        assert!(verdict.contains("expect_breadth reads a widget"), "{verdict}");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("column#0 spans its breadth"), "{verdict}");
     }
 
     #[test]

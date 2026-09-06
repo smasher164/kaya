@@ -1351,6 +1351,20 @@ class _Container(_Scope):
             _pending_root = self.handle
 
 
+class _Labeled(_Container):
+    def __init__(self, handle, text):
+        super().__init__(handle)
+        self._label = text
+
+    def _enter(self):
+        handle = super()._enter()
+        if isinstance(self._label, str):
+            label(text=self._label)
+        else:
+            label(bind=self._label)
+        return handle
+
+
 class _Template(_Scope):
     def __init__(self, opener, target_id, is_for, coll=None):
         self._opener = opener
@@ -2965,6 +2979,20 @@ def grid(columns, grow=None, spacing=None, inset=None, columns_when=None):
     _set_spacing(handle, spacing)
     _set_inset(handle, inset)
     return _Container(handle)
+
+
+def labeled(label, grow=None, spacing=None, inset=None):
+    """A LABELLED ROW (docs/forms-plan.md): `label` names the one control
+    declared inside, with an optional trailing button after it. A column
+    of nothing but these renders as the platform's form.
+
+    `label` is a str, a Signal, or — in a template — the enclosing For's
+    element or one of its fields."""
+    handle = _widget(wire.KIND_LABELED)
+    _set_grow(handle, grow)
+    _set_spacing(handle, spacing)
+    _set_inset(handle, inset)
+    return _Labeled(handle, label)
 
 
 def spacer(grow=1.0):

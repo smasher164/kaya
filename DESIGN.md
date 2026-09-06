@@ -1006,6 +1006,17 @@ The known normalization worklist:
   drift (docs/tasks-plan.md R5 — Compose drew a list row's title flush
   against its top edge beside a taller checkbox, which nobody had
   chosen).
+- A labelled row names its control, and a column of them is a form
+  (docs/forms-plan.md). `labeled` is a container of a label, one
+  control and at most a trailing button; the pairing is a semantic fact
+  the backends lower to their native labelled control (LabeledContent
+  in a Form, Adwaita's action row, WinUI's label-and-control grid,
+  Material's list item) and assistive technology gets the label-for
+  relation, observed as the control's accessible name. A column whose
+  children are all labelled rows is derived into the platform's form
+  surface, the way a For with headers is a table; the side-by-side
+  against stacked decision is the platform control's, never kaya's
+  arithmetic.
 - A text field fills its column's width. An entry or a textarea is an
   input region, not content, so in a vertical container it spans the
   cross axis the way a scroll does; in a row it keeps its intrinsic

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x80fb73fecaaf397f
+let kayaSpecHash: UInt64 = 0x27300640cf479cec
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -124,6 +124,7 @@ private let kindTextarea: UInt32 = 14
 private let kindCanvas: UInt32 = 15
 private let kindDatePicker: UInt32 = 16
 private let kindTimePicker: UInt32 = 17
+private let kindLabeled: UInt32 = 18
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -665,6 +666,7 @@ final class KayaSceneModel {
     var radios: [KayaNode] = []
     var grids: [KayaNode] = []
     var textareas: [KayaNode] = []
+    var labeleds: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface. An
@@ -4115,6 +4117,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindRadio: kayaScene.radios.append(node)
                 case kindGrid: kayaScene.grids.append(node)
                 case kindTextarea: kayaScene.textareas.append(node)
+                case kindLabeled: kayaScene.labeleds.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -6132,6 +6135,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     // addressable for accessibility, which is the point of a universal prop.
     case "entry": return kayaTarget(spec, "entry", kayaScene.entryWidgets)
     case "textarea": return kayaTarget(spec, "textarea", kayaScene.textareas)
+    case "labeled": return kayaTarget(spec, "labeled", kayaScene.labeleds)
     default: return nil
     }
 }
@@ -9030,6 +9034,10 @@ private struct KayaInsetReader: View {
 private struct KayaBoxReader: View {
     let id: UInt64
     let vertical: Bool
+    /// A GROUPED FLOW'S CONTENT BOX IS ITS CARDS' INTERIOR (the grouped-screen
+    /// rule): the section stream pads every run and form by the card inset,
+    /// so a child spanning the interior spans the flow's content.
+    var crossInset: Double = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -9044,7 +9052,7 @@ private struct KayaBoxReader: View {
 
     private func record(_ size: CGSize) {
         kayaContainerExtents[id] = Double(vertical ? size.height : size.width)
-        kayaContainerCross[id] = Double(vertical ? size.width : size.height)
+        kayaContainerCross[id] = Double(vertical ? size.width : size.height) - crossInset
         // The axis the RENDER used, recorded only when the container
         // laid out — expect_axis's observation (never the model's
         // field: a backend that ignored the write must fail, the
@@ -11556,6 +11564,100 @@ let kayaTableCardPad: CGFloat = kayaTableCardInsetX
 /// internal spacing — at `node.spacing` the two surfaces read as one card.
 let kayaFoldSeamGap: CGFloat = 16
 
+#if !os(macOS)
+    /// THE PHONE'S FOLD OF A LABELLED ROW (docs/forms-plan.md §3): label
+    /// leading and value trailing when the three fit the width, the value
+    /// under the label when they do not. ONE Layout over ONE control: a
+    /// ViewThatFits measures a second copy of a bridged control, and that
+    /// copy's dismantle empties the harness registry (docs/traps.md).
+    struct KayaLabeledFold: Layout {
+        let spacing: CGFloat
+
+        struct Plan {
+            var stacked: Bool
+            var label: CGSize
+            var control: CGSize
+            var button: CGSize?
+            var lineHeight: CGFloat
+            var size: CGSize
+        }
+
+        func plan(_ proposal: ProposedViewSize, _ subviews: Subviews) -> Plan {
+            let label = subviews[0].sizeThatFits(.unspecified)
+            let control = subviews[1].sizeThatFits(.unspecified)
+            let button = subviews.count > 2 ? subviews[2].sizeThatFits(.unspecified) : nil
+            let trailing = button.map { $0.width + spacing } ?? 0
+            let rowWidth = label.width + spacing + control.width + trailing
+            let rowHeight = max(label.height, control.height, button?.height ?? 0)
+            guard let width = proposal.width, width.isFinite, rowWidth > width else {
+                let ideal = rowWidth.isFinite ? rowWidth : label.width
+                let w = proposal.width.map { $0.isFinite ? $0 : ideal } ?? ideal
+                return Plan(
+                    stacked: false, label: label, control: control, button: button,
+                    lineHeight: rowHeight, size: CGSize(width: w, height: rowHeight))
+            }
+            let stackedLabel = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+            let controlWidth = max(0, width - trailing)
+            let stackedControl = subviews[1].sizeThatFits(
+                ProposedViewSize(width: controlWidth, height: nil))
+            let line = max(stackedControl.height, button?.height ?? 0)
+            return Plan(
+                stacked: true, label: stackedLabel,
+                control: CGSize(
+                    width: min(stackedControl.width, controlWidth), height: stackedControl.height),
+                button: button, lineHeight: line,
+                size: CGSize(width: width, height: stackedLabel.height + spacing + line))
+        }
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard subviews.count >= 2 else { return .zero }
+            return plan(proposal, subviews).size
+        }
+
+        func placeSubviews(
+            in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+        ) {
+            guard subviews.count >= 2 else { return }
+            let p = plan(proposal, subviews)
+            if p.stacked {
+                subviews[0].place(
+                    at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
+                    proposal: ProposedViewSize(p.label))
+                let lineMid = bounds.minY + p.label.height + spacing + p.lineHeight / 2
+                subviews[1].place(
+                    at: CGPoint(x: bounds.minX, y: lineMid), anchor: .leading,
+                    proposal: ProposedViewSize(p.control))
+                if let button = p.button {
+                    subviews[2].place(
+                        at: CGPoint(x: bounds.maxX, y: lineMid), anchor: .trailing,
+                        proposal: ProposedViewSize(button))
+                }
+            } else {
+                subviews[0].place(
+                    at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                    proposal: ProposedViewSize(p.label))
+                var x = bounds.maxX
+                if let button = p.button {
+                    subviews[2].place(
+                        at: CGPoint(x: x, y: bounds.midY), anchor: .trailing,
+                        proposal: ProposedViewSize(button))
+                    x -= button.width + spacing
+                }
+                subviews[1].place(
+                    at: CGPoint(x: x, y: bounds.midY), anchor: .trailing,
+                    proposal: ProposedViewSize(p.control))
+            }
+        }
+    }
+#endif
+
+/// A column of nothing but labelled rows, two or more, is a form
+/// (docs/forms-plan.md §2).
+func kayaIsForm(_ node: KayaNode) -> Bool {
+    let laid = node.laidOut
+    return laid.count >= 2 && laid.allSatisfy { $0.kind == kindLabeled }
+}
+
 /// Whether this container is a grouped screen's registered primary flow —
 /// false on macOS by construction, which keeps the mac lane byte-stable.
 func kayaIsGroupedFlow(_ node: KayaNode) -> Bool {
@@ -11567,31 +11669,32 @@ func kayaIsGroupedFlow(_ node: KayaNode) -> Bool {
 }
 
 /// THE GROUPED-SCREEN RULE (docs/adaptive-layout-plan.md D7.5): a screen
-/// containing a table is a grouped screen, whose primary flow is the highest
-/// vertical container whose subtree holds one, reached along a SINGLE
-/// table-bearing child. Two carriers side by side ground but do not section.
+/// containing a CARRIER — a table, or a form (docs/forms-plan.md §2) — is a
+/// grouped screen, whose primary flow is the highest vertical container
+/// whose subtree holds one, reached along a SINGLE carrier-bearing child.
+/// Two carriers side by side ground but do not section.
 func kayaRecomputeGroupedSurfaces() {
     var entries = Set<UInt64>()
     var windows = Set<UInt64>()
     var flows = Set<UInt64>()
-    func containsTable(_ node: KayaNode) -> Bool {
-        if !node.tableColumns.isEmpty { return true }
-        return node.laidOut.contains(where: containsTable)
-            || node.foldedChildren.contains(where: containsTable)
+    func containsCarrier(_ node: KayaNode) -> Bool {
+        if !node.tableColumns.isEmpty || kayaIsForm(node) { return true }
+        return node.laidOut.contains(where: containsCarrier)
+            || node.foldedChildren.contains(where: containsCarrier)
     }
     func primaryFlow(_ node: KayaNode) -> KayaNode? {
         let vertical = (node.axis ?? (node.kind == kindColumn ? 1 : 0)) == 1
         if vertical, node.kind == kindColumn || node.kind == kindRow,
-            node.tableColumns.isEmpty
+            node.tableColumns.isEmpty, !kayaIsForm(node)
         {
             return node
         }
-        let carriers = node.laidOut.filter(containsTable)
+        let carriers = node.laidOut.filter(containsCarrier)
         if carriers.count == 1 { return primaryFlow(carriers[0]) }
         return nil
     }
     func register(_ root: KayaNode?, entry: UInt64?, window: UInt64?) {
-        guard let root, containsTable(root) else { return }
+        guard let root, containsCarrier(root) else { return }
         if let entry { entries.insert(entry) }
         if let window { windows.insert(window) }
         if let flow = primaryFlow(root) { flows.insert(flow.id) }
@@ -11617,12 +11720,14 @@ let kayaGroupedHeaderGap: CGFloat = 6
 
 /// THE GROUPED SECTION GRAMMAR (docs/adaptive-layout-plan.md D7.5): a heading
 /// label opens a section as its header, a caption label closes one as its
-/// footer, a table is a body of its own, and every other run of consecutive
-/// children is one card. Headers and footers sit bare on the ground.
+/// footer, a table or a form is a body of its own, and every other run of
+/// consecutive children is one card. Headers and footers sit bare on the
+/// ground.
 private struct KayaGroupedSection: Identifiable {
     enum Content {
         case run([KayaNode])
         case table(KayaNode)
+        case form(KayaNode)
         case none
     }
     var header: KayaNode?
@@ -11632,21 +11737,21 @@ private struct KayaGroupedSection: Identifiable {
         if let header { return header.id }
         switch content {
         case .run(let nodes): return nodes[0].id
-        case .table(let node): return node.id
+        case .table(let node), .form(let node): return node.id
         case .none: return footer?.id ?? 0
         }
     }
 }
 
-/// Flatten a flow: vertical non-table containers dissolve into their
+/// Flatten a flow: vertical non-carrier containers dissolve into their
 /// children (a For's stamped instance most of all — that is where a
-/// row's heading/table/caption triple lives); tables, leaves and
+/// row's heading/table/caption triple lives); tables, forms, leaves and
 /// horizontal containers are stream members that lay themselves out.
 private func kayaGroupedFlatten(_ node: KayaNode, into out: inout [KayaNode]) {
     for child in node.laidOut {
         let vertical = (child.axis ?? (child.kind == kindColumn ? 1 : 0)) == 1
         if vertical, child.kind == kindColumn || child.kind == kindRow,
-            child.tableColumns.isEmpty, !child.laidOut.isEmpty
+            child.tableColumns.isEmpty, !kayaIsForm(child), !child.laidOut.isEmpty
         {
             kayaGroupedFlatten(child, into: &out)
         } else {
@@ -11673,13 +11778,15 @@ private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
         }
     }
     for node in flat {
-        if !node.tableColumns.isEmpty {
+        if !node.tableColumns.isEmpty || kayaIsForm(node) {
+            let body: KayaGroupedSection.Content =
+                node.tableColumns.isEmpty ? .form(node) : .table(node)
             if run.isEmpty, header != nil {
-                out.append(KayaGroupedSection(header: header, content: .table(node)))
+                out.append(KayaGroupedSection(header: header, content: body))
                 header = nil
             } else {
                 flush()
-                out.append(KayaGroupedSection(content: .table(node)))
+                out.append(KayaGroupedSection(content: body))
             }
         } else if node.role == roleHeading {
             flush()
@@ -11718,6 +11825,11 @@ private struct KayaGroupedSections: View {
                                 KayaTrackReader(
                                     id: table.id, vertical: true,
                                     tableGeneration: kayaTableGeometryGeneration(table)))
+                    case .form(let form):
+                        // The form arm draws its own card (docs/forms-plan.md
+                        // §5.1), the same face kayaCarded gives a run.
+                        KayaRender(node: form, flexVertical: true, flexStretch: true)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                     case .run(let nodes):
                         kayaCarded(nodes)
                     case .none:
@@ -11746,8 +11858,12 @@ private struct KayaGroupedSections: View {
             ForEach(nodes) { child in
                 KayaRender(node: child, flexVertical: true, flexStretch: true)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    // The cross box, so expect_breadth and expect_aligned read
+                    // a carded child as they read a flex one.
+                    .background(KayaCellReader(id: child.id, parent: flow.id, vertical: true))
             }
         }
+        .environment(\.kayaInGroupedCard, true)
         #if os(macOS)
             body
         #else
@@ -11785,6 +11901,19 @@ private struct KayaGroupedScreenGround: ViewModifier {
 /// own dress for bare text on the ground.
 private struct KayaGroupedSectionTextKey: EnvironmentKey {
     static let defaultValue = false
+}
+
+/// Set for a carded run's children: the card is the boundary, so a text
+/// area inside one draws no border of its own (Reminders' notes field).
+private struct KayaInGroupedCardKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var kayaInGroupedCard: Bool {
+        get { self[KayaInGroupedCardKey.self] }
+        set { self[KayaInGroupedCardKey.self] = newValue }
+    }
 }
 
 extension EnvironmentValues {
@@ -13029,6 +13158,41 @@ struct KayaRender: View {
                     // rule): the flow's subtree renders as the section
                     // stream instead of its own flex layout.
                     KayaGroupedSections(flow: node)
+                } else if vertical && kayaIsForm(node) {
+                    // A COLUMN OF LABELLED ROWS IS A FORM (docs/forms-plan.md
+                    // §2), AHEAD of the flex branch: a section stream renders
+                    // the form stretched, and the flex branch took it first
+                    // (the card and its dividers gone, captured 2026-09-06).
+                    // The platform's own form surface, its label column
+                    // shared and its side-by-side against stacked decision the
+                    // control's, never kaya's arithmetic. macOS gets the
+                    // grouped Form; iOS draws the inset-grouped card the table
+                    // and the fold already draw, because a List-backed Form
+                    // inside a scroll collapses to nothing (measured
+                    // 2026-09-06, the whole form gone from the phone).
+                    #if os(macOS)
+                        Form {
+                            kayaStackChildren(vertical: true)
+                        }
+                        .formStyle(.grouped)
+                    #else
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(node.laidOut.enumerated()), id: \.element.id) { i, child in
+                                KayaRender(node: child, flexVertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    .padding(.vertical, kayaFoldSectionPadY)
+                                    .background(
+                                        KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                                    )
+                                if i < node.laidOut.count - 1 {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding(.horizontal, kayaFoldSectionPadX)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .background(kayaCardShape())
+                    #endif
                 } else if boxFills || node.laidOut.contains(where: { $0.grow > 0 }) {
                     KayaFlex(
                         vertical: vertical, spacing: node.spacing, nodes: node.laidOut,
@@ -13085,10 +13249,53 @@ struct KayaRender: View {
                 maxHeight: vertical && boxCrosses ? .infinity : nil,
                 alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
-            .background(KayaBoxReader(id: node.id, vertical: vertical))
+            .background(
+                KayaBoxReader(
+                    id: node.id, vertical: vertical,
+                    crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .background(KayaInsetReader(id: node.id, outer: false))
             .padding(node.inset)
             .background(KayaInsetReader(id: node.id, outer: true))
+        case kindLabeled:
+            // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
+            // control — LabeledContent is the platform's own pair, and it
+            // carries the accessibility relation — with the optional trailing
+            // button beside the control.
+            let parts = node.laidOut
+            if let label = parts.first, parts.count >= 2 {
+                // THE RELATION, stated on the control: its accessibility name
+                // is the label's text unless the app named it itself
+                // (docs/forms-plan.md §4).
+                let named = parts[1].a11yLabel.isEmpty ? label.text : parts[1].a11yLabel
+                #if os(macOS)
+                    LabeledContent {
+                        HStack(spacing: node.spacing) {
+                            KayaRender(node: parts[1])
+                                .accessibilityLabel(named)
+                            if parts.count > 2 {
+                                KayaRender(node: parts[2]).fixedSize()
+                            }
+                        }
+                    } label: {
+                        KayaRender(node: label)
+                    }
+                #else
+                    // THE PHONE'S FOLD: side by side when the row fits its
+                    // width, the value under the label when it does not, so a
+                    // Clear beside a date never crushes to one letter per line
+                    // (measured 2026-09-06). ONE Layout over ONE control, never
+                    // ViewThatFits: docs/traps.md, the measured copy's dismantle.
+                    KayaLabeledFold(spacing: node.spacing) {
+                        KayaRender(node: label)
+                        KayaRender(node: parts[1]).accessibilityLabel(named)
+                        if parts.count > 2 {
+                            KayaRender(node: parts[2]).fixedSize()
+                        }
+                    }
+                #endif
+            } else {
+                EmptyView()
+            }
         case kindButton:
             // The dressed floor. macOS bridges to NSButton: under a pre-26 SDK
             // stamp SwiftUI's Button lays out at borderless metrics while
@@ -17237,6 +17444,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var flexVertical: Bool? = nil
         /// Whether that container aligns `stretch` — the cross axis's half.
         var flexStretch = false
+        @Environment(\.kayaInGroupedCard) private var inGroupedCard
 
         var body: some View {
             // EVERY OBSERVATION IS READ HERE, in a SwiftUI body, and handed down
@@ -17253,7 +17461,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 revealSeq: node.revealSeq
             )
             .kayaTextareaFrame(grow: node.grow, flexVertical: flexVertical, stretch: flexStretch)
-            .border(Color.gray.opacity(0.4))
+            .border(Color.gray.opacity(inGroupedCard ? 0 : 0.4))
         }
     }
 

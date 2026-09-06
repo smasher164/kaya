@@ -628,6 +628,7 @@ pub const KAYA_KIND_TEXTAREA: u32 = 14;
 pub const KAYA_KIND_CANVAS: u32 = 15;
 pub const KAYA_KIND_DATE_PICKER: u32 = 16;
 pub const KAYA_KIND_TIME_PICKER: u32 = 17;
+pub const KAYA_KIND_LABELED: u32 = 18;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -646,6 +647,7 @@ const _: () = assert!(
         && KAYA_KIND_CANVAS == wire::KIND_CANVAS
         && KAYA_KIND_DATE_PICKER == wire::KIND_DATE_PICKER
         && KAYA_KIND_TIME_PICKER == wire::KIND_TIME_PICKER
+        && KAYA_KIND_LABELED == wire::KIND_LABELED
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -663,7 +665,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 17,
+        kinds == 18,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };

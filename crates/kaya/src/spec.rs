@@ -2635,6 +2635,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("canvas", 15),
                 ("date_picker", 16),
                 ("time_picker", 17),
+                ("labeled", 18),
             ],
         },
         EnumSpec {
@@ -3368,6 +3369,7 @@ mod tests {
                     ("kind", "canvas") => wire::KIND_CANVAS,
                     ("kind", "date_picker") => wire::KIND_DATE_PICKER,
                     ("kind", "time_picker") => wire::KIND_TIME_PICKER,
+                    ("kind", "labeled") => wire::KIND_LABELED,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),

@@ -88,6 +88,9 @@ if lang == "rust":
         sys.exit(1)
     staged = ROOT / lane.RUST_GUESTS / stem
     staged.parent.mkdir(parents=True, exist_ok=True)
+    # A fresh inode, or the kernel kills the guest at exec with no output
+    # (docs/traps.md, "Code Signature Invalid").
+    staged.unlink(missing_ok=True)
     shutil.copy2(ROOT / f"target/debug/examples/{stem}", staged)
 
 argv = lane.leg_argv(scene, lang, hs_bin)

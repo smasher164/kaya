@@ -599,31 +599,38 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             let notes = tx.textarea().a11y_id("notes").id();
                             tx.set_text(notes, &row.notes);
                             msgs.on_change(notes, Msg::Notes);
-                            // One grid, three rows of [caption][picker][Clear]: the
-                            // column shares its width, so the Clear buttons line up.
-                            tx.grid(3, |tx| {
-                                tx.caption(when_text).a11y_id("when_text").id();
-                                let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
-                                msgs.on_date(picker, Msg::When);
-                                let clear = tx.button("Clear").a11y_id("clear_when").id();
-                                msgs.on_click(clear, Msg::ClearWhen);
-                                tx.caption(deadline_text).a11y_id("deadline_text").id();
-                                let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
-                                msgs.on_date(picker, Msg::Deadline);
-                                let clear = tx.button("Clear").a11y_id("clear_deadline").id();
-                                msgs.on_click(clear, Msg::ClearDeadline);
-                                tx.caption(reminder_text).a11y_id("reminder_text").id();
-                                let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
-                                msgs.on_time(picker, Msg::Reminder);
-                                let clear = tx.button("Clear").a11y_id("clear_reminder").id();
-                                msgs.on_click(clear, Msg::ClearReminder);
+                            // The form (docs/forms-plan.md): four labelled rows,
+                            // each label naming its value, the Clear trailing.
+                            tx.column(|tx| {
+                                tx.labeled(when_text, |tx| {
+                                    let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
+                                    msgs.on_date(picker, Msg::When);
+                                    let clear = tx.button("Clear").a11y_id("clear_when").id();
+                                    msgs.on_click(clear, Msg::ClearWhen);
+                                })
+                                .id();
+                                tx.labeled(deadline_text, |tx| {
+                                    let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
+                                    msgs.on_date(picker, Msg::Deadline);
+                                    let clear = tx.button("Clear").a11y_id("clear_deadline").id();
+                                    msgs.on_click(clear, Msg::ClearDeadline);
+                                })
+                                .id();
+                                tx.labeled(reminder_text, |tx| {
+                                    let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
+                                    msgs.on_time(picker, Msg::Reminder);
+                                    let clear = tx.button("Clear").a11y_id("clear_reminder").id();
+                                    msgs.on_click(clear, Msg::ClearReminder);
+                                })
+                                .id();
+                                tx.labeled(project_label, |tx| {
+                                    let project = tx.select(&options, selected).a11y_id("project").id();
+                                    msgs.on_select(project, Msg::Project);
+                                })
+                                .id();
                             })
-                            // A phone folds the three columns to one (D6.2).
-                            .columns_when(kaya::SizeClass::Compact, 1)
+                            .a11y_id("details")
                             .id();
-                            tx.caption(project_label).id();
-                            let project = tx.select(&options, selected).a11y_id("project").id();
-                            msgs.on_select(project, Msg::Project);
                             let delete = tx
                                 .button("Delete")
                                 .role(kaya::Role::Destructive)

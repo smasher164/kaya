@@ -146,6 +146,7 @@ module KayaApp
     column,
     scroll,
     grid,
+    labeled,
     progress,
     progressIndeterminate,
     bindTextElement,
@@ -245,6 +246,7 @@ module KayaApp
     columnOf,
     scrollOf,
     gridOf,
+    labeledOf,
     buttonBound,
     entryBound,
     textareaBound,
@@ -2295,6 +2297,17 @@ gridWith columns children = do
   mapM_ (addChild parent) handles
   return parent
 
+-- | A LABELLED ROW (docs\/forms-plan.md): the first argument names the one
+-- control the children declare, with an optional trailing button after
+-- it. A column of nothing but these renders as the platform's form.
+labeled :: (LiveStrSource s) => s -> [Build Widget] -> Build Widget
+labeled src children = containerOf W.kindLabeled (name : children)
+  where
+    name = do
+      w <- widget W.kindLabel
+      liveStr setText bindText w src
+      return w
+
 -- | A spacer: PURE SUGAR for an empty grown column — it consumes the
 -- leftover main-axis space between its siblings. In EITHER zone.
 spacer :: (Declare m) => m (El m)
@@ -3067,6 +3080,12 @@ scrollOf child = containerOf W.kindScroll [child]
 -- constant.
 gridOf :: Int -> [Tpl Node] -> Tpl Node
 gridOf = gridWith
+
+-- | A LABELLED ROW per stamped copy — the live 'labeled' one zone down,
+-- taking Nodes: the source names the one control the children declare,
+-- with an optional trailing button after it.
+labeledOf :: TplStrSource s => s -> [Tpl Node] -> Tpl Node
+labeledOf src children = containerOf W.kindLabeled (label src : children)
 
 -- | A canvas per stamped copy — a sparkline in a table cell, the case
 -- set_drawing grew its keys-first addressing for (docs/canvas-plan.md

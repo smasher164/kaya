@@ -52,6 +52,11 @@ app.window(() => {
       kaya.image(TEST_PNG);
       kaya.image(new TextEncoder().encode("not an image"));
     });
+    // The labelled row: the control's accessibility name IS the label's
+    // text, with no a11yLabel of its own.
+    kaya.labeled("Level", () => {
+      kaya.slider({ value: 0.5, min: 0, max: 1 }).a11yId("level");
+    });
   });
 });
 

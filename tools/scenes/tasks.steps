@@ -67,9 +67,10 @@ expect_entries 1
 expect textarea@notes ""
 # A text field fills its column (R10).
 expect_breadth textarea@notes
-expect label@when_text "When: none"
+# The picker's accessibility name IS its row's label (docs/forms-plan.md §4).
+expect_ax date_picker@when "datetime/When: none"
 set_date date_picker@when 2026-09-08
-expect label@when_text "When: Tue 8 Sep"
+expect_ax date_picker@when "datetime/When: Tue 8 Sep"
 back
 expect_entries 0
 expect label@inbox_count "2 in inbox"

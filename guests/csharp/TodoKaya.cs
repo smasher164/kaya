@@ -216,6 +216,14 @@ sealed class TodoRow
 
     public Node Grid(int columns, System.Action body) => t.Grid(columns, body);
 
+    public Node Labeled(string label, System.Action body) => t.Labeled(label, body);
+
+    public Node Labeled(Signal label, System.Action body) => t.Labeled(label, body);
+
+    public Node Labeled(Field<string> label,
+        System.Action body) =>
+        t.Labeled(label, body);
+
     public Node Spacer() => t.Spacer();
 
     public Collection Collection() => t.Collection();

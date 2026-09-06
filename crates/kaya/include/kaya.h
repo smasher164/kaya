@@ -634,6 +634,8 @@
 
 #define KAYA_KIND_TIME_PICKER 17
 
+#define KAYA_KIND_LABELED 18
+
 /**
  * Property keys.
  */

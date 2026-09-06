@@ -19,6 +19,9 @@
 #define W_IMAGE_OK 9
 #define W_IMAGE_BAD 10
 #define W_QUARTER 11
+#define W_LEVEL_ROW 12
+#define W_LEVEL_LABEL 13
+#define W_LEVEL 14
 
 /* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
@@ -30,7 +33,7 @@ static const uint8_t TEST_PNG[75] = {
     0,   0,   73,  69,  78,  68,  174, 66,  96,  130};
 
 static void build_scene(void) {
-    uint8_t buf[1024];
+    uint8_t buf[2048];
     KayaTx tx = {buf, 0, sizeof buf};
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("urgent: false"));
@@ -64,6 +67,17 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_IMAGE_BAD, KAYA_KIND_IMAGE);
     kaya_tx_set_source(&tx, W_IMAGE_BAD, bad_handle);
 
+    /* The labelled row: the control's accessibility name IS the label's
+     * text, with no a11y label of its own. */
+    kaya_tx_create_widget(&tx, W_LEVEL_ROW, KAYA_KIND_LABELED);
+    kaya_tx_create_widget(&tx, W_LEVEL_LABEL, KAYA_KIND_LABEL);
+    kaya_tx_set_text(&tx, W_LEVEL_LABEL, "Level");
+    kaya_tx_create_widget(&tx, W_LEVEL, KAYA_KIND_SLIDER);
+    kaya_tx_set_min(&tx, W_LEVEL, 0.0);
+    kaya_tx_set_max(&tx, W_LEVEL, 1.0);
+    kaya_tx_set_value(&tx, W_LEVEL, 0.5);
+    kaya_tx_set_a11y_id(&tx, W_LEVEL, "level");
+
     kaya_tx_add_child(&tx, W_ROW, W_URGENT);
     kaya_tx_add_child(&tx, W_ROW, W_STATUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_ROW);
@@ -74,6 +88,9 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_OK);
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_BAD);
     kaya_tx_add_child(&tx, W_COLUMN, W_IMAGE_ROW);
+    kaya_tx_add_child(&tx, W_LEVEL_ROW, W_LEVEL_LABEL);
+    kaya_tx_add_child(&tx, W_LEVEL_ROW, W_LEVEL);
+    kaya_tx_add_child(&tx, W_COLUMN, W_LEVEL_ROW);
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

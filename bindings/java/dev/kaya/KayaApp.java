@@ -2910,6 +2910,18 @@ public final class KayaApp {
             return t.grid(columns, body);
         }
 
+        public Node labeled(String label, Runnable body) {
+            return t.labeled(label, body);
+        }
+
+        public Node labeled(Signal<String> label, Runnable body) {
+            return t.labeled(label, body);
+        }
+
+        public Node labeled(KayaRecords.Field<String> label, Runnable body) {
+            return t.labeled(label, body);
+        }
+
         public Node spacer() {
             return t.spacer();
         }
@@ -3818,6 +3830,29 @@ public final class KayaApp {
             Widget parent = widget(KayaWire.KIND_GRID);
             emit(KayaWire.txSetColumns(parent.id, columns));
             parents.add(parent.id);
+            if (body != null) {
+                body.run();
+            }
+            parents.remove(parents.size() - 1);
+            return parent;
+        }
+
+        /** A LABELLED ROW (docs/forms-plan.md): the label names the one
+         * control the body declares, with an optional trailing button
+         * after it. A column of nothing but these renders as the
+         * platform's form. */
+        public Widget labeled(String label, Runnable body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        public Widget labeled(Signal<String> label, Runnable body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        private Widget labeledOf(Runnable name, Runnable body) {
+            Widget parent = widget(KayaWire.KIND_LABELED);
+            parents.add(parent.id);
+            name.run();
             if (body != null) {
                 body.run();
             }
@@ -5232,6 +5267,32 @@ public final class KayaApp {
             Node parent = widget(KayaWire.KIND_GRID);
             tx.emit(KayaWire.txSetColumns(parent.id, columns));
             parents.add(parent.id);
+            if (body != null) {
+                body.run();
+            }
+            parents.remove(parents.size() - 1);
+            return parent;
+        }
+
+        /** A LABELLED ROW per stamped copy (docs/forms-plan.md): the
+         * label names the one control the body declares, with an
+         * optional trailing button after it. */
+        public Node labeled(String label, Runnable body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        public Node labeled(Signal<String> label, Runnable body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        public Node labeled(KayaRecords.Field<String> label, Runnable body) {
+            return labeledOf(() -> label(label), body);
+        }
+
+        private Node labeledOf(Runnable name, Runnable body) {
+            Node parent = widget(KayaWire.KIND_LABELED);
+            parents.add(parent.id);
+            name.run();
             if (body != null) {
                 body.run();
             }

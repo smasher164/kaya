@@ -33,6 +33,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.image(&TEST_PNG[..]);
                 tx.image(&b"not an image"[..]);
             });
+            // The labelled row: the control's accessibility name IS the
+            // label's text, with no a11y_label of its own.
+            tx.labeled("Level", |tx| {
+                tx.slider(0.0, 1.0, 0.5).a11y_id("level");
+            });
         })
         .id();
         tx.mount(root);

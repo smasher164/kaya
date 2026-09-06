@@ -35,6 +35,10 @@ public final class Gallery {
                     tx.image("not an image"
                             .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                 });
+                // The labelled row: the control's accessibility name IS the
+                // label's text, with no a11yLabel of its own.
+                tx.labeled("Level", () ->
+                        tx.slider(0.0, 1.0, 0.5, null).a11yId("level"));
             }));
             return null;
         });

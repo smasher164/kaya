@@ -927,6 +927,13 @@ pub enum WidgetKind {
     /// Prop::Time the value, Prop::MinuteStep the minute granularity; a
     /// committed pick reports as TimeChanged. No range (D4).
     TimePicker,
+    /// A LABELLED ROW (docs/forms-plan.md): a label, the one control it
+    /// names and, optionally, one trailing button. The pairing is a
+    /// semantic fact — assistive technology gets the label-for relation,
+    /// and a backend lowers the pair to its native labelled control; a
+    /// column of nothing but these is a FORM, derived. The root holds the
+    /// shape at the end of the transaction. No occurrence, no tag.
+    Labeled,
 }
 
 /// A civil calendar date, the value a date picker holds
@@ -1085,7 +1092,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 17] = [
+    pub(crate) const ALL: [WidgetKind; 18] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1103,6 +1110,7 @@ impl WidgetKind {
         WidgetKind::Canvas,
         WidgetKind::DatePicker,
         WidgetKind::TimePicker,
+        WidgetKind::Labeled,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1133,7 +1141,8 @@ impl WidgetKind {
             | WidgetKind::Scroll
             | WidgetKind::Progress
             | WidgetKind::Canvas
-            | WidgetKind::Grid => false,
+            | WidgetKind::Grid
+            | WidgetKind::Labeled => false,
         }
     }
 }

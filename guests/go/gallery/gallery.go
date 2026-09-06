@@ -36,6 +36,11 @@ func App() *kaya.App {
 				tx.Image(testPNG)
 				tx.Image([]byte("not an image"))
 			})
+			// The labelled row: the control's accessibility name IS the
+			// label's text, with no a11y label of its own.
+			tx.LabeledText("Level", func() {
+				tx.Slider(0.0, 1.0, 0.5, nil).A11yID("level")
+			})
 		}))
 	})
 

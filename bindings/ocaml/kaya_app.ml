@@ -1307,6 +1307,24 @@ let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?hel
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
+(* A LABELLED ROW (docs/forms-plan.md): [~label] (or [~label_bind]) names
+   the one control the children declare, with an optional trailing button
+   after it. A column of nothing but these renders as the platform's
+   form. The label child is always declared, so the shape the root checks
+   holds even when neither argument is passed. *)
+let labeled ?label ?label_bind ?grow ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset children () =
+  let parent = widget Kaya_wire.kind_labeled in
+  Option.iter (fun g -> set_grow parent g) grow;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind parent;
+  Option.iter (fun s -> set_spacing parent s) spacing;
+  Option.iter (fun p -> set_inset parent p) inset;
+  let name = widget Kaya_wire.kind_label in
+  Option.iter (fun t -> set_text name t) label;
+  Option.iter (fun s -> bind_text name s) label_bind;
+  add_child parent name;
+  List.iter (fun child -> add_child parent (child ())) children;
+  parent
+
 (* A spacer: PURE SUGAR for an empty grown column — it consumes the
    leftover main-axis space between its siblings. *)
 let spacer ?(grow = 1.0) () =
@@ -3220,6 +3238,23 @@ module Tpl = struct
     Option.iter (fun p -> Floor.set_inset n p) inset;
     List.iter (fun child -> Floor.add_child n (child ())) children;
     n
+
+  (* A LABELLED ROW per stamped copy (docs/forms-plan.md): [~label],
+     [~label_bind] or [~label_field] names the one control the children
+     declare, with an optional trailing button after it. *)
+  let labeled ?label ?label_bind ?label_field ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?(level = 0) children () =
+    let parent = Floor.widget Kaya_wire.kind_labeled in
+    Option.iter (fun g -> Floor.set_grow parent g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level parent;
+    let name = Floor.widget Kaya_wire.kind_label in
+    Option.iter (fun t -> Floor.set_text name t) label;
+    Option.iter (fun s -> Floor.bind_text name s) label_bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level name fd) label_field;
+    Floor.add_child parent name;
+    List.iter (fun child -> Floor.add_child parent (child ())) children;
+    parent
 
   (* A spacer: PURE SUGAR for an empty grown column — it consumes the
      leftover main-axis space between its siblings, in every stamped copy. *)

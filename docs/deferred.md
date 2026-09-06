@@ -1935,6 +1935,24 @@ unpicked.
   the list"), or Compose pickers lowered as content-sized buttons
   opening the M3 dialogs. KEY: Details grid, compact columns,
   breakpoint setters axis-only, Compose picker width, D6
+- **`expect_form_columns`, the form's geometry observation** (2026-09-06,
+  docs/forms-plan.md §4): a column of labelled rows should share one
+  leading edge for its controls on the desktops, and no verb reads that
+  today — the labelled row shipped on the accessibility relation alone
+  (`expect_ax <control>` answering the label's text). The grid-columns
+  reader is the model. KEY: expect_form_columns, form geometry,
+  labelled row, shared label column
+- **An identified container hides its children's identifiers in the mac
+  accessibility tree** (2026-09-06, docs/traps.md): a `labeled` row with
+  an a11y_id made its picker and button report the row's id, and
+  `expect_ax` could not find them. The SwiftUI a11y wrapper's
+  `accessibilityElement(children: .contain)` on an identified container
+  is the mechanism; the general fix is an identified container that
+  keeps its children reachable by their own ids, held by a scene that
+  reads a child inside a tagged container. Rows tagged `task` in the
+  task manager are addressed by the model, not the AX tree, which is
+  why they never showed it. KEY: a11y_id container, accessibilityElement
+  contain, expect_ax not in the accessibility tree, when_row
 - **A layout scene of the common list-row shapes** (2026-09-05, after
   three captures found three hugging-or-filling divergences in one day:
   the iPhone switch and the WinUI checkbox claiming a row's free width, the
@@ -10948,6 +10966,35 @@ no fix taken.
 SIXTEENTH SIGHTING, 2026-09-06, matrix #10 (the text-field fill slice):
 `dnd-go` alone again; the compose suite standalone ALL PASS 50 an hour
 earlier on the reshaped 360dp pool.
+SEVENTEENTH SIGHTING, 2026-09-06 01:23, NOT under a matrix: the compose
+suite run beside the iOS rust-swiftui suite alone (two lanes, one-minute
+load ~10 at launch), `dnd-compose` shape (b) again (`started=1 entered=1
+dropped=1 ended=false`), the same suite ALL PASS 50 twelve minutes
+earlier and every other leg green. The first sighting with fewer than
+five lanes running, so "five-lane contention" is no longer the whole
+premise; the instrument the tenth sighting asked for is still the next
+step.
+EIGHTEENTH SIGHTING, 2026-09-06 01:42, matrix #11 (the labelled-row
+slice; load 264 mid-run): `dnd-go`, the keyed-drag-earlier-payload shape
+again (`label#4 reads "text target got text y (copy)", wanted "item x got
+text hello (copy)"`, then `drag ended none` and the injected gesture not
+finishing) — the thirteenth-to-fifteenth sightings' exact text.
+
+## WATCH — android `varied-python` under a matrix: the scene's FIRST step timed out with the model still empty (first sighting 2026-09-06)
+KEY: varied-python, no such target label#0, first step, starved host, android python guest, step ceiling
+
+Matrix #11 (the labelled-row slice; five lanes, one-minute load 264 as the
+android lane reached it): `expect label#0 "300 rows, 845 lines"` — the
+scene's first step — read `no such target label#0` at +5019ms, and EVERY
+later step of the same leg passed (the window, order and scroll_to_row
+reads over the 300-row list), so the model arrived after the first step's
+5s poll and stayed right. The android lane standalone ten minutes later,
+load under 10: ALL PASS, 136 legs, varied-python among them. The shape is
+the mac and android title WATCHes' (the push not reaching the model inside
+the step ceiling on a starved host), on the python guest's largest initial
+push. One sighting; on the next, read the guest's push-to-apply gap off
+the flight recorder before rerunning, and consider whether the harness's
+first step should wait for the ROOT's first apply rather than a 5s clock.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
@@ -11014,6 +11061,11 @@ A different shape from the recorded title WATCH above (that one is the push
 after a pop); green in every earlier matrix on this tree. One sighting; on
 the next, read the Compose header's click log beside the harness step.
 
+SECOND SIGHTING, 2026-09-06 01:42, matrix #11 (load 264 mid-run):
+`label@count reads "15003 of 15003 transactions", wanted "4698 of 15003
+transactions"` — the filter's click did not land, the first sighting's
+shape; the python suite standalone was not run before the sighting, so the
+standalone rerun launched right after is the discriminator.
 
 ## ~~SLIDERS — the depth slice is on the mac (2026-09-04); the other three backends' step and tick arms, iOS's legs and eight bindings' sugar are the breadth slice (docs/slider-plan.md §5)~~ — LANDED on every lane in every language 2026-09-04: the breadth slice merged (GTK, WinUI and Compose arms with their commit gate rows; the eight bindings' step/tick_spacing/on_commit in both zones; nine guests; five rosters), the matrix on the merged tree ALL PASS on all five lanes and 55 gates, 1,668 legs (mac 418, linux 735, windows 259, ios 124, android 132) in 754s, launched at a one-minute load of 8 — the first matrix had died on the duplicated Go scene row (every lane, three at zero legs), and the second was killed by the job runner within seconds of launch as the five lanes' own start pushed the load to 342, so this one ran from a detached launcher that waited for the load to settle.
 KEY: step, tick_spacing, value_committed, expect_slider, slider_value, on_commit, spelled_slider, KayaSliderSurface, KayaNSSlider, KayaTickedSlider, sliders.steps

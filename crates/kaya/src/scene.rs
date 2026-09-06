@@ -662,6 +662,9 @@ pub(crate) struct Scene {
     /// (docs/slider-plan.md S1, S5).
     slider_ranges: HashMap<(bool, u64), SliderRange>,
     slider_dirty: Vec<(bool, u64)>,
+    /// Live labelled rows touched this transaction, checked for shape at
+    /// its end (docs/forms-plan.md §2) once every child has arrived.
+    labeled_dirty: Vec<WidgetId>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -751,7 +754,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // ITS children — so only the container kinds carry it (a
         // grid's spacing is its inter-cell gap, both axes).
         Prop::Spacing => {
-            matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid)
+            matches!(
+                kind,
+                WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid | WidgetKind::Labeled
+            )
         }
         // Alignment likewise: where the container places ITS children
         // on the cross axis.
@@ -763,7 +769,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
         Prop::Inset => {
-            matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid)
+            matches!(
+                kind,
+                WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid | WidgetKind::Labeled
+            )
         }
         // The grid's own shape: how many columns children fill
         // row-major.
@@ -1260,6 +1269,46 @@ impl Default for SliderRange {
 
 /// Does `unit` fit `span` a whole number of times (at least once)? Read
 /// with a relative tolerance, since 0.1 * 3 is not 0.3 in binary.
+/// The labelled row's shape (docs/forms-plan.md §2): a label first, the
+/// one control it names second — any leaf that is not a label — and at
+/// most a trailing button third. Nothing nested: the platform's labelled
+/// control has exactly these seats.
+fn check_labeled_shape(who: &str, kinds: &[WidgetKind]) {
+    assert!(
+        kinds.len() == 2 || kinds.len() == 3,
+        "kaya: labeled row {who} holds {} children; it takes a label, one control \
+         and at most one trailing button (docs/forms-plan.md)",
+        kinds.len()
+    );
+    assert!(
+        kinds[0] == WidgetKind::Label,
+        "kaya: labeled row {who}'s first child must be the label, got {:?}",
+        kinds[0]
+    );
+    let control = kinds[1];
+    assert!(
+        !matches!(
+            control,
+            WidgetKind::Label
+                | WidgetKind::Column
+                | WidgetKind::Row
+                | WidgetKind::Grid
+                | WidgetKind::Scroll
+                | WidgetKind::Labeled
+        ),
+        "kaya: labeled row {who}'s second child is the control it names — a leaf, \
+         not a label or a container; got {control:?}"
+    );
+    if kinds.len() == 3 {
+        assert!(
+            kinds[2] == WidgetKind::Button,
+            "kaya: labeled row {who}'s third child is its trailing action — a button; \
+             got {:?}",
+            kinds[2]
+        );
+    }
+}
+
 fn divides_evenly(span: f64, unit: f64) -> bool {
     let n = span / unit;
     n >= 1.0 - 1e-9 && (n - n.round()).abs() <= 1e-9 * n.max(1.0)
@@ -1672,6 +1721,36 @@ impl Scene {
     /// edits: in place, in order, never coalesced.
     /// Record one of a slider's declared numbers and queue the relation
     /// check for the end of this transaction (docs/slider-plan.md S1, S5).
+    /// Every labelled row in a template body, checked against the shape
+    /// its stamps will have (docs/forms-plan.md §2); nested For and When
+    /// bodies are walked too.
+    fn check_labeled_template(&self, body: &TplBody) {
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        for op in &body.ops {
+            match op {
+                TplOp::AddChild { parent, child } => {
+                    children.entry(*parent).or_default().push(*child);
+                }
+                TplOp::For { bodies, .. } => {
+                    for b in bodies {
+                        self.check_labeled_template(b);
+                    }
+                }
+                TplOp::When { body, .. } => self.check_labeled_template(body),
+                _ => {}
+            }
+        }
+        for op in &body.ops {
+            if let TplOp::Widget { node, kind: WidgetKind::Labeled } = op {
+                let kinds: Vec<WidgetKind> = children
+                    .get(node)
+                    .map(|c| c.iter().map(|n| self.template_nodes[n]).collect())
+                    .unwrap_or_default();
+                check_labeled_shape(&format!("template node {node}"), &kinds);
+            }
+        }
+    }
+
     fn note_slider_prop(&mut self, key: (bool, u64), prop: Prop, value: &Value) {
         let Value::F64(x) = value else { return };
         let range = self.slider_ranges.entry(key).or_default();
@@ -1803,6 +1882,9 @@ impl Scene {
                         .then(|| Self::button_tag(id.0, &vec![]))
                         .flatten();
                     out.push(ApplyOp::Create { id, kind, tag });
+                    if kind == WidgetKind::Labeled {
+                        self.labeled_dirty.push(id);
+                    }
                     if kind == WidgetKind::Row {
                         // A row centres its children on the cross axis unless
                         // the app says otherwise (DESIGN.md Layout, R5).
@@ -2620,6 +2702,11 @@ impl Scene {
                     );
                     self.parent_of.insert(child, parent);
                     self.children_of.entry(parent).or_default().push(child);
+                    if self.widgets[&parent] == WidgetKind::Labeled
+                        && !self.labeled_dirty.contains(&parent)
+                    {
+                        self.labeled_dirty.push(parent);
+                    }
                     self.layout_dirty = true;
                     out.push(ApplyOp::AddChild { parent, child });
                 }
@@ -3152,6 +3239,17 @@ impl Scene {
             if let Some(range) = self.slider_ranges.get(&key) {
                 range.check(key.1);
             }
+        }
+        // The labelled row's SHAPE, on the complete declaration
+        // (docs/forms-plan.md §2): a label, one control, at most one
+        // trailing button.
+        for id in std::mem::take(&mut self.labeled_dirty) {
+            let kinds: Vec<WidgetKind> = self
+                .children_of
+                .get(&id)
+                .map(|c| c.iter().map(|w| self.widgets[w]).collect())
+                .unwrap_or_default();
+            check_labeled_shape(&format!("{id:?}"), &kinds);
         }
 
         // Barrier: validate every signal-bound menu prop on its COMPLETE
@@ -4862,6 +4960,14 @@ impl Scene {
             TxOp::TemplateEnd => {
                 let closed = scopes.pop().unwrap();
                 let bodies = self.close_scope_bodies(closed);
+                match &bodies {
+                    ClosedScope::For { bodies, .. } => {
+                        for body in bodies {
+                            self.check_labeled_template(body);
+                        }
+                    }
+                    ClosedScope::When { body, .. } => self.check_labeled_template(body),
+                }
                 match (scopes.last_mut(), bodies) {
                     // Nested: fold into the parent template.
                     (Some(parent), ClosedScope::For { id, collection, bodies }) => {
@@ -7646,12 +7752,25 @@ mod tests {
     #[test]
     fn a_stamped_copy_is_tagged_wherever_a_live_one_is() {
         for kind in WidgetKind::ALL {
-            // The live half: create one, read its Create op's tag.
+            // The live half: create one, read its Create op's tag. A labelled
+            // row is held to its shape at the end of the transaction, so it
+            // gets the label and control that shape demands.
+            let filling = |base: u64| -> Vec<TxOp> {
+                if kind != WidgetKind::Labeled {
+                    return Vec::new();
+                }
+                vec![
+                    TxOp::CreateWidget { id: WidgetId(base + 1), kind: WidgetKind::Label },
+                    TxOp::CreateWidget { id: WidgetId(base + 2), kind: WidgetKind::Entry },
+                    TxOp::AddChild { parent: WidgetId(base), child: WidgetId(base + 1) },
+                    TxOp::AddChild { parent: WidgetId(base), child: WidgetId(base + 2) },
+                ]
+            };
             let mut scene = Scene::new();
-            let live = scene.apply(vec![
-                TxOp::CreateWidget { id: WidgetId(1), kind },
-                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
-            ]);
+            let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind }];
+            ops.extend(filling(1));
+            ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+            let live = scene.apply(ops);
             let live_tagged = creates(&live)
                 .into_iter()
                 .find(|(k, _)| *k == kind)
@@ -7669,10 +7788,15 @@ mod tests {
                 },
                 TxOp::CreateFor { id: 2, collection: CollectionId(1) },
                 TxOp::CreateWidget { id: WidgetId(10), kind },
+            ]
+            .into_iter()
+            .chain(filling(10))
+            .chain([
                 TxOp::TemplateEnd,
                 TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
                 TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
-            ]);
+            ])
+            .collect());
             let stamped = scene.apply(vec![insert(1, vec![], "k", "row")]);
             let stamped_tagged = creates(&stamped)
                 .into_iter()
@@ -7808,6 +7932,78 @@ mod tests {
                 prop: Prop::Inset,
                 value: PropValue::Const(Value::F64(-1.0)),
             },
+        ]);
+    }
+
+    /// THE LABELLED ROW'S SHAPE (docs/forms-plan.md §2): a label, the one
+    /// control it names, at most one trailing button — held at the end of
+    /// the transaction, live and template alike.
+    fn labeled_row(kinds: &[WidgetKind]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Labeled }];
+        for (i, kind) in kinds.iter().enumerate() {
+            let id = WidgetId(10 + i as u64);
+            ops.push(TxOp::CreateWidget { id, kind: *kind });
+            ops.push(TxOp::AddChild { parent: WidgetId(1), child: id });
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    #[test]
+    fn a_labeled_row_takes_a_label_a_control_and_a_trailing_button() {
+        Scene::new().apply(labeled_row(&[WidgetKind::Label, WidgetKind::Entry]));
+        Scene::new().apply(labeled_row(&[
+            WidgetKind::Label,
+            WidgetKind::DatePicker,
+            WidgetKind::Button,
+        ]));
+    }
+
+    #[test]
+    #[should_panic(expected = "first child must be the label")]
+    fn a_labeled_row_whose_first_child_is_not_a_label_dies() {
+        Scene::new().apply(labeled_row(&[WidgetKind::Entry, WidgetKind::Label]));
+    }
+
+    #[test]
+    #[should_panic(expected = "holds 1 children")]
+    fn a_labeled_row_with_no_control_dies() {
+        Scene::new().apply(labeled_row(&[WidgetKind::Label]));
+    }
+
+    #[test]
+    #[should_panic(expected = "third child is its trailing action")]
+    fn a_labeled_row_whose_trailing_child_is_not_a_button_dies() {
+        Scene::new().apply(labeled_row(&[
+            WidgetKind::Label,
+            WidgetKind::Entry,
+            WidgetKind::Label,
+        ]));
+    }
+
+    #[test]
+    #[should_panic(expected = "second child is the control it names")]
+    fn a_labeled_row_naming_a_container_dies() {
+        Scene::new().apply(labeled_row(&[WidgetKind::Label, WidgetKind::Row]));
+    }
+
+    #[test]
+    #[should_panic(expected = "template node 10 holds 1 children")]
+    fn a_template_labeled_row_is_held_to_the_same_shape() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Labeled },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
     }
 

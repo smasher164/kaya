@@ -49,6 +49,10 @@ let () =
                image ~source:test_png;
                image ~source:(Bytes.of_string "not an image");
              ];
+           (* The labelled row: the control's accessibility name IS the
+              label's text, with no [~a11y_label] of its own. *)
+           labeled ~label:"Level"
+             [ slider ~a11y_id:"level" ~min:0.0 ~max:1.0 ~value:0.5 ];
          ]
          ()
      in

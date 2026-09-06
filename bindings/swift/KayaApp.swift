@@ -3110,6 +3110,46 @@ final class KayaAppTx {
         return parent
     }
 
+    /// A LABELLED ROW (docs/forms-plan.md): the label names the one
+    /// control the children declare, with an optional trailing button
+    /// after it. A column of nothing but these renders as the platform's
+    /// form.
+    func labeled(
+        _ label: String, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil,
+        @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
+            _ = self.label(label)
+        }
+    }
+
+    func labeled(
+        _ label: KayaSignal, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil,
+        @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        labeledOf(children, spacing: spacing, inset: inset, grow: grow) {
+            _ = self.label(bind: label)
+        }
+    }
+
+    private func labeledOf(
+        _ children: () -> Void, spacing: Double?, inset: Double?, grow: Double?,
+        _ name: () -> Void
+    ) -> KayaWidget {
+        let parent = widget(UInt32(KAYA_KIND_LABELED))
+        if let spacing { setSpacing(parent, spacing) }
+        if let inset { setInset(parent, inset) }
+        if let grow { setGrow(parent, grow) }
+        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        name()
+        children()
+        let ids = app.childFrames.removeLast().ids
+        for id in ids { tx.addChild(parent.id, id) }
+        return parent
+    }
+
     /// A spacer: PURE SUGAR for an empty grown column — it consumes
     /// the leftover main-axis space between its siblings.
     func spacer() -> KayaWidget {
@@ -4629,6 +4669,39 @@ final class KayaTpl {
         let n = nodeContainerOf(UInt32(KAYA_KIND_GRID), children)
         tx.tx.setColumns(n.id, Double(columns))
         return n
+    }
+
+    /// A LABELLED ROW per stamped copy (docs/forms-plan.md): the label
+    /// names the one control the children declare, with an optional
+    /// trailing button after it.
+    func labeled(_ label: String, @KayaNodeChildren _ children: () -> Void)
+        -> KayaNodeHandle
+    {
+        labeledOf(children) { _ = self.label(label) }
+    }
+
+    func labeled(_ label: KayaSignal, @KayaNodeChildren _ children: () -> Void)
+        -> KayaNodeHandle
+    {
+        labeledOf(children) { _ = self.label(label) }
+    }
+
+    func labeled(
+        _ label: KayaField<String>, @KayaNodeChildren _ children: () -> Void
+    ) -> KayaNodeHandle {
+        labeledOf(children) { _ = self.label(label) }
+    }
+
+    private func labeledOf(
+        _ children: () -> Void, _ name: () -> Void
+    ) -> KayaNodeHandle {
+        let parent = widget(UInt32(KAYA_KIND_LABELED))
+        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
+        name()
+        children()
+        let ids = tx.app.childFrames.removeLast().ids
+        for id in ids { tx.tx.addChild(parent.id, id) }
+        return parent
     }
 
     /// A spacer: PURE SUGAR for an empty grown column, in every stamped

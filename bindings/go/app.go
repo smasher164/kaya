@@ -1039,6 +1039,30 @@ func (tx *Tx) Grid(columns int, body func()) Widget {
 	return parent
 }
 
+// LabeledText is a LABELLED ROW (docs/forms-plan.md) whose label is
+// constant: it names the one control the body declares, with an optional
+// trailing button after it. A column of nothing but these renders as the
+// platform's form. Labeled is the signal-bound flavor.
+func (tx *Tx) LabeledText(label string, body func()) Widget {
+	return tx.labeledOf(func() { tx.LabelText(label) }, body)
+}
+
+// Labeled is LabeledText with the label bound to a signal.
+func (tx *Tx) Labeled(label Signal[string], body func()) Widget {
+	return tx.labeledOf(func() { tx.Label(label) }, body)
+}
+
+func (tx *Tx) labeledOf(name func(), body func()) Widget {
+	parent := tx.Widget(KindLabeled)
+	tx.app.parents = append(tx.app.parents, parent.id)
+	name()
+	if body != nil {
+		body()
+	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+	return parent
+}
+
 // Spacer is an empty grown column: it consumes the leftover main-axis
 // space between its siblings.
 func (tx *Tx) Spacer() Widget {
@@ -4056,6 +4080,34 @@ func (t *Tpl) Grid(columns int, body func()) Node {
 	// The columns write lands BEFORE the body opens, as in the live twin.
 	t.tx.emit(TxSetColumns(parent.id, float64(columns)))
 	t.tx.app.parents = append(t.tx.app.parents, parent.id)
+	if body != nil {
+		body()
+	}
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
+	return parent
+}
+
+// LabeledText is a LABELLED ROW in the blueprint (docs/forms-plan.md)
+// whose label is constant: it names the one control the body declares,
+// with an optional trailing button after it. LabeledBound is the varying
+// flavor.
+func (t *Tpl) LabeledText(label string, body func()) Node {
+	return t.labeledOf(func() { t.LabelText(label) }, body)
+}
+
+// LabeledBound is LabeledText with the label from a VARYING source — a
+// signal every stamped copy follows, or a field of the row the copy was
+// stamped for; see Tpl.LabelBound for what the base surface takes.
+func (t *Tpl) LabeledBound[S interface {
+	Signal[string] | Field[string]
+}](label S, body func()) Node {
+	return t.labeledOf(func() { t.LabelBound(label) }, body)
+}
+
+func (t *Tpl) labeledOf(name func(), body func()) Node {
+	parent := t.Widget(KindLabeled)
+	t.tx.app.parents = append(t.tx.app.parents, parent.id)
+	name()
 	if body != nil {
 		body()
 	}

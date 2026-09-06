@@ -111,6 +111,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -214,6 +216,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -834,6 +837,7 @@ object KayaSceneModel {
     val canvases = ArrayList<KayaNode>()
     val datePickers = ArrayList<KayaNode>()
     val timePickers = ArrayList<KayaNode>()
+    val labeleds = ArrayList<KayaNode>()
     /**
      * The appearance the core last rastered with — written by the ONE
      * reading the presentation report sends (KayaRoot), so
@@ -1138,7 +1142,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x80fb73fecaaf397fuL
+    private const val SPEC_HASH: ULong = 0x27300640cf479cecuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1331,6 +1335,7 @@ object KayaCompose {
     const val KIND_CANVAS = 15
     const val KIND_DATE_PICKER = 16
     const val KIND_TIME_PICKER = 17
+    const val KIND_LABELED = 18
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -1786,6 +1791,7 @@ object KayaCompose {
                         KIND_CANVAS -> KayaSceneModel.canvases.add(node)
                         KIND_DATE_PICKER -> KayaSceneModel.datePickers.add(node)
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
+                        KIND_LABELED -> KayaSceneModel.labeleds.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -4639,6 +4645,7 @@ object KayaCompose {
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
+            "labeled" -> KayaSceneModel.labeleds
             // Every kind is addressable for accessibility — that is what
             // makes a universal prop universal — so this table is the
             // core's parse_target_kind list, not the subset of kinds some
@@ -8792,6 +8799,13 @@ private val KAYA_TABLE_CARD_PAD_X = 16.dp
 private val KAYA_TABLE_CARD_PAD_Y = 8.dp
 
 /**
+ * THE DERIVED FORM'S GROUPED CONTAINER (docs/forms-plan.md §3): the
+ * table card's fill and outer radius, one segment rather than two —
+ * a form has no header to separate off.
+ */
+private val KAYA_FORM_GROUP_SHAPE = RoundedCornerShape(KAYA_TABLE_SEGMENT_OUTER)
+
+/**
  * ONE SEGMENT'S FILL: filled, borderless, elevation 0. The grouped idiom
  * draws no stroke anywhere — tools/check-table-card.py refuses one here.
  */
@@ -9422,14 +9436,16 @@ fun KayaRender(
     isRoot: Boolean = false,
     flexVertical: Boolean? = null,
     flexStretch: Boolean = false,
+    /** The name a labelled row lends its control (docs/forms-plan.md §4). */
+    a11yFallback: String = "",
 ) {
     val dnd = kayaDragAndDropSurface(node)
     if (dnd == null) {
-        KayaRenderHelped(node, isRoot, flexVertical, flexStretch)
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
         return
     }
     Box(modifier = dnd) {
-        KayaRenderHelped(node, isRoot, flexVertical, flexStretch)
+        KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
     }
 }
 
@@ -9450,9 +9466,10 @@ private fun KayaRenderHelped(
     isRoot: Boolean,
     flexVertical: Boolean?,
     flexStretch: Boolean,
+    a11yFallback: String,
 ) {
     if (node.help.isEmpty()) {
-        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch)
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, a11yFallback)
         return
     }
     TooltipBox(
@@ -9468,7 +9485,7 @@ private fun KayaRenderHelped(
         // docs/tooltip-plan.md §6).
         modifier = Modifier.semantics { onLongClick(label = node.help, action = null) },
     ) {
-        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch)
+        KayaRenderAnchored(node, isRoot, flexVertical, flexStretch, a11yFallback)
     }
 }
 
@@ -9480,10 +9497,11 @@ private fun KayaRenderAnchored(
     isRoot: Boolean,
     flexVertical: Boolean?,
     flexStretch: Boolean,
+    a11yFallback: String,
 ) {
     val attachment = KayaSceneModel.contextMenus[node.id]
     if (attachment == null) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch, a11yFallback)
         return
     }
     Box(
@@ -9494,7 +9512,7 @@ private fun KayaRenderAnchored(
             onLongClick = { KayaSceneModel.openContextWidget = node.id },
         )
     ) {
-        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch, a11yFallback)
         val open = KayaSceneModel.openContextWidget == node.id
         DropdownMenu(
             expanded = open,
@@ -9565,6 +9583,13 @@ private fun kayaStampsRows(node: KayaNode): Boolean {
     }
 }
 
+/** A column of nothing but labelled rows, two or more, is a form
+ * (docs/forms-plan.md §2). */
+private fun kayaIsForm(node: KayaNode): Boolean {
+    val laid = node.laidOut
+    return laid.size >= 2 && laid.all { it.kind == KayaCompose.KIND_LABELED }
+}
+
 /**
  * A HUGGING CONTAINER PINS ITSELF TO ITS CONTENT before the breadth
  * ruling's fill resolves against it: `fillMaxWidth()` takes the
@@ -9615,6 +9640,8 @@ private fun KayaRenderCore(
      * nested-container GAP).
      */
     flexStretch: Boolean = false,
+    /** The name a labelled row lends its control (docs/forms-plan.md §4). */
+    a11yFallback: String = "",
 ) {
     // The mounted root fills its window — the same normalization GTK
     // and UIKit needed. A Compose Column wraps its width even when
@@ -9631,8 +9658,12 @@ private fun KayaRenderCore(
     var boxFill = rootFill
     if (flexVertical != null) {
         val crossing =
-            if (flexVertical) node.kind == KayaCompose.KIND_ROW
-            else node.kind == KayaCompose.KIND_COLUMN
+            if (flexVertical) {
+                node.kind == KayaCompose.KIND_ROW ||
+                    node.kind == KayaCompose.KIND_LABELED
+            } else {
+                node.kind == KayaCompose.KIND_COLUMN
+            }
         if (node.grow > 0) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
@@ -9658,9 +9689,10 @@ private fun KayaRenderCore(
     // only when the name rides its own contentDescription PARAMETER
     // (measured 2026-07-25: through the modifier it read `unknown/Logo`).
     val a11yTag = if (node.a11yId.isNotEmpty()) Modifier.testTag(node.a11yId) else Modifier
+    val a11yNamed = node.a11yLabel.ifEmpty { a11yFallback }
     val a11yName =
-        if (node.a11yLabel.isNotEmpty()) {
-            Modifier.semantics { contentDescription = node.a11yLabel }
+        if (a11yNamed.isNotEmpty()) {
+            Modifier.semantics { contentDescription = a11yNamed }
         } else {
             Modifier
         }
@@ -9700,6 +9732,18 @@ private fun KayaRenderCore(
             var expanded by remember { mutableStateOf(false) }
             val selectedLabel =
                 node.children.getOrNull(node.value.toInt())?.text ?: ""
+            // THE FIELD IS AS WIDE AS ITS VALUE, KayaPickerField's rule
+            // one kind over: Material's 280dp text-field minimum is what
+            // starved the "Project" row on a 360dp phone. The chrome is the
+            // picker's exactly: the field's padding and the 48dp icon slot
+            // (a 24dp slot wrapped "Thesis", captured 2026-09-06). A grower
+            // still takes its track.
+            val selectMeasurer = rememberTextMeasurer()
+            val selectStyle = LocalTextStyle.current
+            val selectWidth = with(LocalDensity.current) {
+                selectMeasurer.measure(selectedLabel, style = selectStyle)
+                    .size.width.toDp() + 16.dp + 48.dp + 16.dp
+            }
             androidx.compose.material3.ExposedDropdownMenuBox(
                 expanded = expanded,
                 onExpandedChange = { expanded = it },
@@ -9708,10 +9752,16 @@ private fun KayaRenderCore(
                     value = selectedLabel,
                     onValueChange = {},
                     readOnly = true,
+                    trailingIcon = {
+                        androidx.compose.material3.ExposedDropdownMenuDefaults.TrailingIcon(
+                            expanded = expanded)
+                    },
                     // The fill rides the FIELD, not the anchor box: a box
                     // that spans while its control hugs is the false green
                     // kayaDrawnExtents exists to catch.
-                    modifier = boxFill.then(a11y).menuAnchor(),
+                    modifier = boxFill.then(a11y)
+                        .then(if (node.grow > 0) Modifier else Modifier.width(selectWidth))
+                        .menuAnchor(),
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
@@ -9845,6 +9895,20 @@ private fun KayaRenderCore(
             // instead (docs/tables-plan.md).
             val kayaVertical =
                 (node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 1L
+            // A COLUMN OF LABELLED ROWS IS A FORM (docs/forms-plan.md §2/§3):
+            // the rows read as one group inside the M3 grouped container the
+            // table card already draws.
+            val formGroup =
+                if (kayaVertical && kayaIsForm(node)) {
+                    Modifier
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainer,
+                            KAYA_FORM_GROUP_SHAPE,
+                        )
+                        .padding(vertical = KAYA_TABLE_CARD_PAD_Y)
+                } else {
+                    Modifier
+                }
             if (kayaVertical && node.tableColumns.isNotEmpty()) {
                 KayaTableSurface(node, boxFill.then(a11y))
             } else if (kayaVertical) Column(
@@ -9854,7 +9918,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.padding(node.inset.dp).onGloballyPositioned {
+                }.padding(node.inset.dp).then(formGroup).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
@@ -9886,7 +9950,8 @@ private fun KayaRenderCore(
                     // under every align mode (the 2026-08-22 breadth
                     // ruling) — beside stretch, which spans every child's.
                     if (node.align == KayaCompose.ALIGN_STRETCH ||
-                        child.kind == KayaCompose.KIND_ROW
+                        child.kind == KayaCompose.KIND_ROW ||
+                        child.kind == KayaCompose.KIND_LABELED
                     ) {
                         cell = cell.fillMaxWidth()
                     }
@@ -9970,6 +10035,68 @@ private fun KayaRenderCore(
                         }
                     }
                 }
+            }
+        }
+        KayaCompose.KIND_LABELED -> {
+            // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
+            // labelled row, the value trailing and a WIDE control folded
+            // under the label into the supporting seat. The label is
+            // kaya's own live node, never a copy of its text, and the
+            // control borrows its text as the accessibility name (§4).
+            val parts = node.laidOut
+            if (parts.size < 2) {
+                Box(boxFill.then(a11y))
+            } else {
+                val label = parts[0]
+                val control = parts[1]
+                val action = parts.getOrNull(2)
+                // ONLY A COMPACT CONTROL RIDES BESIDE THE LABEL: the
+                // trailing seat takes its intrinsic width FIRST, so a
+                // picker or a select there starved "When: Mon 7 Sep" onto
+                // three lines and "Project" onto one letter each on a
+                // 360dp phone. Everything else folds under the label into
+                // the supporting seat — Material's settings shape: title,
+                // value below, action trailing.
+                val compact = control.kind == KayaCompose.KIND_CHECKBOX
+                val named = label.text
+                val supporting: (@Composable () -> Unit)? =
+                    if (!compact) {
+                        {
+                            KayaRender(
+                                control,
+                                flexVertical = true,
+                                a11yFallback = named,
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                val trailing: (@Composable () -> Unit)? =
+                    if (!compact && action == null) {
+                        null
+                    } else {
+                        {
+                            Row(
+                                horizontalArrangement =
+                                    Arrangement.spacedBy(node.spacing.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (compact) KayaRender(control, a11yFallback = named)
+                                if (action != null) KayaRender(action)
+                            }
+                        }
+                    }
+                ListItem(
+                    headlineContent = { KayaRender(label) },
+                    modifier = boxFill.then(a11y).padding(node.inset.dp),
+                    supportingContent = supporting,
+                    trailingContent = trailing,
+                    // The row takes the ground it stands on: the derived
+                    // form's grouped container, or the surface under a
+                    // lone labelled row.
+                    colors = ListItemDefaults.colors(
+                        containerColor = Color.Transparent),
+                )
             }
         }
         KayaCompose.KIND_BUTTON ->
@@ -10104,7 +10231,7 @@ private fun KayaRenderCore(
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
-                    contentDescription = node.a11yLabel.ifEmpty { null },
+                    contentDescription = node.a11yLabel.ifEmpty { a11yFallback }.ifEmpty { null },
                     modifier = boxFill.then(a11yTag),
                 )
             } else {
@@ -10135,7 +10262,7 @@ private fun KayaRenderCore(
                     if (drawing != null) {
                         Image(
                             bitmap = drawing,
-                            contentDescription = node.a11yLabel.ifEmpty { null },
+                            contentDescription = node.a11yLabel.ifEmpty { a11yFallback }.ifEmpty { null },
                             contentScale = ContentScale.None,
                             modifier = a11yTag,
                         )
@@ -12131,7 +12258,15 @@ fun KayaSectionsScaffold(active: KayaSection) {
                     // A section that declares no symbol still passes an
                     // empty slot, exactly as before.
                     icon = { KayaSymbolIcon(section.symbol) },
-                    label = { Text(section.title) },
+                    // ONE LINE: the item's label slot is 56dp on a 360dp
+                    // phone with five sections, and "Upcoming" wrapped to
+                    // "Upcomin" / "g" (captured 2026-09-06). A long title
+                    // overflows its padding rather than breaking a word.
+                    label = {
+                        Text(
+                            section.title, maxLines = 1, softWrap = false,
+                            overflow = TextOverflow.Visible)
+                    },
                 )
             }
         }
