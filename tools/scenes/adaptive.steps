@@ -17,8 +17,13 @@ resize_window 480x400
 expect_axis row@narrow "vertical"
 # The grid's columns follow the class too (D6.2, ruled 2026-09-05).
 expect_grid_columns grid@sheet 1
+# THE GRID THAT FITS (docs/layout-knobs-plan.md §3): grid@fit declares no
+# count, only a 240-point floor, so the WIDTH decides — one column at 480,
+# three at 900 (a fourth would need 984).
+expect_grid_columns grid@fit 1
 # Crossing back AUTO-REVERTS: the diff-against-base rule, so there is no
 # second declaration anywhere.
 resize_window 900x600
 expect_axis row@narrow "horizontal"
 expect_grid_columns grid@sheet 3
+expect_grid_columns grid@fit 3

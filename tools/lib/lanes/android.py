@@ -161,8 +161,10 @@ MODS = {
                          "expect_section expect_section_symbol", "")},
     "adaptive": {"cut": ("resize_window",
                          "expect_axis=row@dash expect_axis=column@steady",
-                         'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1'),
-                 "append": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1;'},
+                         'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
+                         'expect_grid_columns grid@fit 1'),
+                 "append": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
+                           'expect_grid_columns grid@fit 1;'},
     "portfolio": {"cut": ("resize_window", "expect_window=column@ledger",
                           "expect_folded column@summary column@ledger"),
                   "append": "expect_folded column@summary column@ledger;"},

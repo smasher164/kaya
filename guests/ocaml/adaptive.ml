@@ -47,6 +47,15 @@ let () =
                   let cell = signal (Str text) in
                   fun () -> label ~bind:cell () (* label#5..#10 *))
                 [ "c1"; "c2"; "c3"; "c4"; "c5"; "c6" ]);
+           (* grid@fit: no count, a 240-point floor, the WIDTH decides
+              (docs/layout-knobs-plan.md §3). Buttons, so the label
+              ordinals above stay put. *)
+           grid ~columns:3 ~columns_auto:240.0 ~a11y_id:"fit"
+             [
+               (fun () -> button ~text:"f1" () (* button#1 *));
+               (fun () -> button ~text:"f2" ());
+               (fun () -> button ~text:"f3" ());
+             ];
          ]
          ()
      in

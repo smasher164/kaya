@@ -46,6 +46,15 @@ app.window({ title: "adaptive", width: 900, height: 600 }, () => {
       }
     });
     sheet.a11yId("sheet");
+    // grid@fit: no count, a 240-point floor, the WIDTH decides
+    // (docs/layout-knobs-plan.md §3). Buttons, so label ordinals above
+    // stay put.
+    const fit = kaya.grid(3, () => {
+      kaya.button("f1"); // button#1
+      kaya.button("f2");
+      kaya.button("f3");
+    });
+    fit.columnsAuto(240).a11yId("fit");
   });
 });
 

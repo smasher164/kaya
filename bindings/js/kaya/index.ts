@@ -565,6 +565,15 @@ export class Handle {
     return this;
   }
 
+  /** THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
+   * as fit this grid's width at `minWidth` DIP each, sharing the extra.
+   * An explicit `columnsWhen` still wins while its class holds. Chains. */
+  columnsAuto(minWidth: number): this {
+    records().push(wire.tx_set_columns(this.id, 0));
+    records().push(wire.tx_set_min_column_width(this.id, Number(minWidth)));
+    return this;
+  }
+
   /** Declare what this widget takes from a paste — the closed kinds by
    * name plus any custom format ids. Constant in a template: an accept
    * list describes the prototype, not the row. Chains. */

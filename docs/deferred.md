@@ -11011,6 +11011,12 @@ push. One sighting; on the next, read the guest's push-to-apply gap off
 the flight recorder before rerunning, and consider whether the harness's
 first step should wait for the ROOT's first apply rather than a 5s clock.
 
+SECOND SIGHTING, 2026-09-06 03:14, matrix #13 (the auto-grid knob; load
+11 at launch): the same sentence at the same first step, every later
+step green again. Two of three matrices since the class appeared, and the
+android lane standalone green between them: the first step's clock is
+the premise to move, not the guest.
+
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention
 

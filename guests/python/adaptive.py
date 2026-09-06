@@ -44,5 +44,13 @@ with app.window(title="adaptive", width=900, height=600):
             for text in ("c1", "c2", "c3", "c4", "c5", "c6"):
                 kaya.label(bind=kaya.signal(text))  # label#5..#10
         sheet.a11y_id("sheet")
+        # grid@fit: no count, a 240-point floor, the WIDTH decides
+        # (docs/layout-knobs-plan.md §3). Buttons, so label ordinals
+        # above stay put.
+        with kaya.grid(3) as fit:
+            kaya.button("f1")  # button#1
+            kaya.button("f2")
+            kaya.button("f3")
+        fit.columns_auto(240).a11y_id("fit")
 
 sys.exit(app.run())

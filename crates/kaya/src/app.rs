@@ -1002,6 +1002,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
+    /// as fit this grid's width at `min_width` DIP each, sharing the
+    /// extra — `columns` 0 with the floor beside it. An explicit
+    /// `columns_when` still wins while its class holds.
+    pub fn columns_auto(self, min_width: f64) -> Self {
+        self.tx.columns_auto(self.id, min_width);
+        self
+    }
+
     /// Lay this grid out in `columns` columns while the window's size class
     /// is `when` — [`Tx::breakpoint_when`] chained; the authored count
     /// returns when the class does. The root refuses a non-grid target.
@@ -2056,6 +2065,12 @@ impl<'a> Tx<'a> {
     /// Cross-axis stretch for one child (docs/layout-knobs-plan.md §1).
     pub fn fill(&mut self, widget: WidgetId, on: bool) {
         self.set(widget, Prop::Fill, on);
+    }
+
+    /// Auto columns at a floor (docs/layout-knobs-plan.md §3).
+    pub fn columns_auto(&mut self, widget: WidgetId, min_width: f64) {
+        self.set(widget, Prop::Columns, 0.0);
+        self.set(widget, Prop::MinColumnWidth, min_width);
     }
 
     pub fn a11y_label(&mut self, widget: WidgetId, label: impl Into<LiveSource<StrKind>>) {
@@ -3535,6 +3550,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
         self.tpl().fill(node, on)
+    }
+
+    pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
+        self.tpl().columns_auto(node, min_width)
     }
 
     pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
@@ -6207,6 +6226,12 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped copy's cross-axis stretch (docs/layout-knobs-plan.md §1).
     pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
         self.set(node, Prop::Fill, on);
+    }
+
+    /// A stamped grid's auto columns at a floor (docs/layout-knobs-plan.md §3).
+    pub fn columns_auto(&mut self, node: TemplateNodeId, min_width: f64) {
+        self.set(node, Prop::Columns, 0.0);
+        self.set(node, Prop::MinColumnWidth, min_width);
     }
 
     /// A slider over `min..max` whose POSITION comes from a source. The

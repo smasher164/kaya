@@ -49,5 +49,12 @@ main = kayaMain $ \app -> do
     setA11yId sheet "sheet"
     columnsWhen sheet Compact 1
 
-    root <- column [pure dash, pure steadyCol, pure flipButton, pure narrow, pure sheet]
+    -- grid@fit: no count, a 240-point floor, the WIDTH decides
+    -- (docs/layout-knobs-plan.md §3). Buttons, so the label ordinals
+    -- above stay put.
+    fit <- grid 3 [button "f1", button "f2", button "f3"] -- button#1..#3
+    setColumnsAuto fit 240
+    setA11yId fit "fit"
+
+    root <- column [pure dash, pure steadyCol, pure flipButton, pure narrow, pure sheet, pure fit]
     mount root

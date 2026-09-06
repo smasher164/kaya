@@ -416,6 +416,11 @@ func (sc SumCase[K, V]) BindHelp(n Node, sel func(*V) *string) {
 // stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
 func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
 
+// SetColumnsAuto gives every stamped grid of this arm as many columns as
+// fit its width at minWidth DIP each (Tpl.SetColumnsAuto;
+// docs/layout-knobs-plan.md §3).
+func (sc SumCase[K, V]) SetColumnsAuto(n Node, minWidth float64) { sc.t.SetColumnsAuto(n, minWidth) }
+
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

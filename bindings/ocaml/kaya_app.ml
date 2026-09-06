@@ -619,6 +619,14 @@ let set_grow (Widget id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id wei
    (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds. *)
 let set_fill (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_fill id on)
 
+(* THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns as
+   fit this grid's width at [min_width] DIP each, sharing the extra. An
+   explicit [~columns_when] still wins while its class holds. *)
+let set_columns_auto (Widget id) min_width =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_columns id 0.0);
+  emit tx (Kaya_wire.tx_set_min_column_width id min_width)
+
 (* A widget's accessibility IDENTIFIER: a stable authored key that assistive
    tooling and UI automation address it by, and which is NEVER spoken. *)
 let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
@@ -1303,7 +1311,7 @@ let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?h
    that many columns while the window's SIZE CLASS is the named one,
    reverting on leaving it (docs/adaptive-layout-plan.md D6.2). LIVE
    ONLY: [Tpl.grid] carries no such label. *)
-let grid ~columns ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset ?columns_when children () =
+let grid ~columns ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?inset ?columns_when ?columns_auto children () =
   let tx = the_tx () in
   let parent = widget Kaya_wire.kind_grid in
   let (Widget id) = parent in
@@ -1319,6 +1327,7 @@ let grid ~columns ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bin
              Kaya_wire.F64 (float_of_int count);
            ]))
     columns_when;
+  Option.iter (fun m -> set_columns_auto parent m) columns_auto;
   Option.iter (fun g -> set_grow parent g) grow;
   Option.iter (fun v -> set_fill parent v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind parent;
@@ -2643,6 +2652,13 @@ module Tpl = struct
     (* A stamped copy's cross-axis stretch (the live [set_fill]). *)
     let set_fill (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_fill id on)
 
+    (* A stamped grid's auto columns at a floor (the live
+       [set_columns_auto]; docs/layout-knobs-plan.md §3). *)
+    let set_columns_auto (Node id) min_width =
+      let tx = the_tx () in
+      emit tx (Kaya_wire.tx_set_columns id 0.0);
+      emit tx (Kaya_wire.tx_set_min_column_width id min_width)
+
     (* CONST ONLY, like [set_accepts]: what a copy means, and how far its
        prototype holds its children off its edge, are facts about the
        PROTOTYPE. Neither needs a type-level wall — the root judges the
@@ -3267,9 +3283,10 @@ module Tpl = struct
      each column takes its NATURAL width. The count describes the
      prototype, so it stays a required constant. *)
   let grid ~columns ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?inset children () =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?inset ?columns_auto children () =
     let n = Floor.widget Kaya_wire.kind_grid in
     Floor.set_columns n columns;
+    Option.iter (fun m -> Floor.set_columns_auto n m) columns_auto;
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label

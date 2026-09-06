@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xa2bb42a3ce2fc3c9
+specHash = 0x88e3d11bce4a8350
 
 valueBool :: Word32
 valueBool = 1
@@ -192,6 +192,8 @@ propHelp :: Word32
 propHelp = 26
 propFill :: Word32
 propFill = 27
+propMinColumnWidth :: Word32
+propMinColumnWidth = 28
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -1367,6 +1369,25 @@ txBindFill widgetId signalId = wireRecord txKindSetProperty
 txBindFillElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindFillElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propFill <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant min_column_width value.
+txSetMinColumnWidth :: Word64 -> Double -> Builder
+txSetMinColumnWidth widgetId minColumnWidth = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinColumnWidth <> word32LE sourceConst
+    <> encodeValue (VF64 minColumnWidth))
+
+-- set_property with a signal-bound min_column_width value.
+txBindMinColumnWidth :: Word64 -> Word64 -> Builder
+txBindMinColumnWidth widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinColumnWidth <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMinColumnWidthElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMinColumnWidthElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMinColumnWidth <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

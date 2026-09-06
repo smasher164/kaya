@@ -9347,3 +9347,14 @@ runningboardd's exit context before hunting a crash report.
   The panic is the guard; the recipe is validate-mac.py's own `build_*`
   step for that language before the leg, until run-leg learns to run it
   (docs/deferred.md).
+- **A WinUI LayoutUpdated handler that cannot borrow the core must ask
+  for another pass, or the width it saw is gone for good** (2026-09-06,
+  crates/kaya/src/winui/mod.rs, the auto grid). A harness read calls
+  `UpdateLayout()` INSIDE its own core borrow, and LayoutUpdated fires
+  synchronously there; a handler that answers a busy `try_borrow_mut` by
+  returning drops that width, and a static window raises no further
+  layout pass to bring it back. Matrix #13's `adaptive_java` read
+  `grid#1 misaligned (3 column edges, wanted 1)` at 480 wide while the
+  rust leg passed on timing alone. The handler calls `InvalidateArrange()`
+  on a busy borrow now, so the next pass lands between reads; the GTK
+  twin needs nothing, since its frame tick keeps coming.

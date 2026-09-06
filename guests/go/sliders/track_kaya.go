@@ -104,6 +104,8 @@ func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, k
 
 func (r trackRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }
 
+func (r trackRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }
+
 func (r trackRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }
 
 func (r trackRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }

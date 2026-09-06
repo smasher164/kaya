@@ -49,6 +49,16 @@ app.build { tx in
         }
         tx.setA11yId(sheet, "sheet")
         sheet.columnsWhen(.compact, 1)
+        // grid@fit: no count, a 240-point floor, the WIDTH decides
+        // (docs/layout-knobs-plan.md §3). Buttons, so the label ordinals
+        // above stay put.
+        let fit = tx.grid(columns: 3) {
+            tx.button("f1")  // button#1
+            tx.button("f2")
+            tx.button("f3")
+        }
+        tx.setColumnsAuto(fit, 240)
+        tx.setA11yId(fit, "fit")
     }
     tx.mount(root)
 }

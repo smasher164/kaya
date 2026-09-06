@@ -49,6 +49,14 @@ public final class Adaptive {
                         tx.label(tx.signal(text)); // label#5..#10
                     }
                 }).a11yId("sheet").columnsWhen(KayaApp.SizeClass.COMPACT, 1);
+                // grid@fit: no count, a 240-point floor, the WIDTH decides
+                // (docs/layout-knobs-plan.md §3). Buttons, so the label
+                // ordinals above stay put.
+                tx.grid(3, () -> {
+                    tx.button("f1"); // button#1
+                    tx.button("f2");
+                    tx.button("f3");
+                }).columnsAuto(240.0).a11yId("fit");
             }));
             return null;
         });

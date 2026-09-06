@@ -427,6 +427,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }", lowerFirst(name))
 	w("")
+	w("func (r %sRow) SetColumnsAuto(n kaya.Node, minWidth float64) { r.t.SetColumnsAuto(n, minWidth) }", lowerFirst(name))
+	w("")
 	w("func (r %sRow) Draggable(n kaya.Node) kaya.TplDragRef { return r.t.Draggable(n) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetDropTarget(n kaya.Node, ops ...kaya.Op) { r.t.SetDropTarget(n, ops...) }", lowerFirst(name))

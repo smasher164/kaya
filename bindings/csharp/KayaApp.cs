@@ -1659,6 +1659,15 @@ sealed class Tx
     public void SetFill(Widget w, bool on) =>
         Records.Add(KayaWire.TxSetFill(w.Id, on));
 
+    /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
+    /// as fit this grid's width at minWidth DIP each, sharing the extra.
+    /// An explicit columnsWhen still wins while its class holds.
+    public void SetColumnsAuto(Widget w, double minWidth)
+    {
+        Records.Add(KayaWire.TxSetColumns(w.Id, 0));
+        Records.Add(KayaWire.TxSetMinColumnWidth(w.Id, minWidth));
+    }
+
     /// A container's inter-child gap (main axis, DIP; the normalized
     /// default is 8). Containers only — the root rejects it elsewhere.
     public void SetSpacing(Widget w, double gap) =>
@@ -3331,6 +3340,13 @@ sealed class Tpl
     /// A stamped copy's cross-axis stretch (Tx.SetFill).
     public void SetFill(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
+
+    /// A stamped grid's auto columns at a floor (Tx.SetColumnsAuto).
+    public void SetColumnsAuto(Node n, double minWidth)
+    {
+        tx.Records.Add(KayaWire.TxSetColumns(n.Id, 0));
+        tx.Records.Add(KayaWire.TxSetMinColumnWidth(n.Id, minWidth));
+    }
 
     /// What ACTIVATING a stamped copy does — write a verb phrase.
     /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the

@@ -278,6 +278,9 @@ sealed class AccountRow
     public void SetInset(Node n, double pad) => t.SetInset(n, pad);
 
     public void SetFill(Node n, bool on) => t.SetFill(n, on);
+
+    public void SetColumnsAuto(Node n, double minWidth) =>
+        t.SetColumnsAuto(n, minWidth);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

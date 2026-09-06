@@ -2309,6 +2309,23 @@ public final class KayaApp {
         }
 
         /**
+         * THE GRID THAT FITS (docs/layout-knobs-plan.md §3): give this
+         * grid as many columns as fit its width at {@code minWidth} DIP
+         * each, sharing the extra. An explicit {@link #columnsWhen}
+         * still wins while its class holds. Same discipline as
+         * {@link #grow}.
+         */
+        public Widget columnsAuto(double minWidth) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: columnsAuto on a widget outside its build transaction"
+                    + " — use Tx.setColumnsAuto inside a live transaction");
+            }
+            tx.setColumnsAuto(this, minWidth);
+            return this;
+        }
+
+        /**
          * Stack this container's children vertically while the window's
          * SIZE CLASS is {@code when}, reverting on leaving it — one
          * core-evaluated breakpoint (docs/adaptive-layout-plan.md D3).
@@ -3050,6 +3067,12 @@ public final class KayaApp {
             t.setFill(n, on);
         }
 
+        /** This row's copy of that grid's auto columns at a floor
+         * ({@link Tpl#setColumnsAuto}). */
+        public void setColumnsAuto(Node n, double minWidth) {
+            t.setColumnsAuto(n, minWidth);
+        }
+
         /** This row's copy of that slider's granularity (Tpl.setStep). */
         public void setStep(Node n, double step) {
             t.setStep(n, step);
@@ -3678,6 +3701,17 @@ public final class KayaApp {
          */
         public void setFill(Widget w, boolean on) {
             emit(KayaWire.txSetFill(w.id, on));
+        }
+
+        /**
+         * THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
+         * columns as fit this grid's width at {@code minWidth} DIP each,
+         * sharing the extra. An explicit columnsWhen still wins while
+         * its class holds.
+         */
+        public void setColumnsAuto(Widget w, double minWidth) {
+            emit(KayaWire.txSetColumns(w.id, 0));
+            emit(KayaWire.txSetMinColumnWidth(w.id, minWidth));
         }
 
         /**
@@ -5117,6 +5151,13 @@ public final class KayaApp {
          * {@link Tx#setFill(Widget, boolean)}. */
         public void setFill(Node n, boolean on) {
             tx.emit(KayaWire.txSetFill(n.id, on));
+        }
+
+        /** A stamped grid's auto columns at a floor, the blueprint twin
+         * of {@link Tx#setColumnsAuto(Widget, double)}. */
+        public void setColumnsAuto(Node n, double minWidth) {
+            tx.emit(KayaWire.txSetColumns(n.id, 0));
+            tx.emit(KayaWire.txSetMinColumnWidth(n.id, minWidth));
         }
 
         /** A stamped slider's granularity (docs/slider-plan.md S1):

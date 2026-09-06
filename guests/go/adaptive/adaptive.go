@@ -49,6 +49,14 @@ func App() *kaya.App {
 					tx.Label(tx.Signal(text)) // label#5..#10
 				}
 			}).A11yID("sheet").ColumnsWhen(kaya.SizeClassCompact, 1)
+			// grid@fit: no count, a 240-point floor, the WIDTH decides
+			// (docs/layout-knobs-plan.md §3). Buttons, so the label
+			// ordinals above stay put.
+			tx.Grid(3, func() {
+				tx.Button("f1", nil) // button#1
+				tx.Button("f2", nil)
+				tx.Button("f3", nil)
+			}).ColumnsAuto(240).A11yID("fit")
 		}))
 	})
 

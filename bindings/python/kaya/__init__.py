@@ -481,6 +481,15 @@ class _Handle:
         _records().append(wire.tx_set_fill(self.id, bool(on)))
         return self
 
+    def columns_auto(self, min_width):
+        """THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
+        columns as fit this grid's width at `min_width` DIP each, sharing
+        the extra. An explicit `columns_when` still wins while its class
+        holds. Returns the handle."""
+        _records().append(wire.tx_set_columns(self.id, 0.0))
+        _records().append(wire.tx_set_min_column_width(self.id, float(min_width)))
+        return self
+
     def accepts(self, *kinds):
         """Declare what this widget takes from a paste — the closed kinds
         by name plus any custom format ids.

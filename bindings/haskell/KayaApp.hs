@@ -797,6 +797,10 @@ class Monad m => Declare m where
   -- column's width, a row's height — whatever the container's align
   -- (docs\/layout-knobs-plan.md §1). Unset, the kind's own default holds.
   setFill :: El m -> Bool -> m ()
+  -- | THE GRID THAT FITS (docs\/layout-knobs-plan.md §3): as many columns
+  -- as fit this grid's width at that many DIP each, sharing the extra.
+  -- An explicit 'columnsWhen' still wins while its class holds.
+  setColumnsAuto :: El m -> Double -> m ()
   -- | A grid's column count: its children lay out row-major into this
   -- many columns. Describes the PROTOTYPE, so it is a constant.
   setColumns :: El m -> Int -> m ()
@@ -833,6 +837,8 @@ instance Declare Build where
   setChecked (Widget n) checked = emitB (W.txSetChecked n checked)
   setGrow (Widget n) weight = emitB (W.txSetGrow n weight)
   setFill (Widget n) on = emitB (W.txSetFill n on)
+  setColumnsAuto (Widget n) minWidth =
+    emitB (W.txSetColumns n 0) >> emitB (W.txSetMinColumnWidth n minWidth)
   setColumns (Widget n) tracks = emitB (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Widget n) on = emitB (W.txSetIndeterminate n on)
   addChild (Widget p) (Widget child) = emitB (W.txAddChild p child)
@@ -871,6 +877,8 @@ instance Declare Tpl where
   setChecked (Node n) checked = emitT (W.txSetChecked n checked)
   setGrow (Node n) weight = emitT (W.txSetGrow n weight)
   setFill (Node n) on = emitT (W.txSetFill n on)
+  setColumnsAuto (Node n) minWidth =
+    emitT (W.txSetColumns n 0) >> emitT (W.txSetMinColumnWidth n minWidth)
   setColumns (Node n) tracks = emitT (W.txSetColumns n (fromIntegral tracks))
   setIndeterminate (Node n) on = emitT (W.txSetIndeterminate n on)
   addChild (Node p) (Node child) = emitT (W.txAddChild p child)
@@ -2166,6 +2174,10 @@ data Attr (c :: WClass) where
   -- (docs\/layout-knobs-plan.md §1). Any widget class, like 'Grow';
   -- unset, the kind's own default holds.
   Fill :: Bool -> Attr c
+  -- | THE GRID THAT FITS (docs\/layout-knobs-plan.md §3): as many columns
+  -- as fit this grid's width at that many DIP each, sharing the extra.
+  -- Grids only; an explicit 'columnsWhen' still wins while its class holds.
+  ColumnsAuto :: Double -> Attr 'BoxW
   -- | This container's inter-child gap (main axis, DIP; the normalized
   -- default is 8).
   Spacing :: Double -> Attr 'BoxW
@@ -2224,6 +2236,7 @@ data Attr (c :: WClass) where
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Fill on) w = setFill w on
+applyAttr (ColumnsAuto minWidth) w = setColumnsAuto w minWidth
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
@@ -2907,6 +2920,9 @@ data TplAttr where
   -- | Whether this stamped element spans its container's cross axis. A
   -- CONSTANT and not a source, for 'TplGrow''s reason.
   TplFill :: Bool -> TplAttr
+  -- | A stamped grid's auto columns at a floor, the blueprint twin of
+  -- 'ColumnsAuto'. A CONSTANT, for 'TplGrow''s reason.
+  TplColumnsAuto :: Double -> TplAttr
   -- | This stamped CONTAINER's own padding, in layout units — the
   -- window inset two levels up and the live 'Inset' one zone down, the
   -- same number and the same prop.
@@ -2956,6 +2972,7 @@ data TplAttr where
 applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
 applyTplAttr (TplFill on) n = setFill n on
+applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplInset pad) n = setNodeInset n pad
 applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src

@@ -527,6 +527,10 @@ pub(crate) struct Scene {
     /// The guest-authored column count a reverting breakpoint restores
     /// (docs/adaptive-layout-plan.md D6.2); absent means the grid's own 1.
     authored_columns: HashMap<WidgetId, f64>,
+    /// The auto grid's floor, and the grids whose pair moved this
+    /// transaction (docs/layout-knobs-plan.md §3).
+    min_column_widths: HashMap<WidgetId, f64>,
+    grid_dirty: Vec<WidgetId>,
     /// Live containers that DECLARED COLUMNS — a table is a column
     /// whose header bar makes it one, and that declaration is what gives
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
@@ -776,7 +780,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         }
         // The grid's own shape: how many columns children fill
         // row-major.
-        Prop::Columns => matches!(kind, WidgetKind::Grid),
+        Prop::Columns | Prop::MinColumnWidth => matches!(kind, WidgetKind::Grid),
         // The first UNIVERSAL props: every element in the tree has an
         // identity and a spoken name. Containers included, deliberately —
         // a column is a labelled group to an assistive client.
@@ -931,7 +935,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Axis => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill => ValueType::Bool,
-        Prop::Columns => ValueType::F64,
+        Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help => ValueType::Str,
         // An ACCEPT LIST: the closed kinds by name plus any custom
         // format ids, space separated. Not a mask and not an enum slot
@@ -1359,12 +1363,19 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             "kaya: grow weight must be finite and non-negative, got {weight}"
         );
     }
-    // A grid's column count has no reading below one, and a
-    // fractional count has none at all — nonsense dies at the root.
+    // A grid's column count has no reading below zero — 0 is AUTO, as
+    // many as fit at min_column_width (docs/layout-knobs-plan.md §3) — and
+    // a fractional count has none at all; nonsense dies at the root.
     if let (Prop::Columns, Value::F64(cols)) = (prop, value) {
         assert!(
-            cols.is_finite() && *cols >= 1.0 && cols.fract() == 0.0,
-            "kaya: a grid's columns is an integral count >= 1, got {cols}"
+            cols.is_finite() && *cols >= 0.0 && cols.fract() == 0.0,
+            "kaya: a grid's columns is an integral count >= 1, or 0 for auto, got {cols}"
+        );
+    }
+    if let (Prop::MinColumnWidth, Value::F64(min)) = (prop, value) {
+        assert!(
+            min.is_finite() && *min > 0.0,
+            "kaya: a grid's min_column_width is a finite width > 0, got {min}"
         );
     }
     // The ROLE'S VARIANT decides the kind, not the prop
@@ -1947,6 +1958,13 @@ impl Scene {
                                 if let Value::F64(cols) = &v {
                                     self.authored_columns.insert(widget, *cols);
                                 }
+                                self.grid_dirty.push(widget);
+                            }
+                            if prop == Prop::MinColumnWidth {
+                                if let Value::F64(min) = &v {
+                                    self.min_column_widths.insert(widget, *min);
+                                }
+                                self.grid_dirty.push(widget);
                             }
                             // The fold rule's input (D7): a grower is a
                             // grower at evaluation time, not at write time.
@@ -3253,6 +3271,17 @@ impl Scene {
                 .map(|c| c.iter().map(|w| self.widgets[w]).collect())
                 .unwrap_or_default();
             check_labeled_shape(&format!("{id:?}"), &kinds);
+        }
+        // An AUTO grid names its floor (docs/layout-knobs-plan.md §3): the
+        // pair is read on the complete declaration, in either order.
+        for id in std::mem::take(&mut self.grid_dirty) {
+            let auto = self.authored_columns.get(&id).copied() == Some(0.0);
+            let floor = self.min_column_widths.get(&id).copied().unwrap_or(0.0);
+            assert!(
+                !auto || floor > 0.0,
+                "kaya: grid {id:?} declares auto columns (0) without a min_column_width \
+                 (docs/layout-knobs-plan.md §3)"
+            );
         }
 
         // Barrier: validate every signal-bound menu prop on its COMPLETE
@@ -8239,6 +8268,54 @@ mod tests {
         assert_eq!(fills, vec![(WidgetId(2), false), (WidgetId(3), true)]);
     }
 
+    /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): columns 0 and
+    /// the floor both reach the backend, in the order declared.
+    #[test]
+    fn auto_columns_carry_their_floor() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Grid },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Columns,
+                value: PropValue::Const(Value::F64(0.0)),
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::MinColumnWidth,
+                value: PropValue::Const(Value::F64(240.0)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let got: Vec<(Prop, f64)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { prop: p @ (Prop::Columns | Prop::MinColumnWidth), value: Value::F64(v), .. } => {
+                    Some((*p, *v))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got, vec![(Prop::Columns, 0.0), (Prop::MinColumnWidth, 240.0)]);
+    }
+
+    /// An auto grid with no floor dies at the end of the transaction by
+    /// name, whichever order the pair would have arrived in.
+    #[test]
+    #[should_panic(expected = "auto columns (0) without a min_column_width")]
+    fn auto_columns_without_a_floor_die_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Grid },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Columns,
+                value: PropValue::Const(Value::F64(0.0)),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
     /// A fill that is not a bool dies at the root by name, so no backend
     /// meets a number where it reads a flag.
     #[test]
@@ -10313,18 +10390,18 @@ mod tests {
         ]);
     }
 
-    /// The grid's column count: integral and >= 1, or it has no
-    /// reading.
+    /// The grid's column count: integral and >= 1, or 0 for auto
+    /// (docs/layout-knobs-plan.md §3); below that it has no reading.
     #[test]
     #[should_panic(expected = "integral count >= 1")]
-    fn grid_zero_columns_fails_loudly() {
+    fn grid_negative_columns_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
             TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Grid },
             TxOp::SetProperty {
                 widget: WidgetId(1),
                 prop: Prop::Columns,
-                value: PropValue::Const(Value::F64(0.0)),
+                value: PropValue::Const(Value::F64(-1.0)),
             },
         ]);
     }

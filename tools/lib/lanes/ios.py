@@ -132,7 +132,8 @@ MODS = {
     # applies at its first report, no resize ever
     # (docs/adaptive-layout-plan.md §2).
     ("rust-swiftui", "adaptive"): {
-        "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1',
+        "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
+                 'expect_grid_columns grid@fit 1',
         "cut": "resize_window",
         "keep": "expect_axis=row@dash expect_axis=column@steady"},
 }

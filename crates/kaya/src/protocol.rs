@@ -1315,6 +1315,9 @@ pub enum Prop {
     /// cross axis, or hugs; unset leaves the kind's default
     /// (docs/layout-knobs-plan.md §1).
     Fill,
+    /// A grid's minimum column width when its `columns` is 0, auto
+    /// (F64-valued, DIP; docs/layout-knobs-plan.md §3).
+    MinColumnWidth,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

@@ -53,6 +53,17 @@ static class AdaptiveScene
                     }
                 }, columnsWhen: (SizeClass.Compact, 1));
                 tx.SetA11yId(sheet, "sheet");
+                // grid@fit: no count, a 240-point floor, the WIDTH
+                // decides (docs/layout-knobs-plan.md §3). Buttons, so
+                // the label ordinals above stay put.
+                var fit = tx.Grid(3, () =>
+                {
+                    tx.Button("f1"); // button#1
+                    tx.Button("f2");
+                    tx.Button("f3");
+                });
+                tx.SetColumnsAuto(fit, 240);
+                tx.SetA11yId(fit, "fit");
             }));
         });
 

@@ -671,6 +671,15 @@ func (tx *Tx) SetFill(w Widget, on bool) {
 	tx.emit(TxSetFill(w.id, on))
 }
 
+// SetColumnsAuto gives a grid as many columns as fit its width at
+// minWidth DIP each, sharing the extra (docs/layout-knobs-plan.md §3).
+// An explicit ColumnsWhen still wins while its class holds. The dynamic
+// path; the declarative spelling is the ColumnsAuto chain.
+func (tx *Tx) SetColumnsAuto(w Widget, minWidth float64) {
+	tx.emit(TxSetColumns(w.id, 0))
+	tx.emit(TxSetMinColumnWidth(w.id, minWidth))
+}
+
 // SetInset sets a container's own padding — DIP between its bounds and
 // its children, uniform on all four sides (docs/styling-plan.md D3).
 // Containers only. The dynamic path; the chain is the declarative one.
@@ -705,6 +714,16 @@ func (w Widget) Fill(on bool) Widget {
 		panic("kaya: Fill on a widget outside its build transaction — use Tx.SetFill inside a live transaction")
 	}
 	w.tx.SetFill(w, on)
+	return w
+}
+
+// ColumnsAuto gives this grid as many columns as fit its width at
+// minWidth DIP each at construction. Same transaction discipline as Grow.
+func (w Widget) ColumnsAuto(minWidth float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: ColumnsAuto on a widget outside its build transaction — use Tx.SetColumnsAuto inside a live transaction")
+	}
+	w.tx.SetColumnsAuto(w, minWidth)
 	return w
 }
 
@@ -3591,6 +3610,13 @@ func (t *Tpl) BindHelp[S interface {
 // opts it out (Tx.SetFill).
 func (t *Tpl) SetFill(n Node, on bool) {
 	t.tx.emit(TxSetFill(n.id, on))
+}
+
+// SetColumnsAuto gives every stamped grid as many columns as fit its
+// width at minWidth DIP each (Tx.SetColumnsAuto).
+func (t *Tpl) SetColumnsAuto(n Node, minWidth float64) {
+	t.tx.emit(TxSetColumns(n.id, 0))
+	t.tx.emit(TxSetMinColumnWidth(n.id, minWidth))
 }
 
 // SetAccepts declares what each stamped copy takes from a paste. Entry

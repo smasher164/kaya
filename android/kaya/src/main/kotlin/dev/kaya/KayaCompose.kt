@@ -458,6 +458,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // leaves the kind's default to KayaRenderCore's boxFill.
     var fill by mutableStateOf<Boolean?>(null)
     var columns by mutableStateOf(1)
+    // An auto grid's floor, read when columns is 0 (docs/layout-knobs-plan.md §3).
+    var minColumnWidth by mutableStateOf(0.0)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
      * natural size; positive weights divide the leftover main-axis space
@@ -1145,7 +1147,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xa2bb42a3ce2fc3c9uL
+    private const val SPEC_HASH: ULong = 0x88e3d11bce4a8350uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1351,6 +1353,7 @@ object KayaCompose {
     private const val PROP_AXIS = 18
     private const val PROP_INDETERMINATE = 10
     private const val PROP_FILL = 27
+    private const val PROP_MIN_COLUMN_WIDTH = 28
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1832,6 +1835,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_FILL ->
                             KayaSceneModel.nodes[id]!!.fill = readBool(b)
+                        PROP_MIN_COLUMN_WIDTH ->
+                            KayaSceneModel.nodes[id]!!.minColumnWidth = readF64(b)
                         PROP_COLUMNS ->
                             KayaSceneModel.nodes[id]!!.columns = readF64(b).toInt()
                         PROP_A11Y_ID ->
@@ -9704,9 +9709,12 @@ private fun KayaRenderCore(
         // A text field fills its column's width (docs/tasks-plan.md §4, R10).
         val textFills = flexVertical &&
             (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA)
+        // An auto grid is width-driven, so it takes its column's width
+        // (docs/layout-knobs-plan.md §3).
+        val autoGridSpans = flexVertical && node.kind == KayaCompose.KIND_GRID && node.columns == 0
         // The child's own `fill` outranks every default above
         // (docs/layout-knobs-plan.md §1).
-        if (node.fill ?: (flexStretch || crossing || scrollSpans || textFills)) {
+        if (node.fill ?: (flexStretch || crossing || scrollSpans || textFills || autoGridSpans)) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
         }
@@ -9816,8 +9824,12 @@ private fun KayaRenderCore(
             // (aligned across rows by construction), children fill
             // row-major. Each cell's leading edge is recorded at
             // place time for the geometry observation.
-            val cols = maxOf(1, node.columns)
+            val fixedCols = maxOf(1, node.columns)
             val gapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
+            // THE GRID THAT FITS (docs/layout-knobs-plan.md §3): columns 0
+            // derives the count from the width at the floor, equal shares.
+            val autoMinPx = with(LocalDensity.current) { node.minColumnWidth.dp.roundToPx() }
+            val auto = node.columns == 0 && autoMinPx > 0
             androidx.compose.ui.layout.Layout(
                 content = { node.children.forEach { child -> KayaRender(child) } },
                 // The inset pair brackets the padding (see the column's
@@ -9830,8 +9842,25 @@ private fun KayaRenderCore(
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 },
             ) { measurables, constraints ->
+                val cols =
+                    if (auto && constraints.hasBoundedWidth) {
+                        maxOf(1, (constraints.maxWidth + gapPx) / (autoMinPx + gapPx))
+                    } else {
+                        fixedCols
+                    }
+                val share =
+                    if (auto && constraints.hasBoundedWidth) {
+                        maxOf(0, (constraints.maxWidth - gapPx * (cols - 1)) / cols)
+                    } else {
+                        0
+                    }
                 val placeables = measurables.map {
-                    it.measure(androidx.compose.ui.unit.Constraints())
+                    it.measure(
+                        if (auto && share > 0) {
+                            androidx.compose.ui.unit.Constraints(maxWidth = share)
+                        } else {
+                            androidx.compose.ui.unit.Constraints()
+                        })
                 }
                 val rows = (placeables.size + cols - 1) / cols
                 val colW = IntArray(cols)
@@ -9840,6 +9869,7 @@ private fun KayaRenderCore(
                     colW[i % cols] = maxOf(colW[i % cols], p.width)
                     rowH[i / cols] = maxOf(rowH[i / cols], p.height)
                 }
+                if (auto && share > 0) for (c in 0 until cols) colW[c] = share
                 // Coerced into the incoming constraints, so a GROWN grid
                 // takes the track the fill above fixed for it — a Layout
                 // that reports its own size regardless would leave the

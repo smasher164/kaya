@@ -1032,6 +1032,13 @@ The known normalization worklist:
   opt-out each of them lacked. Every backend reads it at its one
   cross-placement site ahead of every default; `expect_hugs` is the
   opt-out's observation, `expect_breadth` the opt-in's.
+- A grid with `columns` 0 fits as many columns as its width allows at
+  `min_column_width`, each an equal share (docs/layout-knobs-plan.md §3):
+  the count is the width's, so the grid spans its parent's cross axis the
+  way a scroll does, and every backend derives the count from the width it
+  was given rather than from a size class. An explicit count, or a
+  `columns_when` while its class holds, still wins. The observation is
+  `expect_grid_columns` after a resize, the adaptive scene's pattern.
 - A stamped row spans its host column, as a live nested row does. A
   For's copies obey the nested-container rule above; three widget
   backends applied it to live children only, and a spacer inside a

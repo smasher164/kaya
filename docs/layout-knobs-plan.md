@@ -68,6 +68,31 @@ because a stretched WinUI TextBlock arranges text-sized (docs/traps.md).
   the adaptive scene's pattern, so the desktops assert both counts and
   the phones their narrow truth.
 
+BUILT 2026-09-06 (overnight). `columns = 0` is auto and `min_column_width`
+(prop 28, F64, grid-only, finite > 0) is its floor; the root holds the
+pair at the end of the transaction, in either order, and dies by name on
+an auto grid with no floor. The sugar is ONE call, `columns_auto(min)`,
+which sets both — no constructor variant, since the count is the width's.
+The arithmetic is one line on every backend: `floor((width + gap) /
+(min + gap))`, at least one, each column an equal share of the width. An
+auto grid SPANS its parent's cross axis by default (the scroll's rule:
+it is width-driven), which is what gives every backend a width to read.
+SwiftUI: `KayaAutoGrid`, a Layout over the proposed width (the fixed
+count keeps SwiftUI's own Grid), cells recording their leading edge
+exactly as the fixed grid's do; Compose: the existing grid Layout with
+the count and share taken from the incoming constraints; GTK: the count
+re-derived on the grid's frame tick from its own allocation (it spans, so
+that IS the available width), homogeneous columns, a reflow only when the
+count moved; WinUI: LayoutUpdated on the grid, gated the same way, Star
+columns. adaptive.steps' `grid@fit` (three buttons, floor 240) reads 1 at
+480 wide and 3 at 900 on the desktops, and 1 on both phones through the
+lanes' extras; the mac read both on the first run. The nine spellings
+are one call each, `columns_auto(min)` in the binding's casing (OCaml also
+`?columns_auto` on `grid`, Haskell `ColumnsAuto`/`setColumnsAuto`), both
+zones, with Go's two sealed surfaces forwarding. Matrix #13 found the
+WinUI handler dropping a width when a harness read held the core borrow
+(docs/traps.md); it asks for another layout pass now.
+
 ## §4 — sequencing
 
 `fill` first: smallest, and it retires the two hard-coded defaults into a

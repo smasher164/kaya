@@ -416,6 +416,11 @@ struct CoreState {
     /// construction order differs per language).
     grid_children: HashMap<u64, Vec<UIElement>>,
     grid_cols: HashMap<u64, i32>,
+    /// The auto grid's floor, its last derived count, and the grids whose
+    /// LayoutUpdated is wired (docs/layout-knobs-plan.md §3).
+    grid_min_col: HashMap<u64, f64>,
+    grid_auto_cols: HashMap<u64, i32>,
+    auto_grids: std::collections::HashSet<u64>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
@@ -1890,11 +1895,42 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
 /// batch. `reindex` below does the same for a Column/Row: a Grid lays out by
 /// attached index rather than by child order (docs/traps.md), so the whole
 /// set is rebuilt after every structural change.
+/// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): the count that fits
+/// `width` at the floor, every backend's one arithmetic.
+fn auto_grid_fit(width: f64, min: f64, gap: f64) -> i32 {
+    if min <= 0.0 || width <= 0.0 {
+        return 1;
+    }
+    ((width + gap) / (min + gap)).floor().max(1.0) as i32
+}
+
+/// An auto grid's LayoutUpdated: the count is re-derived from the grid's
+/// own width (it spans its column, reindex's crossing rule) and a count
+/// that MOVED reflows — gated on the number, or every layout would reflow.
+fn auto_grid_track(core: &mut CoreState, grid_id: u64, width: f64) -> windows_core::Result<()> {
+    let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
+        return Ok(());
+    };
+    let min = core.grid_min_col.get(&grid_id).copied().unwrap_or(0.0);
+    let fit = auto_grid_fit(width, min, grid.ColumnSpacing()?);
+    if core.grid_auto_cols.get(&grid_id).copied() != Some(fit) {
+        core.grid_auto_cols.insert(grid_id, fit);
+        reflow_grid(core, grid_id)?;
+    }
+    Ok(())
+}
+
 fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
         return Ok(());
     };
-    let cols = core.grid_cols.get(&grid_id).copied().unwrap_or(1).max(1);
+    let auto = core.grid_cols.get(&grid_id).copied() == Some(0);
+    let cols = if auto {
+        core.grid_auto_cols.get(&grid_id).copied().unwrap_or(1)
+    } else {
+        core.grid_cols.get(&grid_id).copied().unwrap_or(1)
+    }
+    .max(1);
     let children = match core.grid_children.get(&grid_id) {
         Some(c) => c.clone(),
         None => return Ok(()),
@@ -1904,7 +1940,11 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     coldefs.Clear()?;
     for _ in 0..cols {
         let def = ColumnDefinition::new()?;
-        def.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+        // Equal shares of the width when the count is the width's.
+        def.SetWidth(GridLength {
+            Value: 1.0,
+            GridUnitType: if auto { GridUnitType::Star } else { GridUnitType::Auto },
+        })?;
         coldefs.Append(&def)?;
     }
     let rowdefs = grid.RowDefinitions()?;
@@ -2208,6 +2248,12 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
         let crossing = crossing
             || (vertical && matches!(widget, NativeWidget::Entry(_) | NativeWidget::Textarea(_)));
+        // An auto grid is width-driven, so it takes its column's width
+        // (docs/layout-knobs-plan.md §3).
+        let crossing = crossing
+            || (vertical
+                && matches!(widget, NativeWidget::Grid2D(_))
+                && core.grid_cols.get(&child.0).copied() == Some(0));
         // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
         // (docs/layout-knobs-plan.md §1).
         let crossing = core.fills.get(&child.0).copied().unwrap_or(crossing);
@@ -12326,8 +12372,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.roles_armed = true;
                     refresh_role_enablement(core);
                 }
-                (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
+                (NativeWidget::Grid2D(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
+                    if cols == 0.0 && core.auto_grids.insert(id.0) {
+                        // THE GRID THAT FITS (docs/layout-knobs-plan.md §3):
+                        // this backend projects no SizeChanged, so the width
+                        // is read on LayoutUpdated, gated on a count that moved.
+                        let gid = id.0;
+                        let probe = grid.clone();
+                        let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                            let width = probe.ActualWidth().unwrap_or(0.0);
+                            CORE.with(|slot| {
+                                // A harness read's UpdateLayout raises this
+                                // INSIDE its borrow (adaptive_java read three
+                                // columns at 480, matrix #13): a busy borrow
+                                // asks for one more pass instead of dropping
+                                // the width on the floor.
+                                let Ok(mut core) = slot.try_borrow_mut() else {
+                                    let _ = probe.InvalidateArrange();
+                                    return;
+                                };
+                                let Some(core) = core.as_mut() else { return };
+                                let _ = auto_grid_track(core, gid, width);
+                            });
+                            Ok(())
+                        });
+                        grid.LayoutUpdated(&laid)?;
+                        if let Some(parent) = core.child_order.parent_of(id) {
+                            core.child_order.mark(parent);
+                        }
+                    }
+                    core.child_order.mark(id);
+                }
+                (NativeWidget::Grid2D(_), Prop::MinColumnWidth, Value::F64(min)) => {
+                    core.grid_min_col.insert(id.0, min);
+                    core.grid_auto_cols.remove(&id.0);
                     core.child_order.mark(id);
                 }
                 (NativeWidget::Grid2D(grid), Prop::Spacing, Value::F64(gap)) => {
@@ -14158,6 +14237,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             stamps_rows: std::collections::HashSet::new(),
             fills: HashMap::new(),
             grid_cols: HashMap::new(),
+            grid_min_col: HashMap::new(),
+            grid_auto_cols: HashMap::new(),
+            auto_grids: std::collections::HashSet::new(),
             radio_options: HashMap::new(),
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

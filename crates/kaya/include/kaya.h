@@ -724,6 +724,8 @@
 
 #define KAYA_PROP_FILL 27
 
+#define KAYA_PROP_MIN_COLUMN_WIDTH 28
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.

@@ -609,6 +609,19 @@ fn set_fill(widget: &gtk4::Widget, on: bool) {
     unsafe { widget.set_data(FILL_KEY, if on { 1i8 } else { 2i8 }) }
 }
 
+/// AN AUTO GRID (docs/layout-knobs-plan.md §3), marked on the widget so
+/// apply_cross_align spans it: width-driven, so it takes its column's width.
+const AUTO_GRID_KEY: &str = "kaya-auto-grid";
+fn is_auto_grid(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to
+    // `true` by set_auto_grid below.
+    unsafe { widget.data::<bool>(AUTO_GRID_KEY).is_some() }
+}
+fn set_auto_grid(widget: &gtk4::Widget) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(AUTO_GRID_KEY, true) }
+}
+
 /// A container a For has stamped ROW copies into (docs/tasks-plan.md §4, R7).
 const STAMPED_ROWS_KEY: &str = "kaya-stamps-rows";
 fn stamps_rows(widget: &gtk4::Widget) -> bool {
@@ -703,6 +716,10 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     // list is a surface the platform draws, like a scroll's viewport, and
     // every other backend's form surface takes the width it is offered.
     if vertical_container && is_form(child) {
+        align = gtk4::Align::Fill;
+    }
+    // An auto grid is width-driven (docs/layout-knobs-plan.md §3).
+    if vertical_container && is_auto_grid(child) {
         align = gtk4::Align::Fill;
     }
     // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
@@ -2901,6 +2918,11 @@ struct CoreState {
     /// re-flow the attach positions.
     grid_children: HashMap<u64, Vec<gtk4::Widget>>,
     grid_cols: HashMap<u64, i32>,
+    /// The auto grid's floor, its last derived count, and the grids whose
+    /// frame tick is installed (docs/layout-knobs-plan.md §3).
+    grid_min_col: HashMap<u64, f64>,
+    grid_auto_cols: HashMap<u64, i32>,
+    auto_grids: std::collections::HashSet<u64>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// radio's id, its row); the row's REAL widget is the grouped
     /// CheckButton in radio_buttons.
@@ -4552,12 +4574,46 @@ fn refresh_section_pane(core: &mut CoreState, sid: u64) {
 
 /// Re-attach a grid's children row-major per its current column count —
 /// called when children or the columns prop arrive, in either order.
+/// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): the count that fits
+/// `width` at the floor, shared with every other backend's arithmetic.
+fn auto_grid_fit(width: i32, min: f64, gap: i32) -> i32 {
+    if min <= 0.0 || width <= 0 {
+        return 1;
+    }
+    (((width + gap) as f64) / (min + gap as f64)).floor().max(1.0) as i32
+}
+
+/// An auto grid's frame tick: the count is re-derived from the grid's own
+/// allocation (it spans its column, apply_cross_align's rule), and a count
+/// that moved reflows. A busy CORE borrow waits for the next frame, the
+/// canvas clock's rule.
+fn auto_grid_track(core: &mut CoreState, grid_id: u64, width: i32) {
+    let Some(NativeWidget::Grid(grid)) = core.widgets.get(&crate::protocol::WidgetId(grid_id))
+    else {
+        return;
+    };
+    let min = core.grid_min_col.get(&grid_id).copied().unwrap_or(0.0);
+    let fit = auto_grid_fit(width, min, grid.column_spacing() as i32);
+    if core.grid_auto_cols.get(&grid_id).copied() != Some(fit) {
+        core.grid_auto_cols.insert(grid_id, fit);
+        reflow_grid(core, grid_id);
+    }
+}
+
 fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     let Some(NativeWidget::Grid(grid)) = core.widgets.get(&crate::protocol::WidgetId(grid_id))
     else {
         return;
     };
-    let cols = core.grid_cols.get(&grid_id).copied().unwrap_or(1).max(1);
+    let auto = core.grid_cols.get(&grid_id).copied() == Some(0);
+    let cols = if auto {
+        core.grid_auto_cols.get(&grid_id).copied().unwrap_or(1)
+    } else {
+        core.grid_cols.get(&grid_id).copied().unwrap_or(1)
+    }
+    .max(1);
+    // Equal shares of the width when the count is the width's.
+    grid.set_column_homogeneous(auto);
     let children = core.grid_children.get(&grid_id).cloned().unwrap_or_default();
     for child in &children {
         if child.parent().is_some() {
@@ -9643,10 +9699,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.set_accessible_role(gtk4::AccessibleRole::Caption);
                 }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
+                    use gtk4::prelude::{Cast, WidgetExt};
                     core.grid_cols.insert(id.0, cols as i32);
-                    let grid = grid.clone();
-                    let _ = grid;
+                    if cols == 0.0 && core.auto_grids.insert(id.0) {
+                        let widget = grid.clone().upcast::<gtk4::Widget>();
+                        set_auto_grid(&widget);
+                        widget.set_hexpand(true);
+                        restamp_cross_align(&widget);
+                        let gid = id.0;
+                        widget.add_tick_callback(move |w, _| {
+                            let width = w.width();
+                            CORE.with(|slot| {
+                                let Ok(mut core) = slot.try_borrow_mut() else { return };
+                                let Some(core) = core.as_mut() else { return };
+                                auto_grid_track(core, gid, width);
+                            });
+                            glib::ControlFlow::Continue
+                        });
+                    }
                     reflow_grid(core, id.0);
+                }
+                (NativeWidget::Grid(_), Prop::MinColumnWidth, Value::F64(min)) => {
+                    core.grid_min_col.insert(id.0, min);
+                    core.grid_auto_cols.remove(&id.0);
                 }
                 (NativeWidget::Grid(grid), Prop::Spacing, Value::F64(gap)) => {
                     grid.set_row_spacing(gap as u32);
@@ -10762,6 +10837,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 form_lists: HashMap::new(),
                 grid_children: HashMap::new(),
                 grid_cols: HashMap::new(),
+                grid_min_col: HashMap::new(),
+                grid_auto_cols: HashMap::new(),
+                auto_grids: std::collections::HashSet::new(),
                 radio_options: HashMap::new(),
                 radio_buttons: HashMap::new(),
                 radio_tags: HashMap::new(),

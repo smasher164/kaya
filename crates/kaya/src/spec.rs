@@ -184,6 +184,12 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // container and a derived form span, everything else hugs — and those
     // defaults are what `fill = false` exists to opt out of.
     ("fill", 27, PropKind::Bool),
+    // THE GRID THAT FITS (docs/layout-knobs-plan.md §3): with `columns` at
+    // 0 the grid takes as many columns as fit its width at this minimum
+    // (DIP, finite, > 0), each sharing the extra; an explicit count or a
+    // `columns_when` still wins. Grid-only, and a grid at 0 without it
+    // dies at the end of the transaction.
+    ("min_column_width", 28, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2733,6 +2739,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("tick_spacing", 25),
                 ("help", 26),
                 ("fill", 27),
+                ("min_column_width", 28),
             ],
         },
         EnumSpec {
@@ -3411,6 +3418,7 @@ mod tests {
                     ("prop", "tick_spacing") => wire::PROP_TICK_SPACING,
                     ("prop", "help") => wire::PROP_HELP,
                     ("prop", "fill") => wire::PROP_FILL,
+                    ("prop", "min_column_width") => wire::PROP_MIN_COLUMN_WIDTH,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

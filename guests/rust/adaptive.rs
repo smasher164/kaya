@@ -52,6 +52,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 })
                 .a11y_id("sheet")
                 .columns_when(kaya::SizeClass::Compact, 1);
+                // grid@fit: no count, a 240-point floor, the WIDTH decides
+                // (docs/layout-knobs-plan.md §3). Buttons, so label ordinals
+                // above stay put.
+                tx.grid(3, |tx| {
+                    tx.button("f1"); // button#1
+                    tx.button("f2");
+                    tx.button("f3");
+                })
+                .columns_auto(240.0)
+                .a11y_id("fit");
             })
             .id();
         tx.mount(root);

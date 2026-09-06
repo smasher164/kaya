@@ -2639,6 +2639,14 @@ final class KayaAppTx {
         tx.setFill(w.id, on)
     }
 
+    /// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many columns
+    /// as fit this grid's width at `minWidth` DIP each, sharing the
+    /// extra. An explicit `columnsWhen` still wins while its class holds.
+    func setColumnsAuto(_ w: KayaWidget, _ minWidth: Double) {
+        tx.setColumns(w.id, 0)
+        tx.setMinColumnWidth(w.id, minWidth)
+    }
+
     /// A widget's accessibility IDENTIFIER: a stable authored key that
     /// automation addresses it by, and which is NEVER spoken.
     func setA11yId(_ w: KayaWidget, _ id: String) {
@@ -4132,6 +4140,12 @@ final class KayaTpl {
     /// A stamped copy's cross-axis stretch (KayaTx.setFill).
     func setFill(_ n: KayaNodeHandle, _ on: Bool) {
         tx.tx.setFill(n.id, on)
+    }
+
+    /// A stamped grid's auto columns at a floor (KayaTx.setColumnsAuto).
+    func setColumnsAuto(_ n: KayaNodeHandle, _ minWidth: Double) {
+        tx.tx.setColumns(n.id, 0)
+        tx.tx.setMinColumnWidth(n.id, minWidth)
     }
 
     /// What ACTIVATING a stamped copy does. Write a VERB PHRASE.

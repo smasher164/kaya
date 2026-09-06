@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xa2bb42a3ce2fc3c9
+let kayaSpecHash: UInt64 = 0x88e3d11bce4a8350
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -187,6 +187,7 @@ private let propAlign: UInt32 = 9
 private let propAxis: UInt32 = 18
 private let propIndeterminate: UInt32 = 10
 private let propFill: UInt32 = 27
+private let propMinColumnWidth: UInt32 = 28
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -311,6 +312,9 @@ final class KayaNode: Identifiable {
     /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
     /// leaves the kind's default to the arm that draws it.
     var fill: Bool? = nil
+    /// An auto grid's floor, read when `columns` is 0
+    /// (docs/layout-knobs-plan.md §3).
+    var minColumnWidth: Double = 0
     /// Semantic emphasis (docs/styling-plan.md D4), 0 = none — never a raw
     /// color.
     var role: Int64 = 0
@@ -4635,6 +4639,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.indeterminate = raw[body + 24] != 0
                 case (propFill, valueBool):
                     kayaScene.nodes[id]!.fill = raw[body + 24] != 0
+                case (propMinColumnWidth, valueF64):
+                    kayaScene.nodes[id]!.minColumnWidth =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propColumns, valueF64):
                     kayaScene.nodes[id]!.columns =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
@@ -11678,6 +11685,65 @@ let kayaFoldSeamGap: CGFloat = 16
     }
 #endif
 
+/// THE GRID THAT FITS (docs/layout-knobs-plan.md §3): the column count is
+/// a pure function of the proposed width and the floor, every column an
+/// equal share of the width, cells centred in their row (R5). It takes the
+/// width it is offered, which is what makes it span its parent.
+struct KayaAutoGrid: Layout {
+    let minWidth: CGFloat
+    let spacing: CGFloat
+
+    func columns(for width: CGFloat) -> Int {
+        guard width.isFinite, minWidth > 0 else { return 1 }
+        return max(1, Int(((width + spacing) / (minWidth + spacing)).rounded(.down)))
+    }
+
+    private func rows(_ subviews: Subviews, width: CGFloat) -> (cols: Int, share: CGFloat, heights: [CGFloat]) {
+        let cols = columns(for: width)
+        let share = max(0, (width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+        var heights: [CGFloat] = []
+        var i = 0
+        while i < subviews.count {
+            var rowH: CGFloat = 0
+            for c in 0..<cols where i + c < subviews.count {
+                rowH = max(
+                    rowH,
+                    subviews[i + c].sizeThatFits(ProposedViewSize(width: share, height: nil)).height)
+            }
+            heights.append(rowH)
+            i += cols
+        }
+        return (cols, share, heights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+            ?? (minWidth * CGFloat(subviews.count) + spacing * CGFloat(max(0, subviews.count - 1)))
+        let plan = rows(subviews, width: width)
+        let height = plan.heights.reduce(0, +) + spacing * CGFloat(max(0, plan.heights.count - 1))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let plan = rows(subviews, width: bounds.width)
+        var y = bounds.minY
+        for (r, rowH) in plan.heights.enumerated() {
+            for c in 0..<plan.cols {
+                let i = r * plan.cols + c
+                if i >= subviews.count { break }
+                let size = subviews[i].sizeThatFits(ProposedViewSize(width: plan.share, height: nil))
+                let x = bounds.minX + CGFloat(c) * (plan.share + spacing)
+                subviews[i].place(
+                    at: CGPoint(x: x, y: y + (rowH - size.height) / 2), anchor: .topLeading,
+                    proposal: ProposedViewSize(width: plan.share, height: size.height))
+            }
+            y += rowH + spacing
+        }
+    }
+}
+
 /// A column of nothing but labelled rows, two or more, is a form
 /// (docs/forms-plan.md §2).
 func kayaIsForm(_ node: KayaNode) -> Bool {
@@ -13473,6 +13539,32 @@ struct KayaRender: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        case kindGrid where node.columns == 0:
+            // THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
+            // columns as fit the proposed width at the floor, equal shares;
+            // the cells record their leading edge exactly as the fixed
+            // grid's do, so expect_grid_columns reads both the same way.
+            KayaAutoGrid(minWidth: node.minColumnWidth, spacing: node.spacing) {
+                ForEach(node.children, id: \.id) { cell in
+                    KayaRender(node: cell)
+                        .background(
+                            GeometryReader { g in
+                                Color.clear
+                                    .onAppear {
+                                        kayaCellMinX[cell.id] =
+                                            g.frame(in: .named("kaya-grid-\(node.id)")).minX
+                                    }
+                                    .onChange(of: g.frame(in: .named("kaya-grid-\(node.id)")).minX) { _, x in
+                                        kayaCellMinX[cell.id] = x
+                                    }
+                            }
+                        )
+                }
+            }
+            .coordinateSpace(name: "kaya-grid-\(node.id)")
+            .background(KayaInsetReader(id: node.id, outer: false))
+            .padding(node.inset)
+            .background(KayaInsetReader(id: node.id, outer: true))
         case kindGrid:
             // The 2D layout contract: SwiftUI's own Grid — columns take their
             // natural width, aligned across rows. The node's children chunk
