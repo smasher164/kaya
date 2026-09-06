@@ -7919,6 +7919,13 @@ above (those taps landed and the sheet shrugged); the other 127 iOS legs
 were green. On the next sighting read the driver's own log for the exit
 65 (an xcodebuild test-run failure code) before anything about the sheet.
 
+SIGHTING 2026-09-06 (a later one, filed here after a first landing under the wrong heading) (matrix #17, the action-wait + drag-target tree;
+five-minute load 85): `save-swiftui`, `no file dialog live, wanted
+"kaya-save-…"` and `the driver on 45F06B45-… exited 65` — the XCUI driver
+lost, the dialog never read, every later step reading the app with no
+file open; the iOS lane at 609s beside it. The class this entry holds;
+the same lane read ALL PASS standalone earlier the same day.
+
 
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
@@ -11580,12 +11587,4 @@ THE BREADTH SLICE, two worktrees merged 2026-09-05:
   and its positive control); the python and JS negatives compare `help`'s
   bytes to the generated setters' in both zones. The ANDROID roster waits on
   the Compose arm above.
-
-SIGHTING 2026-09-06 (matrix #17, the action-wait + drag-target tree;
-five-minute load 85): `save-swiftui`, `no file dialog live, wanted
-"kaya-save-…"` and `the driver on 45F06B45-… exited 65` — the XCUI driver
-lost, the dialog never read, every later step reading the app with no
-file open; the iOS lane at 609s beside it. The class this entry holds;
-the same lane read ALL PASS standalone earlier the same day.
-
 
