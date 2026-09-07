@@ -2,6 +2,7 @@
 cd /d C:\kaya\cs
 set PATH=C:\kaya;%PATH%
 set KAYA_SELFTEST=entry
+set KAYA_VERB_TRACE=C:\kaya\flightrec\entry_csharp-vtrace.txt
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 rem Built ONCE at deploy (per-leg dotnet run raced the shared
 rem obj\bin four-wide, CS2012); the apphost exe keeps the

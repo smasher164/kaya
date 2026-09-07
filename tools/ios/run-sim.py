@@ -40,7 +40,7 @@ import tomllib
 import urllib.parse
 
 from lanes import ios as lane
-import quiet
+import exclusive
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -371,7 +371,7 @@ REC_DIRS = {}
 
 
 def _luma_of(png):
-    got = out_of(["ffprobe", "-v", "quiet", "-f", "lavfi",
+    got = out_of(["ffprobe", "-v", "exclusive", "-f", "lavfi",
                   f"movie={png},signalstats", "-show_entries",
                   "frame_tags=lavfi.signalstats.YAVG", "-of", "csv=p=0"])
     first = got.splitlines()[0] if got.splitlines() else ""
@@ -492,7 +492,7 @@ def rec_suite_start(retry=False):
 def _film_edge_ms(movie, down):
     """The first frame whose average luma steps by 25 in the wanted
     direction; its presentation time in ms is the fiducial edge."""
-    got = out_of(["ffprobe", "-v", "quiet", "-f", "lavfi",
+    got = out_of(["ffprobe", "-v", "exclusive", "-f", "lavfi",
                   f"movie={movie},select=gt(scene\\,0.3),signalstats",
                   "-show_entries",
                   "frame=pts_time:frame_tags=lavfi.signalstats.YAVG",
@@ -2157,16 +2157,19 @@ def queue_xcuidrive_proof(app, bundle_id):
 
 
 def queue_leg(name, *args, pad=False, **kwargs):
-    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py): start nothing while
-    # another lane holds it; for this lane's quiet legs, empty the pool
+    # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
+    # another lane holds it; for this lane's exclusive legs, empty the pool
     # first, then hold it and run the leg inline.
-    quiet.wait("ios", name)
+    exclusive.wait("ios", name)
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
+        return
     prep_join()
     _leg_names.append(name)
-    if name in lane.QUIET:
+    if name in lane.EXCLUSIVE:
         for t in [*_leg_threads, *_pad_threads]:
             t.join()
-        with quiet.hold("ios", name):
+        with exclusive.hold("ios", name):
             _leg_worker(name, args, kwargs, pad)
         return
     # Recording is suppressed on the pad: the fiducial scheme indexes
@@ -2610,7 +2613,7 @@ if not xcuidrive_census():
 # a complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
-quiet.summary("ios")
+exclusive.summary("ios")
 if status == 0:
     print("run-sim: ALL PASS")
 else:

@@ -29,10 +29,13 @@ SCENES = [
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
 ]
 
-# Nothing on this lane is in the quiet class yet (tools/lib/quiet.py): its
-# drag legs read green at 31-34s across every recorded run. The set grows
-# on a sighting, with its reason.
-QUIET = set()
+# THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
+# exclusive.py): the drag family, already alone inside this lane for the
+# OLE reasons above, so an exclusive-only run carries them and the everyday
+# matrix can leave them (the maintainer, 2026-09-06: the drags are what
+# make a matrix long).
+EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_java",
+             "dndwitness_rust", "dndforeign_rust"}
 
 # Depth-slice scenes: a rust example + steps exist, the language
 # sweep has not landed. Built, shipped and run RUST-ONLY — the

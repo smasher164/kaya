@@ -7,6 +7,7 @@ rem `asset("icons/kaya-mark.png")` and the core resolves it out
 rem of the root the deploy stages and names machine-wide in
 rem KAYA_ASSET_DIR — the typeface scene's rule, one asset over.
 set KAYA_SELFTEST=identity
+set KAYA_VERB_TRACE=C:\kaya\flightrec\identity_python-vtrace.txt
 rem ms-appx (XamlControlsResources) resolves against the PROCESS
 rem exe's directory: place kaya's minimal resources.pri beside
 rem python.exe (idempotent; inert for non-WinUI python programs).

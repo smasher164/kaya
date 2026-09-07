@@ -45,7 +45,7 @@ import time
 import os
 
 from lanes import win as lane
-import quiet
+import exclusive
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -1523,7 +1523,8 @@ def run_one_suite(name, slot, log):
         print(f"{name}: skipped — the VM was declared unreachable earlier "
               f"in this lane", file=log)
         return False
-    run_ssh(f"del C:\\kaya\\out_{name}.txt 2>nul & schtasks /create /tn "
+    run_ssh(f"del C:\\kaya\\out_{name}.txt 2>nul & "
+            f"del C:\\kaya\\flightrec\\{name}-vtrace.txt 2>nul & schtasks /create /tn "
             f'kaya_{name} /tr "wscript C:\\kaya\\run-hidden.vbs '
             f'run_{name}.cmd {slot}" /sc once /st 00:00 /it /rl highest /f '
             f">nul && schtasks /run /tn kaya_{name} >nul", log=log)
@@ -1632,15 +1633,18 @@ def _leg_worker(name):
 
 
 def run_suite(name):
-    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py), taken on the host for a
+    # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py), taken on the host for a
     # leg that runs on the VM.
-    quiet.wait("windows", name)
+    exclusive.wait("windows", name)
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
+        return
     SUITES_RUN.append(name)
     _leg_names.append(name)
-    if name in lane.QUIET:
+    if name in lane.EXCLUSIVE:
         for t in _leg_threads:
             t.join()
-        with quiet.hold("windows", name):
+        with exclusive.hold("windows", name):
             _leg_worker(name)
         return
     t = threading.Thread(target=_leg_worker, args=(name,))
@@ -1815,7 +1819,7 @@ if os.environ.get("KAYA_RECORD"):
 # complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
-quiet.summary("windows")
+exclusive.summary("windows")
 if status == 0:
     print("deploy-win: ALL PASS")
 else:

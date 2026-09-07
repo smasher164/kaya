@@ -28,7 +28,7 @@ import time
 import tomllib
 
 from lanes import android as lane
-import quiet
+import exclusive
 import flightrec_lane
 
 # Device output is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
@@ -1342,7 +1342,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   errors="replace") as lf:
             run(["adb", "-s", serial, "logcat", "-d", "-s", "kaya:*"],
                 stdout=lf, stderr=subprocess.DEVNULL, **TEXT)
-        dur = out_of(["ffprobe", "-v", "quiet", "-show_entries",
+        dur = out_of(["ffprobe", "-v", "exclusive", "-show_entries",
                       "format=duration", "-of", "csv=p=0",
                       str(rec_dir / "video.mp4")]).strip()
         try:
@@ -1485,15 +1485,18 @@ def _leg_worker(name, script, args, tablet):
 
 
 def queue_leg(name, script, args, tablet=False):
-    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py): start nothing while
-    # another lane holds it; for this lane's quiet legs, empty the pool
+    # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
+    # another lane holds it; for this lane's exclusive legs, empty the pool
     # first, then hold it and run the leg inline.
-    quiet.wait("android", name)
+    exclusive.wait("android", name)
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
+        return
     _leg_names.append(name)
-    if name in lane.QUIET:
+    if name in lane.EXCLUSIVE:
         for t in [*_leg_threads, *_tablet_threads]:
             t.join()
-        with quiet.hold("android", name):
+        with exclusive.hold("android", name):
             _leg_worker(name, script, args, tablet)
         return
     t = threading.Thread(target=_leg_worker,
@@ -2264,7 +2267,7 @@ for _suite in lane.SUITES:
 # a complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
-quiet.summary("android")
+exclusive.summary("android")
 if status == 0:
     print("run-emulator: ALL PASS")
 else:

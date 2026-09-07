@@ -158,6 +158,9 @@ def matrix_parallel_problem(text):
         while at < len(lines) and not lines[at].startswith("run_lane(") \
                 and lines[at].startswith(('"', "'", "env=")):
             at += 1
+    # THE SWEEP WAITS FOR ANDROID, and is four wide (2026-09-07): at t0
+    # beside the lanes it cost every lane 150-200s for a 116s gain
+    # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
     tail = lines[at:at + 3]
     if tail != [ANDROID_PID, ANDROID_WAIT, GATE_LAUNCH]:
         return ("tools/validate-all.py must record Android's exact lane "
@@ -512,7 +515,7 @@ elif matrix_parallel_problem(doctored) is None:
     fail("self-test N10: an unproven Android pid passed")
 
 # N11 — starting the sweep immediately reintroduces the contention this
-# schedule exists to bound.
+# schedule exists to bound (measured again 2026-09-07: matrix #24).
 doctored, n = re.subn(
     r"(?m)^    android_lane_proc\.wait\(\)\n", "", matrix_text, count=1)
 print("check-gates: self-test N11 removed the Android wait, "

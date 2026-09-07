@@ -251,8 +251,11 @@ in docs/deferred.md.
    caught the four gates this paragraph was missing while the lane ran
    them. It also pins validate-all's launch order: ALL FIVE platform lanes
    start together before the runner waits for Android's recorded lane pid;
-   the one gate sweep starts at niceness 10 after Android exits while any
-   longer lanes continue. It holds the runner and environment probe to the
+   the one gate sweep starts at niceness 10 after Android exits, FOUR
+   GATES WIDE since 2026-09-07, while any longer lanes continue. Launched
+   at t0 beside the lanes instead, four wide and niced, it cost every lane
+   150-200s and every ceiling for a 116s gain
+   (docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
    same four-phone pool; its self-tests watch lane count, pool width,
    concurrent platform launch, pid provenance, single-sweep shape and
    niceness red),
@@ -432,8 +435,8 @@ in docs/deferred.md.
    grows by itself, check-slider-commit's shape: a backend whose
    `depth_stub("search")` goes must take a row. Eight watched negatives,
    counts printed),
-   `tools/check-quiet.py` (THE MATRIX-WIDE QUIET TOKEN IS WIRED WHERE IT
-   CANNOT BE FORGOTTEN (tools/lib/quiet.py, the third robustness pass,
+   `tools/check-exclusive.py` (THE MATRIX-WIDE EXCLUSIVE TOKEN IS WIRED WHERE IT
+   CANNOT BE FORGOTTEN (tools/lib/exclusive.py, the third robustness pass,
    2026-09-06): the legs that drive a platform's own input, dialog, drag
    or clipboard machinery from outside the process fail only under a
    matrix and pass alone — twenty-four such legs across the five lanes on
@@ -442,9 +445,9 @@ in docs/deferred.md.
    directory lock in the state home every lane writes to, which the
    container already mounts: a lane asks the token at its ONE leg funnel
    before starting any leg, and holds it, its pool emptied, around the
-   legs in its `QUIET` set. A runner that stopped asking would flake
+   legs in its `EXCLUSIVE` set. A runner that stopped asking would flake
    again and no lane could see it, so the gate reads each funnel by name
-   for the wait and the hold, holds every QUIET name to a leg its lane
+   for the wait and the hold, holds every EXCLUSIVE name to a leg its lane
    runs, holds the python and shell spellings to ONE set of sentences,
    and holds validate-all to handing the directory, the container launch
    to naming its path, and the sweep to yielding. Six watched negatives,
@@ -1089,10 +1092,17 @@ in docs/deferred.md.
    needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
    `tools/validate-all.py` — ALL FIVE platform lanes run concurrently by
-   default (ratified 2026-07-22). After Android exits, the one
-   `nice -n 10` gate sweep runs, so the wall is Android plus the sweep
-   IN SERIES, not the slowest lane: on the accepted 2026-08-24 run the
-   sweep's last ~83s ran with every lane already done (619s wall).
+   default (ratified 2026-07-22). `--no-exclusive` leaves out the
+   input-driving legs every lane names in its EXCLUSIVE set (the drags,
+   the dialogs, the pastes) for the everyday matrix; `--exclusive` runs
+   those alone, nothing else on the host; a commit wants both halves
+   green on one tree, or the plain run (docs/HACKING.md, Exclusive legs).
+   After Android exits, the one `nice -n 10` gate sweep runs FOUR GATES
+   WIDE (since 2026-09-07) and hides behind the longer lanes, so the wall
+   is the slowest lane. One gate at a time it was Android plus the sweep
+   in series, 654 + 422 = 1082s on the last such matrix; launched at t0
+   beside the lanes it slowed every lane by 150-200s for a 116s gain
+   (matrix #24), which is why it still waits.
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.py`,

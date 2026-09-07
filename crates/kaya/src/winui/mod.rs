@@ -3018,7 +3018,15 @@ fn declare_table(
         // view change lands (this backend's bindings project no
         // ViewChanged), and it is the only signal the header travels on.
         let host_id = id.0;
+        let host_live = host.clone();
         let scrolled = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            // LayoutUpdated reaches a detached subscriber too (measured
+            // 2026-09-07: eleven tables under a pushed screen, 220 reports
+            // scheduled in one leg), and a band outside the tree has no
+            // layout to read; Loaded runs table_pass when it is back.
+            if !host_live.IsLoaded()? {
+                return Ok(());
+            }
             table_columns_track(host_id);
             schedule_report(host_id);
             Ok(())
@@ -3035,6 +3043,7 @@ fn declare_table(
         grid.Loaded(&loaded)?;
         let laid_id = id.0;
         let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            LAYOUT_PASSES.with_borrow_mut(|n| *n.entry(laid_id).or_insert(0) += 1);
             table_pass(laid_id);
             Ok(())
         });
@@ -3052,8 +3061,20 @@ fn declare_table(
 /// Refresh what the geometry pass needs from the core and mark the
 /// floors stale. Called once per drain, the `menus_touched` shape.
 fn sync_tables(core: &CoreState) {
-    let ids: Vec<u64> = TABLES.with_borrow(|tables| tables.keys().copied().collect());
-    for id in ids {
+    // Every registered table takes the new rows and the dirty mark — a
+    // table created in THIS apply is not loaded yet, and a mark it never
+    // got left its columns stamped off empty floors: ten runs of ten
+    // cycled at one second (2026-09-07). Only the pass and the report are
+    // gated on attachment: a popped screen's tables stay registered until
+    // the app destroys them, the screens under a pushed one are out of
+    // the tree, and Loaded runs the pass for a fresh one (docs/traps.md).
+    let ids: Vec<(u64, bool)> = TABLES.with_borrow(|tables| {
+        tables
+            .iter()
+            .map(|(id, w)| (*id, w.band.IsLoaded().unwrap_or(false)))
+            .collect()
+    });
+    for (id, attached) in ids {
         let mut rows = Vec::new();
         for child in core.child_order.children(WidgetId(id)) {
             if let Some(NativeWidget::Row(grid)) = core.widgets.get(child) {
@@ -3069,8 +3090,10 @@ fn sync_tables(core: &CoreState) {
                 table.probes = 0;
             }
         });
-        table_pass(id);
-        schedule_report(id);
+        if attached {
+            table_pass(id);
+            schedule_report(id);
+        }
     }
 }
 
@@ -3272,6 +3295,18 @@ fn table_measure_rows(
 /// read while that spacer still holds the PREVIOUS band's number is
 /// arithmetic over two collections (docs/traps.md: A range read against the
 /// PREVIOUS band's spacer alternates two bands forever).
+/// The fault names the call: six `0x88000FA8` faults on the windows
+/// portfolio leg (matrix #25, 2026-09-07) said which HRESULT and not which
+/// of the report's reads raised it (docs/deferred.md, the row-window WATCH).
+thread_local! {
+    static SKIP_SAID: std::cell::RefCell<std::collections::HashSet<u64>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+fn site<T>(what: &str, r: windows_core::Result<T>) -> windows_core::Result<T> {
+    r.map_err(|e| windows_core::Error::new(e.code(), format!("{what}: {}", e.message())))
+}
+
 fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool> {
     let Some((host, band)) =
         TABLES.with_borrow(|tables| tables.get(&id).map(|w| (w.host.clone(), w.band.clone())))
@@ -3280,17 +3315,28 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
     };
     // Measure/arrange are lazy; force them or this cycle reads the
     // previous layout's tracks (the child_shares precedent).
-    band.UpdateLayout()?;
-    if table_measure_rows(core, id, &band)? {
+    if !band.IsLoaded()? {
+        // The wall behind the two scheduling gates (the host's
+        // LayoutUpdated arm and sync_tables): six `band.UpdateLayout`
+        // faults on bands outside the tree, matrix #25 and the VM loop
+        // under load, 2026-09-07 (docs/traps.md). Said once per table.
+        let first = SKIP_SAID.with_borrow_mut(|said| said.insert(id));
+        if first {
+            eprintln!("kaya: table {id}: report skipped, band not in the tree");
+        }
+        return Ok(false);
+    }
+    site("band.UpdateLayout", band.UpdateLayout())?;
+    if site("table_measure_rows", table_measure_rows(core, id, &band))? {
         return Ok(true);
     }
-    if table_write_spacers(core, id, &band)? {
-        band.UpdateLayout()?;
+    if site("table_write_spacers", table_write_spacers(core, id, &band))? {
+        site("band.UpdateLayout after spacers", band.UpdateLayout())?;
         return Ok(true);
     }
-    let (spacer_top, tracks) = band_tracks(&band)?;
-    let y0 = host.VerticalOffset()?;
-    let viewport = host.ViewportHeight()?;
+    let (spacer_top, tracks) = site("band_tracks", band_tracks(&band))?;
+    let y0 = site("host.VerticalOffset", host.VerticalOffset())?;
+    let viewport = site("host.ViewportHeight", host.ViewportHeight())?;
     let Some(geometry) =
         crate::fault::guard("reading window geometry in the report cycle", || {
             core.scene.window_geometry(id)
@@ -3340,7 +3386,7 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
             // The parked row moved under a correction, or the last
             // command has not landed: put the viewport back on the ROW and
             // read nothing off an offset on its way somewhere.
-            table_scroll_to(&host, id, want)?;
+            site("table_scroll_to", table_scroll_to(&host, id, want))?;
             return Ok(true);
         }
     }
@@ -3390,7 +3436,7 @@ fn table_report_once(core: &mut CoreState, id: u64) -> windows_core::Result<bool
             w.reported = Some(visible);
         }
     });
-    table_band_to(core, id, visible)?;
+    site("table_band_to", table_band_to(core, id, visible))?;
     Ok(true)
 }
 
@@ -3730,7 +3776,20 @@ fn table_horizontal_complaint(
 /// Idempotent BY DESIGN, because it runs from a layout callback: a write
 /// invalidates layout, and a pass that wrote unconditionally would never
 /// let the tree settle.
-fn table_stamp(table: &mut WinTable) -> windows_core::Result<()> {
+thread_local! {
+    static LAYOUT_PASSES: std::cell::RefCell<std::collections::HashMap<u64, u64>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// KAYA_WINUI_STAMP_TRACE=1: one line per column stamp that WRITES, with
+/// the layout pass it was reached from — the instrument for a layout
+/// cycle, which XAML reports by code alone (docs/traps.md, 0x88000FA8).
+fn stamp_trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_STAMP_TRACE").is_some())
+}
+
+fn table_stamp(id: u64, table: &mut WinTable) -> windows_core::Result<()> {
     let inner = table.grid.ActualWidth()? - 2.0 * table.pad;
     if inner <= 0.0 {
         // No track to divide — before the first layout, and again while
@@ -3746,6 +3805,16 @@ fn table_stamp(table: &mut WinTable) -> windows_core::Result<()> {
             .all(|(a, b)| (a - b).abs() < 0.5)
     {
         return Ok(());
+    }
+    if stamp_trace_enabled() {
+        let passes = LAYOUT_PASSES.with_borrow(|n| n.get(&id).copied().unwrap_or(0));
+        eprintln!(
+            "kaya: stamp table {id} pass {passes} inner {inner:.1} rows {} widths {:?} was {:?} rows_same {}",
+            table.rows.len(),
+            widths.iter().map(|w| (w * 10.0).round() / 10.0).collect::<Vec<_>>(),
+            table.applied.iter().map(|w| (w * 10.0).round() / 10.0).collect::<Vec<_>>(),
+            table.stamped == table.rows
+        );
     }
     let stamp = |defs: &ColumnDefinitionCollection| -> windows_core::Result<()> {
         defs.Clear()?;
@@ -3809,7 +3878,7 @@ fn table_pass(id: u64) {
                 Err(_) => return,
             }
         }
-        let _ = table_stamp(table);
+        let _ = table_stamp(id, table);
     });
     schedule_report(id);
 }
@@ -16403,6 +16472,50 @@ impl crate::harness::Stage for WinUiStage {
         }
     }
     fn click(&self, t: crate::harness::Target) {
+        // THE FIELD TAKES FOCUS WHEN IT HAS LOADED. A click 50-120ms after
+        // the scene mounted found the TextBox with IsLoaded false and
+        // Focus() answered false — measured on three windows search legs
+        // in one matrix (2026-09-07), and the one-shot click never came
+        // back to it. A control that is not loaded yet takes the focus
+        // from its own Loaded; the harness's expect_focused polls the
+        // result either way.
+        fn focus_told<C>(core: &CoreState, what: &str, i: usize, control: &C) -> windows_core::Result<()>
+        where
+            C: windows_core::Interface,
+        {
+            let control: bindings::Microsoft::UI::Xaml::Controls::Control = control.cast()?;
+            if !control.IsLoaded()? {
+                let token = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+                let seen = token.clone();
+                let handler = RoutedEventHandler::new(move |sender, _| {
+                    if let Some(sender) = sender.as_ref() {
+                        let loaded: bindings::Microsoft::UI::Xaml::Controls::Control = sender.cast()?;
+                        loaded.RemoveLoaded(seen.load(std::sync::atomic::Ordering::SeqCst))?;
+                        if !loaded.Focus(FocusState::Programmatic)? {
+                            eprintln!("kaya: focus on Loaded answered false");
+                        }
+                    }
+                    Ok(())
+                });
+                token.store(control.Loaded(&handler)?, std::sync::atomic::Ordering::SeqCst);
+                eprintln!("kaya: click {what}#{i}: not loaded yet, focus deferred to Loaded");
+                return Ok(());
+            }
+            if control.Focus(FocusState::Programmatic)? {
+                return Ok(());
+            }
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            let hwnd = native.window_handle()?;
+            eprintln!(
+                "kaya: click {what}#{i}: Focus(Programmatic) answered false; loaded={} \
+                 enabled={} visibility={:?} foreground={}",
+                control.IsLoaded()?,
+                control.IsEnabled()?,
+                control.Visibility()?,
+                unsafe { GetForegroundWindow() } == hwnd
+            );
+            Ok(())
+        }
         Self::on_ui(move |core| {
                 // A click on a TEXT KIND focuses it — what a native click does
                 // to a field, and the only way a scene can put focus on a
@@ -16412,15 +16525,15 @@ impl crate::harness::Stage for WinUiStage {
             match t.kind {
                 crate::harness::TargetKind::Entry => {
                     let i = crate::harness::resolve(t.index, core.entries.len());
-                    let _ = core.entries[i].Focus(FocusState::Programmatic)?;
+                    focus_told(core, "entry", i, &core.entries[i])?;
                 }
                 crate::harness::TargetKind::Textarea => {
                     let i = crate::harness::resolve(t.index, core.textareas.len());
-                    let _ = core.textareas[i].Focus(FocusState::Programmatic)?;
+                    focus_told(core, "textarea", i, &core.textareas[i])?;
                 }
                 crate::harness::TargetKind::Search => {
                     let i = crate::harness::resolve(t.index, core.searches.len());
-                    let _ = core.searches[i].Focus(FocusState::Programmatic)?;
+                    focus_told(core, "search", i, &core.searches[i])?;
                 }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());

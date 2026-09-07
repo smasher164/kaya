@@ -51,11 +51,14 @@ the mac todos leg with an impossible expect appended wrote 226 lines
 (210 attempt records, dropped=0, the verdict's own sentence as the
 reason) and the same leg passing wrote nothing; the Compose ring the
 same way on a pool emulator, pulled through run-as. WHAT THIS DOES NOT
-COVER, stated: the Windows lane runs the Rust ring and does not name a
-file for it — its launchers are generated in one shape check-steps
-pins, so that arm is a launcher-shape change of its own; and the iOS
-pull is wired on the shape of the android one and first prints on the
-next iOS failure. The panic log rides the same slice (fault.rs's
+COVER, stated: the iOS pull is wired on the shape of the android one and
+first prints on the next iOS failure. THE WINDOWS ARM CLOSED 2026-09-07,
+after a night that needed it: every checked-in launcher names
+`C:\kaya\flightrec\<leg>-vtrace.txt` (check-steps holds the line and
+watches it cut), deploy-win clears it before the leg with the out file,
+and the recorder pulls it into the bundle as `verb-trace` on the
+failure path — the windows portfolio fault had spent a matrix saying
+`0x88000FA8` with no call and no trace behind it. The panic log rides the same slice (fault.rs's
 `KAYA_PANIC_LOG`, the iOS panic WATCH below).
 
 WHAT LANDED
@@ -8034,9 +8037,9 @@ driver's own retry loop, one press long after this round's edit).
 
 
 ## WATCH — `save-swiftui` under a matrix: the save sheet's Save was pressed once and the sheet stayed up (first sighting 2026-09-06)
-QUIET SINCE 2026-09-06: `save-swift`, `save-go`, `save-swiftui` and
-`filedialog-go` run holding the matrix-wide quiet token (tools/lib/quiet.py,
-tools/lib/lanes/ios.py QUIET) with the iOS pool emptied first, so the
+EXCLUSIVE SINCE 2026-09-06: `save-swift`, `save-go`, `save-swiftui` and
+`filedialog-go` run holding the matrix-wide exclusive token (tools/lib/exclusive.py,
+tools/lib/lanes/ios.py EXCLUSIVE) with the iOS pool emptied first, so the
 starved-host premise is gone from under them; the per-press reading stays
 the instrument for a sighting under the token.
 KEY: save-swiftui, savepress, still up after 1 presses, savePressWindow, swallowed press, xcuidrive, matrix contention
@@ -10909,9 +10912,9 @@ each a stub the runner reads (tools/check-stubs.py):
     releasing anyway` (tools/linux/dragdrive.py `--phase`, gtk.rs `fn
     drag`); XTEST's pointer state outlives the process, which is what
     makes the split possible, and wayland stays one process because its
-    virtual pointer dies with it. Quiet: `drag began 0ms after the press`
+    virtual pointer dies with it. Exclusive: `drag began 0ms after the press`
     on every x11 drag leg. AND the four witness legs run holding the
-    matrix-wide quiet token (tools/lib/quiet.py, KAYA_QUIET_LEGS), so the
+    matrix-wide quiet token (tools/lib/exclusive.py, KAYA_EXCLUSIVE_LEGS), so the
     contended host this entry names is no longer the host they run on.
     The `KAYA_DIAG dragdrive` read the first sighting asked for is still
     owed.
@@ -11045,9 +11048,9 @@ arm lands, and the lanes carry no pickers legs until then:
   green.
 
 ## WATCH — android `dnd-compose` under a matrix: the drag started and was acked, and the destination answered none (first sighting 2026-09-04)
-QUIET SINCE 2026-09-06: `dnd-compose`, `dnd-jvm`, `dnd-go` and
-`tasks-compose` run holding the matrix-wide quiet token (tools/lib/quiet.py,
-tools/lib/lanes/android.py QUIET), so no other lane starts a leg while an
+EXCLUSIVE SINCE 2026-09-06: `dnd-compose`, `dnd-jvm`, `dnd-go` and
+`tasks-compose` run holding the matrix-wide exclusive token (tools/lib/exclusive.py,
+tools/lib/lanes/android.py EXCLUSIVE), so no other lane starts a leg while an
 emulator drag runs; the load-scaled schedule stays, since the lane's own
 four emulators are still there. The seventeenth sighting failed with two
 lanes running, so the token narrows this class rather than closing it: a
@@ -11577,8 +11580,8 @@ other two harnesses, and `KAYA_HARNESS: scene ready after <n>ms` on the way
 through. tools/check-harness-ceiling.py holds all three. The android python suite standalone the same day: varied-python 3s, green.
 
 ## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty"
-QUIET SINCE 2026-09-06: the three wayland clipboard legs run holding the
-matrix-wide quiet token (tools/linux/run-suites.sh KAYA_QUIET_LEGS); the
+EXCLUSIVE SINCE 2026-09-06: the three wayland clipboard legs run holding the
+matrix-wide quiet token (tools/linux/run-suites.sh KAYA_EXCLUSIVE_LEGS); the
 x11 leg does not, its one sighting being the first paste's, so a second
 x11 reading decides whether it joins. (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention, gtk_window_active, CLIP_GENERATION, clip_note, vtrace clipboard records, app_formats, foreign_targets
@@ -11678,6 +11681,83 @@ settle that took hundreds of rounds says the race was real and the wait
 caught it) and the failing step's own `offers=`/`answered` pair — a full
 `offers` with `answered nothing` is a transfer failure, an empty or stale
 `offers` is the selection not having reached this client.
+
+## ~~WATCH — windows `portfolio_python` under a matrix: six `reporting a row window failed: 0x88000FA8` faults after the scene's last step (first sighting 2026-09-07)~~ CLOSED 2026-09-07: reproduced on the VM under load with the call named (`band.UpdateLayout`), the mechanism read and fixed — a popped screen's tables stay registered until the app's destroy lands and the resize's LayoutUpdated scheduled reports for their detached bands; a report skips a band outside the tree now (docs/traps.md).
+KEY: portfolio_python, 0x88000FA8, reporting a row window failed, row window report, table_report_once, windows fold
+
+Matrix #25: the windows lane's `portfolio_python` leg passed every step
+through `resize_window 900x600` and `expect_folded column@summary none`
+(the unfold, the scene's last line) and then read six
+`kaya: reporting a row window failed: 0x88000FA8` faults, so the verdict
+was `step-failed … (and 5 further faults after it)`. First sighting in
+twenty-five matrices; the lanes on that run were the slowest on the
+record (windows 1099s against 946-961 on the three before it). WinUI's
+`fold_restack` re-stamps Grid rows on the same children and moves no
+element, so the band was never outside the tree; what raised the code is
+not known from that log — the fault carried an HRESULT and no call, and
+the flight recorder's bundle (leg log, desktop and foreground samplers)
+had nothing about the table to add. `table_report_once` names its call
+in the fault now, and the leg looped on the VM under real load (the mac
+and linux lanes running beside it) reproduced on its second run:
+`band.UpdateLayout: (0x88000FA8)`, six times, after `resize_window
+900x600` + `expect_folded … none`.
+
+THE MECHANISM, READ OFF THE CODE THE SITE NAMED AND THEN MEASURED:
+`sync_tables` scheduled a report for EVERY id in TABLES, and the scroll
+host's `LayoutUpdated` subscription fires for detached subscribers too
+(the guard's own lines: eleven tables outside the tree had 220 reports
+scheduled in one loaded run). The portfolio scene pushes and pops the
+Transactions screen three times; the guest removes that screen's
+collections in its `on_popped` handler, so between each pop and that
+transaction landing the screen's two tables are out of the tree and
+still registered, and the dashboard's tables are out of the tree under
+every push. On a starved host the resize's layout scheduled reports for
+the six popped bands and `UpdateLayout` on them faulted; the exact
+condition XAML refuses on is not known (the dashboard's detached bands
+did not fault). Neither scheduler asks a detached band for a report
+now, `table_report_once` skips one anyway (said once per table), and the
+band's Loaded runs `table_pass`, which reports again on re-attach.
+Eight runs of the leg under load passed on the guarded build where one
+of six had failed, and ten of ten on the final one. The first draft of
+the sync_tables gate skipped fresh tables' dirty marks and made the leg
+fail ten of ten at one second with a real layout cycle — the same
+HRESULT, with `Layout cycle detected` above it — which is on
+docs/traps.md beside the first; the stamp trace it needed
+(`KAYA_WINUI_STAMP_TRACE=1`) stays as the instrument.
+
+## ~~WATCH — windows `search_rust` under a matrix: the harness click did not give the search field focus, so the typed query went nowhere (first sighting 2026-09-07)~~ CLOSED 2026-09-07: measured on the next matrix and fixed — the click reached the TextBox before its Loaded, `Focus()` refused, and the one-shot click never returned; the click arm defers the focus to the control's own Loaded now (docs/traps.md).
+KEY: search_rust, does not hold focus, Focus(Programmatic), windows search focus, WinUI focus
+
+Matrix #24 (the t0-sweep experiment, every lane 150-200s over its
+ceiling): the windows lane's `search_rust` leg read `Target { kind: Search
+… } does not hold focus` 425ms after `Click(Search)` and kept reading it
+for the step's 15s, then `Type("an")` changed nothing (`"4 items"`, wanted
+`"2 of 4 match"`, the column unfiltered), while the same scene's
+`ClearSearch` at +76.7s put focus on the field and `SetText("ch")`
+filtered. The leg runs ALONE in the windows lane (docs/search-plan.md §5),
+so no other kaya window was on the desktop. Green on every matrix before
+it, including #23 an hour earlier on the same tree less the schedule.
+
+The premise nothing pinned: WinUI's click arm calls
+`Focus(FocusState::Programmatic)` on the TextBox and DISCARDED the bool
+it returns, so a refused focus looked exactly like a late one. The arm
+printed what it measured when the call answered false — loaded,
+enabled, visible, and whether the window is the foreground one.
+
+SECOND SIGHTING, THE SAME DAY, WITH THE INSTRUMENT (matrix #25, three
+legs at once — `search_python`, `search_go`, `search_csharp`): every one
+read `Focus(Programmatic) answered false; loaded=false enabled=true
+visibility=Visible foreground=true`, the click 51-122ms after `scene
+ready`. The premise was the readiness clock: the scene is "ready" when
+its root is mounted, and a WinUI control cannot take focus until its own
+Loaded has run, which on a loaded host comes later than the harness's
+first step. The click arm asks `IsLoaded` first and, when it is false,
+focuses from the control's Loaded event (one-shot, the handler removes
+itself), so a click on a text kind means "focus as soon as the field can
+take it" and `expect_focused`'s poll reads the result either way. The
+three legs that passed on that run (`search_rust`, `search_js`,
+`search_java`) had their click land after Loaded, 400-500ms before the
+first expect_focused.
 
 ## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` and then linux `dnd-js-wayland` (first sighting 2026-09-05)
 KEY: dnd_java, dnd-js-wayland, dnd-jvm, windows drag, wayland drag, android drag, item y drag ended none, text target got text hello, touch slop, seven-pixel source, matrix contention

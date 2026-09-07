@@ -24,7 +24,7 @@ import threading
 import time
 
 from lanes import mac as lane
-import quiet
+import exclusive
 import flightrec_lane
 
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -437,7 +437,7 @@ def rec_suite_stop():
     # Legs share the one film; extractions are independent — run them
     # all at once and collect verdicts after. The packet index is
     # scanned once here, not per worker.
-    pts = out_of(["ffprobe", "-v", "quiet", "-select_streams", "v",
+    pts = out_of(["ffprobe", "-v", "exclusive", "-select_streams", "v",
                   "-show_entries", "packet=pts_time", "-of", "csv=p=0",
                   str(RECORDINGS / "suite.mov")])
     (RECORDINGS / ".pts").write_text(
@@ -534,14 +534,17 @@ def _leg_worker(name, argv, env):
 
 def queue_leg(name, argv, env):
     global status
-    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py): start nothing while
-    # another lane holds it; hold it, alone, for this lane's quiet legs.
-    quiet.wait("mac", name)
-    if name in lane.QUIET:
+    # THE MATRIX-WIDE TOKEN (tools/lib/exclusive.py): start nothing while
+    # another lane holds it; hold it, alone, for this lane's exclusive legs.
+    exclusive.wait("mac", name)
+    mode = os.environ.get("KAYA_EXCLUSIVE", "")
+    if (mode == "only") != (name in lane.EXCLUSIVE) and mode in ("only", "skip"):
+        return
+    if name in lane.EXCLUSIVE:
         for t in _leg_threads:
             t.join()
         _leg_names.append(name)
-        with quiet.hold("mac", name):
+        with exclusive.hold("mac", name):
             _leg_worker(name, argv, env)
         return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
@@ -754,7 +757,7 @@ if os.environ.get("KAYA_RECORD"):
 
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
-quiet.summary("mac")
+exclusive.summary("mac")
 if status == 0:
     print("validate-mac: ALL PASS")
 else:

@@ -6,6 +6,7 @@ set PATH=C:\kaya;%MINGW%;C:\kaya\go127\go\bin;C:\Program Files\Go\bin;%PATH%
 set CGO_ENABLED=1
 set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=gallery
+set KAYA_VERB_TRACE=C:\kaya\flightrec\gallery_go-vtrace.txt
 rem Build INTO C:\kaya rather than `go run`, for two reasons that
 rem both arrived with the one-package collapse. The exe must sit
 rem beside resources.pri for ms-appx (XamlControlsResources) to

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
-import quiet
+import exclusive
+from lanes import android as _android, ios as _ios, mac as _mac, win as _win
 
 dev_shell_or_die()
 
@@ -12,7 +14,7 @@ dev_shell_or_die()
 # default. --serial is for single-lane benchmarking, debugging under
 # contention, and recording mode (one screen, one recorder).
 #
-# Usage: validate-all.py [--serial] [windows-host]
+# Usage: validate-all.py [--serial] [--exclusive | --no-exclusive] [windows-host]
 #
 # tools/check-gates.py pins the parallel launch block.
 
@@ -28,9 +30,18 @@ os.chdir(ROOT)
 
 MODE = "parallel"
 HOST = "akhil@192.168.64.2"
+# --exclusive runs ONLY the exclusive legs (the input-driving ones every
+# lane names in its EXCLUSIVE set), --no-exclusive runs everything but them,
+# and no flag runs everything (the maintainer, 2026-09-06: a flag filters;
+# its absence skips nothing). The choice rides to every lane and to the
+# sweep as KAYA_EXCLUSIVE.
 for arg in sys.argv[1:]:
     if arg == "--serial":
         MODE = "serial"
+    elif arg == "--exclusive":
+        os.environ["KAYA_EXCLUSIVE"] = "only"
+    elif arg == "--no-exclusive":
+        os.environ["KAYA_EXCLUSIVE"] = "skip"
     else:
         HOST = arg
 
@@ -39,6 +50,7 @@ LANES_DIR = pathlib.Path(tempfile.mkdtemp())
 # transient nobody can look at is indistinguishable from a bug nobody
 # found. Ordinary passing lanes leave nothing behind.
 KEEP_DIR = ROOT / "target/validate-failures"
+LANES_KEEP_DIR = ROOT / "target/validate-lanes"
 atexit.register(lambda: shutil.rmtree(LANES_DIR, ignore_errors=True))
 
 lane_names = []
@@ -48,10 +60,15 @@ lane_done = {}
 status = 0
 
 
-def keep_lane_log(name):
+def keep_lane_log(name, where=None):
+    """A failing lane's log goes to target/validate-failures; EVERY lane's
+    goes to target/validate-lanes as well (2026-09-07), since the matrix
+    deletes its scratch at exit and the phase timings inside are the only
+    profile a run leaves behind."""
+    where = where or KEEP_DIR
     try:
-        KEEP_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(LANES_DIR / f"{name}.log", KEEP_DIR / f"{name}.log")
+        where.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LANES_DIR / f"{name}.log", where / f"{name}.log")
     except OSError:
         print(f"== {name} log could not be kept at "
               f"target/validate-failures/{name}.log ==", file=sys.stderr)
@@ -61,11 +78,29 @@ def keep_lane_log(name):
     return True
 
 
+EXCLUSIVE_LEGS = {"mac": _mac.EXCLUSIVE, "windows": _win.EXCLUSIVE,
+                  "ios": _ios.EXCLUSIVE, "android": _android.EXCLUSIVE}
+
+
 def run_lane(name, argv, env=None):
     """One matrix unit. Parallel mode BACKGROUNDS it and records the
     process — the collection below waits on exactly these."""
     global status
     lane_env = dict(os.environ, **(env or {}))
+    if (os.environ.get("KAYA_EXCLUSIVE", "") == "only"
+            and not EXCLUSIVE_LEGS.get(name, {"linux declares its own"})):
+        # An exclusive-only run has nothing for this lane, and launching it
+        # would spend its whole setup (the mac lane's 481s for zero legs)
+        # loading the host under the lanes that do have legs. The row reads
+        # 0 legs, as a launched lane's would.
+        print(f"exclusive: {name} names no exclusive legs; not launched",
+              flush=True)
+        if MODE == "serial":
+            print(f"{name}: PASS (0s)")
+        else:
+            lane_done[name] = ("PASS", 0)
+            lane_names.append(name)
+        return
     if MODE == "serial":
         print(f"== {name} ==")
         t0 = time.monotonic()
@@ -134,23 +169,27 @@ def top_consumers(n=4):
 print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
       f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); top consumers: "
       f"{top_consumers()}", flush=True)
-# THE MATRIX-WIDE QUIET TOKEN (tools/lib/quiet.py): one directory every
+# THE MATRIX-WIDE EXCLUSIVE TOKEN (tools/lib/exclusive.py): one directory every
 # lane reaches, the container through its flight-recorder mount.
-QUIET_DIR = pathlib.Path(
+EXCLUSIVE_DIR = pathlib.Path(
     os.environ.get("XDG_STATE_HOME", "") or str(pathlib.Path.home() / ".local/state")
-) / "kaya" / "quiet"
-QUIET_DIR.mkdir(parents=True, exist_ok=True)
-os.environ["KAYA_QUIET_DIR"] = str(QUIET_DIR)
-print(f"quiet: the token lives at {QUIET_DIR}", flush=True)
+) / "kaya" / "exclusive"
+EXCLUSIVE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["KAYA_EXCLUSIVE_DIR"] = str(EXCLUSIVE_DIR)
+print(f"exclusive: the token lives at {EXCLUSIVE_DIR}", flush=True)
 # The protocol watched before the lanes trust it: the mkdir race, the
 # stale break both sides of its ceiling, an expired wait, the holder.
-if not quiet.selftest():
-    print("quiet: the self-test failed — the lanes run WITHOUT the token", flush=True)
-    del os.environ["KAYA_QUIET_DIR"]
+if not exclusive.selftest():
+    print("exclusive: the self-test failed — the lanes run WITHOUT the token", flush=True)
+    del os.environ["KAYA_EXCLUSIVE_DIR"]
 if MODE == "parallel":
     # ALL FIVE PLATFORM LANES START TOGETHER; the gate sweep waits for
-    # Android's process, then runs niced. THE WALL IS ANDROID PLUS THE
-    # SWEEP, IN SERIES (619s, 2026-08-24).
+    # Android's process, then runs niced and FOUR WIDE (tools/gates.py,
+    # 2026-09-07), which hides it behind the longer lanes. One gate at a
+    # time the wall was Android plus the whole sweep in series (654 +
+    # 422 = 1082s); launched at t0 beside the lanes, four wide and niced,
+    # it cost every lane 150-200s and every ceiling for a 116s gain
+    # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
     #
     # The token is a t0 fingerprint of every keyed gate's inputs, so the
     # mac lane can skip its own sweep; a hand-run has none and sweeps.
@@ -208,11 +247,15 @@ BUDGETS = {
     # 620 since 2026-09-01: the ninth binding took the roster 349 -> 391
     # legs; quiet-contended matrices sit near 500 and this keeps the
     # ~1.25x headroom the other lanes have.
-    # 760 since 2026-09-06: the quiet token (tools/lib/quiet.py) has this lane
+    # 760 since 2026-09-06: the exclusive token (tools/lib/exclusive.py) has this lane
     # hold still while android drags and linux pastes hold it — eight waits,
     # 226s, on matrix #22 (675s against 620); 485s without them the same day.
     # Re-read on the next quiet matrices.
-    "mac": 760,
+    # RE-READ 2026-09-07 over four matrices (#24-#27, the four-wide sweep
+    # after Android overlapping the tails, every lane log kept) and set
+    # ~1.1x over the band: mac 854-932, linux 948-1012, windows 938-1099,
+    # ios 911-957, android 770-852, the sweep 193-214.
+    "mac": 1000,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
     # contended matrix after read 459s. 700 since 2026-09-04: the roster
@@ -222,11 +265,11 @@ BUDGETS = {
     # roster read 636s where the lane standalone the same day read 574s.
     # 700 is 1.1x over the one contended sample; to be re-read on the next
     # quiet matrices.
-    # 820 since 2026-09-06: under the quiet token this lane waited six times
+    # 820 since 2026-09-06: under the exclusive token this lane waited six times
     # for 202s (android's drags, iOS's saves) and held its own seven legs
     # for 26s on matrix #23 (750s against 700, WindowServer at 52% beside
     # it); 674s the matrix before, 452s on a quiet host. Re-read likewise.
-    "linux": 820,
+    "linux": 1100,
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
     # column and the four quiet matrices since read 498, 442, 488 and
     # 559s. 600 is 1.2x over that band's top. 950 since 2026-09-03: the
@@ -243,7 +286,7 @@ BUDGETS = {
     # qemu the top consumer at 86%) where the lane standalone the same day
     # read 449s. 1050 is 1.05x over the one contended sample; to be
     # re-read on the next quiet matrices.
-    "windows": 1050,
+    "windows": 1100,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -255,10 +298,10 @@ BUDGETS = {
     # 640 since 2026-09-06: the roster grew 128 -> 131 legs with the search
     # scene; 538s quiet at 128 (matrix #19), 608s at 131 under a five-minute
     # load of 84 (matrix #21) with no leg slowed in kind.
-    # 840 since 2026-09-06: the four quiet legs empty the pool and run alone
+    # 840 since 2026-09-06: the four exclusive legs empty the pool and run alone
     # (93s held, 89s waiting to hold, 24s admitting on matrix #22, 749s
     # against 640); 608s without them the same day. Re-read likewise.
-    "ios": 840,
+    "ios": 1050,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
@@ -274,13 +317,15 @@ BUDGETS = {
     # cost 48-49s each under a matrix where they cost 22-27s, roughly
     # +100s on a lane whose last five matrices read 458-495s; 660 is
     # 1.12x over 590, to be re-read on the next quiet matrices.
-    "android": 660,
-    # 490 since 2026-08-23. What it guards is the DELAYED-plus-NICED band
-    # (the launch block above), which has ONE accepted sample: 348s
-    # (2026-08-24). It deliberately does not cover the 467s reading from
-    # the from-t0 schedule this file no longer runs. A second
-    # delayed-and-niced sample is the number this arm most needs.
-    "gates": 490,
+    "android": 870,
+    # 490 since 2026-08-23, KEPT for the delayed-and-four-wide schedule
+    # of 2026-09-07 until it has samples: one at a time the sweep read
+    # 348s delayed behind Android (2026-08-24) and 422s on the last such
+    # matrix; four wide it read 151s standalone and 341s from t0 under
+    # every lane's builds (matrix #24, the launch this file no longer
+    # runs). 300 since 2026-09-07: three matrices after Android, four wide,
+    # read 193, 214 and 210.
+    "gates": 300,
 }
 
 if MODE == "parallel":
@@ -300,6 +345,14 @@ if MODE == "parallel":
         legs = sum(1 for line in log_text.splitlines()
                    if ": PASS" in line)
         print(f"{name}: {verdict} ({secs}s, {legs} legs)")
+        # The lane's own phase clock, on the record beside its row: where
+        # a lane's seconds went is the question every wall question
+        # becomes, and the scratch that held it is gone at exit.
+        phases = re.findall(r"^TIMING (\S+) (\d+)s$", log_text, re.M)
+        if phases:
+            print(f"{name}: phases " + ", ".join(
+                f"{p} {s}" for p, s in phases if p != "matrix"))
+        keep_lane_log(name, LANES_KEEP_DIR)
         budget = BUDGETS.get(name, 0)
         if budget > 0 and secs > budget:
             now = os.getloadavg()

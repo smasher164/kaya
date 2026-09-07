@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
-import quiet
+import exclusive
 
 dev_shell_or_die()
 
@@ -12,6 +12,7 @@ dev_shell_or_die()
 # (CLAUDE.md's validation ladder, rung 2).
 #
 #   tools/gates.py              build what the gates read, then run them
+#                               (KAYA_GATE_JOBS=1 reads one at a time)
 #   tools/gates.py --list       the list as JSON, for check-gates and
 #                               check-keyed
 #   tools/gates.py --selftest   watch the count refuse
@@ -27,10 +28,12 @@ dev_shell_or_die()
 # gate, run that gate. THE SWEEP IS macOS-SHAPED: the other four lanes
 # run their own per-lane subset, which check-gates.py does not police.
 
+import concurrent.futures
 import itertools
 import json
 import os
 import subprocess
+import threading
 import time
 
 os.chdir(ROOT)
@@ -93,7 +96,7 @@ GATES = [
     # byte (measured 2026-09-04).
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     ("check-search", ["tools/check-search.py"], True, ""),
-    ("check-quiet", ["tools/check-quiet.py"], True, ""),
+    ("check-exclusive", ["tools/check-exclusive.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),
@@ -283,6 +286,55 @@ def preflight(gates):
     return problems
 
 
+# THE SWEEP RUNS WIDE (2026-09-07): WIDTH gates run at once, so the
+# sweep validate-all starts after the Android lane hides behind the
+# longer lanes instead of being half the wall (one at a time it was
+# Android plus the whole sweep in series, 654 + 422 = 1082s). Starting
+# it at t0 beside the lanes was measured and rejected the same day: four
+# wide and niced it cost every lane 150-200s for a 116s gain
+# (docs/measurements/gate-sweep-2026-09-07.md).
+#
+# ALONE: the three generator checks regenerate the tree IN PLACE and put
+# every byte back, so nothing may read the tree while one runs — they go
+# first, one at a time, in list order. AFTER: js-app-checks imports
+# through the workspace link js-typecheck writes. LAST: check-targets
+# cross-compiles into the same target dirs the ios and android lanes
+# build into, and cargo's lock is per build dir, so it starts once the
+# lanes' own t0 builds are done rather than queueing them behind it.
+# WEIGHT: seconds measured standalone 2026-09-07 (57 gates, 378s in
+# series, 151s four wide, check-table-tier alone 136 of them;
+# docs/measurements/gate-sweep-2026-09-07.md); the
+# pool takes the heaviest first so no long gate is the tail, and a gate
+# not named runs after them in list order.
+WIDTH = max(1, int(os.environ.get("KAYA_GATE_JOBS", "") or "4"))
+ALONE = ("gen-header", "gen-bindings", "gen-guests")
+AFTER = {"js-app-checks": "js-typecheck"}
+LAST = ("check-targets",)
+WEIGHT = {
+    "check-table-tier": 136, "swift-typecheck": 57, "check-sugar-surface": 23,
+    "check-abort": 18, "check-assets": 15, "check-harness-ceiling": 12,
+    "check-empty-child": 10, "check-pane-ladder": 10, "check-pins": 10,
+    "check-canvas-blit": 9, "gen-guests": 8, "check-verbs": 7,
+    "check-app-identity": 6, "check-keyed": 6, "check-steps": 5,
+}
+
+
+def pool_order(rest):
+    """The pool's submission order: heaviest first, LAST last, and a
+    dependency ahead of its dependent so the dependent's wait can never
+    fill the pool with waiters."""
+    order = sorted(rest, key=lambda g: (g[0] in LAST, -WEIGHT.get(g[0], 0)))
+    names = [g[0] for g in order]
+    for dependent, dep in AFTER.items():
+        if dependent in names and dep in names and names.index(dep) > names.index(dependent):
+            g = order.pop(names.index(dep))
+            names.remove(dep)
+            at = names.index(dependent)
+            order.insert(at, g)
+            names.insert(at, dep)
+    return order
+
+
 def sweep(gates, label="gates"):
     """Run every gate; return True only if every declared one passed.
 
@@ -303,21 +355,50 @@ def sweep(gates, label="gates"):
 
     ran = 0
     failed = []
-    for name, cmd, keyed, _why in gates:
+    if os.environ.get("KAYA_EXCLUSIVE") == "only":
+        print(f"{label}: an exclusive-only run (KAYA_EXCLUSIVE=only) — the sweep is no "
+              f"exclusive leg and ran in the full matrix; nothing to run here", flush=True)
+        return True
+    # ONE pass over the list: a Truncated list stops it early, and the
+    # count below is what says so.
+    todo = list(gates)
+    finished = {g[0]: threading.Event() for g in todo}
+    lock = threading.Lock()
+
+    def run_one(name, cmd, keyed):
+        nonlocal ran
+        dep = AFTER.get(name)
+        if dep in finished:
+            finished[dep].wait()
         # The sweep is the host's biggest consumer and holds nothing: it
-        # yields while a lane runs an input-driving leg (tools/lib/quiet.py).
-        quiet.wait("gates", name)
+        # yields while a lane runs an exclusive leg (tools/lib/exclusive.py).
+        exclusive.wait("gates", name)
         argv = ["tools/keyed.py", name, "--"] + cmd if keyed else list(cmd)
-        print(f"[{ran + 1:02d}/{declared:02d}] {name}", flush=True)
+        print(f"        start {name}", flush=True)
         t0 = time.monotonic()
-        rc = subprocess.call(argv, cwd=ROOT)
+        got = subprocess.run(argv, cwd=ROOT, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True,
+                             encoding="utf-8", errors="replace", check=False)
         dt = time.monotonic() - t0
-        ran += 1
-        if rc == 0:
-            print(f"        OK   {dt:5.1f}s", flush=True)
-        else:
-            failed.append(name)
-            print(f"        FAIL rc={rc} {dt:5.1f}s", flush=True)
+        with lock:
+            ran += 1
+            print(f"[{ran:02d}/{declared:02d}] {name}")
+            sys.stdout.write(got.stdout)
+            if got.returncode == 0:
+                print(f"        OK   {dt:5.1f}s", flush=True)
+            else:
+                failed.append(name)
+                print(f"        FAIL rc={got.returncode} {dt:5.1f}s", flush=True)
+        finished[name].set()
+
+    for g in todo:
+        if g[0] in ALONE:
+            run_one(*g[:3])
+    rest = pool_order([g for g in todo if g[0] not in ALONE])
+    print(f"{label}: {len(rest)} gates, {WIDTH} wide", flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WIDTH) as pool:
+        for fut in [pool.submit(run_one, *g[:3]) for g in rest]:
+            fut.result()
 
     passed = ran - len(failed)
     print(f"{label}: declared {declared}, ran {ran}, passed {passed}", flush=True)

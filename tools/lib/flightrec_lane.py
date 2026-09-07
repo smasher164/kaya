@@ -375,6 +375,10 @@ class WinRecorder(LaneRecorder):
                 self.foreground(bundle, t0)
                 self.pull(bundle, leg, "collect.txt", "desktop", "desktop.txt")
                 self.pull(bundle, leg, "shot.png", "shot", "shot.png")
+                # The Rust verb trace (crates/kaya/src/vtrace.rs), dumped by
+                # the guest on a failed verdict to the file its launcher
+                # names (since 2026-09-07; check-steps holds the line).
+                self.pull(bundle, leg, "vtrace.txt", "verb-trace", "verb-trace.txt")
                 self.bundle_report(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
 

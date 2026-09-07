@@ -11,6 +11,7 @@ rem deploy stages and names machine-wide in KAYA_ASSET_DIR. A
 rem per-asset variable in a per-leg launcher is what made every
 rem new asset cost five more of these lines.
 set KAYA_SELFTEST=typeface
+set KAYA_VERB_TRACE=C:\kaya\flightrec\typeface_go-vtrace.txt
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
 go build -o C:\kaya\typeface_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_typeface_go.txt 2>&1

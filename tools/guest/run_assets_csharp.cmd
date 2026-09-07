@@ -8,6 +8,7 @@ rem root the deploy staged and named machine-wide in
 rem KAYA_ASSET_DIR. A per-asset variable in a per-leg launcher
 rem is what made every new asset cost five more of these lines.
 set KAYA_SELFTEST=assets
+set KAYA_VERB_TRACE=C:\kaya\flightrec\assets_csharp-vtrace.txt
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 rem ms-appx resolves against the PROCESS exe's directory: the
 rem APPHOST exe (not dotnet.exe) runs from C:\kaya\cs-out, built

@@ -6,6 +6,7 @@ rem `asset("icons/kaya-mark.png")` and the core resolves it out
 rem of the root the deploy stages and names machine-wide in
 rem KAYA_ASSET_DIR — the typeface scene's rule, one asset over.
 set KAYA_SELFTEST=identity
+set KAYA_VERB_TRACE=C:\kaya\flightrec\identity_java-vtrace.txt
 rem ms-appx resolves against the PROCESS exe's directory: place
 rem kaya's minimal resources.pri beside java.exe (idempotent).
 copy /y C:\kaya\resources.pri "C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot\bin\resources.pri" > nul

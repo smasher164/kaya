@@ -8,6 +8,7 @@ rem deploy stages and names machine-wide in KAYA_ASSET_DIR. A
 rem per-asset variable in a per-leg launcher is what made every
 rem new asset cost five more of these lines.
 set KAYA_SELFTEST=typeface
+set KAYA_VERB_TRACE=C:\kaya\flightrec\typeface_python-vtrace.txt
 rem ms-appx (XamlControlsResources) resolves against the PROCESS
 rem exe's directory: place kaya's minimal resources.pri beside
 rem python.exe (idempotent; inert for non-WinUI python programs).

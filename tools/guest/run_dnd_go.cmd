@@ -6,6 +6,7 @@ set PATH=C:\kaya;%MINGW%;C:\kaya\go127\go\bin;C:\Program Files\Go\bin;%PATH%
 set CGO_ENABLED=1
 set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=dnd
+set KAYA_VERB_TRACE=C:\kaya\flightrec\dnd_go-vtrace.txt
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
 go build -o C:\kaya\dnd_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_dnd_go.txt 2>&1

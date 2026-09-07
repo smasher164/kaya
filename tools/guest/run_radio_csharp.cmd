@@ -2,6 +2,7 @@
 cd /d C:\kaya\cs
 set PATH=C:\kaya;%PATH%
 set KAYA_SELFTEST=radio
+set KAYA_VERB_TRACE=C:\kaya\flightrec\radio_csharp-vtrace.txt
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 rem ms-appx resolves against the PROCESS exe's directory: the
 rem APPHOST exe (not dotnet.exe) runs from C:\kaya\cs-out, built

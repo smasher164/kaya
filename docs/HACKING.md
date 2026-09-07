@@ -143,9 +143,15 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 
 - The whole matrix: `tools/validate-all.py` — all five platform lanes run
   CONCURRENTLY by default. When Android finishes, one `nice -n 10` gate
-  sweep starts, so the wall is Android plus the sweep in series, not the
-  slowest lane (the sweep's tail runs alone once the other lanes end);
-  the per-lane ceilings below are the live budgets. `--serial` is for single-lane
+  sweep starts, FOUR GATES WIDE since 2026-09-07 (`KAYA_GATE_JOBS`;
+  gates.py's ALONE, AFTER, LAST and WEIGHT tables say which gates may not
+  share the tree, which follows which, and the order), so it hides behind
+  the longer lanes and the wall is the slowest lane. One gate at a time
+  it was Android plus the sweep in series (654 + 422 = 1082s on the last
+  such matrix); launched at t0 beside the lanes, four wide and niced, it
+  slowed every lane by 150-200s for a 116s gain (matrix #24,
+  docs/measurements/gate-sweep-2026-09-07.md), which is why it still
+  waits. The per-lane ceilings below are the live budgets. `--serial` is for single-lane
   benchmarking, contention-free debugging, or recording mode. Per-lane
   logs print for any FAIL.
 - macOS: `tools/validate-mac.py` (KAYA_JOBS=n for pool width, =1 for
@@ -425,43 +431,51 @@ touch. The gate layer catches what an agent misses — that is what it is
 for. After parallel work lands, one consolidation pass re-runs all
 gates against the final tree (each agent verified against a moving one).
 
-## Quiet legs: one input-driving leg on the host at a time
+## Exclusive legs: one input-driving leg on the host at a time
 
 The legs that drive a platform's own input, dialog, drag or clipboard
 machinery from outside the process (an emulator drag, the iOS save sheet,
 kaya's own x11 drag in the witness legs, a wayland paste) fail only under a
-matrix and pass alone. tools/lib/quiet.py is the matrix-wide token they run
-under: one `mkdir` lock in `$XDG_STATE_HOME/kaya/quiet`, which the linux
-container already sees at `/flightrec-state/kaya/quiet`.
+matrix and pass alone. tools/lib/exclusive.py is the matrix-wide token they run
+under: one `mkdir` lock in `$XDG_STATE_HOME/kaya/exclusive`, which the linux
+container already sees at `/flightrec-state/kaya/exclusive`.
 
-- Every runner asks the token at its one leg funnel (`quiet.wait(<lane>,
+- Every runner asks the token at its one leg funnel (`exclusive.wait(<lane>,
   name)`) before starting ANY leg: while another lane holds it, the lane
   starts nothing and its legs in flight finish.
-- Each lane's `QUIET` set (tools/lib/lanes/*.py; `KAYA_QUIET_LEGS` in
+- Each lane's `EXCLUSIVE` set (tools/lib/lanes/*.py; `KAYA_EXCLUSIVE_LEGS` in
   tools/linux/run-suites.sh) names the legs it runs holding the token: the
   pool is emptied first, the leg runs inline, the token is released.
-- Every wait and hold prints (`quiet: ios waits to admit save-swift —
-  lane=android leg=dnd-go … holds`, `quiet: android holds for dnd-go`,
-  `quiet: android released after dnd-go (48.2s held)`), and each lane ends
-  with `quiet: <lane> held N legs for Xs; waited M times for Ys`, so the
+- Every wait and hold prints (`exclusive: ios waits to admit save-swift —
+  lane=android leg=dnd-go … holds`, `exclusive: android holds for dnd-go`,
+  `exclusive: android released after dnd-go (48.2s held)`), and each lane ends
+  with `exclusive: <lane> held N legs for Xs; waited M times for Ys`, so the
   wall cost of quiet stands beside the lane's duration.
 - A lock older than 300s is broken with a sentence (a dead lane, not a slow
-  leg); a wait longer than 360s proceeds with a sentence. Quiet never costs
+  leg); a wait longer than 360s proceeds with a sentence. Exclusion never costs
   a lane a leg.
-- To add a leg: put its lane-spelled name in the lane's `QUIET` set with
-  the sighting that earned it. tools/check-quiet.py holds every name to a
+- To add a leg: put its lane-spelled name in the lane's `EXCLUSIVE` set with
+  the sighting that earned it. tools/check-exclusive.py holds every name to a
   leg the lane runs, every funnel to the wait and the hold, and the python
   and shell spellings to one set of sentences.
 - A lane run by hand takes the token too, in the state home's directory;
   alone on the host it never waits.
-- QUIET CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
-  (2026-09-06): it trades parallelism for isolation. The matrix's wall is
-  the android lane plus the gate sweep IN SERIES (validate-all's rule), and
-  neither is shortened by another lane holding still; the holds cost the
-  lanes that wait (matrix #22: the mac lane waited eight times for 226s
-  while android's drags held, the iOS lane emptied its pool for its four
-  quiet legs) and those lanes' ceilings were moved for it. The first
-  matrix under the token ran 1026s against 958s the run before, the
-  difference the sweep's own growth and the host's load, not the token;
-  the lever, if the wall ever matters more than the isolation, is a
-  smaller QUIET set, never a shorter wait.
+- THE FLAGS FILTER, AND NO FLAG SKIPS NOTHING (the maintainer, 2026-09-06):
+  `tools/validate-all.py` runs everything; `--exclusive` runs only the
+  exclusive legs on every lane, nothing else on the host, and skips the
+  sweep, and does not launch a lane whose EXCLUSIVE set is empty (the mac
+  lane spent 481s of setup to run zero legs before that rule); `--no-exclusive`
+  runs everything but them, the everyday matrix while iterating. A commit
+  wants both halves green on the same tree, or the plain run. The choice
+  rides to the lanes as KAYA_EXCLUSIVE=only|skip.
+- EXCLUSION CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
+  (2026-09-06): it trades parallelism for isolation. The wall is the
+  slowest lane, and no lane is shortened by another holding still; the
+  holds cost the lanes that wait (matrix #22: the mac lane waited eight
+  times for 226s while android's drags held, the iOS lane emptied its pool
+  for its four exclusive legs) and those lanes' ceilings were moved for
+  it. The first matrix under the token ran 1026s against 958s the run
+  before, the difference the sweep's own growth and the host's load, not
+  the token. What does shorten the wall is leaving the exclusive legs out
+  (`--no-exclusive`) or, if the wall ever matters more than the isolation,
+  a smaller EXCLUSIVE set — never a shorter wait.

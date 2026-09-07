@@ -7,6 +7,7 @@ rem deploy stages and names machine-wide in KAYA_ASSET_DIR. A
 rem per-asset variable in a per-leg launcher is what made every
 rem new asset cost five more of these lines.
 set KAYA_SELFTEST=typeface
+set KAYA_VERB_TRACE=C:\kaya\flightrec\typeface_java-vtrace.txt
 rem ms-appx resolves against the PROCESS exe's directory: place
 rem kaya's minimal resources.pri beside java.exe (idempotent).
 copy /y C:\kaya\resources.pri "C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot\bin\resources.pri" > nul

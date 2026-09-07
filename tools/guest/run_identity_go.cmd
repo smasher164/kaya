@@ -10,6 +10,7 @@ rem `asset("icons/kaya-mark.png")` and the core resolves it out
 rem of the root the deploy stages and names machine-wide in
 rem KAYA_ASSET_DIR — the typeface scene's rule, one asset over.
 set KAYA_SELFTEST=identity
+set KAYA_VERB_TRACE=C:\kaya\flightrec\identity_go-vtrace.txt
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
 go build -o C:\kaya\identity_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_identity_go.txt 2>&1

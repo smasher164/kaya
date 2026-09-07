@@ -6,6 +6,7 @@ rem `asset("icons/kaya-mark.png")` and the core resolves it out
 rem of the root the deploy stages and names machine-wide in
 rem KAYA_ASSET_DIR — the typeface scene's rule, one asset over.
 set KAYA_SELFTEST=identity
+set KAYA_VERB_TRACE=C:\kaya\flightrec\identity_csharp-vtrace.txt
 set DOTNET_CLI_TELEMETRY_OPTOUT=1
 rem ms-appx resolves against the PROCESS exe's directory: the
 rem APPHOST exe (not dotnet.exe) runs from C:\kaya\cs-out, built

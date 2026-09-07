@@ -3,5 +3,6 @@ cd /d C:\kaya
 set PATH=C:\kaya;C:\kaya\node24\node-v24.19.0-win-arm64;%PATH%
 set KAYA_LIB=C:\kaya\kaya.dll
 set KAYA_SELFTEST=1
+set KAYA_VERB_TRACE=C:\kaya\flightrec\js-vtrace.txt
 node C:\kaya\milestone2.ts > C:\kaya\out_js.txt 2>&1
 echo EXIT=%ERRORLEVEL% >> C:\kaya\out_js.txt

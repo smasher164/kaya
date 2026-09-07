@@ -2260,20 +2260,71 @@ if out:
     status = 1
 
 
+def verb_trace_line(leg):
+    """The line every windows launcher carries (since 2026-09-07): the
+    Rust verb trace is dumped on a failed verdict to the file this names,
+    and the flight recorder pulls it into the leg's bundle. A launcher
+    without it fails with an HRESULT and no trace, which is how the
+    windows portfolio fault spent a matrix saying nothing."""
+    return f"set KAYA_VERB_TRACE=C:\\kaya\\flightrec\\{leg}-vtrace.txt"
+
+
+# Launchers that run no kaya guest carry no ring to dump: each names its
+# reason, and is held to still lacking a KAYA_SELFTEST line, since a
+# launcher that grew a guest would need the trace like every other.
+VERB_TRACE_EXEMPT = {
+    "dndforeign_rust": "runs dnd-witness.ps1 (a foreign drag onto kaya), no guest",
+    "dndwitness_rust": "runs dnd-witness.ps1 (kaya's drag out), no guest",
+}
+
+
+def launcher_problems(leg, text):
+    if leg in VERB_TRACE_EXEMPT:
+        if "set KAYA_SELFTEST=" in text:
+            return [f"tools/guest/{win_lane.launcher(leg)}: exempt from the "
+                    f"verb-trace line ({VERB_TRACE_EXEMPT[leg]}) yet runs a "
+                    f"kaya guest — the exemption is stale"]
+        return []
+    if verb_trace_line(leg) not in text:
+        return [f"tools/guest/{win_lane.launcher(leg)}: lacks "
+                f"`{verb_trace_line(leg)}` — a failed verdict there dumps "
+                f"no verb trace for the flight recorder to pull"]
+    return []
+
+
 def launchers():
     failed = 0
     for leg in win_lane.legs():
         # The module roster covers the milestone2 bare legs too
         # (run_rust.cmd and kin), which a <scene>_<lang> pattern cannot.
-        if not (ROOT / "tools" / "guest"
-                / win_lane.launcher(leg)).is_file():
+        path = ROOT / "tools" / "guest" / win_lane.launcher(leg)
+        if not path.is_file():
             print(f'check-steps: the win lane wires leg "{leg}" but '
                   f"tools/guest/{win_lane.launcher(leg)} does not "
                   f"exist — that leg would wait out its whole timeout "
                   f"in silence", file=sys.stderr)
             failed = 1
+            continue
+        for problem in launcher_problems(
+                leg, path.read_text(encoding="utf-8", errors="replace")):
+            print(f"check-steps: {problem}", file=sys.stderr)
+            failed = 1
     return failed
 
+
+# Watched: a launcher whose verb-trace line is cut must be named.
+_launcher_text = (ROOT / "tools/guest" / win_lane.launcher("todos_rust")
+                  ).read_text(encoding="utf-8", errors="replace")
+_cut, _n = sub_count(re.escape(verb_trace_line("todos_rust")) + r"\r?\n", "",
+                     _launcher_text)
+print(f"check-steps: self-test the todos_rust launcher's verb-trace line cut, "
+      f"{_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the verb-trace negative perturbed nothing")
+if not launcher_problems("todos_rust", _cut):
+    selftest_fail("a launcher without its verb-trace line passed")
+if launcher_problems("todos_rust", _launcher_text):
+    selftest_fail("the real todos_rust launcher was refused")
 
 if launchers():
     status = 1

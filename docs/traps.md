@@ -7887,6 +7887,62 @@ BUDGETS = {
 }
 ```
 
+## A popped screen's tables are reported until the app destroys them, and WinUI refuses layout reads off the tree (measured 2026-09-07)
+
+WinUI's row-window report reached bands outside the visual tree two
+ways, both measured: the scroll host's `LayoutUpdated` subscription
+fires for a detached subscriber (eleven tables under a pushed screen or
+left by a popped one had 220 reports scheduled in one portfolio leg), and
+`sync_tables` walked every id in TABLES. A table leaves the tree when
+its screen is popped, or when a screen is pushed over it, and leaves
+TABLES only when the app destroys it — the portfolio guest does that in
+`on_popped`, one transaction later. On the windows `portfolio_python`
+leg, `band.UpdateLayout` on such bands faulted with 0x88000FA8 six times
+after the scene's last resize (three pops of the Transactions screen
+times two tables), first on matrix #25 and then on the second of six
+runs of the leg looped on the VM under the mac and linux lanes' load;
+with the reads gated on `IsLoaded`, eight loaded runs passed, then ten.
+WHAT IS NOT KNOWN: the exact condition XAML refuses on — the dashboard's
+tables are detached under the pushed screen on every run and their reads
+did not fault. The fix does not depend on it: a band outside the tree
+has no layout to read, so neither scheduler asks for one and the report
+skips one anyway (`table_report_once`), and the band's Loaded runs
+`table_pass`, which reports again. TABLES holds registrations, not
+attachments.
+
+THE SAME CODE WEARS A SECOND DEFECT, measured the same night: the first
+draft of that gate filtered `sync_tables` to attached tables and so
+never gave a table created in the CURRENT apply its dirty mark (a fresh
+table is not loaded at its own apply), its columns were stamped off
+empty floors, and ten runs of ten failed at one second with
+`Layout cycle detected. Layout could not complete.` on the unhandled
+path and then `band.UpdateLayout: (0x88000FA8)`. The original fault had
+no cycle line. So 0x88000FA8 is what a layout read answers once XAML's
+layout has failed, for more than one reason; read the unhandled lines
+above the fault before naming the cause. Every registered table takes
+its rows and its dirty mark; only the pass and the report are gated.
+`KAYA_WINUI_STAMP_TRACE=1` prints one line per column stamp that writes,
+with the layout pass it was reached from — on a passing run the stamps
+converge as the band grows (1, 2, 4, 8, 16, 32 rows) and as the wrap
+re-breaks the track (613 -> 427), 58 stamps over eleven tables; an
+oscillation would show as alternating widths on consecutive passes.
+
+## A WinUI control refuses focus until its own Loaded has run, and "scene ready" comes first (measured 2026-09-07)
+
+`Control.Focus(FocusState::Programmatic)` answers false on a TextBox that
+is in the tree, enabled, visible and in the foreground window but has
+not raised Loaded yet. The harness starts a scene's first step when the
+root is mounted, and on a loaded host the search field's Loaded came
+after the click: three windows search legs in one matrix read
+`Focus(Programmatic) answered false; loaded=false enabled=true
+visibility=Visible foreground=true` 51-122ms after `scene ready`, and
+one the matrix before (which discarded the bool, so it read only "does
+not hold focus"). The three that passed had clicked 400-500ms later.
+WinUI's click arm on a text kind (entry, textarea, search) checks
+`IsLoaded` and, when false, takes the focus from the control's Loaded
+event; `focus_told` in winui/mod.rs. Anything else the harness drives
+before a control's Loaded is the same trap one verb over.
+
 ## A paste dispatched during a focus handover lands in the PREVIOUS field (measured 2026-08-04)
 
 On the mac clipboard leg, twice in one run, `menu_activate "Edit>Paste"`
@@ -9622,7 +9678,7 @@ before any leg runs. A list of names is right until the next scene.
 
 ## A bare `wait` in a sourced shell helper reaps the caller's background jobs (2026-09-06)
 
-tools/linux/quiet.sh's self-test raced two background `mkdir`s and then
+tools/linux/exclusive.sh's self-test raced two background `mkdir`s and then
 called `wait` with no pids. In run-suites.sh that shell already had the
 guest builds running in the background: the bare `wait` reaped them, and
 the builds' own `wait $pid` then failed with `pid 28 is not a child of

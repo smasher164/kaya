@@ -2,6 +2,7 @@
 cd /d C:\kaya
 set PATH=C:\kaya;%PATH%
 set KAYA_SELFTEST=progress
+set KAYA_VERB_TRACE=C:\kaya\flightrec\progress_java-vtrace.txt
 rem ms-appx resolves against the PROCESS exe's directory: place
 rem kaya's minimal resources.pri beside java.exe (idempotent).
 copy /y C:\kaya\resources.pri "C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot\bin\resources.pri" > nul
