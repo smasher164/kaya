@@ -12023,3 +12023,38 @@ manager's per-list search fields (docs/search-plan.md S10) with their
 steps, the placeholder on entry and textarea in every backend, the gate
 clauses for S5's Escape arms and S7's identity per backend, and the
 matrix. The entry is struck when the last lane's arm lands.
+
+## RULING WANTED — a lost dialog answers the app as a cancel; should the app be able to tell the two apart? (recorded 2026-09-06)
+KEY: lost dialog, KAYA_DIALOG_LOST, file_dialog_result reason, cancelled versus lost, DIALOG_RESULT_BUDGET_MS, dialog occurrence
+
+What happens today, after the android ghost's fix (89338ee6): when a
+picker is gone, kaya's own window holds the focus again and no result has
+arrived within 15s, the Compose backend prints `KAYA_DIALOG_LOST` with what
+it measured, notes it into the failure dump, and answers the dialog as
+CANCELLED — because file_dialog_result is the only thing that frees the
+core's one-live-dialog slot, and the alternative was a hang. The APP sees
+exactly what it sees when the user pressed Cancel. The verdict and the log
+see the loss; the app cannot.
+
+The three answers, each with its cost:
+1. A distinct OCCURRENCE (a `file_dialog_lost` record beside
+   file_dialog_result): a new wire record, the spec hash moves, nine
+   bindings gain a handler nobody has a use for yet, four backends gain an
+   arm three of which would never fire — the largest change for a case only
+   a starved emulator has produced.
+2. A REASON on the result kaya already sends: file_dialog_result carries
+   `cancelled`; a `reason` field (`user` | `lost`) is one wire field, the
+   spec hash still moves, and the nine bindings' `on_result` callbacks
+   expose it where they expose the cancel — a small uniform addition, and
+   the app can say "the picker closed without answering, try again" instead
+   of treating a platform loss as a choice.
+3. NOTHING: the app treats the loss as a cancel, the log and the verdict
+   name it, and the distinction stays a harness fact. No wire change.
+
+RECOMMENDATION: 3 for now, 2 if the loss is ever seen outside a matrix.
+The one real user path that produced a loss — rotating the phone
+mid-dialog — is fixed at its cause and delivers the result; what remains
+is the framework's async hop under a starved host, which the 15s bound now
+turns into a cancel, and no app in the tree would act differently on
+"lost" than on "cancelled". A reason field is the honest shape if that
+changes, since it keeps one result record and one callback per binding.
