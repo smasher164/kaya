@@ -483,7 +483,12 @@ container already sees at `/flightrec-state/kaya/exclusive`.
   the mac lane not launched). The 350s between the plain run and the
   everyday one is the exclusive legs' serialization: every lane's queue
   stalls at its funnel while another lane holds the token, so a plain run
-  spends roughly that long running one leg on the whole host.
+  spends roughly that long running one leg on the whole host
+  (docs/deferred.md, the serialized-holds entry). The windows lane is the
+  everyday wall, starved on the VM: halving the mac and linux pools bought
+  nothing (654s, linux became the wall), the windows pool at four instead
+  of six read 589s where six read 644s with every other lane unchanged
+  (matrix #30, 594s of wall), and the matrix sets KAYA_WIN_JOBS=4 since.
 - EXCLUSION CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
   (2026-09-06): it trades parallelism for isolation. The wall is the
   slowest lane, and no lane is shortened by another holding still; the

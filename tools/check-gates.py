@@ -111,12 +111,12 @@ def census(on_disk, listed, excluded):
     return sorted(set(on_disk) - set(listed) - set(excluded))
 
 
-# The matrix driver's exact launch spellings (the linux launch spans two
-# lines — its env rider — and is matched as a prefix).
+# The matrix driver's exact launch spellings (the linux and windows
+# launches span two lines — their env riders — and are matched as prefixes).
 PLATFORM_LAUNCHES = [
     'run_lane("mac", ["tools/validate-mac.py"])',
     'run_lane("linux", ["tools/validate-linux.py"],',
-    'run_lane("windows", ["tools/deploy-win.py", HOST, "all"])',
+    'run_lane("windows", ["tools/deploy-win.py", HOST, "all"],',
     'run_lane("ios", ["tools/ios/run-sim.py"])',
     'run_lane("android", ["tools/android/run-emulator.py"])',
 ]

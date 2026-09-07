@@ -11725,6 +11725,33 @@ HRESULT, with `Layout cycle detected` above it — which is on
 docs/traps.md beside the first; the stamp trace it needed
 (`KAYA_WINUI_STAMP_TRACE=1`) stays as the instrument.
 
+## COST — the plain matrix spends ~350s running one exclusive leg on the whole host (measured 2026-09-07)
+KEY: exclusive holds, serialized holds, plain matrix wall, --no-exclusive, drag pacing under the token, DRAG_DURATION_CAP_MS, exclusive leg duration
+
+On one tree the same night: the plain run 1003s (matrix #27), `--no-exclusive`
+649s (matrix #28), `--exclusive` 461s (25 legs). The difference is not the
+exclusive legs' own time — it is that every lane's queue stalls at its funnel
+while another lane holds the token, so for the sum of the holds (windows 226s
+over eight legs, android ~150s over four, iOS ~90s over four, linux ~26s over
+seven) the whole host runs one leg. The android lane's `legs-go` phase read
+400s for 365s of leg time on four phones in the plain run and 116-129s in the
+everyday one, which is the stall made visible.
+
+What would shorten it, each a measurement to take rather than a change to
+make blind: (1) the drag legs' pacing — android's eight moves are spread over
+a duration scaled off the one-minute load and capped at 4.5s
+(tools/android/run-emulator.py DRAG_DURATION_CAP_MS), and under the token the
+host's LEGS are quiet while its load figure is not, so every drag runs at the
+cap (dnd-compose 54-56s, dnd-jvm 51s); a pacing that reads the token as the
+quiet it buys would cut those holds by most of their length, if the drags
+still land. (2) The windows dnd legs at 31-33s each under the token
+(20s alone) — the same question one lane over. (3) The iOS save and file
+dialog legs at 20-27s each — the dialog settles. (4) A hold that admits
+non-input legs of other lanes at a narrow width, which trades the isolation
+the token was built for and needs the flake families re-measured first.
+Until one of those is measured, the everyday run is `--no-exclusive` and the
+commit run is the plain one.
+
 ## ~~WATCH — windows `search_rust` under a matrix: the harness click did not give the search field focus, so the typed query went nowhere (first sighting 2026-09-07)~~ CLOSED 2026-09-07: measured on the next matrix and fixed — the click reached the TextBox before its Loaded, `Focus()` refused, and the one-shot click never returned; the click arm defers the focus to the control's own Loaded now (docs/traps.md).
 KEY: search_rust, does not hold focus, Focus(Programmatic), windows search focus, WinUI focus
 

@@ -219,7 +219,13 @@ if MODE == "parallel":
     # the wall only 403 -> 394.
     run_lane("linux", ["tools/validate-linux.py"],
              env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", "")})
-    run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
+    # KAYA_WIN_JOBS scopes the VM's leg pool under the matrix: six slots
+    # on six vCPUs were measured for a VM with the host to itself, and
+    # under the everyday matrix the lane is the wall — 644s at six, 589s
+    # at four with every other lane unchanged (matrices #28 and #30,
+    # 2026-09-07). Empty means the runner's own default.
+    run_lane("windows", ["tools/deploy-win.py", HOST, "all"],
+             env={"KAYA_WIN_JOBS": os.environ.get("KAYA_WIN_JOBS", "4")})
     run_lane("ios", ["tools/ios/run-sim.py"])
     run_lane("android", ["tools/android/run-emulator.py"])
     android_lane_proc = lane_procs[-1]

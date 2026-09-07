@@ -88,3 +88,21 @@ with nothing slowed to get there.
 | check-symbols | 0.0 |
 | check-ambient-tx | 0.0 |
 | check-accent | 0.0 |
+
+## The everyday run and the pool A/Bs, the same night
+
+All `--no-exclusive`, all ALL PASS, on one tree (49fd2ef5) with the host
+otherwise idle (the maintainer's Finder and the VM's idle QEMU at the top
+of the launch lines):
+
+| matrix | knob | wall | mac | linux | windows | ios | android | sweep |
+|---|---|---|---|---|---|---|---|---|
+| #28 | none | 649 | 454 | 445 | 644 | 521 | 313 | 266 |
+| #29 | mac and linux pools 4 (from 8) | 654 | 524 | 649 | 613 | 506 | 286 | 294 |
+| #30 | windows pool 4 (from 6) | 594 | 453 | 447 | 589 | 520 | 320 | 267 |
+
+The plain run on the tree before (matrix #27) read 1003 with every leg
+green; the 350s between it and #28 is the exclusive legs' serialization
+(docs/deferred.md). Halving the host-side pools moved the wall to linux
+and bought nothing; the VM's pool at four is the one knob that moved the
+windows lane, and the matrix sets it (KAYA_WIN_JOBS=4) since.
