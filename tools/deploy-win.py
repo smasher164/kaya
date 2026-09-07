@@ -290,6 +290,24 @@ if not ssh_probe():
     vm_boot()
 timing("vm-ready")
 
+
+def defender_excluded():
+    r"""Is C:\kaya out of Defender's real-time scanning? MsMpEng was the
+    VM's top CPU consumer over its uptime (31,000 CPU-seconds, 2026-09-07):
+    every deployed artifact and every leg's process was scanned. The
+    exclusion is VM state, not the repo's, so the lane says which it found
+    (docs/HACKING.md, the Windows VM playbook)."""
+    got = run_ssh_out('powershell -NoProfile -Command "(Get-MpPreference).ExclusionPath"') or ""
+    return any(line.strip().lower() == "c:\\kaya" for line in got.splitlines())
+
+
+if defender_excluded():
+    print("deploy-win: Defender excludes C:\\kaya from real-time scanning", flush=True)
+else:
+    print("deploy-win: DEFENDER SCANS C:\\kaya — every leg pays for it; on the VM run "
+          "`Add-MpPreference -ExclusionPath C:\\kaya` as administrator "
+          "(--provision does it)", flush=True)
+
 SCENES = lane.SCENES
 DEPTH_SCENES = lane.depth_scenes()
 GO_ONLY_SCENES = lane.GO_ONLY_SCENES
@@ -609,6 +627,9 @@ if scp_dir_to(sorted((ROOT / "guests/go").iterdir()),
 
 if PROVISION:
     print("== provisioning Windows App Runtime (one-time) ==")
+    # Defender's real-time scan of C:\kaya was the VM's top CPU consumer
+    # (deploy-win's defender_excluded probe says which state it found).
+    must_ssh('powershell -NoProfile -Command "Add-MpPreference -ExclusionPath C:\\kaya"')
     if scp_to([SDK / "WindowsAppRuntimeInstall-arm64.exe"], "C:/kaya/") != 0:
         die("deploy-win: could not ship the App Runtime installer")
     must_ssh("C:\\kaya\\WindowsAppRuntimeInstall-arm64.exe --quiet --force")

@@ -194,6 +194,15 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   [rust|python|go|csharp|java|all|<scene>_<lang>]` — the
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
+  THE VM EXCLUDES C:\kaya FROM DEFENDER'S REAL-TIME SCAN (2026-09-07):
+  MsMpEng was the VM's top CPU consumer over its uptime (31,000
+  CPU-seconds, ahead of the compositor), scanning every deployed file and
+  every leg's process; with `Add-MpPreference -ExclusionPath C:\kaya`
+  the lane standalone in skip mode read deploy 9s where it had read 28s
+  and suites 221s where it had read 232s. `--provision` applies it, and
+  every run prints which state it found (`deploy-win: Defender excludes
+  …` or `DEFENDER SCANS …` naming the command), since it is VM state
+  and a rebuilt VM starts without it.
 - The accessibility scene is the one leg with an environment
   requirement of its own: GTK publishes an accessibility tree only
   under `GTK_A11Y=atspi` with a session bus and the AT-SPI launcher
@@ -467,7 +476,14 @@ container already sees at `/flightrec-state/kaya/exclusive`.
   lane spent 481s of setup to run zero legs before that rule); `--no-exclusive`
   runs everything but them, the everyday matrix while iterating. A commit
   wants both halves green on the same tree, or the plain run. The choice
-  rides to the lanes as KAYA_EXCLUSIVE=only|skip.
+  rides to the lanes as KAYA_EXCLUSIVE=only|skip. MEASURED 2026-09-07 on
+  one tree: the plain run 1003s (matrix #27, 1,735 legs), `--no-exclusive`
+  649s (matrix #28, 1,712 legs; mac 454, linux 445, windows 644, ios 521,
+  android 313, the sweep 266 after android), `--exclusive` 461s (25 legs,
+  the mac lane not launched). The 350s between the plain run and the
+  everyday one is the exclusive legs' serialization: every lane's queue
+  stalls at its funnel while another lane holds the token, so a plain run
+  spends roughly that long running one leg on the whole host.
 - EXCLUSION CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
   (2026-09-06): it trades parallelism for isolation. The wall is the
   slowest lane, and no lane is shortened by another holding still; the
