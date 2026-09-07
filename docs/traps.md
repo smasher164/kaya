@@ -9629,3 +9629,38 @@ the builds' own `wait $pid` then failed with `pid 28 is not a child of
 this shell` and printed `guest build FAILED: csharp` / `java` for builds
 that had succeeded. A helper that starts children waits on THEIR pids and
 nothing else; run-suites.sh's drain says the same of the compositor.
+
+## The android dialog ghost, read at the pool's own release (2026-09-06)
+
+Three findings from closing the family's two reachable loss paths
+(docs/deferred.md, the save-jvm/dialog-family entry):
+
+- **A picker's result belongs to the ActivityRecord; its launcher
+  belonged to the Activity INSTANCE.** A configuration change — a
+  rotation, a night-mode flip, `recreate()` — destroys the instance and
+  keeps the record, so Android delivers the result perfectly and androidx
+  parks it in the NEW `ActivityResultRegistry` under the key it was
+  launched with (`ActivityResultRegistry.doDispatch`, activity-1.9.3).
+  A launcher registered once, at the present, is gone with the old
+  instance and nothing ever collects it: measured 2026-09-06 on API 35
+  with `KAYA_ACTIVITY_RESULT code=-1 data=true` in the log and no
+  `KAYA_PICK_RESULT`, the guest waiting for the life of the process and
+  the next show dying on the one-live-dialog guard. Register again from
+  `mount()` with the SAME KEY; `register` hands over a result that has
+  already arrived from inside the call, so neither order matters. The
+  lane's `remount-filedialog-jvm` leg is the wall.
+- **On API 35 a parked activity result is not erased — it waits.**
+  `ActivityRecord.results` is drained by the next FULL resume pass
+  (TaskFragment.resumeTopActivity :1609); the early returns that skip
+  the drain also skip `completeResumeLocked`, and the relaunch path
+  carries `results` into its own item. So "no result ever arrived" while
+  the caller's record LIVED means the delivery was never sent or the
+  record was finishing — not that AMS erased it. (This corrects step 5 of
+  docs/probes/lost-activity-result-android.md, which read `main` and
+  reasoned from the erase.)
+- **A `"*/*"` MIME literal eats a block-comment stripper.** `/\*.*?\*/`
+  over KayaCompose.kt swallows everything from a `setType("*/*")` to the
+  next `*/`, and a gate that strips comments that way then agrees with a
+  doctored file — measured while writing check-harness-ceiling's dialog
+  clause, where the picker arm's registration vanished. Strip whole-line
+  `//` comments only, or lex the strings.

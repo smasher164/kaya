@@ -454,3 +454,14 @@ container already sees at `/flightrec-state/kaya/quiet`.
   and shell spellings to one set of sentences.
 - A lane run by hand takes the token too, in the state home's directory;
   alone on the host it never waits.
+- QUIET CANNOT MAKE A MATRIX FASTER, and the maintainer expected it might
+  (2026-09-06): it trades parallelism for isolation. The matrix's wall is
+  the android lane plus the gate sweep IN SERIES (validate-all's rule), and
+  neither is shortened by another lane holding still; the holds cost the
+  lanes that wait (matrix #22: the mac lane waited eight times for 226s
+  while android's drags held, the iOS lane emptied its pool for its four
+  quiet legs) and those lanes' ceilings were moved for it. The first
+  matrix under the token ran 1026s against 958s the run before, the
+  difference the sweep's own growth and the host's load, not the token;
+  the lever, if the wall ever matters more than the isolation, is a
+  smaller QUIET set, never a shorter wait.

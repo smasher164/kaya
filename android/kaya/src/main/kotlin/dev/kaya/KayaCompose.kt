@@ -1732,13 +1732,26 @@ object KayaCompose {
             LifecycleEventObserver { source, event ->
                 when (event) {
                     Lifecycle.Event.ON_RESUME -> KayaHarnessAccessibility.appResumed = true
-                    Lifecycle.Event.ON_PAUSE -> KayaHarnessAccessibility.appResumed = false
+                    Lifecycle.Event.ON_PAUSE -> {
+                        KayaHarnessAccessibility.appResumed = false
+                        // The picker is up: this activity is behind it.
+                        kayaLiveDialog?.tookForeground = true
+                    }
                     // IDENTITY-GUARDED: the newcomer's onCreate can
                     // precede the incumbent's onDestroy, and clearing
                     // the slot then would blind every verb for the rest
                     // of the run.
-                    Lifecycle.Event.ON_DESTROY ->
-                        if (mountedActivity === source) mountedActivity = null
+                    Lifecycle.Event.ON_DESTROY -> {
+                        val going = mountedActivity
+                        if (going === source) {
+                            // A dialog outlives a RECREATION and dies
+                            // with a FINISH (kayaGiveUpOnFinishingActivity).
+                            if (going.isFinishing) {
+                                kayaLiveDialog?.let { kayaGiveUpOnFinishingActivity(it) }
+                            }
+                            mountedActivity = null
+                        }
+                    }
                     else -> Unit
                 }
             },
@@ -1758,6 +1771,29 @@ object KayaCompose {
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
         activity.setContent { KayaAppearance { KayaTheme { KayaRoot() } } }
+        // A LIVE DIALOG OUTLIVES THE ACTIVITY THAT LAUNCHED IT: the
+        // result belongs to the ActivityRecord, which a recreation
+        // keeps, and androidx holds it under the launcher's key
+        // (KayaLiveDialog). Registering one with that key on the new
+        // instance is what collects it — posted, so it lands on a
+        // mounted activity and not mid-onCreate.
+        kayaLiveDialog?.let { live ->
+            kayaMainHandler.post {
+                if (!live.answered && kayaLiveDialog === live && mountedActivity === activity) {
+                    Log.i(
+                        "kaya",
+                        "KAYA_DIALOG_REATTACHED: dialog=${live.dialog} kind=${live.kind} " +
+                            "key=${live.key} — its launcher was re-registered on the " +
+                            "re-created activity",
+                    )
+                    // register() answers a result that already arrived,
+                    // from inside the call, so the launcher is only
+                    // WORTH holding if it comes back unanswered.
+                    val launcher = kayaRegisterDialogLauncher(activity, live)
+                    if (live.answered) launcher.unregister() else kayaLivePickerLauncher = launcher
+                }
+            }
+        }
         // ONCE PER PROCESS: a second admission starts a second script
         // runner, and two harness threads race one scene to two verdicts.
         if (first && System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
@@ -3409,11 +3445,220 @@ object KayaCompose {
     /// the intent is being built.
     private var kayaPendingPickerDirectory: String? = null
 
-    /// The live picker's dialog id, held so a second present can be
-    /// refused and so the launcher can be released once. Null when none
-    /// is up.
-    private var kayaLivePickerDialog: Long? = null
+    /**
+     * The live dialog: its id, the entry that answers it, the registry
+     * KEY its launcher is registered under, and whether anything has
+     * answered it yet.
+     *
+     * THE KEY IS WHAT SURVIVES AN ACTIVITY RECREATION. A result is
+     * delivered to the ACTIVITY RECORD, which a recreation keeps, and
+     * androidx holds it under this key until a launcher with that key
+     * registers — so [mount] re-registers one on the new instance and
+     * the result lands. Without that, a rotation with a picker open
+     * loses a RESULT_OK the process received and never retires the
+     * core's one-live-dialog slot (docs/deferred.md's dialog-family
+     * WATCH; measured 2026-09-06 with KAYA_RECREATE_AFTER).
+     */
+    private class KayaLiveDialog(val dialog: Long, val kind: String) {
+        val key =
+            if (kind == DIALOG_KIND_SAVE) "kaya-save-dialog-$dialog"
+            else "kaya-file-dialog-$dialog"
+        val launchedAtMs: Long = android.os.SystemClock.elapsedRealtime()
+
+        /// Where a picked URI's name is read, moved to the new instance
+        /// on a re-attach.
+        @Volatile
+        var activity: ComponentActivity? = null
+
+        /// Whether the picker ever took the foreground. UNTIL IT
+        /// DOES, this app is legitimately resumed and focused with a
+        /// dialog live — DocumentsUI is another process starting, and
+        /// its COLD start was measured at 6.983s on a loaded lane
+        /// (DIALOG_LAUNCH_BUDGET_NS) — so the watchdog below would
+        /// otherwise call a slow PRESENTATION a lost result.
+        @Volatile
+        var tookForeground = false
+
+        @Volatile
+        var answered = false
+    }
+
+    @Volatile
+    private var kayaLiveDialog: KayaLiveDialog? = null
     private var kayaLivePickerLauncher: ActivityResultLauncher<Intent>? = null
+
+    /// The launcher of a dialog the watchdog gave up on, kept REGISTERED
+    /// so a result arriving after the loss reaches a line instead of
+    /// vanishing (kayaAnswerLiveDialog's KAYA_DIALOG_LATE). Released at
+    /// the next present.
+    private var kayaLostPickerLauncher: ActivityResultLauncher<Intent>? = null
+
+    /**
+     * HOW LONG A RESULT MAY STILL BE IN FLIGHT once this app's own
+     * activity is back on screen with nothing over it. THE OS CONTRACT
+     * PUTS IT EARLIER: above targetSdk S a result rides the resume
+     * transaction and lands just before onResume
+     * (ActivityResultItem.CALL_ACTIVITY_RESULT_BEFORE_RESUME, AOSP bug
+     * 78294732; kaya is targetSdk 35). The one legitimate late shape is
+     * AMS's async hop for a caller that was ALREADY resumed
+     * (ActivityRecord.finishActivityResults' `mH.post`), whose longest
+     * delay on this record is 1.36s (docs/deferred.md's dialog-family
+     * WATCH, matrix4). Ten times that is not lateness.
+     */
+    private const val DIALOG_RESULT_BUDGET_MS = 15_000L
+
+    /// How often the watchdog looks. The span it measures must be
+    /// UNBROKEN, so every look that finds the app not settled restarts
+    /// the clock rather than ending the watch.
+    private const val DIALOG_WATCH_TICK_MS = 500L
+
+    private val kayaMainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    @Volatile
+    private var kayaDialogSettledAtMs = 0L
+
+    /**
+     * Register [live]'s result callback on `activity`'s registry — at
+     * the present, and AGAIN from [mount] when the Activity is
+     * re-created while the dialog is up. `register` hands over a result
+     * that already arrived under the same key, so either order works.
+     */
+    private fun kayaRegisterDialogLauncher(
+        activity: ComponentActivity,
+        live: KayaLiveDialog,
+    ): ActivityResultLauncher<Intent> {
+        live.activity = activity
+        return activity.activityResultRegistry.register(
+            live.key,
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            // The save-jvm WATCH's discriminator (docs/deferred.md): a
+            // lost result reads the same as a CANCELED one, because the
+            // guest's cancel arm rewrites the string the label already
+            // shows. Present with code=0 means DocumentsUI answered
+            // cancel; absent means the delivery itself was lost.
+            Log.i(
+                "kaya",
+                (if (live.kind == DIALOG_KIND_SAVE) "KAYA_SAVE_RESULT" else "KAYA_PICK_RESULT") +
+                    ": dialog=${live.dialog} code=${result.resultCode} " +
+                    "uri=${result.data?.data != null}",
+            )
+            kayaAnswerLiveDialog(live, result.data)
+        }
+    }
+
+    /**
+     * THE ONE ANSWER CHOKEPOINT: a live dialog is answered on the entry
+     * its kind names, EXACTLY ONCE. A result that arrives after the
+     * watchdog gave the dialog up says so and is dropped — the core's
+     * slot is already retired, and answering twice faults it.
+     */
+    private fun kayaAnswerLiveDialog(
+        live: KayaLiveDialog,
+        data: Intent?,
+        keepRegistered: Boolean = false,
+    ) {
+        if (live.answered) {
+            Log.w(
+                "kaya",
+                "KAYA_DIALOG_LATE: dialog=${live.dialog} kind=${live.kind} answered " +
+                    "${android.os.SystemClock.elapsedRealtime() - live.launchedAtMs}ms after " +
+                    "the launch, which is after kaya gave it up; this result is dropped",
+            )
+            return
+        }
+        live.answered = true
+        if (kayaLiveDialog === live) kayaLiveDialog = null
+        if (keepRegistered) {
+            kayaLostPickerLauncher?.unregister()
+            kayaLostPickerLauncher = kayaLivePickerLauncher
+        } else {
+            kayaLivePickerLauncher?.unregister()
+        }
+        kayaLivePickerLauncher = null
+        val activity = mountedActivity ?: live.activity
+        if (live.kind == DIALOG_KIND_SAVE) {
+            kayaAnswerSaveDialog(activity, live.dialog, data)
+        } else {
+            kayaAnswerFileDialog(activity, live.dialog, data)
+        }
+    }
+
+    /**
+     * A LIVE DIALOG IS WATCHED FROM THE APP'S OWN SIDE, because nothing
+     * else ever frees it: `file_dialog_result` is the only thing that
+     * retires the core's one-live-dialog slot, and the platform has no
+     * timeout of its own. Armed at every present, ticking while the
+     * dialog is unanswered.
+     */
+    private fun kayaWatchLiveDialog() {
+        kayaDialogSettledAtMs = 0L
+        kayaMainHandler.removeCallbacks(kayaDialogWatchdog)
+        kayaMainHandler.postDelayed(kayaDialogWatchdog, DIALOG_WATCH_TICK_MS)
+    }
+
+    /**
+     * WHAT IT MEASURES, and nothing more: an unbroken span with this
+     * app's own activity RESUMED and holding the window focus — which
+     * is to say nothing on top of it, the picker included — while a
+     * dialog it launched is still unanswered.
+     */
+    private val kayaDialogWatchdog = object : Runnable {
+        override fun run() {
+            val live = kayaLiveDialog ?: return
+            val activity = mountedActivity
+            val settled = activity != null &&
+                live.tookForeground &&
+                KayaHarnessAccessibility.appResumed &&
+                activity.hasWindowFocus()
+            if (!settled) {
+                kayaDialogSettledAtMs = 0L
+            } else {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (kayaDialogSettledAtMs == 0L) kayaDialogSettledAtMs = now
+                val waited = now - kayaDialogSettledAtMs
+                if (waited >= DIALOG_RESULT_BUDGET_MS) {
+                    kayaGiveUpOnDialog(live, waited)
+                    return
+                }
+            }
+            kayaMainHandler.postDelayed(this, DIALOG_WATCH_TICK_MS)
+        }
+    }
+
+    /// The loss said out loud AND answered, so a guest is not stuck for
+    /// the life of the process. Cancel is the only honest answer: there
+    /// is no locator to hand over, and the platform never named one.
+    private fun kayaGiveUpOnDialog(live: KayaLiveDialog, waitedMs: Long) {
+        val said =
+            "KAYA_DIALOG_LOST: dialog=${live.dialog} kind=${live.kind} — the picker took the " +
+                "foreground and gave it back, nothing has been on top of this app's window for " +
+                "${waitedMs / 1000}s (its activity resumed and focused), and Android delivered " +
+                "no result for the dialog launched " +
+                "${android.os.SystemClock.elapsedRealtime() - live.launchedAtMs}ms ago; " +
+                "answering cancelled so the app is not stuck" +
+                (KayaHarnessAccessibility.live?.let { " — ${it.windowCensus()}" } ?: "")
+        Log.w("kaya", said)
+        KayaDiag.note(said)
+        kayaAnswerLiveDialog(live, null, keepRegistered = true)
+    }
+
+    /**
+     * A DIALOG DIES WITH THE ACTIVITY IT WAS LAUNCHED FROM: the result
+     * is parked on an ActivityRecord that will never resume again and
+     * goes with it, with no line at any level — the launch-time guard's
+     * rule (KAYA_DIALOG_DOOMED) at the other end of a dialog's life.
+     * A RECREATION IS NOT THIS: there the record lives and [mount]
+     * re-registers the launcher.
+     */
+    private fun kayaGiveUpOnFinishingActivity(live: KayaLiveDialog) {
+        val said =
+            "KAYA_DIALOG_DOOMED: dialog=${live.dialog} kind=${live.kind} was launched from an " +
+                "activity that has now finished — a result could never arrive; answering cancelled"
+        Log.w("kaya", said)
+        KayaDiag.note(said)
+        kayaAnswerLiveDialog(live, null)
+    }
 
     /// Point the next picker at a directory. The harness placing the app
     /// where a user would have navigated — set_text's tier, not a stamp:
@@ -3479,8 +3724,8 @@ object KayaCompose {
         extensions: List<String>,
     ) {
         val activity = mountedActivity ?: error("kaya: a picker with no mounted activity")
-        check(kayaLivePickerDialog == null) {
-            "kaya: a second file dialog while $kayaLivePickerDialog is still up"
+        check(kayaLiveDialog == null) {
+            "kaya: a second file dialog while ${kayaLiveDialog?.dialog} is still up"
         }
         // A FINISHING ACTIVITY CAN NEVER RECEIVE THE RESULT — the OS
         // drops it with no line anywhere (measured 2026-08-20: a stray
@@ -3527,27 +3772,16 @@ object KayaCompose {
         // activity — measured to work, which is why no lifecycle-scoped
         // registration is needed in the shell Activity. The key carries
         // the dialog id so a leaked registration cannot collide.
-        kayaLivePickerDialog = dialog
-        kayaLivePickerLauncher = activity.activityResultRegistry.register(
-            "kaya-file-dialog-$dialog",
-            ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            // The save dialog's sibling line, same discriminator (see
-            // the save launcher below).
-            Log.i(
-                "kaya",
-                "KAYA_PICK_RESULT: dialog=$dialog code=${result.resultCode} " +
-                    "uri=${result.data?.data != null}",
-            )
-            kayaLivePickerDialog = null
-            kayaLivePickerLauncher?.unregister()
-            kayaLivePickerLauncher = null
-            kayaAnswerFileDialog(activity, dialog, result.data)
-        }
+        val live = KayaLiveDialog(dialog, DIALOG_KIND_OPEN)
+        kayaLostPickerLauncher?.unregister()
+        kayaLostPickerLauncher = null
+        kayaLiveDialog = live
+        kayaLivePickerLauncher = kayaRegisterDialogLauncher(activity, live)
         // A fresh dialog invalidates prior removal announcements, so a
         // reused window id cannot vouch for a window that is still alive.
         KayaHarnessAccessibility.clearRemovals()
         kayaNoteDialogPresented(dialog, DIALOG_KIND_OPEN)
+        kayaWatchLiveDialog()
         kayaLivePickerLauncher?.launch(intent)
     }
 
@@ -3556,7 +3790,7 @@ object KayaCompose {
     /// no sentinel to invent. A cancelled picker arrives here with a
     /// null Intent.
     private fun kayaAnswerFileDialog(
-        activity: ComponentActivity,
+        activity: ComponentActivity?,
         dialog: Long,
         data: Intent?,
     ) {
@@ -3580,10 +3814,10 @@ object KayaCompose {
     /// appends an extension for the mime type and renames on collision,
     /// `picked.txt` becoming `picked (1).txt` with no prompt (measured),
     /// so only the provider knows the name the document HAS.
-    private fun displayName(activity: ComponentActivity, uri: Uri): String {
+    private fun displayName(activity: ComponentActivity?, uri: Uri): String {
         var name = ""
         try {
-            activity.contentResolver.query(uri, null, null, null, null)?.use { c ->
+            activity?.contentResolver?.query(uri, null, null, null, null)?.use { c ->
                 val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (c.moveToFirst() && i >= 0) name = c.getString(i) ?: ""
             }
@@ -3606,8 +3840,8 @@ object KayaCompose {
         extensions: List<String>,
     ) {
         val activity = mountedActivity ?: error("kaya: a save dialog with no mounted activity")
-        check(kayaLivePickerDialog == null) {
-            "kaya: a second file dialog while $kayaLivePickerDialog is still up"
+        check(kayaLiveDialog == null) {
+            "kaya: a second file dialog while ${kayaLiveDialog?.dialog} is still up"
         }
         // ONE TYPE, NOT A LIST: the picker's EXTRA_MIME_TYPES filters
         // what is SHOWN, while a create request's type is what the
@@ -3640,29 +3874,14 @@ object KayaCompose {
             kayaAnswerSaveDialog(activity, dialog, null)
             return
         }
-        kayaLivePickerDialog = dialog
-        kayaLivePickerLauncher = activity.activityResultRegistry.register(
-            "kaya-save-dialog-$dialog",
-            ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            // The save-jvm WATCH's discriminator (docs/deferred.md): a
-            // lost third-save result reads the same as a CANCELED one,
-            // because the guest's cancel arm rewrites the string the
-            // label already shows. This line in the on-FAIL dump splits
-            // them: present with code=0 means DocumentsUI answered
-            // cancel; absent means delivery itself was lost.
-            Log.i(
-                "kaya",
-                "KAYA_SAVE_RESULT: dialog=$dialog code=${result.resultCode} " +
-                    "uri=${result.data?.data != null}",
-            )
-            kayaLivePickerDialog = null
-            kayaLivePickerLauncher?.unregister()
-            kayaLivePickerLauncher = null
-            kayaAnswerSaveDialog(activity, dialog, result.data)
-        }
+        val live = KayaLiveDialog(dialog, DIALOG_KIND_SAVE)
+        kayaLostPickerLauncher?.unregister()
+        kayaLostPickerLauncher = null
+        kayaLiveDialog = live
+        kayaLivePickerLauncher = kayaRegisterDialogLauncher(activity, live)
         KayaHarnessAccessibility.clearRemovals()
         kayaNoteDialogPresented(dialog, DIALOG_KIND_SAVE)
+        kayaWatchLiveDialog()
         kayaLivePickerLauncher?.launch(intent)
     }
 
@@ -3674,7 +3893,7 @@ object KayaCompose {
     /// decides what a destination IS from which entry it arrives on
     /// (`register_saved` vs `register_picked`).
     private fun kayaAnswerSaveDialog(
-        activity: ComponentActivity,
+        activity: ComponentActivity?,
         dialog: Long,
         data: Intent?,
     ) {

@@ -125,6 +125,35 @@ READY_SENTENCE = (
 )
 
 
+def code_only(text):
+    """Whole-line `//` comments blanked, LINE COUNT PRESERVED: the rules
+    below are about calls, and the PROSE BESIDE A CALL NAMES IT TOO —
+    which is how two of check-appearance's own negatives first passed,
+    and how this clause's finishing-activity negative first passed here.
+
+    BLOCK COMMENTS ARE DELIBERATELY LEFT: this file's `*/*` MIME
+    literals make `/\\*.*?\\*/` swallow real code (measured — the
+    registration in the picker arm vanished and the census then agreed
+    with a doctored file), and KDoc sits ABOVE a member, outside every
+    block [kt_block] cuts."""
+    return re.sub(r"^([ \t]*)//.*$", r"\1", text, flags=re.M)
+
+
+def kt_block(text, header):
+    """One KayaCompose member's OWN body: from its header to the first
+    brace closed at the member's indent. The dialog rules below are
+    about what a function does and does not do, which no line pattern
+    over the whole file can answer — a sibling arm's call would stand
+    in for a missing one, which is the shape the budget clause above
+    already reads per-block to avoid."""
+    m = re.search(header, text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    end = re.search(r"\n    \}", rest)
+    return rest[:end.start()] if end else rest
+
+
 def check(harness, swiftui, compose):
     """Offender sentences for the three given harness paths — any of
     which may be a perturbed copy; that is how the self-tests below
@@ -296,6 +325,100 @@ def check(harness, swiftui, compose):
                        f"buys nothing. Keep it well clear (and under "
                        f"STEP_CEILING).")
 
+        # A LIVE DIALOG IS COLLECTED, ANSWERED ONCE, AND NEVER WAITED FOR
+        # FOREVER (docs/deferred.md's dialog-family WATCH, 2026-09-06).
+        # NO SCENE ON A QUIET EMULATOR REACHES ANY OF THESE: the
+        # recreation face needs the Activity re-created mid-dialog (a
+        # rotation), the double answer needs a result after a loss, and
+        # the hang needs a result that never comes — while
+        # `file_dialog_result` is the ONLY thing that retires the core's
+        # one-live-dialog slot (crates/kaya/src/capi.rs), so a dialog
+        # nobody answers is stuck for the life of the process.
+        where = paths["KayaCompose.kt"]
+        compose_code = code_only(compose_text)
+        registrations = compose_code.count("activityResultRegistry.register(")
+        if registrations != 1:
+            bad.append(
+                f"{where} calls activityResultRegistry.register in "
+                f"{registrations} place(s) — a dialog launcher registered "
+                f"anywhere but kayaRegisterDialogLauncher is one the "
+                f"re-attach in mount() cannot restore, and a recreation "
+                f"then loses a RESULT_OK the process already received")
+        mount = kt_block(compose_code, r"\n    fun mount\(activity: ComponentActivity\) \{")
+        if mount is None:
+            bad.append(f"{where}: mount() is gone — re-point this clause "
+                       f"at whatever re-attaches the interpreter")
+        else:
+            if "kayaRegisterDialogLauncher" not in mount:
+                bad.append(
+                    f"{where}'s mount() never re-registers a live "
+                    f"dialog's launcher. The result belongs to the "
+                    f"ActivityRecord, which a recreation KEEPS, while the "
+                    f"launcher belonged to the Activity instance it "
+                    f"destroyed: androidx holds the result under the "
+                    f"launcher's key and hands it over only to a launcher "
+                    f"registered with that key (measured 2026-09-06 — "
+                    f"KAYA_ACTIVITY_RESULT code=-1 with no "
+                    f"KAYA_PICK_RESULT, and the guest waiting forever)")
+            if "kayaGiveUpOnFinishingActivity" not in mount:
+                bad.append(
+                    f"{where}'s mount() lifecycle observer no longer "
+                    f"answers a live dialog when its activity FINISHES — "
+                    f"that result is parked on an ActivityRecord that "
+                    f"never resumes again and dies with it, with no line "
+                    f"at any level (AOSP ActivityRecord.sendResult; the "
+                    f"straggler-BACK sightings). The launch-time "
+                    f"KAYA_DIALOG_DOOMED guard covers only the instant of "
+                    f"the launch")
+        answer = kt_block(compose_code,
+                          r"\n    private fun kayaAnswerLiveDialog\(")
+        if answer is None:
+            bad.append(f"{where}: kayaAnswerLiveDialog is gone — the one "
+                       f"answer chokepoint this clause reads")
+        elif "if (live.answered)" not in answer or "live.answered = true" not in answer:
+            bad.append(
+                f"{where}'s kayaAnswerLiveDialog does not both READ and "
+                f"SET the answered flag — a dialog the watchdog gave up "
+                f"on is answered a second time when its result finally "
+                f"lands, and the core's retire faults on a slot that is "
+                f"no longer live")
+        watch = kt_block(
+            compose_code,
+            r"\n    private val kayaDialogWatchdog = object : Runnable \{")
+        if watch is None:
+            bad.append(f"{where}: the live-dialog watchdog is gone — a "
+                       f"dialog whose result never arrives then waits for "
+                       f"the life of the process")
+        else:
+            for reads, why in (
+                ("tookForeground",
+                 "the picker actually took the foreground and gave it "
+                 "back — until it does, this app is legitimately resumed "
+                 "and focused with a dialog live, and DocumentsUI's cold "
+                 "start was measured at 6.983s"),
+                ("appResumed", "this app's own activity is resumed"),
+                ("hasWindowFocus", "nothing is on top of its window"),
+                ("DIALOG_RESULT_BUDGET_MS", "the budget has elapsed"),
+            ):
+                if reads not in watch:
+                    bad.append(
+                        f"{where}'s live-dialog watchdog does not read "
+                        f"{reads} — it must measure that {why} before it "
+                        f"calls a result lost, or it cancels the picker "
+                        f"under a user who is still browsing")
+        m = re.search(r"DIALOG_RESULT_BUDGET_MS = ([\d_]+)L", compose_code)
+        if not m:
+            bad.append(f"{where} declares no DIALOG_RESULT_BUDGET_MS — "
+                       f"the watchdog above has no bound to measure")
+        elif int(m.group(1).replace("_", "")) < 10_000:
+            bad.append(
+                f"{where}'s DIALOG_RESULT_BUDGET_MS is "
+                f"{int(m.group(1).replace('_', '')) / 1000}s — the "
+                f"legitimate late shape is AMS's async hop for an already "
+                f"resumed caller, measured at 1.36s on a loaded lane, and "
+                f"a budget near it turns a late result into a fabricated "
+                f"cancel with the file already written")
+
     return bad
 
 
@@ -423,13 +546,78 @@ g.negative("a launch budget shrunk back to the number that was measured "
            lambda: check(HARNESS, SWIFTUI, str(compose_tightdlg)),
            want="the presentation this covers was MEASURED at 6.983s")
 
+# THE LIVE DIALOG'S RESULT. Each perturbation removes ONE link of the
+# chain that carries it, and every one of them leaves a tree that
+# compiles and a lane that is green on a quiet emulator.
+compose_noreattach = g.perturb(
+    "the KayaCompose.kt dialog re-attach perturbation", COMPOSE,
+    r"val launcher = kayaRegisterDialogLauncher\(activity, live\)",
+    "val launcher = kayaLivePickerLauncher!!")
+g.negative("an Android dialog whose launcher dies with the Activity "
+           "instance that opened it",
+           lambda: check(HARNESS, SWIFTUI, str(compose_noreattach)),
+           want="never re-registers a live dialog's launcher")
+
+compose_rawregister = g.perturb(
+    "the KayaCompose.kt raw-registration perturbation", COMPOSE,
+    r"kayaLivePickerLauncher = kayaRegisterDialogLauncher\(activity, live\)\n"
+    r"        // A fresh dialog invalidates",
+    "kayaLivePickerLauncher = activity.activityResultRegistry.register(\n"
+    "            live.key,\n"
+    "            ActivityResultContracts.StartActivityForResult(),\n"
+    "        ) { }\n"
+    "        // A fresh dialog invalidates")
+g.negative("an Android dialog arm that registers its own launcher",
+           lambda: check(HARNESS, SWIFTUI, str(compose_rawregister)),
+           want="calls activityResultRegistry.register in 2 place(s)")
+
+compose_twiceanswered = g.perturb(
+    "the KayaCompose.kt answered-once perturbation", COMPOSE,
+    r"        live\.answered = true\n", "")
+g.negative("an Android dialog that can be answered twice",
+           lambda: check(HARNESS, SWIFTUI, str(compose_twiceanswered)),
+           want="does not both READ and SET the answered flag")
+
+compose_blindwatch = g.perturb(
+    "the KayaCompose.kt watchdog window-focus perturbation", COMPOSE,
+    r"                activity\.hasWindowFocus\(\)", "                true")
+g.negative("an Android dialog watchdog that fires on a timer alone",
+           lambda: check(HARNESS, SWIFTUI, str(compose_blindwatch)),
+           want="does not read hasWindowFocus")
+
+compose_slowpresent = g.perturb(
+    "the KayaCompose.kt watchdog presentation perturbation", COMPOSE,
+    r"                live\.tookForeground &&\n", "")
+g.negative("an Android dialog watchdog that counts a slow presentation "
+           "as a lost result",
+           lambda: check(HARNESS, SWIFTUI, str(compose_slowpresent)),
+           want="does not read tookForeground")
+
+compose_tightresult = g.perturb(
+    "the KayaCompose.kt result-budget shrink perturbation", COMPOSE,
+    r"DIALOG_RESULT_BUDGET_MS = 15_000L",
+    "DIALOG_RESULT_BUDGET_MS = 2_000L")
+g.negative("a result budget shrunk toward the measured late delivery",
+           lambda: check(HARNESS, SWIFTUI, str(compose_tightresult)),
+           want="turns a late result into a fabricated cancel")
+
+compose_nodoomed = g.perturb(
+    "the KayaCompose.kt finishing-activity perturbation", COMPOSE,
+    r"kayaLiveDialog\?\.let \{ kayaGiveUpOnFinishingActivity\(it\) \}",
+    "Unit")
+g.negative("an Android dialog left live by the activity that finished "
+           "under it",
+           lambda: check(HARNESS, SWIFTUI, str(compose_nodoomed)),
+           want="no longer answers a live dialog when its activity "
+                "FINISHES")
+
 # An ABSENT harness is a failure that NAMES IT, never a skip.
 absent = g.scratch() / "no-such-harness.kt"
 g.negative("an absent harness",
            lambda: check(HARNESS, SWIFTUI, str(absent)),
            want=f"cannot read {absent}")
 
-g.negatives_ran(14)
+g.negatives_ran(21)
 
 # --- Clause B: the runtime negative, where the toolchain exists. ------
 if platform.system() == "Darwin":

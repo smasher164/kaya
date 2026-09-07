@@ -77,6 +77,7 @@ LEGS = {
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
+        "remount-filedialog-jvm",
         "table-jvm", "save-jvm", "dirty-jvm",
         "ranges-jvm", "styling-jvm", "typeface-jvm",
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
@@ -131,6 +132,17 @@ FLAGS = {
         "remount": (4, "KAYA_REMOUNT: recreating after step 4 "
                        "(expect_entries 1)"),
         "appearance": "dark"},
+    # THE PICKER ACROSS A RECREATION: the result belongs to the
+    # ActivityRecord, which a recreation keeps, while the launcher
+    # belonged to the Activity INSTANCE it destroyed — measured
+    # 2026-09-06 losing a RESULT_OK the process had already received,
+    # with the core's one-live-dialog slot never retired and the guest
+    # waiting for the life of the process (docs/deferred.md's
+    # dialog-family WATCH). Step 3 is the click that opens the picker.
+    "remount-filedialog-jvm": {
+        "scene": "filedialog",
+        "remount": (3, "KAYA_REMOUNT: recreating after step 3 "
+                       "(click button#0)")},
     # The dark half of expect_ink's frozen string, one leg instead of a
     # lane re-run (check-appearance holds the leg here).
     "canvasdark-compose": {"scene": "canvas", "appearance": "dark"},

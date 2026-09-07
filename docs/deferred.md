@@ -7090,6 +7090,74 @@ green — the "stays open until a real all-five-at-t0 matrix pass"
 condition is met, three times over. What keeps the entry open is the
 WATCH on the ghost family alone.
 
+AMENDED 2026-09-06 (the third robustness pass; the maintainer: "If it's
+possible to fix the dialog ghost, go for it"), and two of the family's loss
+paths are CLOSED IN KAYA while the WATCH stays for the faces it does not
+name (the windows swallowed press, the iOS stale provider index, the mac
+post-back read). THE DELIVERY PATH READ AT THE POOL'S OWN RELEASE (2026-09-06,
+android-15.0.0_r1 = API 35, which every pool device and every host's
+targetSdk is), and ONE OF ITS TWO LOSS PATHS CLOSED IN KAYA. The 2026-08-20
+probe (docs/probes/lost-activity-result-android.md) named the async hop —
+`ActivityRecord.finishActivityResults` :3635 posts to `mAtmService.mH`
+whenever the caller is already RESUMED, and `sendResult` :5021 re-checks
+RESUMED before scheduling — and that much is verbatim on r1. ITS STEP 5
+IS WRONG, AND THE CORRECTION IS THE WHOLE REMEDY: a parked result is not
+erased while the caller's record lives. `completeResumeLocked` (:6546,
+`results = null`) has exactly two callers, both in
+`TaskFragment.resumeTopActivity` — one AFTER the drain at :1609, one after
+`relaunchActivityLocked` has already carried `results` into the relaunch
+item — and the early returns that skip the drain skip it too. AMS even
+refuses to pause an activity holding one (`shouldPauseActivity` :6409,
+"otherwise it will cause this activity to resume before getting result").
+So with the process alive there are exactly two ways a result is lost:
+the caller's ActivityRecord is FINISHING when it is sent (the straggler
+BACK, sightings 8/10/11), or the caller's Activity INSTANCE was
+re-created and kaya's launcher died with it while the framework delivered
+perfectly. THE SECOND WAS KAYA'S OWN HOLE and nothing in the tree had
+ever exercised it: `activityResultRegistry.register("kaya-file-dialog-N")`
+ran on the instance a rotation destroys, androidx parked the arrived
+result under that key, and kaya never registered that key again — so a
+RESULT_OK the process HAD RECEIVED was dropped, the guest waited for the
+life of the process, and the next show tripped the one-per-process guard.
+Measured in one command on a quiet emulator with the lane's own
+`KAYA_RECREATE_AFTER=3`: `KAYA_ACTIVITY_RESULT: rc=... code=-1 data=true`
+with no `KAYA_PICK_RESULT` anywhere. A USER REACHES IT BY ROTATING THE
+PHONE. FIXED: `KayaLiveDialog` holds the dialog's id, kind and registry
+key; `kayaRegisterDialogLauncher` is the one registration site and
+`mount()` calls it again on the re-created activity
+(`KAYA_DIALOG_REATTACHED`), which collects a result that already arrived
+as well as one still to come; `kayaAnswerLiveDialog` is the one answer
+chokepoint and answers exactly once. AND THE FIRST LOSS PATH IS WALLED AT
+ITS OTHER END: the launch-time `isFinishing` guard covered only the
+instant of the launch, so a dialog whose activity finishes AFTERWARDS —
+a straggler BACK, a user's own BACK, any `finish()` — waited forever; the
+ON_DESTROY arm now answers it cancelled with the same KAYA_DIALOG_DOOMED
+sentence, 520ms after the finish where the shipped code hung. AND
+NOTHING WAITS FOREVER ANY MORE: `DIALOG_RESULT_BUDGET_MS = 15s`, measured
+over an UNBROKEN span with kaya's own activity RESUMED and holding the
+WINDOW FOCUS (nothing on top of it, the picker included), after which
+`KAYA_DIALOG_LOST` says what it measured — the span, the time since the
+launch, the a11y window census when the harness service is live — notes
+it into KayaDiag so it rides the failure dump, and answers the dialog
+CANCELLED, because `file_dialog_result` is the only thing that retires
+the core's one-live-dialog slot. A result arriving after that prints
+`KAYA_DIALOG_LATE` and is dropped rather than answering twice. ALL FOUR
+NEW BRANCHES WERE WATCHED PRINTING on doctored builds (budget 1s with the
+answer delayed 6s; the recreation calling `finish()` instead of
+`recreate()`), counts printed, restored from a saved copy and
+shasum-verified. GUARDS: `remount-filedialog-jvm` is the lane's own leg
+for it — the filedialog scene with the Activity re-created at the click
+that opens the picker — and tools/check-harness-ceiling.py holds the five
+static links with six watched negatives (14 -> 20). WHAT IS NOT CLOSED:
+the retry-free remedy cannot make the framework deliver a result that was
+never sent, and this entry's OTHER faces (the windows swallowed press,
+the iOS stale provider index, the mac post-back read) are untouched. The
+AMS async hop remains the one shape that can make a result LATE rather
+than lost, and 15s is what it is now allowed.
+What the app cannot yet tell apart is a cancel from a loss — a distinct
+occurrence is a spec change and a binding-surface ruling, left for the
+maintainer; the verdict sees the loss through KayaDiag either way.
+
 One pool device, one matrix run, 4s-green solo on either side. The
 validation apps hold NO storage permission BY MEASUREMENT
 (tools/android/pickerprobe's manifest carries the finding: the

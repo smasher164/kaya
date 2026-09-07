@@ -1,5 +1,15 @@
 # The ghost result: why `onActivityResult` is never called after a DocumentsUI SAVE
 
+CORRECTED 2026-09-06 (docs/traps.md, "On API 35 a parked activity result
+is not erased — it waits"): step 5 below reasoned from `main` that
+`completeResumeLocked` erases a parked result; at the pool's own release
+(android-15.0.0_r1, API 35) it has exactly two callers, both after the
+drain or after the relaunch has carried `results`, so a parked result
+waits for the next full resume pass. The two loss paths that ARE reachable
+with the process alive — a finishing caller, and an Activity INSTANCE
+re-created with its launcher — are closed in KayaCompose.kt.
+
+
 Research log, 2026-08-20. Primary sources are AOSP at `refs/heads/main` unless a
 release tag is named. Every file quoted was fetched from
 `android.googlesource.com/platform/{frameworks/base, packages/apps/DocumentsUI,

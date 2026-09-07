@@ -222,7 +222,11 @@ BUDGETS = {
     # roster read 636s where the lane standalone the same day read 574s.
     # 700 is 1.1x over the one contended sample; to be re-read on the next
     # quiet matrices.
-    "linux": 700,
+    # 820 since 2026-09-06: under the quiet token this lane waited six times
+    # for 202s (android's drags, iOS's saves) and held its own seven legs
+    # for 26s on matrix #23 (750s against 700, WindowServer at 52% beside
+    # it); 674s the matrix before, 452s on a quiet host. Re-read likewise.
+    "linux": 820,
     # 600 since 2026-09-02: the roster grew 201 -> 239 legs with the JS
     # column and the four quiet matrices since read 498, 442, 488 and
     # 559s. 600 is 1.2x over that band's top. 950 since 2026-09-03: the
