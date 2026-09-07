@@ -1,6 +1,8 @@
 # The search field: the design pass (2026-09-06)
 
-Status: PROPOSED. Stage S1 of the task manager (docs/tasks-plan.md §6:
+Status: RULED 2026-09-06 (the maintainer: "im fine with this", with one
+amendment on S4: the Return key is ledgered for a milestone that needs a
+submit event, a chat app being the named example). Stage S1 of the task manager (docs/tasks-plan.md §6:
 "a search entry filtering the open list"), and rank 1 of the table stakes
 the 2026-09-05 surveys put first (docs/deferred.md, "Next milestones";
 docs/probes/roadmap-app-needs-2026-09-05.md: must-have in 11 of 15
@@ -104,7 +106,7 @@ the app's answer; `expect entry@x` reads its text; `expect_window` and
 refuses non-printables and the root refuses `escape` as a shortcut), no
 verb reads a placeholder, and no scene can assert that a button is gone.
 
-## §2 — The rulings (PROPOSED 2026-09-06)
+## §2 — The rulings (RULED 2026-09-06, as recommended; S4 amended as noted)
 
 ### S1 — The field sits in the content, where the app puts it (RECOMMEND: content)
 
@@ -163,16 +165,17 @@ HelpText or the box's own property) confirms the platform received it,
 the tooltips pass's T5 shape. The default is none: the tasks app sets
 "Search". Orthogonal to S2 and worth its own commit inside the slice.
 
-### S4 — No submit occurrence in S1 (RECOMMEND: refuse, record the shape)
+### S4 — No submit occurrence in S1 (RULED: refuse for S1; ledgered for the milestone that needs a submit event, the maintainer naming a chat app)
 
 S1 filters on every keystroke, so Return has nothing to publish. The
 phones show the Search key regardless (Compose forces the IME action;
 iOS takes `.submitLabel(.search)`), and pressing it dismisses the
 keyboard and nothing else, on both. The shape for the day a consumer
-arrives (a search that asks a server, which no kaya app does) is
-`submitted`, occurrence 27 with `value_committed`'s layout and
-check-slider-commit's gate shape; it goes on the ledger with that
-trigger rather than into S1.
+arrives is `submitted`, occurrence 27 with `value_committed`'s layout and
+check-slider-commit's gate shape. The maintainer's amendment names the
+consumer: a chat app, whose compose field sends on Return, is the
+milestone that pays for it; the ledger entry carries that trigger (and a
+search that asks a server, and a form whose Return submits, beside it).
 
 ### S5 — Clearing is one act on every platform, and Escape is that act on the desktops (RECOMMEND: yes)
 

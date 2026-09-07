@@ -11837,8 +11837,8 @@ derived collection (a predicate over a source collection, stamped like a
 For) versus a hide-without-forgetting prop, and DESIGN.md's own note
 prefers the prop for the second.
 
-## DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06)
-KEY: submitted occurrence, submit on Return, QuerySubmitted, onSubmit, search key, occurrence 27
+## DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06; the chat app is its milestone)
+KEY: submitted occurrence, submit on Return, QuerySubmitted, onSubmit, search key, occurrence 27, chat app, compose field
 
 No occurrence in the spec reports Return in a text field; `text_changed`
 is the entry's only event. The search field's design pass
@@ -11849,5 +11849,10 @@ per-change event beside the settled one), a gate in
 tools/check-slider-commit.py's shape holding the four backends to
 "per-keystroke is not the submit". The phones already show the Search
 key on a search field and dismiss the keyboard on it.
-TRIGGER: an app whose search asks a server, or a form whose Return
-submits. It arrives with the shape taken, so the work is the arms.
+TRIGGER: THE CHAT APP MILESTONE (the maintainer, 2026-09-06, ratifying
+the search pass: "we should definitely ledger the return key for a
+milestone where we need a submit event, like maybe a chat app"): a
+compose field that sends on Return is the consumer that pays for the
+occurrence; a search that asks a server or a form whose Return submits
+ride the same record. It arrives with the shape taken, so the work is
+the arms in four backends and nine bindings.
