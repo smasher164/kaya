@@ -9,8 +9,16 @@ plugins {
 // ordered ahead of AGP's resource merge by hand
 // (docs/app-identity-plan.md, rulings 3 and 4).
 
-/** The declaration: `name` and `icon` out of kaya's packaging manifest. */
-data class KayaIdentity(val name: String, val icon: File)
+/**
+ * The declaration: `name` and `icon`, plus the `[launch]` slot's colour
+ * and picture (docs/tasks-s2-plan.md T4), out of kaya's packaging manifest.
+ */
+data class KayaIdentity(
+    val name: String,
+    val icon: File,
+    val launchBackground: String,
+    val launchIcon: File,
+)
 
 fun kayaReadIdentity(repoRoot: File): KayaIdentity {
     val manifest = File(repoRoot, "guests/assets/identity.toml")
@@ -22,15 +30,50 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "or a picture."
         )
     }
-    fun value(key: String): String {
-        val re = Regex("""^\s*$key\s*=\s*"([^"]*)"\s*$""", RegexOption.MULTILINE)
-        val m = re.find(manifest.readText())
-            ?: throw GradleException(
-                "kaya: ${manifest.path} declares no `$key` — the APK reads both `name` " +
-                    "and `icon` from it, and half a declaration is not one."
-            )
-        return m.groupValues[1]
+    val text = manifest.readText()
+    // SECTION-AWARE, because `[launch]` put a second table in this file
+    // and a MULTILINE key pattern would read `background` whatever table
+    // it sits in — which is how the next key added to the root table
+    // would silently answer for the launch slot.
+    fun table(section: String): Map<String, String> {
+        val header = Regex("""^\[([A-Za-z0-9_.-]+)]$""")
+        val pair = Regex("""^([A-Za-z0-9_]+)\s*=\s*"([^"]*)"$""")
+        // A `#` INSIDE QUOTES IS NOT A COMMENT, which is not a nicety
+        // here: the launch background is spelled #RRGGBB and is the one
+        // value in this manifest that carries one, so a plain
+        // substringBefore('#') reads its line as empty and reports the
+        // key missing. Measured 2026-09-07, one build.
+        fun uncommented(raw: String): String {
+            var quoted = false
+            for ((i, c) in raw.withIndex()) {
+                if (c == '"') quoted = !quoted
+                else if (c == '#' && !quoted) return raw.substring(0, i)
+            }
+            return raw
+        }
+        val out = LinkedHashMap<String, String>()
+        var current = ""
+        for (raw in text.lineSequence()) {
+            val line = uncommented(raw).trim()
+            if (line.isEmpty()) continue
+            val head = header.find(line)
+            if (head != null) {
+                current = head.groupValues[1]
+                continue
+            }
+            val kv = pair.find(line) ?: continue
+            if (current == section) out[kv.groupValues[1]] = kv.groupValues[2]
+        }
+        return out
     }
+
+    val root = table("")
+    val launch = table("launch")
+    fun value(key: String): String =
+        root[key] ?: throw GradleException(
+            "kaya: ${manifest.path} declares no `$key` — the APK reads both `name` " +
+                "and `icon` from it, and half a declaration is not one."
+        )
     val name = value("name")
     if (name.isBlank()) {
         throw GradleException(
@@ -47,7 +90,31 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "sends over the wire — the same file, on purpose."
         )
     }
-    return KayaIdentity(name, icon)
+
+    val background = launch["background"] ?: throw GradleException(
+        "kaya: ${manifest.path} declares no `[launch] background`. Android's own " +
+            "slot takes a colour and a picture, and an app that supplies neither " +
+            "gets the platform's window background between the tap and the first " +
+            "frame (docs/tasks-s2-plan.md T4)."
+    )
+    if (!Regex("^#[0-9A-Fa-f]{6}$").matches(background)) {
+        throw GradleException(
+            "kaya: ${manifest.path} declares `[launch] background = \"$background\"`, " +
+                "which is not #RRGGBB. The slot's colour is written into an Android " +
+                "colour resource and into the iOS bundle's colour asset, and neither " +
+                "reader can guess what a half-spelled one meant."
+        )
+    }
+    // `image` DEFAULTS TO `icon` (T4): one picture stands for the app in
+    // the launcher and on the way in.
+    val launchIcon = File(repoRoot, launch["image"] ?: value("icon"))
+    if (!launchIcon.isFile) {
+        throw GradleException(
+            "kaya: ${manifest.path} names the launch image ${launchIcon.path}, which " +
+                "is not there."
+        )
+    }
+    return KayaIdentity(name, icon, background, launchIcon)
 }
 
 val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
@@ -70,6 +137,36 @@ if (!kayaAssetRoot.isDirectory) {
 }
 
 subprojects {
+    // THE LAUNCH SLOT'S TWO RESOURCES GO IN THE LIBRARY, not in each app:
+    // `Theme.Kaya.Launch` is declared once in android/kaya's themes.xml and
+    // a library style may only name resources its own module can resolve,
+    // so a per-app copy of the colour and the drawable would mean a
+    // per-app copy of the theme (docs/tasks-s2-plan.md T4).
+    plugins.withId("com.android.library") {
+        val generatedLaunch =
+            layout.buildDirectory.dir("generated/kaya-launch/res").get().asFile
+        val values = File(generatedLaunch, "values")
+        val drawable = File(generatedLaunch, "drawable")
+        values.mkdirs()
+        drawable.mkdirs()
+        File(values, "kaya_launch.xml").writeText(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<resources>\n" +
+                "    <color name=\"kaya_launch_background\">" +
+                "#FF${kayaIdentity.launchBackground.substring(1).uppercase()}" +
+                "</color>\n" +
+                "</resources>\n"
+        )
+        // Copied VERBATIM, like the mark: the lane hashes what the APK
+        // carries against this file (run-emulator's apk_launch_verify).
+        kayaIdentity.launchIcon.copyTo(File(drawable, "kaya_launch_mark.png"),
+            overwrite = true)
+
+        extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
+            sourceSets.getByName("main").res.srcDir(generatedLaunch)
+        }
+    }
+
     plugins.withId("com.android.application") {
         // Copied VERBATIM: the lane's byte-equality check after
         // assembleDebug (tools/android/run-emulator.py) compares hashes.
@@ -95,7 +192,7 @@ subprojects {
             buildTypes.getByName("debug") {
                 // Already the debug default, written down because the
                 // byte-equality check depends on it: AAPT2's PNG crunch
-                // would re-encode the mark.
+                // would re-encode the mark AND the launch picture.
                 isCrunchPngs = false
             }
         }

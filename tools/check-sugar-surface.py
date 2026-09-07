@@ -569,7 +569,12 @@ if role_fake != 18:
 # with the number in nine wire files and the name in two. Go alone
 # spells a role AS its wire constant (`Role(RoleCaption)`), which is why
 # its row reads the generated file. One call per role, nine patterns.
-def check_role_name(snake, pascal, upper, findings=None):
+def check_role_name(snake, pascal, upper, findings=None, swift=None):
+    # `switch` is a Swift KEYWORD, so its case is backticked there: the
+    # NAME is the role's and the backticks are the language's, which is
+    # why one row takes an override rather than the sweep loosening.
+    swift = snake if swift is None else swift
+
     def want(lang, rel, pattern):
         global status
         if not grep_file(pattern, rel):
@@ -588,7 +593,7 @@ def check_role_name(snake, pascal, upper, findings=None):
          f"^    {pascal} = KayaWire.Role{pascal},$")
     want("java", "bindings/java/dev/kaya/KayaApp.java",
          f"^        {upper}\\(KayaWire.ROLE_{upper}\\)[,;]$")
-    want("swift", "bindings/swift/KayaApp.swift", f"^    case {snake} = \\d$")
+    want("swift", "bindings/swift/KayaApp.swift", f"^    case {swift} = \\d$")
     want("haskell", "bindings/haskell/KayaApp.hs", f"^roleWire {pascal} = \\d$")
     want("ocaml", "bindings/ocaml/kaya_app.ml",
          f"^  \\| {pascal} -> Int64.of_int Kaya_wire.role_{snake}$")
@@ -599,8 +604,12 @@ for role in (("destructive", "Destructive", "DESTRUCTIVE"),
              ("prominent", "Prominent", "PROMINENT"),
              ("heading", "Heading", "HEADING"),
              ("caption", "Caption", "CAPTION"),
-             ("plain", "Plain", "PLAIN")):
+             ("plain", "Plain", "PLAIN"),
+             ("link", "Link", "LINK")):
     check_role_name(*role)
+
+# The switch role (docs/tasks-s2-plan.md T1), Swift's case backticked.
+check_role_name("switch", "Switch", "SWITCH", swift="`switch`")
 
 fake = []
 check_role_name("kaya_fake_role", "KayaFakeRole", "KAYA_FAKE_ROLE",
@@ -3389,7 +3398,7 @@ def prop_probe():
     probe("d2", "guests/csharp/ItemKaya.cs",
           "    public void SetRole(Node n, Role role) => "
           "t.SetRole(n, role);\n",
-          "", "does not forward: SetRole")
+          "", "SetRole(Node, Role)")
     probe("d3", "bindings/ocaml/kaya_app.ml",
           "module Tpl = struct\n", "module TplRenamed = struct\n",
           "cannot find ocaml's template zone")
@@ -3418,7 +3427,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 18 members")
+    ], "js's prop reader found only 19 members")
     return "\n".join(lines)
 
 
@@ -3895,11 +3904,12 @@ check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
 # WRITTEN AS A FUNCTION so the fake name below can be driven through the
 # same nine patterns: a pattern loose enough to match a prop no binding
 # has is a clause that can only pass.
-def check_str_prop(snake, pascal, camel, findings=None):
+def check_str_prop(snake, pascal, camel, findings=None, arg="text"):
+    # `arg` is the PARAMETER NAME the two ambient bindings spell.
     check("rust", "crates/kaya/src/app.rs", snake,
           rf"fn {snake}\(self", findings)
     check("python", "bindings/python/kaya/__init__.py", snake,
-          rf"def {snake}\(self, text\)", findings)
+          rf"def {snake}\(self, {arg}\)", findings)
     check("go", "bindings/go/app.go", snake,
           rf"func \(w Widget\) {pascal}\(", findings)
     check("csharp", "bindings/csharp/KayaApp.cs", snake,
@@ -3913,7 +3923,7 @@ def check_str_prop(snake, pascal, camel, findings=None):
     check("ocaml", "bindings/ocaml/kaya_app.ml", snake,
           rf"let set_{snake} \(Widget id\)", findings)
     check("js", "bindings/js/kaya/index.ts", snake,
-          rf"^  {camel}\(text:", findings)
+          rf"^  {camel}\({arg}:", findings)
 
 
 check_str_prop("help", "Help", "help")
@@ -3925,6 +3935,11 @@ check_str_prop("help", "Help", "help")
 # wire-only would leave apps unable to author a prompt at all, which is
 # what every search field on five platforms opens with.
 check_str_prop("placeholder", "Placeholder", "placeholder")
+
+# HREF, the destination a `role link` label opens (docs/tasks-s2-plan.md
+# T3): admitted on the link role's label, spelled where `placeholder` is
+# in all nine.
+check_str_prop("href", "Href", "href", arg="url")
 
 fake = []
 check_str_prop("kaya_fake_help", "KayaFakeHelp", "kayaFakeHelp",
@@ -4482,6 +4497,43 @@ check_styling_point(
     r"func addSection\(", r"^addSectionIn ::",
     r"add_section \?\(window",
     r"^export type SectionOptions = .*window\?: number")
+
+# THE SECTION BADGE (docs/tasks-s2-plan.md T2): the COUNT on the
+# switcher item. Neither a widget kind nor a window prop nor a widget
+# prop, so nothing else in this file can see it — it rides
+# `set_section_prop` beside `symbol`, and a binding that shipped it
+# wire-only would leave apps in that language unable to put a count on a
+# tab at all. EVERY ROW KEYS ON THE SECTION SURFACE, never the bare word:
+# `badge` is short and a widget prop of the same name would satisfy a
+# loose pattern.
+check_styling_point(
+    "section badge",
+    r"pub fn badge\(self, count: impl Into<LiveSource<F64Kind>>\)",
+    r"def add_section\(self, section_id, title=None, symbol=None, "
+    r"badge=None,",
+    r"func \(r SectionRef\) Badge\(count float64\) SectionRef",
+    r"double\? badge = null, Signal\? badgeSignal = null,",
+    r"public SectionRef badge\(double count\)",
+    r"badge: Double\? = nil, badgeSignal: KayaSignal\? = nil,",
+    r"SBadge Double",
+    r"let add_section \?\(window = 0L\) \?title \?symbol \?badge \?badge_bind",
+    r"badge\?: number \| Signal<number>")
+
+# ITS SIGNAL HALF, ruled with it: a count that changes moves the badge
+# without a rebuild, which is what the archetype's Today section does.
+# Python's and JS's ONE parameter takes both, so those two rows read the
+# same line the const clause reads — the ambient bindings' usual reason.
+check_styling_point(
+    "section badge (sourced)",
+    r"bind_section_prop\(self.section, SectionProp::Badge, signal\)",
+    r"wire.tx_bind_section_badge\(",
+    r"func \(r SectionRef\) BadgeBound\(s Signal\[float64\]\) SectionRef",
+    r"KayaWire.TxBindSectionBadge\(id, bs.Id\)",
+    r"public SectionRef badge\(Signal<Double> s\)",
+    r"if let badgeSignal \{ tx.bindSectionBadge\(id, badgeSignal.id\) \}",
+    r"SBadgeBound Signal",
+    r"tx_bind_section_badge id s",
+    r"wire.tx_bind_section_badge\(sectionId, opts.badge.id\)")
 
 # THE CONTAINER INSET (docs/styling-plan.md D3). EVERY ROW IS KEYED PAST
 # ITS WINDOW-INSET TWIN, which shares the bare name in all nine: the

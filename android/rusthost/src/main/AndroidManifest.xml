@@ -14,11 +14,14 @@
          (docs/app-identity-plan.md ruling 4): both the mark and the
          label are placed by android/build.gradle.kts. Neither is
          written here, because one more copy of the label is how "one
-         mark, one name" stops being true without anybody editing it. -->
+         mark, one name" stops being true without anybody editing it.
+         The theme is the LAUNCH one (docs/tasks-s2-plan.md T4); the
+         activity wears Theme.Kaya.NoActionBar from installSplashScreen()
+         on. -->
     <application
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
-        android:theme="@style/Theme.Kaya.NoActionBar">
+        android:theme="@style/Theme.Kaya.Launch">
         <activity
             android:name=".MainActivity"
             android:exported="true">

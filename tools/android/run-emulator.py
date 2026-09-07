@@ -29,6 +29,7 @@ import tomllib
 
 from lanes import android as lane
 import exclusive
+import scene_cut
 import flightrec_lane
 
 # Device output is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
@@ -859,6 +860,26 @@ if not isinstance(ICON_REL, str) or not ICON_REL.strip():
 # gradle packaged.
 ICON_SRC = ROOT / ICON_REL
 
+# THE LAUNCH SLOT, out of the same declaration (docs/tasks-s2-plan.md
+# T4). apk_launch_verify holds what gradle packaged to both halves.
+_LAUNCH = tomllib.loads(KAYA_IDENTITY_MANIFEST.read_text(
+    encoding="utf-8")).get("launch")
+if not isinstance(_LAUNCH, dict):
+    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares no `[launch]` "
+        f"table, so every APK this lane builds would show the platform's "
+        f"window background between the tap and the first frame")
+LAUNCH_BG = _LAUNCH.get("background")
+if not isinstance(LAUNCH_BG, str) or not re.fullmatch(
+        r"#[0-9A-Fa-f]{6}", LAUNCH_BG):
+    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares `[launch] "
+        f"background = {LAUNCH_BG!r}`, which is not #RRGGBB")
+# `image` DEFAULTS TO `icon`.
+LAUNCH_IMAGE_REL = _LAUNCH.get("image", ICON_REL)
+LAUNCH_IMAGE_SRC = ROOT / LAUNCH_IMAGE_REL
+if not LAUNCH_IMAGE_SRC.is_file():
+    die(f"run-emulator: the declared launch image {LAUNCH_IMAGE_REL} is "
+        f"missing from this tree")
+
 
 def assets_prepare(serial):
     adb(serial, "shell", "rm", "-rf", ASSET_ON_DEVICE,
@@ -1562,63 +1583,20 @@ def scene_script(scene):
 
 
 def scene_script_cut(scene, cut, keep, extra=""):
-    """THE PHONE-EXPRESSIBLE PREFIX of a shared scene: everything above
-    the CUT VERB. THE SHARED FILE STAYS BYTE-FROZEN — the prefix is its
-    own bytes, and the steps this lane did NOT run are printed. THE TWO
-    WAYS A CUT GOES QUIET, BOTH REFUSED: the cut verb leaving the scene
-    (the cut is then stale), and the cut swallowing the very assertion
-    the leg exists for — so the KEEP VERBS are mandatory and compared
-    against the WHOLE file. `verb=target` holds one HANDLE's
-    assertions; buying the same-verb drop costs an EXTRA that
-    re-asserts the verb in its always-true-here form. THE iOS LANE
-    TAKES THE SAME LIST AND THE SAME GRAMMAR — two mobile lanes, one
-    question, and two answers is how lanes drift."""
+    """The phone-expressible prefix, decided in tools/lib/scene_cut.py —
+    one census for run-sim, this runner and check-steps."""
     path = ROOT / f"tools/scenes/{scene}.steps"
-    keeps = keep.split()
-    if not keeps:
-        die(f"run-emulator: cutting {path} at `{cut}` with no `keep` "
-            f"verb — say which assertions this cut may not take with "
-            f"it, or the leg can be trimmed until it asserts nothing")
-    lines = [line.strip() for line in
-             path.read_text(encoding="utf-8").splitlines()
-             if line.strip() and not line.lstrip().startswith("#")]
-    verbs = [(line.split() or [""])[0] for line in lines]
-    if cut not in verbs:
-        die(f"run-emulator: {path} has no `{cut}` step, so this lane's "
-            f"cut is stale — the scene was reshaped and nobody re-read "
-            f"what the phone can express. Fix the leg, do not widen "
-            f"the cut.")
-    at = verbs.index(cut)
-    prefix, dropped = lines[:at], lines[at:]
-
-    def asserted(seq, verb, target=None):
-        return {" ".join(line.split()) for line in seq
-                if (p := line.split()) and p[0] == verb
-                and (target is None or (len(p) > 1 and p[1] == target))}
-
-    extra_verbs = {(line.split() or [""])[0]
-                   for line in extra.splitlines()}
-    for tok in keeps:
-        verb, _, target = tok.partition("=")
-        whole = asserted(lines, verb, target or None)
-        kept = asserted(prefix, verb, target or None)
-        if not kept:
-            die(f"run-emulator: cutting {path} at `{cut}` leaves no "
-                f"`{tok}` step at all — the leg would pass without "
-                f"asserting the thing it exists for")
-        if kept != whole:
-            die(f"run-emulator: cutting {path} at `{cut}` drops "
-                f"{sorted(whole - kept)} — the cut may not take an "
-                f"assertion of `{tok}` with it")
-        if target and asserted(dropped, verb) and verb not in extra_verbs:
-            die(f"run-emulator: cutting {path} at `{cut}` takes "
-                f"`{verb}` assertions the targeted keep `{tok}` does "
-                f"not hold, and the leg's extra asserts no `{verb}` — "
-                f"re-assert it there or hold them with the keep")
+    try:
+        prefix, dropped = scene_cut.scene_prefix(path, cut, keep, extra,
+                                                 who="run-emulator")
+    except scene_cut.CutRefused as exc:
+        die(str(exc))
     for line in dropped:
-        print(f"run-emulator: NOT RUN on this host (after `{cut}`): "
-              f"{line}", file=sys.stderr)
-    return ";".join(prefix) + ";"
+        if line.strip():
+            print(f"run-emulator: NOT RUN on this host (after `{cut}`): "
+                  f"{line.strip()}", file=sys.stderr)
+    return ";".join(line.strip() for line in prefix if line.strip()) + ";"
+
 
 
 def drop_block(lines, specs, keep):
@@ -1878,6 +1856,77 @@ def apk_icon_verify(apk):
               "(ruling 1); two", file=sys.stderr)
         print("  readers that disagree is the failure ruling 4 exists "
               "to prevent.", file=sys.stderr)
+        return False
+    return True
+
+
+def apk_launch_verify(apk):
+    """THE LAUNCH SLOT'S TWO HALVES INSIDE THE APK gradle just wrote,
+    against guests/assets/identity.toml (docs/tasks-s2-plan.md T4) —
+    beside apk_icon_verify, on the same path nobody can avoid. The
+    picture is a FILE entry and is hashed; the colour is a value in the
+    resource table and is read back with aapt2, which is the only route
+    to it — nothing in the APK's file listing carries it."""
+    entry = "res/drawable/kaya_launch_mark.png"
+    if run(["unzip", "-l", str(apk), entry],
+           stdout=subprocess.DEVNULL,
+           stderr=subprocess.DEVNULL).returncode != 0:
+        print(f"run-emulator: {apk} carries no {entry} — the launch "
+              f"slot's picture", file=sys.stderr)
+        print("  never reached the package, so Android draws the "
+              "windowBackground alone", file=sys.stderr)
+        print(f"  (android/build.gradle.kts is the reader; "
+              f"{LAUNCH_IMAGE_REL} is the source)", file=sys.stderr)
+        return False
+    declared = hashlib.sha256(LAUNCH_IMAGE_SRC.read_bytes()).hexdigest()
+    packaged = hashlib.sha256(subprocess.run(
+        ["unzip", "-p", str(apk), entry],
+        stdout=subprocess.PIPE, check=False).stdout).hexdigest()
+    if declared != packaged:
+        print(f"run-emulator: the launch picture inside {apk} is not the "
+              f"declared one.", file=sys.stderr)
+        print(f"  declared ({LAUNCH_IMAGE_REL}): {declared}",
+              file=sys.stderr)
+        print(f"  packaged ({entry}): {packaged}", file=sys.stderr)
+        return False
+    # The build-tools version is READ from the module that pins it, in
+    # minsdk_of's shape: retyping it here would go stale the day the
+    # nix SDK moves and the gate would then blame the colour.
+    pin = ROOT / "android/kaya/build.gradle.kts"
+    m = re.search(r'buildToolsVersion\s*=\s*"([^"]+)"',
+                  pin.read_text(encoding="utf-8"))
+    if m is None:
+        print(f"run-emulator: {pin} pins no buildToolsVersion, so "
+              f"aapt2 cannot be", file=sys.stderr)
+        print("  resolved and the launch colour inside the APK cannot "
+              "be read back", file=sys.stderr)
+        return False
+    aapt2 = pathlib.Path(os.environ.get("ANDROID_HOME", "")) \
+        / "build-tools" / m.group(1) / "aapt2"
+    if not aapt2.is_file():
+        print(f"run-emulator: {aapt2} is not there, so the launch "
+              f"colour inside {apk}", file=sys.stderr)
+        print("  cannot be read back — it lives in the resource table "
+              "and in no file", file=sys.stderr)
+        return False
+    table = out_of([str(aapt2), "dump", "resources", str(apk)],
+                   stderr=subprocess.STDOUT)
+    m = re.search(r"color/kaya_launch_background\s*\n\s*\(\)\s*"
+                  r"(#[0-9a-fA-F]{8})", table)
+    if m is None:
+        print(f"run-emulator: {apk} declares no "
+              f"color/kaya_launch_background —", file=sys.stderr)
+        print("  the splash theme names it, and an attribute pointing "
+              "at a missing", file=sys.stderr)
+        print("  colour leaves the platform's own ground behind the "
+              "mark", file=sys.stderr)
+        return False
+    want = "#ff" + LAUNCH_BG[1:].lower()
+    if m.group(1).lower() != want:
+        print(f"run-emulator: the launch colour inside {apk} is "
+              f"{m.group(1)}, and", file=sys.stderr)
+        print(f"  {KAYA_IDENTITY_MANIFEST} declares {LAUNCH_BG} "
+              f"({want}).", file=sys.stderr)
         return False
     return True
 
@@ -2210,6 +2259,8 @@ def build_suite(suite):
             "--component", "compose", str(apk)]).returncode != 0:
         return False
     if not apk_icon_verify(apk):
+        return False
+    if not apk_launch_verify(apk):
         return False
     if not apk_assets_verify(apk):
         return False

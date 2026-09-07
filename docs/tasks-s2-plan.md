@@ -19,7 +19,7 @@ checkbox for an item in a list or a form that is submitted.
 | macOS | `NSSwitch`; SwiftUI `Toggle` with `.toggleStyle(.switch)` — Ventura's Settings app is switches throughout | `AXCheckBox` with subrole `AXSwitch` (VoiceOver says "switch") |
 | iOS | `UISwitch`; SwiftUI `Toggle` IS a switch (UIKit has no checkbox, which is why kaya's iOS checkbox already draws one) | a button with the `switch button` trait |
 | Android, Material 3 | `Switch` (the M3 thumb-and-track) | `Role.Switch` |
-| GTK 4 | `GtkSwitch`; `GtkCheckButton` is the checkbox | `switch` (MEASURED 2026-09-07 in the lane's own image under Xvfb: `GtkSwitch` → `switch`, `GtkCheckButton` → `checkbox`, `GtkLinkButton` → `link`) |
+| GTK 4 | `GtkSwitch`; `GtkCheckButton` is the checkbox | in-process `get_accessible_role` says `switch`, but ON THE AT-SPI BUS GTK publishes `check box` for a GtkSwitch, the same role as the check button (measured 2026-09-07 building the arm; the atspi 0.30 crate's role enum ends at 129, below ATSPI_ROLE_SWITCH = 130), so the harness's `switch` on GTK comes from the widget kaya built, the `datetime` precedent; `GtkLinkButton` publishes `link` itself |
 | WinUI 3 | `ToggleSwitch` (with on/off content); `CheckBox` is the checkbox | UIA `Button` with the Toggle pattern |
 
 **A badge on a section.** The count on a tab or a sidebar row.
@@ -84,7 +84,7 @@ Three facts decide the rulings:
    The app that wants to intercept (S7's rich text, a link that navigates
    inside the app) is a different feature with its own occurrence.
 
-## §2 — The rulings (PROPOSED 2026-09-07)
+## §2 — The rulings (RULED 2026-09-07, as recommended: "I approve the rulings")
 
 ### T1 — A switch is a ROLE on checkbox: `switch` (RECOMMEND: role)
 
@@ -140,6 +140,21 @@ once. tools/check-app-identity.py gains the clause: the launch colour and
 the image's bytes in both builds agree with the declaration. Nothing rides
 the wire.
 
+AS BUILT (2026-09-07): `background = "#1C1C1E"` (Apple's dark systemGray6;
+all four quadrants of the mark read on it, measured on both phones). iOS:
+`UIImageName` resolves a loose PNG in the bundle, but `UIColorName` has NO
+loose-file route and a name nothing answers falls back to WHITE with no
+error, so the lane compiles one colorset with `xcrun actool` into
+`target/ios-launch/Assets.car` once per lane (~3s) and every bundle carries
+it; the Info.plist template's `UILaunchScreen` dict names both. Android:
+`androidx.core:core-splashscreen:1.0.1` (minSdk is 26; the bare attributes
+start at API 31), `color/kaya_launch_background` and `Theme.Kaya.Launch`,
+every host activity calling `installSplashScreen()` first — which
+check-app-identity's C7 holds, beside the byte checks on the compiled
+catalog and the APK (16 watched negatives, two of which caught the
+clause's own first drafts). The mark needs no padded variant: the splash
+icon is masked to a circle and the mark is a full-bleed square.
+
 ## §3 — The lowering, per backend
 
 | | T1 switch | T2 badge | T3 link |
@@ -148,6 +163,19 @@ the wire.
 | SwiftUI (iOS) | the same `Toggle` (already a switch); the role changes nothing, stated in the arm | `.badge(count)` on the tab item and the More list row | as mac |
 | GTK 4 | `gtk4::Switch` with `state-set`; the row's label beside it as the checkbox's | a `GtkLabel` with a `.badge` CSS class (pill, secondary colour) trailing in the sidebar row; the stack switcher has none | `gtk4::LinkButton` |
 | WinUI 3 | `ToggleSwitch` (`OnContent`/`OffContent` empty, the label as the checkbox's) | `NavigationViewItem.InfoBadge` with `Value = count`; 0 → `null` | `HyperlinkButton` with `NavigateUri` |
+
+WinUI, as built (2026-09-07): a role that changes the control CLASS
+arrives after the widget is parented (every sugar emits AddChild right
+after CreateWidget), so the two arms swap the native in place —
+`swap_element` carries the identity props over and takes the old
+control's seat — while the registries keep the inner control, so every
+non-role widget's path is unchanged. Measured on the VM: a ToggleSwitch's
+peer publishes `AutomationControlType::Button` with the Toggle pattern
+(the pattern is the `switch` signal), a HyperlinkButton's publishes
+`Hyperlink`, and UIA derives the link's name from its content. Three
+classes joined tools/winui-bindgen's filter (ToggleSwitch,
+HyperlinkButton, InfoBadge, plus Windows.Foundation.Uri) and bindings.rs
+was regenerated, the route docs/search-plan.md §3 names.
 | Compose | `Switch` with `Role.Switch` | `BadgedBox { Badge { Text(count) } }` around the item's icon; 0 → none | `Text(AnnotatedString with LinkAnnotation.Url)` (Compose 1.7) |
 
 The bindings: `role switch` and `role link` ride the role prop every
@@ -158,6 +186,26 @@ href=…)` where the binding's idiom keys, a chained `.href(…)` where it
 chains); the badge is `set_section_prop` in the section sugar every
 binding has for `symbol`. check-sugar-surface's sweeps cover the role, the
 prop and the section prop.
+
+The bindings, as built (2026-09-07): all eight DO, no carve-out. Swift's
+enum case is written `` `switch` `` because the word is reserved; Rust's
+`.href(…)` chains the way `.placeholder(…)` does; Go and C# gained the
+generated `SetHref` forwards; check-sugar-surface's str-prop row holds
+`href` in all nine. Observed on the VM capture and left as polish: the
+WinUI ToggleSwitch's label sits a few pixels above the control's centre
+(the checkbox row centres its label on a CheckBox's box, and the
+ToggleSwitch is taller) — on the ledger's S2 entry.
+
+THE REVIEW'S FINDINGS, taken the same afternoon (the maintainer's, from
+the S2 review page): the notes field carries a `Notes` placeholder,
+asserted in tasks.steps on every lane — and the macOS textarea published
+no AXPlaceholderValue for its drawn placeholder (KayaTextareaPlaceholder
+is an overlay, not the NSTextView's), which `expect_placeholder` read as
+"" on the mac; the representable sets it by hand now. On iOS the notes
+field and the link share one inset card by D7.5's run rule
+(docs/adaptive-layout-plan.md), the Reminders shape; the maintainer kept
+the rule and queued the run card's two polish items as S2c
+(docs/tasks-plan.md §6), with S2b the app-wide appearance switch.
 
 ## §4 — The wire
 
@@ -175,11 +223,12 @@ tools/scenes/tasks.steps grows: the Settings column's two checkboxes carry
 `role switch` and the scene toggles one and reads it back and reads its
 a11y role; the Today section reads `expect_badge section@today 3` after the
 list's count changes; a task's notes gain a label with `role link` whose
-`expect_href` and `expect_ax link/…` are read. The switch also joins
-tools/scenes/gallery.steps as the ninth control, so the a11y sweep sees
-it on every lane. tools/check-app-identity.py holds T4.
+`expect_href` and `expect_ax link/…` are read. The switch was to join
+tools/scenes/gallery.steps as the ninth control; that is DEFERRED (the
+ledger's S2 entry says why) — the tasks scene carries the switch's a11y
+read on every lane. tools/check-app-identity.py holds T4.
 
-## §6 — Build order, if ruled
+## §6 — Build order (RULED 2026-09-07; steps 1-3 built and captured on all five lanes the same day, step 4 in flight)
 
 1. Spec: the two roles, `href`, the section prop; regenerate; the
    ledger entry with its KEY line.
@@ -193,15 +242,17 @@ it on every lane. tools/check-app-identity.py holds T4.
 ## §7 — To be measured before the design is frozen
 
 - ~~What GTK 4's `GtkSwitch` reports to AT-SPI on the lane's Ubuntu~~ —
-  measured (§0): `switch`, `checkbox`, `link`, so the three verdict words
-  are the platforms' own on GTK.
-- Whether `.badge(_:)` on a macOS `NavigationSplitView` sidebar row draws
-  on macOS 26 (it did not on early 12.x in some reports).
-- WinUI: `HyperlinkButton` inside a `TextBlock` flow versus standalone
-  (the notes' label is standalone in S2, so the standalone shape is enough).
-- Android: the SplashScreen icon's safe zone against kaya's mark at
-  288dp — whether the mark needs a padded variant (the launcher icon
-  already has one; check-app-identity would hold both to the same source).
-- iOS: `UILaunchScreen` with `UIImageName` needs the image in an asset
-  catalog; the bundle today ships the icon as an `Assets.car`-less PNG
-  set, so the launch image may need the catalog route (tools/ios/…).
+  measured twice (§0): in-process `switch`, on the bus `check box`; the
+  bus is what the harness reads, so `switch` on GTK is kaya's own word for
+  the widget it built, and `link` is the platform's.
+- ~~Whether `.badge(_:)` on a macOS `NavigationSplitView` sidebar row draws
+  on macOS 26~~ — measured 2026-09-07: it draws, trailing the row's label
+  (the S2 review page's mac capture).
+- ~~WinUI: `HyperlinkButton` inside a `TextBlock` flow versus standalone~~ —
+  built standalone (the notes' label is its own widget) and drawn on the VM
+  capture; the in-flow shape is a question for a richer notes field.
+- ~~Android: the SplashScreen icon's safe zone~~ — measured: no padded
+  variant needed (§2 T4, as built).
+- ~~iOS: `UILaunchScreen` with `UIImageName` needs an asset catalog~~ —
+  measured: the IMAGE resolves loose, the COLOUR does not and fails white
+  and silent, so the catalog is compiled for the colour (§2 T4, as built).

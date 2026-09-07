@@ -732,6 +732,8 @@
 
 #define KAYA_PROP_PLACEHOLDER 30
 
+#define KAYA_PROP_HREF 31
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
@@ -796,6 +798,8 @@
  * a value of the KAYA_SYMBOL_* block below, never bytes.
  */
 #define KAYA_SPROP_SYMBOL 3
+
+#define KAYA_SPROP_BADGE 4
 
 /**
  * Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
@@ -946,6 +950,10 @@
 #define KAYA_ROLE_CAPTION 4
 
 #define KAYA_ROLE_PLAIN 5
+
+#define KAYA_ROLE_SWITCH 6
+
+#define KAYA_ROLE_LINK 7
 
 /**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md

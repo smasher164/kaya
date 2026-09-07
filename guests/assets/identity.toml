@@ -23,3 +23,14 @@
 
 name = "Aurora Notes"
 icon = "guests/assets/icons/kaya-mark.png"
+
+# THE LAUNCH SLOT (docs/tasks-s2-plan.md T4): what the platform draws
+# between the tap and the first frame. `image` defaults to `icon`, so
+# one picture stands for the app in the launcher AND on the way in.
+#
+# HONOURED WHERE THE PLATFORM HAS A SLOT, ABSENT WHERE IT DOES NOT: the
+# iOS bundle's UILaunchScreen and the APK's SplashScreen theme read it;
+# macOS and GTK have no slot at all, and WinUI's is the MSIX manifest's
+# and belongs to the packaging stage. Nothing rides the wire.
+[launch]
+background = "#1C1C1E"

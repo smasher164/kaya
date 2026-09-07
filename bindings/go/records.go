@@ -902,3 +902,11 @@ func (c RecordCollection[K, T]) Placeholder[S interface {
 }](t *Tpl, n Node, src S) {
 	t.applyRecordStrProp[T](n, src, TxSetPlaceholder, TxBindPlaceholder, TxBindPlaceholderElement)
 }
+
+// Href gives each stamped link its destination, from any addressable
+// source (Tpl.SetHref; docs/tasks-s2-plan.md T3).
+func (c RecordCollection[K, T]) Href[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetHref, TxBindHref, TxBindHrefElement)
+}

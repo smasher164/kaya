@@ -32,6 +32,7 @@ import plistlib
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import threading
@@ -41,6 +42,7 @@ import urllib.parse
 
 from lanes import ios as lane
 import exclusive
+import scene_cut
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -178,6 +180,147 @@ if not ICON_SRC.is_file():
     die(f"run-sim: the declared app mark {ICON_REL} is missing from this "
         f"tree")
 
+# THE LAUNCH SLOT, OUT OF THE SAME DECLARATION (docs/tasks-s2-plan.md T4).
+# `UILaunchScreen`'s two keys name ASSET-CATALOG entries. MEASURED
+# 2026-09-07 on kaya-sim-2, `simctl launch --wait-for-debugger` holding
+# the slot on screen: `UIImageName` DOES resolve a loose PNG in the
+# bundle root, but `UIColorName` naming a colour that is in no compiled
+# catalog fails SILENTLY and the ground comes up white — there is no
+# loose-file spelling of a named colour. So the colour forces the
+# catalog, and the picture rides in beside it rather than depending on
+# the icon's opt-in copy.
+_launch = _decl.get("launch")
+if not isinstance(_launch, dict):
+    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares no `[launch]` table, "
+        f"so every bundle this lane assembles would show the system's "
+        f"plain ground between the tap and the first frame "
+        f"(docs/tasks-s2-plan.md T4)")
+LAUNCH_BG = _launch.get("background")
+if not isinstance(LAUNCH_BG, str) or not re.fullmatch(
+        r"#[0-9A-Fa-f]{6}", LAUNCH_BG):
+    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares `[launch] background "
+        f"= {LAUNCH_BG!r}`, which is not #RRGGBB — a colour asset takes "
+        f"components, and nothing here can guess what a half-spelled one "
+        f"meant")
+# `image` DEFAULTS TO `icon`: one picture in the launcher and on the way
+# in.
+LAUNCH_IMAGE_REL = _launch.get("image", ICON_REL)
+if not isinstance(LAUNCH_IMAGE_REL, str) or not LAUNCH_IMAGE_REL.strip():
+    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares an empty `[launch] "
+        f"image`; leave it out to take the declared icon")
+LAUNCH_IMAGE_SRC = ROOT / LAUNCH_IMAGE_REL
+if not LAUNCH_IMAGE_SRC.is_file():
+    die(f"run-sim: the declared launch image {LAUNCH_IMAGE_REL} is "
+        f"missing from this tree")
+# The two names the plist keys spell; check-app-identity reads them back
+# out of this file.
+LAUNCH_COLOR_NAME = "KayaLaunchBackground"
+LAUNCH_IMAGE_NAME = "KayaLaunchMark"
+LAUNCH_CAR = ROOT / "target/ios-launch/Assets.car"
+
+
+def build_launch_catalog():
+    """One actool run per LANE, not per bundle: the catalog is a pure
+    function of the declaration and the compile costs ~3s, which over
+    the lane's bundles would be minutes of nothing."""
+    src = ROOT / "target/ios-launch/Kaya.xcassets"
+    shutil.rmtree(src.parent, ignore_errors=True)
+    (src / f"{LAUNCH_COLOR_NAME}.colorset").mkdir(parents=True)
+    (src / f"{LAUNCH_IMAGE_NAME}.imageset").mkdir(parents=True)
+    src.joinpath("Contents.json").write_text(
+        '{"info":{"author":"kaya","version":1}}\n', encoding="utf-8")
+    r, g, b = (int(LAUNCH_BG[i:i + 2], 16) for i in (1, 3, 5))
+    src.joinpath(f"{LAUNCH_COLOR_NAME}.colorset/Contents.json").write_text(
+        json.dumps({
+            "colors": [{
+                "color": {
+                    "color-space": "srgb",
+                    "components": {"red": f"0x{r:02X}",
+                                   "green": f"0x{g:02X}",
+                                   "blue": f"0x{b:02X}",
+                                   "alpha": "1.000"},
+                },
+                "idiom": "universal",
+            }],
+            "info": {"author": "kaya", "version": 1},
+        }, indent=2) + "\n", encoding="utf-8")
+    art = pathlib.Path(LAUNCH_IMAGE_REL).name
+    shutil.copy2(LAUNCH_IMAGE_SRC,
+                 src / f"{LAUNCH_IMAGE_NAME}.imageset" / art)
+    src.joinpath(f"{LAUNCH_IMAGE_NAME}.imageset/Contents.json").write_text(
+        json.dumps({
+            "images": [{"filename": art, "idiom": "universal",
+                        "scale": "1x"}],
+            "info": {"author": "kaya", "version": 1},
+        }, indent=2) + "\n", encoding="utf-8")
+    LAUNCH_CAR.parent.mkdir(parents=True, exist_ok=True)
+    if run(["xcrun", "actool", str(src), "--compile",
+            str(LAUNCH_CAR.parent), "--platform", "iphonesimulator",
+            "--minimum-deployment-target", "15.0", "--output-format",
+            "human-readable-text"],
+           stdout=subprocess.DEVNULL).returncode != 0 \
+            or not LAUNCH_CAR.is_file():
+        die(f"run-sim: actool did not compile {src} — the launch slot's "
+            f"colour lives only in a compiled catalog, so without one "
+            f"every bundle comes up on the system's plain ground "
+            f"(DEVELOPER_DIR is {os.environ.get('DEVELOPER_DIR', '?')}; "
+            f"actool ships with Xcode, not with the nix SDK)")
+
+
+def launch_catalog_verify():
+    """WHAT THE CATALOG ACTUALLY CARRIES, against the declaration — the
+    iOS half of the launch slot's byte check, beside the APK's
+    (run-emulator's apk_launch_verify). `actool` RE-ENCODES a rendition,
+    so the picture cannot be hash-equal to the source by construction;
+    what is measurable is its name and its pixel size, and this prints
+    only that. The COLOUR is exact: assetutil reports the components as
+    fractions of 255."""
+    info = out_of(["/usr/bin/assetutil", "--info", str(LAUNCH_CAR)])
+    try:
+        entries = json.loads(info)
+    except json.JSONDecodeError:
+        die(f"run-sim: assetutil could not read {LAUNCH_CAR} — the launch "
+            f"slot's colour and picture would go unchecked into every "
+            f"bundle this lane assembles")
+    colour = next((e for e in entries
+                   if e.get("Name") == LAUNCH_COLOR_NAME), None)
+    image = next((e for e in entries
+                  if e.get("Name") == LAUNCH_IMAGE_NAME), None)
+    if colour is None or image is None:
+        die(f"run-sim: {LAUNCH_CAR} carries "
+            f"{sorted(e['Name'] for e in entries if 'Name' in e)} — the "
+            f"Info.plist names {LAUNCH_COLOR_NAME} and "
+            f"{LAUNCH_IMAGE_NAME}, and a UILaunchScreen key nothing "
+            f"answers to fails SILENTLY (the ground comes up white)")
+    want = tuple(int(LAUNCH_BG[i:i + 2], 16) for i in (1, 3, 5))
+    got = tuple(round(c * 255) for c in colour.get("Color components",
+                                                   [])[:3])
+    if got != want:
+        die(f"run-sim: {LAUNCH_CAR} carries the launch colour "
+            f"{'#%02X%02X%02X' % got if len(got) == 3 else got}, and "
+            f"{KAYA_IDENTITY_MANIFEST} declares {LAUNCH_BG}")
+    with open(LAUNCH_IMAGE_SRC, "rb") as fh:
+        head = fh.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        die(f"run-sim: {LAUNCH_IMAGE_REL} is not a PNG, so its declared "
+            f"size cannot be read here and the catalog's rendition is "
+            f"held to nothing")
+    w, h = struct.unpack(">II", head[16:24])
+    if (image.get("PixelWidth"), image.get("PixelHeight")) != (w, h):
+        die(f"run-sim: {LAUNCH_CAR} carries a launch picture "
+            f"{image.get('PixelWidth')}x{image.get('PixelHeight')} and "
+            f"{LAUNCH_IMAGE_REL} is {w}x{h}")
+    if image.get("RenditionName") != pathlib.Path(LAUNCH_IMAGE_REL).name:
+        die(f"run-sim: {LAUNCH_CAR} carries the launch picture "
+            f"{image.get('RenditionName')!r}, and "
+            f"{KAYA_IDENTITY_MANIFEST} declares {LAUNCH_IMAGE_REL}")
+    print(f"launch: {LAUNCH_CAR.relative_to(ROOT)} carries {LAUNCH_BG} "
+          f"and {pathlib.Path(LAUNCH_IMAGE_REL).name} at {w}x{h}")
+
+
+build_launch_catalog()
+launch_catalog_verify()
+
 # THE ASSET ROOT, INTO EVERY BUNDLE: staging and PACKAGING are the same
 # act here (docs/assets-plan.md A4's iOS row and A5.3). NO
 # KAYA_ASSET_DIR: the core asks `Bundle.main` first
@@ -256,10 +399,33 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
         "            </array>\n"
         "        </dict>\n"
         "    </dict>")
+    # THE LAUNCH SLOT IS NOT OPT-IN the way the identity block is: the
+    # icon block is per-bundle so `expect_app_icon` cannot read an
+    # identity its guest never declared, and the slot has no wire half
+    # and no observation to make vacuous (docs/tasks-s2-plan.md T4).
+    shutil.copy2(LAUNCH_CAR, app / "Assets.car")
+    launch = ("<dict>\n"
+              "        <key>UIColorName</key>\n"
+              f"        <string>{LAUNCH_COLOR_NAME}</string>\n"
+              "        <key>UIImageName</key>\n"
+              f"        <string>{LAUNCH_IMAGE_NAME}</string>\n"
+              "    </dict>")
     (app / "Info.plist").write_text(
         tpl.replace("@EXECUTABLE@", name).replace("@BUNDLE_ID@", bundle_id)
-           .replace("@NAME@", name).replace("@IDENTITY@", block),
+           .replace("@NAME@", name).replace("@IDENTITY@", block)
+           .replace("@LAUNCH@", launch),
         encoding="utf-8")
+    # PARSED BACK, because the template is TEXT and a plist iOS cannot
+    # read is a bundle that fails at INSTALL with the reason on the
+    # simulator's side of the fence. Measured 2026-09-07: an XML comment
+    # may not carry a double hyphen, and one quoted in the launch slot's
+    # own comment made every bundle in this lane malformed.
+    try:
+        plistlib.loads((app / "Info.plist").read_bytes())
+    except Exception as exc:                              # noqa: BLE001
+        die(f"run-sim: the {name} bundle's Info.plist is not well-formed "
+            f"({exc}) — tools/ios/Info.plist.in is a TEXT template and "
+            f"something it or make_bundle wrote is not XML")
     shutil.copytree(ASSET_SRC, app / "assets")
     verify_bundle_assets(ASSET_SRC, app / "assets", name)
     shutil.copy2(executable_path, app / name)
@@ -905,11 +1071,14 @@ def picker_export_probe(udid):
         run(["timeout", "60", "xcrun", "simctl", "terminate", udid,
              EXPORT_PROBE_BUNDLE], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL)
-        if run(["timeout", "60", "xcrun", "simctl", "install", udid,
-                EXPORT_PROBE_APP], stdout=subprocess.DEVNULL,
-               stderr=subprocess.DEVNULL).returncode != 0:
+        installed = subprocess.run(
+            ["timeout", "60", "xcrun", "simctl", "install", udid, EXPORT_PROBE_APP],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False, **TEXT)
+        if installed.returncode != 0:
+            # The simulator's own reason rides the sentence: a malformed
+            # Info.plist and a missing bundle read the same without it.
             print(f"run-sim: the LocalStorage export probe would not install "
-                  f"on {udid}", file=sys.stderr)
+                  f"on {udid}: {installed.stderr.strip()[-300:]}", file=sys.stderr)
             return 1
         container = out_of(["timeout", "60", "xcrun", "simctl",
                             "get_app_container", udid, EXPORT_PROBE_BUNDLE,
@@ -1197,58 +1366,20 @@ def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
 
 # --------------------------------------------- scene script transforms
 def scene_script_cut(scene, cut, keep, extra):
-    """THE PHONE-EXPRESSIBLE PREFIX: everything above the first `cut`
-    verb, both quiet failure modes refused — a cut verb the scene no
-    longer has is STALE, and the cut may not take the assertions the
-    leg exists for (`keep`, a list; `verb=target` holds one target's
-    and buys the same-verb drop only if the extra re-asserts that verb).
-    The dropped steps are PRINTED."""
+    """The phone-expressible prefix, decided in tools/lib/scene_cut.py —
+    one census for run-emulator, this runner and check-steps."""
     path = ROOT / f"tools/scenes/{scene}.steps"
-    keeps = keep.split()
-    if not keeps:
-        die(f"run-sim: cutting {path} at `{cut}` with no `keep` verb — "
-            f"say which assertions this cut may not take with it, or the "
-            f"leg can be trimmed until it asserts nothing")
-    lines = [line for line in
-             path.read_text(encoding="utf-8").splitlines()
-             if not line.lstrip().startswith("#")]
-    verbs = [(line.split() or [""])[0] for line in lines]
-    if cut not in verbs:
-        die(f"run-sim: {path} has no `{cut}` step, so this lane's cut is "
-            f"stale — the scene was reshaped and nobody re-read what the "
-            f"phone can express. Fix the leg, do not widen the cut.")
-    at = verbs.index(cut)
-    prefix, dropped = lines[:at], lines[at:]
-
-    def asserted(seq, verb, target=None):
-        return {" ".join(line.split()) for line in seq
-                if (p := line.split()) and p[0] == verb
-                and (target is None or (len(p) > 1 and p[1] == target))}
-
-    extra_verbs = {(line.split() or [""])[0]
-                   for line in extra.splitlines()}
-    for tok in keeps:
-        verb, _, target = tok.partition("=")
-        whole = asserted(lines, verb, target or None)
-        kept = asserted(prefix, verb, target or None)
-        if not kept:
-            die(f"run-sim: cutting {path} at `{cut}` leaves no `{tok}` "
-                f"step at all — the leg would pass without asserting the "
-                f"thing it exists for")
-        if kept != whole:
-            die(f"run-sim: cutting {path} at `{cut}` drops "
-                f"{sorted(whole - kept)} — the cut may not take an "
-                f"assertion of `{tok}` with it")
-        if target and asserted(dropped, verb) and verb not in extra_verbs:
-            die(f"run-sim: cutting {path} at `{cut}` takes `{verb}` "
-                f"assertions the targeted keep `{tok}` does not hold, "
-                f"and the leg's extra asserts no `{verb}` — re-assert it "
-                f"there or hold them with the keep")
+    try:
+        prefix, dropped = scene_cut.scene_prefix(path, cut, keep, extra,
+                                                 who="run-sim")
+    except scene_cut.CutRefused as exc:
+        die(str(exc))
     for line in dropped:
         if line.strip():
             print(f"run-sim: NOT RUN on this host (after `{cut}`): {line}",
                   file=sys.stderr)
     return "\n".join(prefix)
+
 
 
 def scene_script_drop(scene, verb, target, keep):

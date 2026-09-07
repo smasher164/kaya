@@ -56,7 +56,8 @@ Q3/Q4 turns on which container the window uses.
 - **Sections** (`refresh_sections`, gtk.rs:1769-1865): a `gtk4::Stack`
   plus either a `gtk4::StackSwitcher` (hint auto/bar — packed into a
   vertical `Box` in the *content*, halign Center, **not** in the header
-  bar) or a `gtk4::StackSidebar` (hint sidebar — a horizontal `Box`).
+  bar) or, for the sidebar hint, kaya's own `gtk4::ListBox` of section rows
+  bound to the stack (a `GtkStackSidebar` until 2026-09-07; docs/traps.md).
 - **List-detail**: `adw::NavigationSplitView` inside an
   `adw::BreakpointBin`, set as the window's content
   (`refresh_nav`, gtk.rs:1590-1737). The `AdwNavigationPage`s carry the

@@ -152,7 +152,15 @@ public final class KayaApp {
         CAPTION(KayaWire.ROLE_CAPTION),
         /** An action at low emphasis — a row's accessory (Details, Open).
          * Buttons only. */
-        PLAIN(KayaWire.ROLE_PLAIN);
+        PLAIN(KayaWire.ROLE_PLAIN),
+        /** A checkbox drawn as the platform's SWITCH and reporting its
+         * trait (docs/tasks-s2-plan.md T1): a setting that takes effect
+         * at once. */
+        SWITCH(KayaWire.ROLE_SWITCH),
+        /** A label drawn as the platform's LINK, opening its href
+         * through the platform's own opener (docs/tasks-s2-plan.md
+         * T3). */
+        LINK(KayaWire.ROLE_LINK);
 
         final long wire;
 
@@ -2033,6 +2041,21 @@ public final class KayaApp {
             return this;
         }
 
+        /** The COUNT on the switcher item (docs/tasks-s2-plan.md T2):
+         * the platforms draw it where they draw a badge, GTK as a pill
+         * on the row. Zero clears. */
+        public SectionRef badge(double count) {
+            tx.emit(KayaWire.txSetSectionBadge(id, count));
+            return this;
+        }
+
+        /** The count from a signal, so a changing total moves the badge
+         * without a rebuild. */
+        public SectionRef badge(Signal<Double> s) {
+            tx.emit(KayaWire.txBindSectionBadge(id, s.id));
+            return this;
+        }
+
         /** Binds the selected handler to THIS section (per-section):
          * fires each time the USER switches to it through the
          * platform's switcher — post-fact and NOT one-shot. A
@@ -2536,6 +2559,29 @@ public final class KayaApp {
                     + " — use Tx.setPlaceholder inside a live transaction");
             }
             tx.setPlaceholder(this, s);
+            return this;
+        }
+
+        /** The DESTINATION this {@link Role#LINK} label opens
+         * (docs/tasks-s2-plan.md T3): the platform's own opener takes it
+         * and nothing is emitted. */
+        public Widget href(String url) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: href on a widget outside its build transaction"
+                    + " — use Tx.setHref inside a live transaction");
+            }
+            tx.setHref(this, url);
+            return this;
+        }
+
+        public Widget href(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: href on a widget outside its build transaction"
+                    + " — use Tx.setHref inside a live transaction");
+            }
+            tx.setHref(this, s);
             return this;
         }
 
@@ -3228,6 +3274,24 @@ public final class KayaApp {
 
         public void bindPlaceholderField(Node n, int level, KayaRecords.Field<String> f) {
             t.bindPlaceholderField(n, level, f);
+        }
+
+        /** This row's copy of that link's DESTINATION
+         * ({@link Tpl#setHref(Node, String)}). */
+        public void setHref(Node n, String url) {
+            t.setHref(n, url);
+        }
+
+        public void setHref(Node n, Signal<String> s) {
+            t.setHref(n, s);
+        }
+
+        public void setHref(Node n, KayaRecords.Field<String> f) {
+            t.setHref(n, f);
+        }
+
+        public void bindHrefField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindHrefField(n, level, f);
         }
 
         /** What activating this row's copy of that node does —
@@ -3941,6 +4005,19 @@ public final class KayaApp {
 
         public void setPlaceholder(Widget w, Signal<String> s) {
             emit(KayaWire.txBindPlaceholder(w.id, s.id));
+        }
+
+        /**
+         * The DESTINATION a {@link Role#LINK} label opens
+         * (docs/tasks-s2-plan.md T3): the platform's own opener takes
+         * it and nothing is emitted.
+         */
+        public void setHref(Widget w, String url) {
+            emit(KayaWire.txSetHref(w.id, url));
+        }
+
+        public void setHref(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindHref(w.id, s.id));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {
@@ -5396,6 +5473,24 @@ public final class KayaApp {
 
         public void bindPlaceholderField(Node n, int level, KayaRecords.Field<String> f) {
             tx.emit(KayaWire.txBindPlaceholderElement(n.id, level, f.index));
+        }
+
+        /** A stamped link's DESTINATION, the blueprint twin of
+         * {@link Tx#setHref(Widget, String)}. */
+        public void setHref(Node n, String url) {
+            tx.emit(KayaWire.txSetHref(n.id, url));
+        }
+
+        public void setHref(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindHref(n.id, s.id));
+        }
+
+        public void setHref(Node n, KayaRecords.Field<String> f) {
+            bindHrefField(n, 0, f);
+        }
+
+        public void bindHrefField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindHrefElement(n.id, level, f.index));
         }
 
         /**

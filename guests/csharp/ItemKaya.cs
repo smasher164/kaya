@@ -288,6 +288,13 @@ sealed class ItemRow
     public void SetPlaceholder(Node n, Field<string> f, uint level = 0) =>
         t.SetPlaceholder(n, f, level);
 
+    public void SetHref(Node n, string url) => t.SetHref(n, url);
+
+    public void SetHref(Node n, Signal s) => t.SetHref(n, s);
+
+    public void SetHref(Node n, Field<string> f, uint level = 0) =>
+        t.SetHref(n, f, level);
+
     public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
 
     public TplDragRef Draggable(Node n) => t.Draggable(n);

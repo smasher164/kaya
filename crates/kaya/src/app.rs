@@ -190,6 +190,18 @@ impl<K> From<SignalId> for LiveSource<K> {
     }
 }
 
+impl From<f64> for LiveSource<F64Kind> {
+    fn from(v: f64) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::F64(v)), _kind: PhantomData }
+    }
+}
+
+impl From<u32> for LiveSource<F64Kind> {
+    fn from(v: u32) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::F64(f64::from(v))), _kind: PhantomData }
+    }
+}
+
 impl<K> Field<K> {
     pub const fn new(index: u32) -> Self {
         Field {
@@ -1134,6 +1146,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
+    pub fn href(self, url: impl Into<LiveSource<StrKind>>) -> Self {
+        self.tx.href(self.id, url);
+        self
+    }
+
     /// This widget's spoken accessibility label — [`Tx::a11y_label`]
     /// chained.
     pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
@@ -1833,6 +1851,15 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// A section property driven by a signal (the widget `bind` rule).
+    pub fn bind_section_prop(&mut self, section: WindowId, prop: SectionProp, signal: SignalId) {
+        self.ops.push(TxOp::SetSectionProp {
+            section,
+            prop,
+            value: PropValue::Signal(signal),
+        });
+    }
+
     /// Request a modal alert (the request/result grammar): a chain ending in
     /// [`AlertRef::show`], which sends the one atomic record and returns the
     /// request's id. The handler binds to the REQUEST, never to the app. Up
@@ -2081,6 +2108,11 @@ impl<'a> Tx<'a> {
     /// platform's own placeholder, never the text, never emitted.
     pub fn placeholder(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
         self.set_live(widget, Prop::Placeholder, text.into());
+    }
+
+    /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
+    pub fn href(&mut self, widget: WidgetId, url: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::Href, url.into());
     }
 
     /// Cross-axis stretch for one child (docs/layout-knobs-plan.md §1).
@@ -3593,6 +3625,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().placeholder(node, src)
     }
 
+    pub fn href(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().href(node, src)
+    }
+
     pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
         self.tpl().fill(node, on)
     }
@@ -5051,6 +5087,20 @@ impl SectionRef<'_, '_> {
         self
     }
 
+    /// The switcher item's count, a number or a signal; zero clears
+    /// (docs/tasks-s2-plan.md T2).
+    pub fn badge(self, count: impl Into<LiveSource<F64Kind>>) -> Self {
+        match count.into().inner {
+            LiveInner::Const(value) => {
+                self.tx.set_section_prop(self.section, SectionProp::Badge, value)
+            }
+            LiveInner::Signal(signal) => {
+                self.tx.bind_section_prop(self.section, SectionProp::Badge, signal)
+            }
+        }
+        self
+    }
+
     pub fn id(&self) -> WindowId {
         self.section
     }
@@ -5474,6 +5524,10 @@ pub enum Role {
     /// must not out-shout the content beside it: a text button on Material,
     /// borderless on Apple, `.flat` on GTK, the subtle style on WinUI.
     Plain = 5,
+    /// A checkbox drawn as the platform's switch (docs/tasks-s2-plan.md T1).
+    Switch = 6,
+    /// A label drawn as the platform's link to its `href` (docs/tasks-s2-plan.md T3).
+    Link = 7,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum "platform";
@@ -6426,6 +6480,11 @@ impl<'b> Tpl<'_, 'b> {
     /// (docs/search-plan.md S3).
     pub fn placeholder(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.apply_source(node, Prop::Placeholder, src.into().inner);
+    }
+
+    /// A stamped link label's destination (docs/tasks-s2-plan.md T3).
+    pub fn href(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::Href, src.into().inner);
     }
 
     /// What activating a stamped copy does. The root admits this on the

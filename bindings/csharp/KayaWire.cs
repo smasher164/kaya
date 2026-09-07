@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x50347d52a1eef1b4;
+    public const ulong SpecHash = 0x0e5f6241c88af41c;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -101,6 +101,7 @@ static class KayaWire
     public const uint PropMinColumnWidth = 28;
     public const uint PropWrap = 29;
     public const uint PropPlaceholder = 30;
+    public const uint PropHref = 31;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -114,6 +115,7 @@ static class KayaWire
     public const uint SpropTitle = 1;
     public const uint SpropIcon = 2;
     public const uint SpropSymbol = 3;
+    public const uint SpropBadge = 4;
     public const uint MenuKindMenu = 1;
     public const uint MenuKindAction = 2;
     public const uint MenuKindToggle = 3;
@@ -158,6 +160,8 @@ static class KayaWire
     public const uint RoleHeading = 3;
     public const uint RoleCaption = 4;
     public const uint RolePlain = 5;
+    public const uint RoleSwitch = 6;
+    public const uint RoleLink = 7;
     public const uint SymbolAdd = 1;
     public const uint SymbolRemove = 2;
     public const uint SymbolDelete = 3;
@@ -1670,6 +1674,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant href value.
+    public static byte[] TxSetHref(ulong widgetId, string href)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHref); w.Write(SourceConst);
+        EncodeValue(w, href);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound href value.
+    public static byte[] TxBindHref(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHref); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindHrefElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropHref); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -1888,6 +1917,23 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(section); w.Write(SpropSymbol); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a constant badge value.
+    public static byte[] TxSetSectionBadge(ulong section, double badge)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropBadge); w.Write(SourceConst);
+        EncodeValue(w, badge);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a signal-bound badge value.
+    public static byte[] TxBindSectionBadge(ulong section, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropBadge); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetSectionProp);
     }
 

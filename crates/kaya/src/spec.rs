@@ -200,6 +200,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // platform's own placeholder, never part of the text and never
     // emitted. Legal on the three text kinds; the root refuses an empty one.
     ("placeholder", 30, PropKind::Str),
+    // docs/tasks-s2-plan.md T3.
+    ("href", 31, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -262,6 +264,8 @@ pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
     // vocabulary each backend maps to its own symbol set, BESIDE the
     // Blob above, which stays for app-specific art.
     ("symbol", 3, PropKind::Enum("symbol")),
+    // docs/tasks-s2-plan.md T2; the prop kinds have no integer.
+    ("badge", 4, PropKind::F64),
 ];
 
 /// Menu-item properties (DESIGN.md, Menus), a flat spec fact: the scene
@@ -2753,6 +2757,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("min_column_width", 28),
                 ("wrap", 29),
                 ("placeholder", 30),
+                ("href", 31),
             ],
         },
         EnumSpec {
@@ -2774,7 +2779,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "sprop",
-            variants: &[("title", 1), ("icon", 2), ("symbol", 3)],
+            variants: &[("title", 1), ("icon", 2), ("symbol", 3), ("badge", 4)],
         },
         EnumSpec {
             // The menu item vocabulary (DESIGN.md, Menus). `menu` and
@@ -2888,6 +2893,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("heading", 3),
                 ("caption", 4),
                 ("plain", 5),
+                ("switch", 6),
+                ("link", 7),
             ],
         },
         EnumSpec {
@@ -3435,6 +3442,7 @@ mod tests {
                     ("prop", "min_column_width") => wire::PROP_MIN_COLUMN_WIDTH,
                     ("prop", "wrap") => wire::PROP_WRAP,
                     ("prop", "placeholder") => wire::PROP_PLACEHOLDER,
+                    ("prop", "href") => wire::PROP_HREF,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -3448,6 +3456,7 @@ mod tests {
                     ("sprop", "title") => wire::SPROP_TITLE,
                     ("sprop", "icon") => wire::SPROP_ICON,
                     ("sprop", "symbol") => wire::SPROP_SYMBOL,
+                    ("sprop", "badge") => wire::SPROP_BADGE,
                     ("menu_kind", "menu") => wire::MENU_KIND_MENU,
                     ("menu_kind", "action") => wire::MENU_KIND_ACTION,
                     ("menu_kind", "toggle") => wire::MENU_KIND_TOGGLE,
@@ -3504,6 +3513,8 @@ mod tests {
                     ("role", "heading") => wire::ROLE_HEADING,
                     ("role", "caption") => wire::ROLE_CAPTION,
                     ("role", "plain") => wire::ROLE_PLAIN,
+                    ("role", "switch") => wire::ROLE_SWITCH,
+                    ("role", "link") => wire::ROLE_LINK,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,

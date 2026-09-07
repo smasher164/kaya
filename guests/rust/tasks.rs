@@ -203,6 +203,7 @@ struct App {
     queries: BTreeMap<List, String>,
     hidden: BTreeMap<String, (List, TaskRow)>,
     counts: BTreeMap<List, kaya::SignalId>,
+    today_badge: kaya::SignalId,
     projects: BTreeMap<String, String>,
     order: BTreeMap<String, Vec<String>>,
     next: u32,
@@ -264,6 +265,11 @@ impl App {
     fn update_count(&self, tx: &mut kaya::Tx, list: List) {
         if let Some(sig) = self.counts.get(&list) {
             tx.write(*sig, self.count_text(list));
+        }
+        if list == List::Today {
+            let total = self.tasks.values().filter(|(l, _)| *l == list).count();
+            let shown = if self.hide_badge { 0 } else { total };
+            tx.write(self.today_badge, shown as f64);
         }
     }
 
@@ -435,7 +441,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let today = today();
 
-    let (lists, projects_coll, quick, counts) = ctx.apply(|tx| {
+    let (lists, projects_coll, quick, counts, today_badge) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
@@ -467,8 +473,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
         let mut quick = kaya::WidgetId(0);
+        let today_badge = tx.signal(0.0);
         for (list, window, name, symbol) in sections {
-            let section = tx.add_section(window).title(name).symbol(symbol).id();
+            let mut declared = tx.add_section(window).title(name).symbol(symbol);
+            if list == List::Today {
+                declared = declared.badge(today_badge);
+            }
+            let section = declared.id();
             msgs.on_section_selected(section, Msg::Section(window));
             let coll = tx.collection::<TaskRow>();
             // Written by the app (count_text): a derived signal could count
@@ -563,7 +574,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-        (lists, projects_coll, quick, counts)
+        (lists, projects_coll, quick, counts, today_badge)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -576,6 +587,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         queries: BTreeMap::new(),
         hidden: BTreeMap::new(),
         counts,
+        today_badge,
         projects: BTreeMap::new(),
         order: BTreeMap::new(),
         next: 1,
@@ -705,9 +717,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let root = tx
                         .scroll(|tx| {
                             tx.column(|tx| {
-                            let notes = tx.textarea().a11y_id("notes").id();
+                            let notes = tx.textarea().placeholder("Notes").a11y_id("notes").id();
                             tx.set_text(notes, &row.notes);
                             msgs.on_change(notes, Msg::Notes);
+                            let reference_text = tx.signal("Reference");
+                            let reference = tx.label(reference_text).role(kaya::Role::Link).a11y_id("reference").id();
+                            tx.href(reference, format!("https://example.com/tasks/{key}"));
                             // The form (docs/forms-plan.md): four labelled rows,
                             // each label naming its value, the Clear trailing.
                             tx.column(|tx| {
@@ -921,6 +936,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::HideBadge(on) => {
                 app.hide_badge = on;
                 app.write_settings(&ctx);
+                ctx.apply(|tx| app.update_count(tx, List::Today));
             }
             Msg::KeepDone(on) => {
                 app.keep_done = on;
@@ -1003,12 +1019,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                     msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
                                     t.row(|t| {
                                         let hide = t.checkbox(Settings::hide_badge());
+                                        t.role(hide, kaya::Role::Switch);
+                                        t.a11y_label(hide, "Hide the Today badge");
                                         t.a11y_id(hide, "hide_badge");
                                         msgs.on_toggle_node(hide, |_, on| Msg::HideBadge(on));
                                         t.label("Hide the Today badge");
                                     });
                                     t.row(|t| {
                                         let keep = t.checkbox(Settings::keep_done());
+                                        t.role(keep, kaya::Role::Switch);
+                                        t.a11y_label(keep, "Keep completed tasks in their list");
                                         t.a11y_id(keep, "keep_done");
                                         msgs.on_toggle_node(keep, |_, on| Msg::KeepDone(on));
                                         t.label("Keep completed tasks in their list");

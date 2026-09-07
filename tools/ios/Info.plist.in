@@ -84,7 +84,18 @@
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
+    <!-- THE LAUNCH SLOT (docs/tasks-s2-plan.md T4): what iOS draws
+         between the tap and the first frame. BOTH KEYS NAME ASSET-CATALOG
+         ENTRIES, and only one of them has a loose-file fallback —
+         measured 2026-09-07 with simctl's wait-for-debugger flag
+         holding the slot on screen: UIImageName resolves a loose PNG in
+         the bundle root, UIColorName naming a colour that is in no
+         compiled catalog fails SILENTLY and the ground comes up white.
+         So run-sim compiles a one-colour, one-image catalog with actool
+         and drops the Assets.car in beside this file. An EMPTY dict here
+         is the system's plain ground, which is what this bundle had
+         before the slot was declared. -->
     <key>UILaunchScreen</key>
-    <dict/>
+    @LAUNCH@
 </dict>
 </plist>

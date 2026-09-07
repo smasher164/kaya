@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x50347d52a1eef1b4
+SPEC_HASH = 0x0e5f6241c88af41c
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -99,6 +99,7 @@ PROP_FILL = 27
 PROP_MIN_COLUMN_WIDTH = 28
 PROP_WRAP = 29
 PROP_PLACEHOLDER = 30
+PROP_HREF = 31
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -112,6 +113,7 @@ EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
 SPROP_ICON = 2
 SPROP_SYMBOL = 3
+SPROP_BADGE = 4
 MENU_KIND_MENU = 1
 MENU_KIND_ACTION = 2
 MENU_KIND_TOGGLE = 3
@@ -156,6 +158,8 @@ ROLE_PROMINENT = 2
 ROLE_HEADING = 3
 ROLE_CAPTION = 4
 ROLE_PLAIN = 5
+ROLE_SWITCH = 6
+ROLE_LINK = 7
 SYMBOL_ADD = 1
 SYMBOL_REMOVE = 2
 SYMBOL_DELETE = 3
@@ -1028,6 +1032,21 @@ def tx_bind_placeholder_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLACEHOLDER, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_href(widget_id, href):
+    """set_property with a constant href value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HREF, SOURCE_CONST) + _enc.value(href))
+
+
+def tx_bind_href(widget_id, signal_id):
+    """set_property with a signal-bound href value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HREF, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_href_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HREF, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -1156,6 +1175,16 @@ def tx_set_section_symbol(section, symbol):
 def tx_bind_section_symbol(section, signal_id):
     """set_section_prop with a signal-bound symbol value."""
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_SYMBOL, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_section_badge(section, badge):
+    """set_section_prop with a constant badge value (float)."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_BADGE, SOURCE_CONST) + _enc.value(badge))
+
+
+def tx_bind_section_badge(section, signal_id):
+    """set_section_prop with a signal-bound badge value."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_BADGE, SOURCE_SIGNAL, signal_id))
 
 
 _SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"))

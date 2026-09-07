@@ -336,6 +336,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let pc = camel(prop);
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (param(prop), "string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::F64 => (param(prop), "float64", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::Blob => (
                 "handle".to_string(),
                 "uint64",

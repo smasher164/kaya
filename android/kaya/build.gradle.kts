@@ -44,6 +44,10 @@ dependencies {
     // api, not implementation: the app shell touches the types
     // (ComponentActivity in MainActivity).
     api("androidx.activity:activity-compose:1.9.3")
+    // api for the same reason: every app module's MainActivity calls
+    // installSplashScreen() (docs/tasks-s2-plan.md T4;
+    // Theme.Kaya.Launch's own comment says what happens without it).
+    api("androidx.core:core-splashscreen:1.0.1")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.material3:material3")
     // Material 3 adaptive versions separately from the BOM above, so

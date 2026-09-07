@@ -234,6 +234,22 @@ pass, not this one's.
   Clear trailing, the column derived into the platform's form. The grid
   and its compact fold went with it; the guard is the relation,
   `expect_ax date_picker@when "datetime/When: none"` on every lane.
+- **R12 — a switch is a role on checkbox** (TAKEN 2026-09-07, with R13-R15
+  in one word on docs/tasks-s2-plan.md: `role switch` draws the platform's
+  switch and reports its trait; `checked`, `toggled`, `toggle` and
+  `expect_checked` are the checkbox's; iOS already draws every checkbox
+  as one).
+- **R13 — the badge is a section prop holding a count** (TAKEN 2026-09-07):
+  `set_section_prop(section, badge, n)`, zero clears; GTK draws a pill on
+  the row, the others use their own badge; text and dot badges refused.
+- **R14 — a link is a role on label with `href`** (TAKEN 2026-09-07): the
+  platform's link, opened through the platform's opener, no occurrence;
+  `expect_href` and `expect_ax link/…` read it back and no scene activates
+  one.
+- **R15 — the launch slot is a build-time `[launch]` in identity.toml**
+  (TAKEN 2026-09-07): background colour and the mark; the iOS bundle and
+  the APK write their platform's slot, the desktops declare nothing,
+  check-app-identity holds both builds to it.
 - **The Details screen was one grid** (superseded by R11), three rows of caption, picker and
   Clear, so the Clear buttons share a column edge — the maintainer's
   first ask on the captures ("The Clear buttons should be aligned with
@@ -450,6 +466,8 @@ the gate or trap it became.
 | S0 | the app on today's surface: guest, scene, five lanes | nothing new; the consumer for everything below | — |
 | S1 | a search entry filtering the open list | the search field (a role on entry) | 1 |
 | S2 | switches in Settings, the Today badge, a link in notes, the launch slot | toggle switch, badge, hyperlink label, splash | 2 |
+| S2b | an app-wide Light / Dark / System switch in Settings | the appearance PROP: programmatic dark mode, bound to a signal, over the per-process `KAYA_APPEARANCE` install sites every backend already has (QUEUED 2026-09-07 by the maintainer: "users often just want to select one of those things"; nobody uses Discord's light mode) | 2b |
+| S2c | the Details screen's run cards on iOS read as Reminders' do | the inset separator between a run card's stacked text children; the lone-button card as the grouped button row (QUEUED 2026-09-07 with S2's review; the notes placeholder went into S2 itself) | 2c |
 | S3 | a reminder fires as a notification; activating it opens the task | local notifications | 3 |
 | S4 | tasks survive a relaunch; settings persist | app data directory, the preferences store, window memory | 4 |
 | S5 | the app under the largest text size, an RTL locale, a non-US locale, on every lane | the compliance pass | 5 |

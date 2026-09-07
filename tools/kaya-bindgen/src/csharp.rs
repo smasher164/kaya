@@ -353,6 +353,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let pc = pascal(prop);
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "double", format!("EncodeValue(w, {});", camel(prop))),
             crate::PropKind::Blob => (
                 "handle".to_string(),
                 "ulong",

@@ -5815,23 +5815,13 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   cannot be asserted by a shared scene**~~ — CLOSED 2026-08-17 as a
   RATIFIED PLATFORM DIVERGENCE (maintainer), not as work owed: DESIGN.md's
   Binding conventions now states it under "Stated platform divergences"
-  — on Linux a sidebar's section rows are text-only, and the
-  section-symbol contract there is carried by the BAR presentation's
-  rows, which the shared scene already asserts on five lanes. So nothing
-  is waiting on a decision; what would reopen it is the GTK re-lowering
-  named at the end of this entry, and the day it lands the scene grows
-  two lines and the carve-out paragraph goes away. The measurement that
-  the ratification rests on, as filed:
-  `GtkStackSidebar` binds only the page's
-  TITLE into a GtkLabel and ignores `icon-name` entirely (measured, GTK
-  4.18.6 — gtk.rs's `refresh_section_symbols` fact 2), and kaya does not
-  hand-build rows inside a component that owns them. The other four
-  backends all draw it: the macOS `NavigationSplitView` sidebar was
-  measured answering `section "Shelves" symbol "search"` / `section
-  "Loans" symbol "lock"` through the same read, and WinUI's `Left` pane
-  is the same `NavigationViewItem` as its `Top` one. So the sections
-  scene asserts its BAR rows only; adding the two sidebar lines would be
-  red on linux forever while green everywhere else, and scenes are
+  — on Linux a sidebar's section rows WERE text-only until 2026-09-07,
+  when the GTK re-lowering named at the end of this entry landed with the
+  task manager's S2 badge (docs/tasks-s2-plan.md T2): GTK's sidebar is
+  kaya's own GtkListBox, its rows draw the symbol, and the sections scene
+  asserts the two sidebar lines on all five lanes (the carve-out
+  paragraph in DESIGN.md is struck; docs/traps.md carries the measurement
+  that forced it).
   shared verbatim.
   WHAT WOULD CLOSE IT: moving the GTK sections lowering onto
   `AdwViewStack` + `AdwViewSwitcher` (the component that shows icon AND
@@ -7881,6 +7871,12 @@ preparation uninstalls every exact prior-run `dev.kaya.*` bundle through
 The remaining follow-up when this face returns is to instrument the AIM:
 log the directory goto requested beside the breadcrumb the picker
 answered (`currentDirectory` already reads it).
+TAKEN 2026-09-07 (matrix s2-2, filedialog-swiftui: `present dialog=1 at
+…/kaya-picked-15186` beside `file dialog showing "filedialogrs-swiftui"`,
+the rows arriving after 7.8s under load ~140): the aim is on the record
+in those two lines, and the remedy is the harness's own descent —
+`expect_file_dialog` enters the aimed folder when the picker opened at
+its parent (docs/traps.md, the first-picker entry's dated paragraph).
 
 A green run's log is the baseline: target/ios-simdrive-logs/<leg>.log
 for each of the four dialog scenes, cleared per run; a failing leg's
@@ -11724,6 +11720,64 @@ fail ten of ten at one second with a real layout cycle — the same
 HRESULT, with `Layout cycle detected` above it — which is on
 docs/traps.md beside the first; the stamp trace it needed
 (`KAYA_WINUI_STAMP_TRACE=1`) stays as the instrument.
+
+## BUG — GTK: twenty `Gtk-WARNING … natural size must be >= min size` lines on the tasks scene, from kaya's own FlexLayout::measure (found 2026-09-07)
+KEY: natural size must be >= min size, Gtk-WARNING, FlexLayout::measure, gtk flex measure, tasks scene gtk warnings
+
+Found while building the S2 GTK arms: the tasks scene under the lane's
+image prints exactly 20 `Gtk-WARNING … natural size must be >= min size`
+lines, and they are not the new arms' — with the badge pill removed and
+both role swaps skipped the count stayed 20. The source is
+crates/kaya/src/gtk.rs's `flex::FlexLayout::measure` answering a natural
+size below the minimum it reported. The legs stay green (GTK clamps), so
+no scene sees it; the layout it clamps to is not the one kaya asked for.
+Remedy: make the measure answer natural >= min by construction and hold it
+with a gate that fails the linux lane on any Gtk-WARNING from a kaya
+layout manager, since a warning nobody reads is the false green's shape.
+
+## BUILD — task manager S2: switches, the Today badge, a link in notes, the launch slot (rulings TAKEN 2026-09-07; depth green on the mac the same day)
+KEY: tasks S2, role switch, role link, href, section badge, SPROP_BADGE, expect_section_badge, expect_href, launch slot, [launch], UILaunchScreen, UIColorName, actool, launch catalog, core-splashscreen, installSplashScreen, kaya_launch_background, Theme.Kaya.Launch, docs/tasks-s2-plan.md
+- CLOSED IN THE SLICE (2026-09-07 afternoon): the notes field's `Notes`
+  placeholder, asserted on every lane; the macOS textarea's
+  AXPlaceholderValue, published by hand since the drawn placeholder is
+  an overlay; the two sidebar-symbol assertions moved from
+  sections.steps (below the phones' aux-window cut, which both runners
+  refused) to tasks.steps, and the runners' cut census moved into
+  tools/lib/scene_cut.py where check-steps runs it in the fast sweep
+  (docs/traps.md, "A cut refusal only the lane could print").
+- OPEN (polish, 2026-09-07): the WinUI ToggleSwitch's label sits a few
+  pixels above the control's centre on the VM capture; the checkbox row
+  centres its label on a CheckBox's box and the ToggleSwitch is taller
+  (docs/tasks-s2-plan.md §3).
+
+The four rulings are docs/tasks-s2-plan.md §2 (T1 a switch is a role on
+checkbox; T2 the badge a section prop holding a count, zero clears; T3 a
+link is a role on label with `href`, opened by the platform, no occurrence;
+T4 the launch slot a build-time `[launch]` in identity.toml), recorded as
+R12-R15 in docs/tasks-plan.md §4. THE WIRE: spec enum `role` gains
+switch=6 and link=7, PROPS `href` 31 (Str), SECTION_PROPS `badge` 4 (F64 —
+the prop kinds have no integer, so a count rides the double and the root
+refuses a non-whole or negative one), the spec hash moved and both
+interpreters carry the new one; the generator's eight emitters had refused
+an F64 section prop by construction and take it now. THE HARNESS: two
+verbs, `expect_section_badge "<title>" <count>` and `expect_href <label>
+"<url>"`, each a Stage read; SwiftUI's badge read is the value the render
+arm handed `.badge`, since SwiftUI exposes none, stated in the arm; the
+widget backends read their controls. THE MAC DEPTH: the Settings switches
+(`.switch` style; AXCheckBox with the AXSwitch subrole reads `switch`), the
+Today badge on the sidebar row and the tab (`.badge`), the Reference link
+in Details (`Link`, `AXLink`), and iOS — whose checkbox was already a
+UISwitch — answers `switch` from the declared role, the one model-informed
+word, stated. tools/scenes/tasks.steps asserts all four on every lane.
+BREADTH: GTK (the switch word is kaya's own — AT-SPI publishes `check
+box` for a GtkSwitch, docs/traps.md), WinUI (three classes joined the
+bindgen filter; a class-changing role swaps the native in place), Compose
+(the switch and link words are kaya's, the platform publishes neither)
+and the launch slot (T4 as built in the plan) landed 2026-09-07; the eight
+bindings' sugar is the last leg. NOT DONE FROM THE
+PLAN: §5's promise to add the switch to tools/scenes/gallery.steps as the
+ninth control — the tasks scene runs on every lane and carries the switch's
+a11y read, so the gallery addition is deferred here rather than half-done.
 
 ## COST — the plain matrix spends ~350s running one exclusive leg on the whole host (measured 2026-09-07)
 KEY: exclusive holds, serialized holds, plain matrix wall, --no-exclusive, drag pacing under the token, DRAG_DURATION_CAP_MS, exclusive leg duration

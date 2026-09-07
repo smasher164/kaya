@@ -3122,6 +3122,18 @@ presentation is inert — four re-assertions at 0.8/1.6/2.4/3.2s produced
 no second reveal and the picker never moved. The property is read when
 the remote view controller is configured and never again.
 
+**The harness descends, since 2026-09-07.** The race recurred mid-run
+under a five-lane matrix (host load ~140; the picker's rows took 7.8s
+to arrive, the reveal lost): `expect_file_dialog` read the app's
+Documents root with `kaya-picked-<pid>` as a row. When the directory
+read lacks the aimed suffix and the aimed folder is a row, the
+interpreter's iOS arm asks the driver to `enter` it — the tap
+retried until the breadcrumb reads the folder, like `choose` — and
+re-reads the state; every step is a `KAYA_PICKER_TRACE` line (`aim
+miss`, `entered`), so the miss stays on the record without failing a
+leg for Apple's race. `KAYA_PICKER_MISAIM=1` presents at the parent on
+purpose, which is how the descent was watched firing.
+
 **So the runner owns the aim**: after the exact prior-run cleanup below,
 `picker_warm` in tools/ios/run-sim.py launches the system's own Files app
 on each pool phone before any leg
@@ -7327,7 +7339,7 @@ appended — `choose_icon` tries the direction-suffixed name first, so
 `go-previous-symbolic` is RTL-aware for free while hard-coding the suffix
 would break LTR.
 
-## GTK switchers draw a section's symbol OR its title, never both — and the sidebar draws no symbol at all (measured, GTK 4.18.6)
+## GTK switchers draw a section's symbol OR its title, never both — and GtkStackSidebar drew no symbol at all (measured, GTK 4.18.6; the sidebar is kaya's own since 2026-09-07)
 
 Two facts from the validation container, both about how a section's
 `icon-name` reaches the screen:
@@ -7339,8 +7351,11 @@ Two facts from the validation container, both about how a section's
    icon-name=go-home-symbolic`. So a section's symbol REPLACES its tab
    title on GTK, where the SwiftUI arm shows both.
 2. `GtkStackSidebar` ignores icon-name entirely: it binds only the page's
-   title into a GtkLabel (probe: `GtkListBoxRow > GtkLabel`), so the
-   SIDEBAR arm draws no symbol at all.
+   title into a GtkLabel (probe: `GtkListBoxRow > GtkLabel`), so its rows
+   drew no symbol — the fact behind the text-only carve-out, and since
+   2026-09-07 the reason kaya's sidebar is its own GtkListBox (the entry
+   "GtkStackSidebar owns its rows' children" below). Fact 1 still governs
+   the bar.
 
 It follows that the harness's TITLE -> ROW pairing has to be POSITIONAL (a
 section with a symbol has no visible label to match on), and that the
@@ -7926,6 +7941,68 @@ with the layout pass it was reached from — on a passing run the stamps
 converge as the band grows (1, 2, 4, 8, 16, 32 rows) and as the wrap
 re-breaks the track (613 -> 427), 58 stamps over eleven tables; an
 oscillation would show as alternating widths on consecutive passes.
+
+## An iOS launch colour that names nothing shows WHITE, silently; an XML comment may not hold `--` (measured 2026-09-07)
+
+Building the launch slot (docs/tasks-s2-plan.md T4): `UILaunchScreen`'s
+`UIImageName` resolves a loose PNG in the bundle, but `UIColorName` looks
+only in a compiled asset catalog — a name nothing answers to draws a
+white launch screen with no error anywhere, so the colour is what forces
+`xcrun actool` (reachable on the lane host only under Xcode's
+DEVELOPER_DIR, not the nix SDK's). Two more, each now a wall: an XML
+comment containing `--` is malformed, and one quoting `--wait-for-debugger`
+would have shipped every bundle's Info.plist broken — `make_bundle` parses
+its own output back and refuses by name; and the gradle-side TOML reader's
+`substringBefore('#')` ate `background = "#1C1C1E"`, since a `#` inside
+quotes is not a comment. tools/check-app-identity.py's C7 holds the
+colour, the catalog's bytes, the APK's, and every host's
+`installSplashScreen()` call.
+
+## GtkStackSidebar owns its rows' children and rewrites them (measured 2026-09-07)
+
+Grafting a badge pill onto a `GtkStackSidebar` row — re-seating the row's
+GtkLabel into a GtkBox beside a second label — survives nothing:
+`gtk_stack_sidebar_update_row` calls `gtk_label_set_text` on
+`gtk_list_box_row_get_child(row)`, so once that child is a GtkBox every
+later populate/update pass prints `Gtk-CRITICAL … gtk_label_set_text:
+assertion 'GTK_IS_LABEL (self)' failed` and bails out of the row. On the
+tasks scene under the linux lane's image: 19 such lines, and the sidebar
+drew FOUR rows — the Projects section, declared after the badge's first
+refresh, never got one. NO SCENE CAUGHT IT: `expect_sections` counts the
+stack's pages and `select_section` drives the stack; the rows were
+observed by nothing until a capture for the review page showed four where
+five had been. So the sidebar is kaya's own `gtk4::ListBox`
+(`refresh_section_rows` in gtk.rs): a row per section with its symbol,
+title and pill, stamped with the section id, selection bound both ways to
+the stack. The rule: never mutate the children of a row a GTK component
+builds; own the rows or leave them.
+
+## GTK's in-process accessible role and its AT-SPI role are two different answers (measured 2026-09-07)
+
+`gtk_accessible_get_accessible_role()` on a `GtkSwitch` says `switch`,
+and the design pass took that as the bus's answer. On the AT-SPI bus the
+same widget publishes `check box` (role 7), the check button's role, and
+`ATSPI_ROLE_SWITCH` (130) is past the end of the atspi 0.30 crate's enum
+in any case. The harness reads the bus, so a GTK a11y word measured
+in-process proves nothing about what a scene will read; measure with the
+lane's own reader (tools/linux/a11y-leg.sh's route). The switch word on
+GTK is kaya's own, keyed on the widget it built (`composed_control_role`
+in gtk.rs, the `datetime` precedent); `GtkLinkButton` publishes `link`.
+
+## Compose publishes no accessibility class for a switch and no role for a text link (measured 2026-09-07)
+
+Read off the resolved artifacts (compose-ui 1.7.5, material3 1.3.1, the
+BOM in android/kaya/build.gradle.kts): `Role.Switch` exists, but
+`SemanticsUtils_androidKt` maps only Button, CheckBox, ImageView,
+RadioButton and Spinner to legacy class names, so a switch node's
+`AccessibilityNodeInfo.className` is the generic view and a class-keyed
+reader can never name it — the harness's `kayaAxRole` answers `switch`
+from the semantics `Role` alone. A text link (`withLink(LinkAnnotation.Url)`)
+is lowered to an overlaid `combinedClickable` with `role = null`, so the
+platform publishes NO link role either; like the pickers' `datetime`,
+kaya publishes the classification itself. Both words are what the shared
+scene asserts (tools/scenes/tasks.steps), so a reader keyed on the class
+alone would fail the android leg for a reason no capture shows.
 
 ## A WinUI control refuses focus until its own Loaded has run, and "scene ready" comes first (measured 2026-09-07)
 
@@ -8871,7 +8948,7 @@ out of `Role$Companion` in the BOM's own `ui-release.aar` — and D6's
 Material idiom is a read-only text field, which the accessibility
 delegate classes as `android.widget.EditText`, the same class every
 `entry` publishes. So KayaCompose.kt's picker arm PUBLISHES the fact
-into the semantics tree (`KayaPickerKind`, a `SemanticsPropertyKey` set
+into the semantics tree (`KayaAxKind (KayaPickerKind until 2026-09-07, when the link joined it)`, a `SemanticsPropertyKey` set
 in the field's own `semantics {}` block) and `kayaAxRole` reads it back
 off the merged node the harness found by test tag.
 AND IT MUST GO ON BOTH READ ROUTES. `kayaAx` answers from the
@@ -9720,3 +9797,34 @@ Three findings from closing the family's two reachable loss paths
   doctored file — measured while writing check-harness-ceiling's dialog
   clause, where the picker arm's registration vanished. Strip whole-line
   `//` comments only, or lex the strings.
+
+## The iOS export probe's `@LAUNCH@` slot, and an install refusal that said nothing (2026-09-07)
+
+tools/ios/exportprobe's Info.plist is a template: `@LAUNCH@` is the
+seat the tasks bundle's `UILaunchScreen` dictionary takes, and the probe,
+which declares no launch slot, must render it to an empty `<dict/>`. The
+first build left the literal in place, `simctl install` refused with
+"Failed to install the requested application", and tools/ios/run-sim.py
+printed the exit code alone — the reason (the plist would not parse) was
+in a stderr nobody printed, and the iOS suite spent its first run on
+that. Two walls now: build.sh renders the slot, parses the plist back
+with plistlib and refuses any `@…@` left in it, and run-sim prints the
+refusal's stderr. The colour half of the launch slot is its own finding
+(docs/tasks-s2-plan.md §2 T4, §7): `UIColorName` resolves only from a
+compiled asset catalog and falls back to white with no message, where
+`UIImageName` resolves a loose file.
+
+## A cut refusal only the lane could print (2026-09-07)
+
+The phone runners cut a shared scene at the verb their host cannot
+express (`expect_windows` in sections.steps: no auxiliary windows by
+capability) and refuse a cut that takes a KEPT assertion with it. Two
+`expect_section_symbol` lines for the aux window's sidebar rows landed
+below that cut; the mac lane ran them green, check-steps passed, the full
+sweep passed, and the refusal printed 36s into the android lane and 513s
+into the iOS lane of a matrix — the only two places the census ran. The
+census is one module now, tools/lib/scene_cut.py, imported by both
+runners and by tools/check-steps.py, which runs it over both lane tables
+in the fast sweep with the shipped shape and a stale cut as its watched
+negatives. The assertions themselves moved to tasks.steps, whose sections
+live in window#0 and so run on every lane.

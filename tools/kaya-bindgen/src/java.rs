@@ -366,6 +366,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let up = prop.to_uppercase();
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
             crate::PropKind::Blob => (
                 "handle".to_string(),
                 "long",

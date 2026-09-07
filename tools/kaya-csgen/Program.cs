@@ -441,6 +441,9 @@ static class Program
         Set("SetPlaceholder", ["Node n", "string text"], "n, text");
         Set("SetPlaceholder", ["Node n", "Signal s"], "n, s");
         Set("SetPlaceholder", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetHref", ["Node n", "string url"], "n, url");
+        Set("SetHref", ["Node n", "Signal s"], "n, s");
+        Set("SetHref", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetAccepts", ["Node n", "params string[] kinds"], "n, kinds");
         FwdAs("TplDragRef", "Draggable", ["Node n"], "n");
         Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");

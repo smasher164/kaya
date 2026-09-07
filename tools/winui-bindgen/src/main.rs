@@ -165,6 +165,18 @@ fn main() {
         "Microsoft.UI.Xaml.VerticalAlignment".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
         "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
+        // THE SWITCH ROLE'S CONTROL (docs/tasks-s2-plan.md T1): a checkbox
+        // wearing `role switch` is a ToggleSwitch, which derives from Control
+        // and not from ToggleButton, so it comes in on its own.
+        "Microsoft.UI.Xaml.Controls.ToggleSwitch".to_string(),
+        // THE LINK ROLE'S CONTROL (T3), with the type its one property takes:
+        // NavigateUri is a Windows.Foundation.Uri, and without it the two
+        // slots are `usize` vtable pads.
+        "Microsoft.UI.Xaml.Controls.HyperlinkButton".to_string(),
+        "Windows.Foundation.Uri".to_string(),
+        // THE SECTION BADGE (T2): NavigationViewItem already carries
+        // InfoBadge/SetInfoBadge, both pads until the type itself is named.
+        "Microsoft.UI.Xaml.Controls.InfoBadge".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBase".to_string(),
         "Microsoft.UI.Xaml.Controls.Slider".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventHandler".to_string(),

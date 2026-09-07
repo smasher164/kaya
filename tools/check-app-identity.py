@@ -36,6 +36,21 @@ dev_shell_or_die()
 #       to the declared icon or in EXCLUDED with a reason.
 #   C6  A PACKAGING CONSUMER READS THE MANIFEST. The .cmd launchers are
 #       exempt and C3 covers them: a batch file cannot read TOML.
+#   C7  THE LAUNCH SLOT IS DECLARED ONCE AND HONOURED WHERE THE
+#       PLATFORM HAS ONE (docs/tasks-s2-plan.md T4). `[launch]` names a
+#       colour and a picture; the iOS bundle turns them into
+#       UILaunchScreen's two asset entries and the APK into the
+#       SplashScreen theme's two attributes, while macOS, GTK and
+#       unpackaged WinUI have no slot to honour. The colour is a
+#       LITERAL nowhere but the manifest — no gate can see a second
+#       copy at runtime, because a splash that is the wrong colour
+#       still launches. AND THE ANDROID CALL: the manifest names the
+#       LAUNCH theme, so `installSplashScreen()` is what puts the app
+#       back on its own; a module that stops calling it wears the
+#       launch colour as its window background for the app's whole
+#       life, and no scene can see that either (every kaya surface
+#       paints its own ground). Beside them the packaging steps' own
+#       byte checks, which is where the comparison lives.
 # The self-test runs the real checker over a shadow root of symlinks
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
@@ -87,6 +102,19 @@ def excluded(rel):
         if rel == prefix or rel.startswith(prefix + "/"):
             return why
     return None
+
+
+def defined_and_called(text, fn):
+    """A function that EXISTS and is REACHED, comments stripped: a
+    packaging step's byte check that nobody calls is prose, and a
+    mention of it in a comment is prose twice over (watched — the
+    clause's first draft counted mentions and a sentence naming the
+    function paid for the call)."""
+    body = "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith("#"))
+    if f"def {fn}(" not in body:
+        return False
+    return body.count(f"{fn}(") > 1
 
 
 def decode_png(data):
@@ -417,6 +445,222 @@ def check(root):
                 f"a packaging step reads the declared file or it is "
                 f"showing something else")
 
+    # ------------------------------------------------------------- C7
+    launch = manifest.get("launch")
+    if not isinstance(launch, dict):
+        bad.append(
+            f"{MANIFEST}: declares no `[launch]` table — the iOS bundle "
+            f"and the APK each have a slot the platform draws between "
+            f"the tap and the first frame, and an app that declares "
+            f"nothing gets the system's plain ground on both "
+            f"(docs/tasks-s2-plan.md T4)")
+        return bad
+
+    bg = launch.get("background")
+    if not isinstance(bg, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}",
+                                                   bg):
+        bad.append(
+            f"{MANIFEST}: declares `[launch] background = {bg!r}`, which "
+            f"is not #RRGGBB — it becomes an Android colour resource and "
+            f"an iOS colour asset, and neither reader can guess what a "
+            f"half-spelled one meant")
+        return bad
+    launch_rel = launch.get("image", icon_rel)
+    if not isinstance(launch_rel, str) or not (root / launch_rel).is_file():
+        bad.append(
+            f"{MANIFEST}: names the launch image {launch_rel!r}, which is "
+            f"not a file in this tree (leave `image` out to take the "
+            f"declared icon)")
+        return bad
+
+    # C7, THE COLOUR IS A LITERAL ONCE. Every reader derives it; a second
+    # copy is silent, because a splash drawn in the wrong colour still
+    # launches and every observable the harness has is drawn after it.
+    # Comments count: this file's own rule for asset names, one field
+    # over. NO COMMENT IN THIS FILE MAY SPELL THE DECLARED COLOUR.
+    # `#RGB`, Android's `#AARRGGBB` and a Kotlin/Swift `0x` literal —
+    # the three spellings a second copy would plausibly wear. A BARE run
+    # of six hex digits is deliberately not matched: every build id and
+    # sha256 in this tree would answer to it.
+    colour_re = re.compile(r"(?:#|0[xX])(?:[0-9A-Fa-f]{2})?" + bg[1:]
+                           + r"\b", re.I)
+    for r in SOURCE_ROOTS:
+        base = root / r
+        if not base.is_dir():
+            continue
+        for f in tree_walk(base):
+            rel = f.relative_to(root).as_posix()
+            if rel == MANIFEST or not f.is_file() or excluded(rel):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, ValueError):
+                continue
+            if colour_re.search(text):
+                bad.append(
+                    f"{rel}: spells the launch colour {bg} — {MANIFEST} "
+                    f"declares it and every reader DERIVES it, so a "
+                    f"second copy here is a second source of truth that "
+                    f"nothing at run time can see: a slot drawn in the "
+                    f"wrong colour still launches, and the first frame "
+                    f"after it covers the evidence")
+
+    # C7, THE iOS SLOT. The template carries the key and the build fills
+    # it; an EMPTY dict is what this bundle had before the slot was
+    # declared, and it is what a revert looks like.
+    tpl_rel = "tools/ios/Info.plist.in"
+    tpl_path = root / tpl_rel
+    if not tpl_path.is_file():
+        bad.append(f"{tpl_rel}: is gone, so the iOS bundles carry "
+                   f"whatever Info.plist keys nothing writes")
+    else:
+        tpl = tpl_path.read_text(encoding="utf-8")
+        if not re.search(r"<key>UILaunchScreen</key>", tpl):
+            bad.append(
+                f"{tpl_rel}: declares no UILaunchScreen — iOS has a slot "
+                f"and this bundle would not use it")
+        elif re.search(r"<key>UILaunchScreen</key>\s*<dict\s*/>", tpl):
+            bad.append(
+                f"{tpl_rel}: declares an EMPTY UILaunchScreen dict, which "
+                f"is the system's plain ground — {MANIFEST} declares a "
+                f"colour and a picture and this bundle draws neither")
+
+    ios_rel = "tools/ios/run-sim.py"
+    ios_path = root / ios_rel
+    if not ios_path.is_file():
+        bad.append(f"{ios_rel}: is gone, so nothing assembles the iOS "
+                   f"bundles this clause is about")
+    else:
+        ios = ios_path.read_text(encoding="utf-8")
+        for key in ("UIColorName", "UIImageName"):
+            if key not in ios:
+                bad.append(
+                    f"{ios_rel}: never writes {key} — UILaunchScreen "
+                    f"takes the colour and the picture under those two "
+                    f"names, and a key it does not write is half a slot")
+        # MEASURED 2026-09-07: UIColorName resolves ONLY inside a
+        # compiled catalog (a loose file has no colour spelling), and a
+        # name nothing answers to comes up white with no error.
+        if "actool" not in ios:
+            bad.append(
+                f"{ios_rel}: never runs actool — UIColorName names an "
+                f"asset-catalog entry and there is no loose-file "
+                f"spelling of a colour, so without a compiled catalog "
+                f"the ground comes up white and NOTHING says so")
+        if not defined_and_called(ios, "launch_catalog_verify"):
+            bad.append(
+                f"{ios_rel}: does not both define and CALL "
+                f"launch_catalog_verify — the byte comparison lives in "
+                f"the packaging step, and this gate is only its static "
+                f"half")
+
+    # C7, THE ANDROID SLOT. One theme in the library, named by every
+    # app module's manifest, and the call that takes the app back off it.
+    theme_rel = "android/kaya/src/main/res/values/themes.xml"
+    theme_path = root / theme_rel
+    launch_theme = ""
+    if not theme_path.is_file():
+        bad.append(f"{theme_rel}: is gone, so no kaya app declares a "
+                   f"platform theme at all")
+    else:
+        themes = theme_path.read_text(encoding="utf-8")
+        # THE STYLE'S OWN BLOCK, not a window over the file: the plain
+        # theme beside it is SELF-CLOSING, so a pattern that opens at
+        # `<style name="…"` and runs to the first attribute reads that
+        # one's NAME with this one's body (watched, the clause's first
+        # draft).
+        blocks = {m.group(1): m.group(0) for m in re.finditer(
+            r'<style name="([^"]+)"(?![^>]*/>).*?</style>', themes, re.S)}
+        hit = [n for n, b in blocks.items()
+               if "windowSplashScreenBackground" in b]
+        if not hit:
+            bad.append(
+                f"{theme_rel}: declares no style setting "
+                f"windowSplashScreenBackground — Android's slot is theme "
+                f"attributes and nothing else, so the APK would draw the "
+                f"window background alone")
+        else:
+            launch_theme = hit[0]
+            block = blocks[launch_theme]
+            for attr in ("windowSplashScreenAnimatedIcon",
+                         "postSplashScreenTheme"):
+                if attr not in block:
+                    bad.append(
+                        f"{theme_rel}: {launch_theme} sets no {attr} — "
+                        f"the picture and the theme the activity wears "
+                        f"AFTER the slot are the other two thirds of it, "
+                        f"and without postSplashScreenTheme the launch "
+                        f"colour is the app's window background for its "
+                        f"whole life")
+
+    gradle_rel = "android/build.gradle.kts"
+    gradle_path = root / gradle_rel
+    if not gradle_path.is_file():
+        bad.append(f"{gradle_rel}: is gone, so nothing reads the "
+                   f"declaration into the APK")
+    else:
+        gradle = gradle_path.read_text(encoding="utf-8")
+        for want in ("kaya_launch_background", "kaya_launch_mark"):
+            if want not in gradle:
+                bad.append(
+                    f"{gradle_rel}: generates no {want} — "
+                    f"{theme_rel} names it, and a theme attribute "
+                    f"pointing at a resource nothing writes does not "
+                    f"build")
+
+    # Every APP module — the manifests that declare a launcher icon; the
+    # library's has none, which is how they are told apart without a
+    # list to keep in step.
+    app_manifests = [f for f in sorted(
+        (root / "android").glob("*/src/main/AndroidManifest.xml"))
+        if "android:icon" in f.read_text(encoding="utf-8")]
+    if not app_manifests:
+        bad.append("android/*/src/main/AndroidManifest.xml: no app "
+                   "module declares a launcher icon, so C7's Android "
+                   "half read nothing and would agree with anything")
+    for mf in app_manifests:
+        rel = mf.relative_to(root).as_posix()
+        module = mf.relative_to(root).parts[1]
+        text = mf.read_text(encoding="utf-8")
+        if launch_theme and f"@style/{launch_theme}" not in text:
+            bad.append(
+                f"{rel}: names no android:theme=\"@style/{launch_theme}\" "
+                f"— the platform reads the slot off the MANIFEST theme "
+                f"before any of this app's code runs, so a module on the "
+                f"plain theme has no slot however the declaration reads")
+        acts = sorted((root / "android" / module / "src/main/kotlin")
+                      .rglob("MainActivity.kt"))
+        if not acts:
+            bad.append(f"android/{module}: declares a launcher icon and "
+                       f"has no MainActivity.kt, so nothing can take it "
+                       f"off the launch theme")
+        for act in acts:
+            arel = act.relative_to(root).as_posix()
+            if "installSplashScreen()" not in act.read_text(
+                    encoding="utf-8"):
+                bad.append(
+                    f"{arel}: never calls installSplashScreen() while "
+                    f"{rel} names the launch theme — the activity then "
+                    f"KEEPS that theme, so {bg} is its window background "
+                    f"for the app's whole life. No scene can see it "
+                    f"(every kaya surface paints its own ground) and the "
+                    f"app still launches")
+
+    runner_rel = "tools/android/run-emulator.py"
+    runner_path = root / runner_rel
+    if not runner_path.is_file():
+        bad.append(f"{runner_rel}: is gone, so the APK's launch bytes "
+                   f"are compared by nothing")
+    else:
+        runner = runner_path.read_text(encoding="utf-8")
+        if not defined_and_called(runner, "apk_launch_verify"):
+            bad.append(
+                f"{runner_rel}: does not both define and CALL "
+                f"apk_launch_verify — the picture's bytes and the "
+                f"colour's value inside the APK are held to "
+                f"{MANIFEST} there, on the path nobody can avoid, and "
+                f"this gate is only the static half of that")
+
     return bad
 
 
@@ -645,7 +889,74 @@ g.negative("a guest opening an asset the manifest does not declare",
            lambda p=s: check(p),
            want="in the declared mark's own family but is not it")
 
-g.negatives_ran(9)
+# --------------------------------------------------------------- C7 ---
+# N10 — a launch background nothing can turn into a colour.
+s = fresh("badcolour")
+doctor_shadow("the half-spelled launch colour", s, MANIFEST,
+              r'background = "#[0-9A-Fa-f]{6}"',
+              'background = "dark grey"')
+g.negative("a launch background that is not #RRGGBB",
+           lambda p=s: check(p), want="which is not #RRGGBB")
+
+# N11 — THE SECOND SOURCE OF TRUTH: the colour typed into a build step
+# instead of derived. Silent at run time — a slot drawn in the wrong
+# colour still launches, and the app's own first frame covers it.
+s = fresh("twocolours")
+_bg = tomllib.loads((ROOT / MANIFEST).read_text(
+    encoding="utf-8"))["launch"]["background"]
+(s / "tools" / "zz-selftest-splash.sh").write_text(
+    f'splash_background="{_bg}"\n', encoding="utf-8")
+g.negative("a build step that retypes the launch colour",
+           lambda p=s: check(p), want="spells the launch colour")
+
+# N12 — THE FORGOTTEN CALL: an app module on the launch theme whose
+# activity never leaves it. The app launches and every scene passes.
+s = fresh("nocall")
+doctor_shadow("the missing installSplashScreen", s,
+              "android/rusthost/src/main/kotlin/dev/kaya/rusthost/"
+              "MainActivity.kt",
+              r"\n\s*installSplashScreen\(\)", "")
+g.negative("an app module that keeps the launch theme for its whole life",
+           lambda p=s: check(p), want="never calls installSplashScreen()")
+
+# N13 — a module put back on the plain theme: the platform reads the
+# slot off the MANIFEST theme, so this one has none.
+s = fresh("plaintheme")
+doctor_shadow("the reverted manifest theme", s,
+              "android/gohost/src/main/AndroidManifest.xml",
+              r'android:theme="@style/Theme\.Kaya\.Launch"',
+              'android:theme="@style/Theme.Kaya.NoActionBar"')
+g.negative("an app module whose manifest names no launch theme",
+           lambda p=s: check(p), want="names no android:theme=")
+
+# N14 — the iOS slot back to the empty dict it carried before T4.
+s = fresh("emptylaunch")
+doctor_shadow("the emptied UILaunchScreen", s, "tools/ios/Info.plist.in",
+              r"<key>UILaunchScreen</key>\n    @LAUNCH@",
+              "<key>UILaunchScreen</key>\n    <dict/>")
+g.negative("an iOS bundle whose launch screen is the system's plain "
+           "ground", lambda p=s: check(p), want="EMPTY UILaunchScreen")
+
+# N15 — the theme keeps the colour and loses the picture.
+s = fresh("noicon")
+doctor_shadow("the dropped splash icon", s,
+              "android/kaya/src/main/res/values/themes.xml",
+              r'<item name="windowSplashScreenAnimatedIcon">'
+              r'[^<]*</item>\n\s*', "")
+g.negative("a splash theme with a colour and no picture",
+           lambda p=s: check(p), want="sets no windowSplashScreenAnimatedIcon")
+
+# N16 — the APK's own byte check stops being called, which is where the
+# comparison actually lives.
+s = fresh("noapkverify")
+doctor_shadow("the uncalled apk_launch_verify", s,
+              "tools/android/run-emulator.py",
+              r"    if not apk_launch_verify\(apk\):\n        "
+              r"return False\n", "")
+g.negative("a lane that packages the slot and never checks it",
+           lambda p=s: check(p), want="define and CALL apk_launch_verify")
+
+g.negatives_ran(16)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

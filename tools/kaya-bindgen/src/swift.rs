@@ -328,6 +328,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let up = prop.to_uppercase();
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::F64 => (camel(prop), "Double", "f64"),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
             crate::PropKind::Date | crate::PropKind::Time => {

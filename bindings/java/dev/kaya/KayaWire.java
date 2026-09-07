@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x50347d52a1eef1b4L;
+    public static final long SPEC_HASH = 0x0e5f6241c88af41cL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -102,6 +102,7 @@ public final class KayaWire {
     public static final int PROP_MIN_COLUMN_WIDTH = 28;
     public static final int PROP_WRAP = 29;
     public static final int PROP_PLACEHOLDER = 30;
+    public static final int PROP_HREF = 31;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -115,6 +116,7 @@ public final class KayaWire {
     public static final int SPROP_TITLE = 1;
     public static final int SPROP_ICON = 2;
     public static final int SPROP_SYMBOL = 3;
+    public static final int SPROP_BADGE = 4;
     public static final int MENU_KIND_MENU = 1;
     public static final int MENU_KIND_ACTION = 2;
     public static final int MENU_KIND_TOGGLE = 3;
@@ -159,6 +161,8 @@ public final class KayaWire {
     public static final int ROLE_HEADING = 3;
     public static final int ROLE_CAPTION = 4;
     public static final int ROLE_PLAIN = 5;
+    public static final int ROLE_SWITCH = 6;
+    public static final int ROLE_LINK = 7;
     public static final int SYMBOL_ADD = 1;
     public static final int SYMBOL_REMOVE = 2;
     public static final int SYMBOL_DELETE = 3;
@@ -1590,6 +1594,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant href value. */
+    public static byte[] txSetHref(long widgetId, String href) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HREF).putInt(SOURCE_CONST);
+        encodeValue(b, href);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound href value. */
+    public static byte[] txBindHref(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HREF).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindHrefElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_HREF).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -1782,6 +1809,21 @@ public final class KayaWire {
     public static byte[] txBindSectionSymbol(long section, long signalId) {
         Enc b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section).putInt(SPROP_SYMBOL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_section_prop with a constant badge value. */
+    public static byte[] txSetSectionBadge(long section, double badge) {
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_BADGE).putInt(SOURCE_CONST);
+        encodeValue(b, badge);
+        return finish(b);
+    }
+
+    /** set_section_prop with a signal-bound badge value. */
+    public static byte[] txBindSectionBadge(long section, long signalId) {
+        Enc b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_BADGE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

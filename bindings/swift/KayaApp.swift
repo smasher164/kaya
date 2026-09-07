@@ -346,6 +346,14 @@ enum KayaRole: Int64 {
     /// An action at low emphasis: a row's accessory (Details, Open).
     /// Buttons only.
     case plain = 5
+    /// A checkbox drawn as the platform's SWITCH and reporting its trait
+    /// (docs/tasks-s2-plan.md T1): a setting that takes effect at once.
+    /// Backticked because `switch` is a Swift keyword — the NAME is the
+    /// role's, the backticks are the language's.
+    case `switch` = 6
+    /// A label drawn as the platform's LINK, opening its `href` through
+    /// the platform's own opener (docs/tasks-s2-plan.md T3).
+    case link = 7
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
@@ -2712,6 +2720,16 @@ final class KayaAppTx {
         tx.bindPlaceholder(w.id, s.id)
     }
 
+    /// The DESTINATION a `.link` label opens (docs/tasks-s2-plan.md T3):
+    /// the platform's own opener takes it and nothing is emitted.
+    func setHref(_ w: KayaWidget, _ url: String) {
+        tx.setHref(w.id, url)
+    }
+
+    func setHref(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindHref(w.id, s.id)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }
@@ -4058,14 +4076,20 @@ final class KayaAppTx {
     /// switching is SELECTION, not lifecycle. `onSelected` fires each time
     /// the USER switches to it — post-fact and NOT one-shot; a
     /// programmatic selectSection does not fire it.
+    /// `badge:` is the COUNT on the switcher item
+    /// (docs/tasks-s2-plan.md T2) — a number or, through
+    /// `badgeSignal:`, a signal holding one; zero clears.
     func addSection(
         _ id: UInt64, title: String? = nil, symbol: KayaSymbol? = nil,
+        badge: Double? = nil, badgeSignal: KayaSignal? = nil,
         onSelected: ((KayaAppTx) throws -> Void)? = nil,
         window: UInt64 = 0
     ) {
         tx.addSection(window, id)
         if let title { tx.setSectionTitle(id, title) }
         if let symbol { tx.setSectionSymbol(id, symbol.rawValue) }
+        if let badge { tx.setSectionBadge(id, badge) }
+        if let badgeSignal { tx.bindSectionBadge(id, badgeSignal.id) }
         if let onSelected { app.onSectionSelected(id, onSelected) }
     }
 
@@ -4181,6 +4205,19 @@ final class KayaTpl {
 
     func setPlaceholder(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
         tx.tx.bindPlaceholderElement(n.id, level: level, field: f.index)
+    }
+
+    /// A stamped link's DESTINATION (KayaTx.setHref).
+    func setHref(_ n: KayaNodeHandle, _ url: String) {
+        tx.tx.setHref(n.id, url)
+    }
+
+    func setHref(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindHref(n.id, s.id)
+    }
+
+    func setHref(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindHrefElement(n.id, level: level, field: f.index)
     }
 
     /// A stamped copy's cross-axis stretch (KayaTx.setFill).

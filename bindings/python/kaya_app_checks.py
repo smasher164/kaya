@@ -2969,4 +2969,84 @@ check("a value_committed occurrence reaches on_commit and NOT on_change",
 check("a stamped value_committed passes the copy's keys first",
       slider_row_commits == [("b", 40.0)])
 
+# --- S2: THE SWITCH ROLE, THE LINK'S href, THE SECTION BADGE ---------
+# (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator hands
+# every binding as NUMBERS and each binding names by hand: a role name
+# that packed the wrong number draws the wrong control, an `href` that
+# reached any prop but 31 opens nothing, and a badge on the wrong section
+# prop counts on the wrong item — none of it visible to a scene until a
+# platform is asked to draw it.
+check("Role.SWITCH and Role.LINK are the wire's own numbers",
+      kaya.Role.SWITCH == kaya.wire.ROLE_SWITCH == 6
+      and kaya.Role.LINK == kaya.wire.ROLE_LINK == 7)
+
+app_s2 = kaya.App()
+with app_s2.window():
+    with kaya.column():
+        s2_box = kaya.checkbox("Hide the badge")
+        # BOTH SPELLINGS, the name and the enum, on the ROLE prop.
+        check("a switch-role checkbox packs role value 6",
+              _const_num_prop(lambda: s2_box.role("switch"),
+                              kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
+              == (s2_box.id, 6))
+        check("kaya.Role.SWITCH packs the same record the name does",
+              _const_num_prop(lambda: s2_box.role(kaya.Role.SWITCH),
+                              kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
+              == _const_num_prop(lambda: s2_box.role("switch"),
+                                 kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64))
+
+        s2_link = kaya.label("kaya/tasks")
+        check("a link-role label packs role value 7",
+              _const_num_prop(lambda: s2_link.role("link"),
+                              kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
+              == (s2_link.id, 7))
+        # THE href PROP: a Str const on prop 31, and the keyword on the
+        # constructor is the chained call's own bytes.
+        check("href packs a const string on the href prop",
+              _const_str_prop(lambda: s2_link.href("https://kaya.dev/t/1"),
+                              kaya.wire.PROP_HREF)
+              == "https://kaya.dev/t/1")
+        s2_href_signal = kaya.signal("https://kaya.dev/t/2")
+        check("href takes a signal too",
+              _signal_prop(lambda: s2_link.href(s2_href_signal),
+                           kaya.wire.PROP_HREF) == s2_href_signal.id)
+
+        before_s2 = len(kaya._tx)
+        s2_keyed = kaya.label("kaya/tasks", href="https://kaya.dev/t/1")
+        s2_keyed_records = kaya._tx[before_s2:]
+        check("label(href=) writes what .href() writes",
+              kaya.wire.tx_set_href(s2_keyed.id, "https://kaya.dev/t/1")
+              in s2_keyed_records)
+
+# THE SECTION BADGE is a SECTION prop (SPROP_BADGE), a different wire
+# slot from every widget prop above, and it takes a count OR a signal.
+app_badge = kaya.App()
+with app_badge.window():
+    before_b = len(kaya._tx)
+    with app_badge.add_section(5150, title="Today", badge=3):
+        with kaya.column():
+            kaya.label("today")
+    badge_const_records = kaya._tx[before_b:]
+
+    badge_signal = kaya.signal(0)
+    before_b = len(kaya._tx)
+    with app_badge.add_section(5151, title="Inbox", badge=badge_signal):
+        with kaya.column():
+            kaya.label("inbox")
+    badge_signal_records = kaya._tx[before_b:]
+
+check("add_section(badge=count) packs the F64 count on SPROP_BADGE",
+      kaya.wire.tx_set_section_badge(5150, 3.0) in badge_const_records)
+check("add_section(badge=signal) binds the section prop instead",
+      kaya.wire.tx_bind_section_badge(5151, badge_signal.id)
+      in badge_signal_records
+      and not any(
+          _rec_kind(r) == kaya.wire.TX_SET_SECTION_PROP
+          and int.from_bytes(r[16:20], "little") == kaya.wire.SPROP_BADGE
+          and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+          for r in badge_signal_records))
+check("zero is a badge value and not an absent one (it CLEARS)",
+      kaya.wire.tx_set_section_badge(5150, 0.0)
+      != kaya.wire.tx_set_section_badge(5150, 3.0))
+
 sys.exit(1 if failures else 0)

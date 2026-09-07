@@ -117,6 +117,7 @@ module KayaApp
     bindA11yHint,
     bindHelp,
     bindPlaceholder,
+    bindHref,
     LiveStrSource (..),
     bindChecked,
     bindValue,
@@ -132,6 +133,7 @@ module KayaApp
     setA11yHint,
     setHelp,
     setPlaceholder,
+    setHref,
     setRole,
     Align (..),
     Axis (..),
@@ -1266,6 +1268,13 @@ data SectionAttr
   | -- | The switcher item's SEMANTIC ICON ('Symbol'): a concept each
     -- backend draws in its own platform's symbol set.
     SSymbol Symbol
+  | -- | The COUNT on the switcher item (docs\/tasks-s2-plan.md T2): the
+    -- platforms draw it where they draw a badge, GTK as a pill on the
+    -- row. Zero clears.
+    SBadge Double
+  | -- | The count from a signal, so a changing total moves the badge
+    -- without a rebuild.
+    SBadgeBound Signal
   | SOnSelected (IO ())
 
 -- | Push a navigation entry onto the primary surface's stack (entry ids
@@ -1304,6 +1313,8 @@ addSectionIn w n attrs = do
   where
     apply (STitle t) = emitB (W.txSetSectionTitle n t)
     apply (SSymbol s) = emitB (W.txSetSectionSymbol n (symbolWire s))
+    apply (SBadge c) = emitB (W.txSetSectionBadge n c)
+    apply (SBadgeBound (Signal s)) = emitB (W.txBindSectionBadge n s)
     apply (SOnSelected handler) = pendB (PSectionSelected n handler)
 
 -- | Select a section programmatically: configuration, never echoes
@@ -2117,6 +2128,13 @@ data Role
   | -- | An action at low emphasis: a row's accessory (Details, Open).
     -- Buttons only.
     Plain
+  | -- | A checkbox drawn as the platform's SWITCH and reporting its
+    -- trait (docs\/tasks-s2-plan.md T1): a setting that takes effect at
+    -- once. Checkboxes only.
+    Switch
+  | -- | A label drawn as the platform's LINK, opening its 'Href' through
+    -- the platform's own opener (docs\/tasks-s2-plan.md T3). Labels only.
+    Link
   deriving (Eq, Show)
 
 roleWire :: Role -> Int64
@@ -2125,6 +2143,8 @@ roleWire Prominent = 2
 roleWire Heading = 3
 roleWire Caption = 4
 roleWire Plain = 5
+roleWire Switch = 6
+roleWire Link = 7
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
 setRole :: Widget -> Role -> Build ()
@@ -2174,6 +2194,14 @@ setPlaceholder (Widget w) v = emitB (W.txSetPlaceholder w v)
 
 bindPlaceholder :: Widget -> Signal -> Build ()
 bindPlaceholder (Widget w) (Signal s) = emitB (W.txBindPlaceholder w s)
+
+-- | The DESTINATION a 'Link' label opens (docs\/tasks-s2-plan.md T3): the
+-- platform's own opener takes it and nothing is emitted.
+setHref :: Widget -> String -> Build ()
+setHref (Widget w) v = emitB (W.txSetHref w v)
+
+bindHref :: Widget -> Signal -> Build ()
+bindHref (Widget w) (Signal s) = emitB (W.txBindHref w s)
 
 -- | What a LIVE widget's Str a11y prop can take: a constant or a signal —
 -- the attr picks the setter by the argument's type, as the template
@@ -2237,6 +2265,10 @@ data Attr (c :: WClass) where
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
   Placeholder :: LiveStrSource s => s -> Attr 'LeafW
+  -- | The DESTINATION this 'Link' label opens
+  -- (docs\/tasks-s2-plan.md T3): the platform's own opener takes it, and
+  -- nothing is emitted.
+  Href :: LiveStrSource s => s -> Attr 'LeafW
   -- | A date picker's inclusive lower bound (docs/datetime-plan.md D4);
   -- a pick past it lands on the bound.
   MinDate :: Day -> Attr 'LeafW
@@ -2278,6 +2310,7 @@ applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Help h) w = liveStr setHelp bindHelp w h
 applyAttr (Placeholder p) w = liveStr setPlaceholder bindPlaceholder w p
+applyAttr (Href u) w = liveStr setHref bindHref w u
 applyAttr (MinDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMinDate n (fromIntegral y) m dd)
@@ -2850,13 +2883,14 @@ data StrProp = StrProp
     strElement :: Word64 -> Word32 -> Word32 -> Builder
   }
 
-textProp, a11yIdProp, a11yLabelProp, a11yHintProp, helpProp, placeholderProp :: StrProp
+textProp, a11yIdProp, a11yLabelProp, a11yHintProp, helpProp, placeholderProp, hrefProp :: StrProp
 textProp = StrProp W.txSetText W.txBindText W.txBindTextElement
 a11yIdProp = StrProp W.txSetA11yId W.txBindA11yId W.txBindA11yIdElement
 a11yLabelProp = StrProp W.txSetA11yLabel W.txBindA11yLabel W.txBindA11yLabelElement
 a11yHintProp = StrProp W.txSetA11yHint W.txBindA11yHint W.txBindA11yHintElement
 helpProp = StrProp W.txSetHelp W.txBindHelp W.txBindHelpElement
 placeholderProp = StrProp W.txSetPlaceholder W.txBindPlaceholder W.txBindPlaceholderElement
+hrefProp = StrProp W.txSetHref W.txBindHref W.txBindHrefElement
 
 -- | What a template Str prop can bind to: a constant, a signal, or the
 -- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
@@ -2995,6 +3029,9 @@ data TplAttr where
   -- | The PROMPT this stamped field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only.
   TplPlaceholder :: TplStrSource s => s -> TplAttr
+  -- | The DESTINATION this stamped 'Link' label opens
+  -- (docs\/tasks-s2-plan.md T3).
+  TplHref :: TplStrSource s => s -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
@@ -3033,6 +3070,7 @@ applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
 applyTplAttr (TplHelp src) n = bindStrSource helpProp n src
 applyTplAttr (TplPlaceholder src) n = bindStrSource placeholderProp n src
+applyTplAttr (TplHref src) n = bindStrSource hrefProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)

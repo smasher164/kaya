@@ -983,6 +983,37 @@ func (w Widget) BindPlaceholder(s Signal[string]) Widget {
 	return w
 }
 
+// SetHref sets the DESTINATION a RoleLink label opens
+// (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
+// nothing is emitted.
+func (tx *Tx) SetHref(w Widget, url string) {
+	tx.emit(TxSetHref(w.id, url))
+}
+
+// BindHref binds a link's destination to a signal.
+func (tx *Tx) BindHref(w Widget, s Signal[string]) {
+	tx.emit(TxBindHref(w.id, s.id))
+}
+
+// Href sets this link's destination at construction. Same transaction
+// discipline as Grow.
+func (w Widget) Href(url string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Href on a widget outside its build transaction — use Tx.SetHref inside a live transaction")
+	}
+	w.tx.SetHref(w, url)
+	return w
+}
+
+// BindHref binds this link's destination to a signal at construction.
+func (w Widget) BindHref(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindHref on a widget outside its build transaction — use Tx.BindHref inside a live transaction")
+	}
+	w.tx.BindHref(w, s)
+	return w
+}
+
 // SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
 // it looks (docs/styling-plan.md D4). The vocabulary is closed and the
 // root refuses a misfit at declare time. (The Role* STRING constants
@@ -3191,6 +3222,21 @@ func (r SectionRef) Symbol(symbol int64) SectionRef {
 	return r
 }
 
+// Badge is the COUNT on the switcher item (docs/tasks-s2-plan.md T2):
+// the platforms draw it where they draw a badge, GTK as a pill on the
+// row. Zero clears.
+func (r SectionRef) Badge(count float64) SectionRef {
+	r.tx.emit(TxSetSectionBadge(r.id, count))
+	return r
+}
+
+// BadgeBound takes the count from a signal, so a changing total moves
+// the badge without a rebuild.
+func (r SectionRef) BadgeBound(s Signal[float64]) SectionRef {
+	r.tx.emit(TxBindSectionBadge(r.id, s.id))
+	return r
+}
+
 // OnSelected binds the selected handler to THIS section: fires each
 // time the USER switches to it — post-fact and NOT one-shot. A
 // programmatic SelectSection does not fire it (the echo doctrine).
@@ -3681,6 +3727,19 @@ func (t *Tpl) BindPlaceholder[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
 	t.applyStrProp(n, src, TxBindPlaceholder, TxBindPlaceholderElement)
+}
+
+// SetHref gives every stamped link the same destination (Tx.SetHref).
+func (t *Tpl) SetHref(n Node, url string) {
+	t.tx.emit(TxSetHref(n.id, url))
+}
+
+// BindHref sources each stamped link's destination from a varying
+// source — the row's own field being the case it exists for.
+func (t *Tpl) BindHref[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindHref, TxBindHrefElement)
 }
 
 // SetFill spans every stamped copy across its container's cross axis, or

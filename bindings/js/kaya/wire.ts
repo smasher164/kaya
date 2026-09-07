@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x50347d52a1eef1b4n;
+export const SPEC_HASH = 0x0e5f6241c88af41cn;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -96,6 +96,7 @@ export const PROP_FILL = 27;
 export const PROP_MIN_COLUMN_WIDTH = 28;
 export const PROP_WRAP = 29;
 export const PROP_PLACEHOLDER = 30;
+export const PROP_HREF = 31;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -109,6 +110,7 @@ export const EPROP_INTERCEPT_BACK = 2;
 export const SPROP_TITLE = 1;
 export const SPROP_ICON = 2;
 export const SPROP_SYMBOL = 3;
+export const SPROP_BADGE = 4;
 export const MENU_KIND_MENU = 1;
 export const MENU_KIND_ACTION = 2;
 export const MENU_KIND_TOGGLE = 3;
@@ -153,6 +155,8 @@ export const ROLE_PROMINENT = 2;
 export const ROLE_HEADING = 3;
 export const ROLE_CAPTION = 4;
 export const ROLE_PLAIN = 5;
+export const ROLE_SWITCH = 6;
+export const ROLE_LINK = 7;
 export const SYMBOL_ADD = 1;
 export const SYMBOL_REMOVE = 2;
 export const SYMBOL_DELETE = 3;
@@ -1131,6 +1135,21 @@ export function tx_bind_placeholder_element(widget_id: number, level = 0, field 
   return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_PLACEHOLDER), u32(SOURCE_ELEMENT), u32(level), u32(field)));
 }
 
+/** set_property with a constant href value. */
+export function tx_set_href(widget_id: number, href: string): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_CONST), enc.value(href)));
+}
+
+/** set_property with a signal-bound href value. */
+export function tx_bind_href(widget_id: number, signal_id: number): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_href_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  return record(TX_SET_PROPERTY, cat(u64(widget_id), u32(PROP_HREF), u32(SOURCE_ELEMENT), u32(level), u32(field)));
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_TITLE), u32(SOURCE_CONST), enc.value(title)));
@@ -1259,6 +1278,16 @@ export function tx_set_section_symbol(section: number, symbol: number): Uint8Arr
 /** set_section_prop with a signal-bound symbol value. */
 export function tx_bind_section_symbol(section: number, signal_id: number): Uint8Array {
   return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_SYMBOL), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_section_prop with a constant badge value. */
+export function tx_set_section_badge(section: number, badge: number): Uint8Array {
+  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_BADGE), u32(SOURCE_CONST), enc.value(badge)));
+}
+
+/** set_section_prop with a signal-bound badge value. */
+export function tx_bind_section_badge(section: number, signal_id: number): Uint8Array {
+  return record(TX_SET_SECTION_PROP, cat(u64(section), u32(SPROP_BADGE), u32(SOURCE_SIGNAL), u64(signal_id)));
 }
 
 const SHORTCUT_NAMED_KEYS = new Set(["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]);

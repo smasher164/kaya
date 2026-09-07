@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.system.Os
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import dev.kaya.KayaCompose
 import dev.kaya.KayaPy
 import dev.kaya.KayaRing
@@ -18,6 +19,13 @@ import java.io.File
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The launch slot's other half: the manifest names
+        // Theme.Kaya.Launch and THIS swaps the activity onto
+        // postSplashScreenTheme. Without it the window background
+        // stays the launch colour for the app's whole life
+        // (docs/tasks-s2-plan.md T4; tools/check-app-identity.py
+        // holds every app module to making the call).
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         // KAYA_* intent extras into libc's live environ BEFORE the

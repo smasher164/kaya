@@ -258,6 +258,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let up = prop.to_uppercase();
         let (param, ty, expr) = match kind {
             PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
+            PropKind::F64 => (*prop, "float", format!("_enc.value({prop})")),
             PropKind::Blob => (
                 "handle",
                 "a kaya_blob_register handle, consumed by the next submit",

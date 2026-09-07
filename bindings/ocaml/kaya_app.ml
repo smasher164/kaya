@@ -672,6 +672,13 @@ let set_placeholder (Widget id) value =
 let bind_placeholder (Widget id) (Signal s) =
   emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s)
 
+(* The DESTINATION a [Link] label opens (docs/tasks-s2-plan.md T3): the
+   platform's own opener takes it and nothing is emitted. *)
+let set_href (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_href id value)
+
+let bind_href (Widget id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_href id s)
+
 (* The three universal props as they ride every constructor: applied
    together, in one place, so a new constructor cannot pick up [~grow]
    and quietly miss these. *)
@@ -726,7 +733,7 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
    never how it looks. [Destructive] and [Prominent] are an ACTION's
    emphasis and belong to a button; [Heading] and [Caption] are text
    hierarchy facts and belong to a label. *)
-type role = Destructive | Prominent | Heading | Caption | Plain
+type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link
 
 let role_wire = function
   | Destructive -> Int64.of_int Kaya_wire.role_destructive
@@ -734,6 +741,8 @@ let role_wire = function
   | Heading -> Int64.of_int Kaya_wire.role_heading
   | Caption -> Int64.of_int Kaya_wire.role_caption
   | Plain -> Int64.of_int Kaya_wire.role_plain
+  | Switch -> Int64.of_int Kaya_wire.role_switch
+  | Link -> Int64.of_int Kaya_wire.role_link
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
@@ -907,7 +916,7 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   | None -> ());
   w
 
-let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?text ?bind () =
+let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?href ?href_bind ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -915,6 +924,8 @@ let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   (* [Heading] and [Caption] are the label's roles; the two button
      emphases die here. *)
   Option.iter (fun r -> set_role w r) role;
+  Option.iter (fun u -> set_href w u) href;
+  Option.iter (fun s -> bind_href w s) href_bind;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun s -> bind_text w s) bind;
   w
@@ -1878,13 +1889,19 @@ let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
    retained while covered (switching is SELECTION, not lifecycle).
    [~on_selected] fires each time the USER switches to it — NOT one-shot;
    a programmatic [select_section] does not fire it (the echo doctrine). *)
-let add_section ?(window = 0L) ?title ?symbol ?on_selected id =
+let add_section ?(window = 0L) ?title ?symbol ?badge ?badge_bind ?on_selected id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_section window id);
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_section_title id t)) title;
   Option.iter
     (fun s -> emit tx (Kaya_wire.tx_set_section_symbol id (symbol_wire s)))
     symbol;
+  (* The COUNT on the switcher item (docs/tasks-s2-plan.md T2); zero
+     clears. *)
+  Option.iter (fun c -> emit tx (Kaya_wire.tx_set_section_badge id c)) badge;
+  Option.iter
+    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_section_badge id s))
+    badge_bind;
   Option.iter
     (fun f -> Hashtbl.replace tx.app.section_selected id f)
     on_selected
@@ -2756,6 +2773,16 @@ module Tpl = struct
     let bind_placeholder_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_placeholder_element ~level ~field:fd.fd_index id)
 
+    (* A stamped link's DESTINATION (docs/tasks-s2-plan.md T3). *)
+    let set_href (Node id) value =
+      emit (the_tx ()) (Kaya_wire.tx_set_href id value)
+
+    let bind_href (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_href id s)
+
+    let bind_href_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_href_element ~level ~field:fd.fd_index id)
+
     (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. It cannot
        be a type here ([node] is not typed by kind), so the wall is the
        constructors and the root's own refusal at DECLARE time. *)
@@ -3037,7 +3064,8 @@ module Tpl = struct
     n
 
   let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?role ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?role ?href
+      ?href_bind ?href_field ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_label in
     Option.iter (fun g -> Floor.set_grow n g) grow;
@@ -3047,6 +3075,9 @@ module Tpl = struct
     (* [Heading] and [Caption] are the label's roles; the two button
        emphases die at the root. *)
     Option.iter (fun r -> Floor.set_role n r) role;
+    Option.iter (fun u -> Floor.set_href n u) href;
+    Option.iter (fun s -> Floor.bind_href n s) href_bind;
+    Option.iter (fun fd -> Floor.bind_href_field ~level n fd) href_field;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
     Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;

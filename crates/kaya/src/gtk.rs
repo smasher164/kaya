@@ -1773,6 +1773,10 @@ enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
     Label(gtk4::Label),
+    /// The label kind wearing `role link` (docs/tasks-s2-plan.md T3): a
+    /// `GtkLinkButton` carrying `href` as its uri. GTK opens it through
+    /// `gtk_show_uri` on activation and kaya emits nothing.
+    Link(gtk4::LinkButton),
     Entry(gtk4::Entry),
     /// The entry's contract on GTK's own search widget (docs/search-plan.md
     /// S2): `GtkSearchEntry` is a `GtkWidget` implementing `GtkEditable`, NOT
@@ -1780,6 +1784,11 @@ enum NativeWidget {
     Search(gtk4::SearchEntry),
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
+    /// The checkbox kind wearing `role switch` (docs/tasks-s2-plan.md T1):
+    /// GTK's own switch on screen, a checkbox to the model — `checked`,
+    /// `toggled`, the `toggle` verb. GtkSwitch is no CheckButton subclass, so
+    /// the role swaps the control (`swap_control`).
+    Switch(gtk4::Switch),
     Slider(GtkSlider),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
@@ -1813,10 +1822,12 @@ impl NativeWidget {
             NativeWidget::Column(w) => w.clone().upcast(),
             NativeWidget::Button(w) => w.clone().upcast(),
             NativeWidget::Label(w) => w.clone().upcast(),
+            NativeWidget::Link(w) => w.clone().upcast(),
             NativeWidget::Entry(w) => w.clone().upcast(),
             NativeWidget::Search(w) => w.clone().upcast(),
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
+            NativeWidget::Switch(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
@@ -1844,6 +1855,111 @@ impl NativeWidget {
             other => other.widget(),
         }
     }
+}
+
+/// The text a LABEL registry slot draws, whichever control the role left
+/// there (docs/tasks-s2-plan.md T3): a `GtkLinkButton`'s caption is its
+/// `label` property, not a `GtkLabel`'s `text`.
+fn label_text(widget: &gtk4::Widget) -> String {
+    use gtk4::prelude::{ButtonExt, Cast};
+    if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+        return label.text().to_string();
+    }
+    if let Some(link) = widget.downcast_ref::<gtk4::LinkButton>() {
+        return link.label().map(|s| s.to_string()).unwrap_or_default();
+    }
+    String::new()
+}
+
+/// The checked bit a CHECKBOX registry slot holds, and the write that moves
+/// it — a `GtkSwitch` (the switch role, T1) is no `GtkCheckButton`, and both
+/// signal their change under `apply_quiet` the same way.
+fn set_checked(widget: &gtk4::Widget, on: bool) {
+    use gtk4::prelude::{Cast, CheckButtonExt};
+    if let Some(check) = widget.downcast_ref::<gtk4::CheckButton>() {
+        check.set_active(on);
+    } else if let Some(switch) = widget.downcast_ref::<gtk4::Switch>() {
+        switch.set_active(on);
+    }
+}
+
+/// Put `new` where the widget behind `id` sits and take the old one out.
+///
+/// A ROLE THAT DECIDES THE CONTROL (T1's switch, T3's link) always arrives
+/// AFTER the widget exists and is parented: every binding's sugar parents at
+/// create (`Tx::auto_parent`) and spells a role as a property after it. So the
+/// lowering is a swap, and the pieces that have to move with it are the ones
+/// `AddChild` and the props before the role can have set — the child's place
+/// among its siblings, the layout stamps kaya keeps as object data, and the
+/// registry SLOT, whose position is the `kind#index` ordinal.
+///
+/// GtkBox's own `append`/`remove` are `gtk_widget_insert_before` and
+/// `gtk_widget_unparent`, so `insert_child_after` is what the container would
+/// have done for the new child anyway; the two normalizations `AddChild` ends
+/// with are re-run rather than copied.
+fn swap_control(core: &mut CoreState, id: WidgetId, native: NativeWidget) {
+    use gtk4::prelude::{BoxExt, Cast, WidgetExt};
+    let old = core.widgets[&id].widget();
+    let new = native.widget();
+    for class in old.css_classes() {
+        new.add_css_class(&class);
+    }
+    new.set_widget_name(&old.widget_name());
+    new.set_tooltip_text(old.tooltip_text().as_deref());
+    new.set_visible(old.is_visible());
+    new.set_sensitive(old.is_sensitive());
+    new.set_margin_start(old.margin_start());
+    new.set_margin_end(old.margin_end());
+    new.set_margin_top(old.margin_top());
+    new.set_margin_bottom(old.margin_bottom());
+    set_grow_weight(&new, grow_weight(&old));
+    if let Some(on) = fill_of(&old) {
+        set_fill(&new, on);
+    }
+    if let Some(track) = child_track(&old) {
+        set_child_track(&new, track);
+    }
+    if let Some(parent) = old.parent() {
+        let after = old.prev_sibling();
+        match parent.downcast_ref::<gtk4::Box>() {
+            Some(container) => {
+                container.remove(&old);
+                container.insert_child_after(&new, after.as_ref());
+            }
+            // EVERY OTHER PARENT NAMES ITSELF. A grid attaches by row and
+            // column, a scroll viewport holds exactly one child, and a
+            // labelled row's seats are its own — none of them is a sibling
+            // list, so a splice here would put the control somewhere the
+            // container does not know about and the app would render without
+            // it. Refused with the GType, which is what was measured.
+            None => panic!(
+                "kaya: a role that changes the control (docs/tasks-s2-plan.md T1, T3) \
+                 needs a sibling list to splice into, and widget {} sits in a {} — \
+                 declare the switch or the link inside a row or a column",
+                id.0,
+                parent.type_().name()
+            ),
+        }
+        restamp_cross_align(&new);
+        reconcile_grow_align(&new);
+    }
+    // The registry slot is the ordinal, so it is REPLACED and never appended:
+    // `checkbox#0` must still name this widget after the role lands.
+    for slot in core.checkboxes.iter_mut().chain(core.labels.iter_mut()) {
+        if *slot == old {
+            *slot = new.clone();
+        }
+    }
+    // The seats a labelled row remembers hold widgets, not ids.
+    for seats in core.labeled_rows.values_mut() {
+        if seats.label.as_ref() == Some(&old) {
+            seats.label = Some(new.clone());
+        }
+        if seats.action.as_ref() == Some(&old) {
+            seats.action = Some(new.clone());
+        }
+    }
+    core.widgets.insert(id, native);
 }
 
 /// A labelled row's seats (docs/forms-plan.md §2): how many children have
@@ -2317,11 +2433,11 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
     use gtk4::prelude::Cast;
     match kind {
         K::Button => core.buttons.iter().map(|w| w.clone().upcast()).collect(),
-        K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
+        K::Checkbox => core.checkboxes.clone(),
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
-        K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
+        K::Label => core.labels.clone(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
         K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
         K::Image => core.images.iter().map(|w| w.clone().upcast()).collect(),
@@ -3010,6 +3126,10 @@ struct GtkSectionPage {
     /// `icon-name` survives a chrome rebuild. Not an observation: the harness
     /// reads the switcher's own GtkImage.
     symbol: i64,
+    /// The count the switcher row draws (docs/tasks-s2-plan.md T2), 0 for
+    /// none — held for the same reason `symbol` is, since a chrome rebuild
+    /// mints fresh rows. Not an observation: the harness reads the pill.
+    badge: f64,
     root: Option<gtk4::Widget>,
 }
 
@@ -3021,8 +3141,13 @@ struct CoreState {
     // Per-kind registries in creation order (stamped copies included): the
     // harness names targets as kind#index.
     buttons: Vec<gtk4::Button>,
-    checkboxes: Vec<gtk4::CheckButton>,
-    labels: Vec<gtk4::Label>,
+    /// The two registries a ROLE can re-type (docs/tasks-s2-plan.md T1, T3):
+    /// a checkbox is a `GtkCheckButton` or a `GtkSwitch`, a label a `GtkLabel`
+    /// or a `GtkLinkButton`, and neither pair shares a subclass — so the slot
+    /// holds the widget and `swap_control` replaces it IN PLACE, since the
+    /// position IS the `kind#index` ordinal.
+    checkboxes: Vec<gtk4::Widget>,
+    labels: Vec<gtk4::Widget>,
     /// Every tagged widget's occurrence tag (the on_click_node encoding:
     /// the template node and the copy's key path), by widget id — what a
     /// `kind@id[key.path]` target resolves through for every tagged kind,
@@ -3091,6 +3216,11 @@ struct CoreState {
     /// whose constructor sets the props before the text. The text arms
     /// re-apply it from here.
     a11y_labels: HashMap<u64, String>,
+    /// The declared `href` per widget (docs/tasks-s2-plan.md T3), because the
+    /// prop and the `link` role arrive in either order: the role reads this to
+    /// build the LinkButton, and a prop landing after writes both. Never an
+    /// observation — `Stage::href` reads the control's own uri.
+    hrefs: HashMap<u64, String>,
     /// The DropDown's string model per select id (rows appended at
     /// AddChild; text arrives via the label's SetProp).
     select_models: HashMap<u64, gtk4::StringList>,
@@ -3178,6 +3308,11 @@ struct CoreState {
     /// The arm that ACTUALLY assembled that chrome, per window — stamped
     /// inside each branch of refresh_sections, never derived from the hint.
     sections_rendered: HashMap<u64, &'static str>,
+    /// The sidebar arm's row list per window, KAYA'S OWN (docs/tasks-s2-plan.md
+    /// T2, docs/traps.md: GtkStackSidebar owns its rows' children and rewrites them). The
+    /// cell is shared with the stack's mirror handler, which may not borrow
+    /// CORE; the bar arm clears it.
+    section_lists: HashMap<u64, Rc<RefCell<Option<gtk4::ListBox>>>>,
     selected_sections: HashMap<u64, u64>,
     sections_presentation: HashMap<u64, i64>,
     /// The window's OWN mounted root and title, restored on pop.
@@ -4513,7 +4648,7 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
 
 /// Assemble (or reassemble on a hint change) the window's sections chrome: a
 /// GtkStack of section pages under the presentation's switcher — the header
-/// StackSwitcher for auto/bar, GtkStackSidebar for sidebar. The stack's
+/// StackSwitcher for auto/bar, kaya's own row list for sidebar. The stack's
 /// notify::visible-child is the USER route.
 fn refresh_sections(core: &mut CoreState, window: u64) {
     use gtk4::prelude::{BoxExt, Cast, ObjectExt, WidgetExt};
@@ -4550,6 +4685,25 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
                 });
             }
         });
+        // THE OTHER HALF OF THE SIDEBAR BINDING (docs/tasks-s2-plan.md T2):
+        // every programmatic move of the stack — the first section's default,
+        // ApplyOp::SelectSection, the harness's select_section — moves the row
+        // selection, and none of them may emit. Reads the shared cell and
+        // never CORE, which is borrowed on all three paths.
+        let rows = core.section_lists.entry(window).or_default().clone();
+        let quiet = core.apply_quiet.clone();
+        stack.connect_notify_local(Some("visible-child"), move |st, _| {
+            let Some(list) = rows.borrow().clone() else { return };
+            let Some(name) = st.visible_child_name() else { return };
+            let Ok(sid) = name.as_str().parse::<u64>() else { return };
+            let Some(row) = section_row(&list, sid) else { return };
+            if list.selected_row().as_ref() == Some(&row) {
+                return;
+            }
+            let was = quiet.replace(true);
+            list.select_row(Some(&row));
+            quiet.set(was);
+        });
         core.section_stacks.insert(window, stack);
     }
     let stack = core.section_stacks[&window].clone();
@@ -4576,12 +4730,39 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
         stack.set_hexpand(true);
         stack.set_vexpand(true);
         let chrome = if hint == 2 {
-            // sidebar: the leading-edge list spelling.
+            // sidebar: the leading-edge list spelling, and KAYA BUILDS THE ROWS
+            // (docs/tasks-s2-plan.md T2; docs/traps.md: GtkStackSidebar owns its rows'
+            // children and rewrites them).
             let container = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-            let sidebar = gtk4::StackSidebar::new();
-            sidebar.set_stack(&stack);
-            container.append(&sidebar);
+            let list = gtk4::ListBox::new();
+            list.set_selection_mode(gtk4::SelectionMode::Single);
+            list.add_css_class(SIDEBAR_CLASS);
+            {
+                let quiet = core.apply_quiet.clone();
+                let stack = stack.clone();
+                list.connect_row_selected(move |_, row| {
+                    // THE USER ROUTE, and the one a GtkStackSidebar click took:
+                    // move the stack, and its notify::visible-child does the
+                    // emitting. The row's own stamp and nothing else — CORE is
+                    // borrowed whenever kaya moves the selection itself.
+                    if quiet.get() {
+                        return;
+                    }
+                    let Some(sid) = row.and_then(section_of_row) else { return };
+                    stack.set_visible_child_name(&sid.to_string());
+                });
+            }
+            let scroller = gtk4::ScrolledWindow::new();
+            scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+            scroller.set_propagate_natural_width(true);
+            scroller.set_vexpand(true);
+            scroller.set_child(Some(&list));
+            container.append(&scroller);
             container.append(&stack);
+            core.section_lists
+                .entry(window)
+                .or_default()
+                .replace(Some(list));
             // THE ARM STAMPS ITSELF, here and in the peer below: the
             // observation is what RENDERED, so both branches record it
             // and neither reader may consult the hint.
@@ -4595,6 +4776,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
             switcher.set_halign(gtk4::Align::Center);
             container.append(&switcher);
             container.append(&stack);
+            core.section_lists.entry(window).or_default().replace(None);
             core.sections_rendered.insert(window, "bar");
             container
         };
@@ -4610,14 +4792,18 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
     // A rebuilt GtkStackSwitcher mints fresh buttons, so the accessible
     // descriptions are re-stamped every time, not once at declare time.
     refresh_section_symbols(core, window);
+    // And a rebuilt sidebar has no rows at all yet (docs/tasks-s2-plan.md T2)
+    // — the same reason, one arm over.
+    refresh_section_rows(core, window);
 }
 
 /// The sections half of the semantic icon (docs/styling-plan.md D6): each
-/// page's `icon-name`, then the switcher's accessible description. TWO
-/// MEASURED PLATFORM FACTS — GtkStackSwitcher renders icon OR title, never
-/// both, and GtkStackSidebar ignores icon-name entirely (docs/traps.md: "GTK
-/// switchers draw a section's symbol or its title"). The DESCRIPTION carries
-/// the semantic name; the button's NAME is GTK's own and already the title.
+/// page's `icon-name`, then the switcher's accessible description. THE
+/// MEASURED PLATFORM FACT — GtkStackSwitcher renders icon OR title, never
+/// both (docs/traps.md: "GTK switchers draw a section's symbol or its
+/// title"). The DESCRIPTION carries the semantic name; the button's NAME is
+/// GTK's own and already the title. The SIDEBAR arm's rows are kaya's and
+/// draw both, in `refresh_section_rows`.
 fn refresh_section_symbols(core: &CoreState, window: u64) {
     use gtk4::prelude::{AccessibleExtManual, Cast, WidgetExt};
     let Some(stack) = core.section_stacks.get(&window) else {
@@ -4643,8 +4829,7 @@ fn refresh_section_symbols(core: &CoreState, window: u64) {
         }
     }
 // The switcher's buttons are minted from the stack's pages IN PAGE ORDER,
-// which is the order sections were added. Only the bar arm has buttons; the
-// sidebar arm's rows carry no icon (fact 2 above).
+// which is the order sections were added. Only the bar arm has buttons.
     let Some((_, chrome)) = core.section_chrome.get(&window) else {
         return;
     };
@@ -4681,6 +4866,179 @@ fn refresh_section_symbols(core: &CoreState, window: u64) {
         }
         child = widget.next_sibling();
     }
+}
+
+/// The section badge's pill (docs/tasks-s2-plan.md T2): a rounded count in
+/// the secondary colour, kaya's own drawing.
+///
+/// `@borders` and not a literal: the vocabulary's rule is that colours come
+/// from the platform's own tokens, and this one is already proven to parse
+/// here (TABLE_CSS uses it).
+const BADGE_CSS: &str = "\
+.kaya-badge { background-color: @borders; border-radius: 999px; \
+padding: 0px 6px; min-width: 12px; font-size: 0.8em; }
+";
+
+const BADGE_CLASS: &str = "kaya-badge";
+
+/// The style class the sidebar's row list wears — libadwaita's own sidebar
+/// list, so kaya's rows are the platform's shape and not a hand-drawn one.
+const SIDEBAR_CLASS: &str = "navigation-sidebar";
+
+/// The names kaya's own sidebar row parts wear, so every read finds its part
+/// by name rather than by position inside the row.
+const SECTION_TITLE_NAME: &str = "kaya-section-title";
+const SECTION_SYMBOL_NAME: &str = "kaya-section-symbol";
+const SECTION_BADGE_NAME: &str = "kaya-section-badge";
+
+/// The section a sidebar row stands for, stamped at build (the object-data
+/// pattern the layout stamps use). The rows are kaya's now, so every read is
+/// BY SECTION ID and none of them is positional.
+const SECTION_ROW_KEY: &str = "kaya-section";
+
+fn section_of_row(row: &gtk4::ListBoxRow) -> Option<u64> {
+    // SAFETY: the key is private to this module and only ever set to a u64,
+    // by build_section_row below.
+    unsafe { row.data::<u64>(SECTION_ROW_KEY).map(|p| *p.as_ref()) }
+}
+
+/// This window's sidebar row list, or None when the bar arm rendered.
+fn sidebar_list(core: &CoreState, window: u64) -> Option<gtk4::ListBox> {
+    core.section_lists.get(&window).and_then(|c| c.borrow().clone())
+}
+
+/// The row standing for a section, by its stamp.
+fn section_row(list: &gtk4::ListBox, sid: u64) -> Option<gtk4::ListBoxRow> {
+    let mut index = 0;
+    while let Some(row) = list.row_at_index(index) {
+        if section_of_row(&row) == Some(sid) {
+            return Some(row);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// One part of a kaya sidebar row, by the name it was built with.
+fn section_row_part<W: gtk4::glib::object::IsA<gtk4::Widget>>(
+    row: &gtk4::ListBoxRow,
+    name: &str,
+) -> Option<W> {
+    use gtk4::prelude::{Cast, ListBoxRowExt, WidgetExt};
+    let seat = row.child()?;
+    let mut child = seat.first_child();
+    while let Some(w) = child {
+        if w.widget_name() == name {
+            return w.downcast::<W>().ok();
+        }
+        child = w.next_sibling();
+    }
+    None
+}
+
+/// The pill this row draws (docs/tasks-s2-plan.md T2) — the READ's half.
+fn badge_pill_of(row: &gtk4::ListBoxRow) -> Option<gtk4::Label> {
+    section_row_part::<gtk4::Label>(row, SECTION_BADGE_NAME)
+}
+
+/// One sidebar row, KAYA'S OWN: the semantic symbol, the title, and the badge
+/// pill on the trailing edge (docs/tasks-s2-plan.md T2). Nothing here is
+/// bound by a GTK component, which is the whole point — GtkStackSidebar
+/// rewrites its rows' child label and CRITICALs on anything else
+/// (docs/traps.md).
+fn build_section_row(sid: u64) -> gtk4::ListBoxRow {
+    use gtk4::prelude::{BoxExt, ListBoxRowExt, WidgetExt};
+    let row = gtk4::ListBoxRow::new();
+    // SAFETY: the key is private to this module; this is its only writer.
+    unsafe { row.set_data(SECTION_ROW_KEY, sid) }
+    let seat = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    let symbol = gtk4::Image::new();
+    symbol.set_widget_name(SECTION_SYMBOL_NAME);
+    symbol.set_visible(false);
+    seat.append(&symbol);
+    let title = gtk4::Label::new(None);
+    title.set_widget_name(SECTION_TITLE_NAME);
+    title.set_xalign(0.0);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title.set_hexpand(true);
+    title.set_halign(gtk4::Align::Fill);
+    seat.append(&title);
+    let pill = gtk4::Label::new(None);
+    pill.set_widget_name(SECTION_BADGE_NAME);
+    pill.add_css_class(BADGE_CLASS);
+    pill.add_css_class("dim-label");
+    pill.set_valign(gtk4::Align::Center);
+    pill.set_visible(false);
+    seat.append(&pill);
+    row.set_child(Some(&seat));
+    row
+}
+
+/// Draw the sidebar: one row per section, in section order, each carrying the
+/// title, the symbol it declared and its count (docs/tasks-s2-plan.md T2).
+/// Called wherever any of those three moves, and after a chrome rebuild.
+///
+/// THE BAR ARM TAKES NO BADGE (the plan's §3 table says so in one line): a
+/// GtkStackSwitcher's button content is built by the component out of the
+/// page's `icon-name` or its title — kaya hands it no widget — and
+/// libadwaita's AdwViewSwitcher has only `needs-attention`, a dot with no
+/// count. So the bar is left without one, and `section_badge` says that
+/// rather than answering 0.
+fn refresh_section_rows(core: &CoreState, window: u64) {
+    use gtk4::prelude::WidgetExt;
+    let Some(list) = sidebar_list(core, window) else {
+        return;
+    };
+    let ids = core.sections.get(&window).cloned().unwrap_or_default();
+    // EVERY ROW MUTATION IS QUIET: `row-selected` fires synchronously on an
+    // append that lands under the selected row's index and on the removal of
+    // a selected row, and this runs with CORE borrowed.
+    let was_quiet = core.apply_quiet.replace(true);
+    let matched = ids.iter().enumerate().all(|(i, sid)| {
+        list.row_at_index(i as i32).and_then(|r| section_of_row(&r)) == Some(*sid)
+    }) && list.row_at_index(ids.len() as i32).is_none();
+    if !matched {
+        while let Some(row) = list.row_at_index(0) {
+            list.remove(&row);
+        }
+        for sid in &ids {
+            list.append(&build_section_row(*sid));
+        }
+    }
+    for sid in &ids {
+        let Some(row) = section_row(&list, *sid) else { continue };
+        let Some(record) = core.section_pages.get(sid) else { continue };
+        if let Some(title) = section_row_part::<gtk4::Label>(&row, SECTION_TITLE_NAME) {
+            title.set_text(&record.title);
+        }
+        if let Some(symbol) = section_row_part::<gtk4::Image>(&row, SECTION_SYMBOL_NAME) {
+            match symbol_icon_name(record.symbol) {
+                Some(icon) => {
+                    symbol.set_icon_name(Some(icon));
+                    symbol.set_visible(true);
+                }
+                None => {
+                    symbol.set_icon_name(None);
+                    symbol.set_visible(false);
+                }
+            }
+        }
+        if let Some(pill) = badge_pill_of(&row) {
+            let count = record.badge.round().max(0.0) as i64;
+            pill.set_text(&count.to_string());
+            pill.set_visible(count > 0);
+        }
+    }
+    if let Some(row) = core
+        .selected_sections
+        .get(&window)
+        .and_then(|sid| section_row(&list, *sid))
+    {
+        if list.selected_row().as_ref() != Some(&row) {
+            list.select_row(Some(&row));
+        }
+    }
+    core.apply_quiet.set(was_quiet);
 }
 
 /// Reconcile a section page's visible child: its stack's top entry
@@ -6064,9 +6422,9 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
     use crate::harness::{resolve, TargetKind as K};
     let widget: gtk4::Widget = match t.kind {
         K::Button => core.buttons[resolve(t.index, core.buttons.len())].clone().upcast(),
-        K::Checkbox => core.checkboxes[resolve(t.index, core.checkboxes.len())].clone().upcast(),
+        K::Checkbox => core.checkboxes[resolve(t.index, core.checkboxes.len())].clone(),
         K::Slider => core.sliders[resolve(t.index, core.sliders.len())].scale.clone().upcast(),
-        K::Label => core.labels[resolve(t.index, core.labels.len())].clone().upcast(),
+        K::Label => core.labels[resolve(t.index, core.labels.len())].clone(),
         K::Column => core.columns[resolve(t.index, core.columns.len())].clone().upcast(),
         K::Row => core.rows[resolve(t.index, core.rows.len())].clone().upcast(),
         K::Image => core.images[resolve(t.index, core.images.len())].clone().upcast(),
@@ -8067,7 +8425,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                             sink.send_toggle_tag(&tag, c.is_active());
                         }
                     });
-                    core.checkboxes.push(check.clone());
+                    core.checkboxes.push(check.clone().upcast());
                     NativeWidget::Checkbox(check)
                 }
                 WidgetKind::Slider => {
@@ -8170,7 +8528,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.set_wrap(true);
                     label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
                     label.set_max_width_chars(KAYA_LABEL_MAX_WIDTH_CHARS);
-                    core.labels.push(label.clone());
+                    core.labels.push(label.clone().upcast());
                     NativeWidget::Label(label)
                 }
                 WidgetKind::Scroll => {
@@ -8394,7 +8752,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // authored name; Group is the honest role a composed field
                     // can publish, since GTK 4.18 reaches no date-shaped one
                     // and forwards ROLE_DESCRIPTION nowhere (both measured,
-                    // docs/traps.md). `composed_picker_role` below is what
+                    // docs/traps.md). `composed_control_role` below is what
                     // names the kind.
                     button.set_accessible_role(gtk4::AccessibleRole::Group);
                     let field = GtkDateField {
@@ -8715,6 +9073,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // destroyed column its boxed list (docs/forms-plan.md §2).
             core.labeled_rows.remove(&id.0);
             core.form_lists.remove(&id.0);
+            core.hrefs.remove(&id.0);
             let widget = core
                 .widgets
                 .remove(&id)
@@ -8792,7 +9151,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: bar/auto = the header StackSwitcher,
-                    // sidebar = GtkStackSidebar; the chrome rebuilds
+                    // sidebar = kaya's own row list; the chrome rebuilds
                     // if it already exists.
                     core.sections_presentation.insert(window.0, *hint);
                     if core.sections.contains_key(&window.0) {
@@ -8866,6 +9225,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.section_stacks.remove(&window.0);
             core.section_chrome.remove(&window.0);
             core.sections_rendered.remove(&window.0);
+            core.section_lists.remove(&window.0);
             core.selected_sections.remove(&window.0);
             core.sections_presentation.remove(&window.0);
             // ... and its menu chrome. The registry keeps the items; only
@@ -8939,6 +9299,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     page,
                     title: String::new(),
                     symbol: 0,
+                    badge: 0.0,
                     root: None,
                 },
             );
@@ -8975,6 +9336,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         let stack_page = stack.page(page.upcast_ref::<gtk4::Widget>());
                         stack_page.set_title(&core.section_pages[&section.0].title);
                     }
+                    // The sidebar's rows are kaya's, so the title lands there
+                    // by hand (docs/tasks-s2-plan.md T2).
+                    refresh_section_rows(core, window);
                 }
                 // THE SEMANTIC ICON NAME (docs/styling-plan.md D6): onto
                 // GtkStackPage's own `icon-name`, the slot both switcher
@@ -8984,6 +9348,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     record.symbol = *symbol;
                     let window = record.window;
                     refresh_section_symbols(core, window);
+                    refresh_section_rows(core, window);
+                }
+                // THE COUNT ON THE SIDEBAR ROW (docs/tasks-s2-plan.md T2),
+                // zero clears. GTK has no native badge anywhere, so the
+                // sidebar row's pill is kaya's own drawing — the one lowering
+                // the ruling says is ours.
+                (SectionProp::Badge, Value::F64(count)) => {
+                    record.badge = *count;
+                    let window = record.window;
+                    refresh_section_rows(core, window);
                 }
                 // Day-one slot: accepted; the switcher TITLE is the
                 // harness observable (GTK's switcher shows titles).
@@ -9764,6 +10138,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.radio_buttons[radio][*row as usize].set_label(Some(&s));
                     }
                 }
+                // A LINK'S CAPTION IS THE LABEL'S TEXT (docs/tasks-s2-plan.md
+                // T3), on the control the role left behind. A link is never a
+                // select option or a radio row — those consume the label at
+                // AddChild, before any role can reach it.
+                (NativeWidget::Link(link), Prop::Text, Value::Str(s)) => {
+                    link.set_label(&s);
+                    if let Some(name) = core.a11y_labels.get(&id.0) {
+                        use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
+                        link.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+                        link.update_property(&[gtk4::accessible::Property::Label(name.as_str())]);
+                    }
+                }
                 (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
                     // Quiet: a property write is configuration, not a user
                     // edit. The before-image is read one line before the write,
@@ -9845,9 +10231,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {
                     check.set_label(Some(&s));
                 }
+                // A GtkSwitch DRAWS NO CAPTION — the row's own label beside it
+                // is the switch's, which is the ruled lowering
+                // (docs/tasks-s2-plan.md §3) and the shape every guest that
+                // declares one already takes.
+                (NativeWidget::Switch(_), Prop::Text, Value::Str(_)) => {}
                 (NativeWidget::Checkbox(check), Prop::Checked, Value::Bool(b)) => {
                     core.apply_quiet.set(true);
                     check.set_active(b);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Switch(switch), Prop::Checked, Value::Bool(b)) => {
+                    core.apply_quiet.set(true);
+                    switch.set_active(b);
                     core.apply_quiet.set(false);
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
@@ -10032,6 +10428,70 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.add_css_class("caption");
                     label.add_css_class("dim-label");
                     label.set_accessible_role(gtk4::AccessibleRole::Caption);
+                }
+                // THE TWO ROLES THAT DECIDE THE CONTROL (docs/tasks-s2-plan.md
+                // T1, T3). Everything a switch is to the model stays the
+                // checkbox's — `checked`, `toggled`, the `toggle` verb — and
+                // everything a link is stays the label's; only the widget
+                // changes, so the arm swaps it and `swap_control` carries the
+                // place, the layout stamps and the registry ordinal over.
+                // A re-applied role finds the control already there: a
+                // template's ops are replayed whole on every stamp.
+                (NativeWidget::Checkbox(check), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_SWITCH) =>
+                {
+                    let checked = gtk4::prelude::CheckButtonExt::is_active(check);
+                    let switch = gtk4::Switch::new();
+                    core.apply_quiet.set(true);
+                    switch.set_active(checked);
+                    core.apply_quiet.set(false);
+                    // The flip's own signal, the CheckButton's arm one control
+                    // over: `state-set` is emitted for a programmatic
+                    // `set_active` too, so the split rides apply_quiet exactly
+                    // as `toggled` does.
+                    let sink = core.occurrences.clone();
+                    let quiet = core.apply_quiet.clone();
+                    let tag = core
+                        .widget_tags
+                        .get(&id.0)
+                        .cloned()
+                        .expect("checkboxes carry a tag");
+                    switch.connect_state_set(move |_, on| {
+                        if !quiet.get() {
+                            sink.send_toggle_tag(&tag, on);
+                        }
+                        glib::Propagation::Proceed
+                    });
+                    swap_control(core, id, NativeWidget::Switch(switch));
+                }
+                (NativeWidget::Switch(_), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_SWITCH) => {}
+                (NativeWidget::Label(label), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_LINK) =>
+                {
+                    // GTK OPENS THE URI ITSELF, through GtkLinkButton's own
+                    // `activate-link` default (gtk_show_uri): no occurrence, no
+                    // handler, which is the ruling (T3).
+                    let link = gtk4::LinkButton::with_label("", &label.text());
+                    link.set_has_frame(false);
+                    if let Some(uri) = core.hrefs.get(&id.0) {
+                        // The href can arrive before the role — a prop is a
+                        // prop and the two orders are both legal.
+                        link.set_uri(uri);
+                    }
+                    swap_control(core, id, NativeWidget::Link(link));
+                }
+                (NativeWidget::Link(_), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_LINK) => {}
+                // THE LINK'S DESTINATION (T3), held in either order: the map is
+                // what a role arriving second reads, the control what the
+                // harness reads back.
+                (NativeWidget::Link(link), Prop::Href, Value::Str(uri)) => {
+                    link.set_uri(&uri);
+                    core.hrefs.insert(id.0, uri);
+                }
+                (NativeWidget::Label(_), Prop::Href, Value::Str(uri)) => {
+                    core.hrefs.insert(id.0, uri);
                 }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     use gtk4::prelude::{Cast, WidgetExt};
@@ -10311,9 +10771,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 let group = group.clone();
                 let text = match core.widgets.get(&child).expect("scene validated the id") {
                     NativeWidget::Label(l) => {
-                        let l = l.clone();
+                        let l = l.clone().upcast::<gtk4::Widget>();
                         core.labels.retain(|x| x != &l);
-                        l.text().to_string()
+                        label_text(&l)
                     }
                     _ => String::new(),
                 };
@@ -10407,9 +10867,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // covers writes that arrive after.
                 let text = match core.widgets.get(&child).expect("scene validated the id") {
                     NativeWidget::Label(l) => {
-                        let l = l.clone();
+                        let l = l.clone().upcast::<gtk4::Widget>();
                         core.labels.retain(|x| x != &l);
-                        l.text().to_string()
+                        label_text(&l)
                     }
                     _ => String::new(),
                 };
@@ -10941,6 +11401,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let dnd_css = gtk4::CssProvider::new();
         watch_css_errors(&dnd_css, &css_error);
         load_kaya_css(&dnd_css, "drop indicator", DND_CSS, &css_error);
+        // The section badge's pill, static for the same reason.
+        let badge_css = gtk4::CssProvider::new();
+        watch_css_errors(&badge_css, &css_error);
+        load_kaya_css(&badge_css, "section badge", BADGE_CSS, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -10970,6 +11434,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &dnd_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &badge_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
@@ -11102,6 +11571,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 section_stacks: HashMap::new(),
                 section_chrome: HashMap::new(),
                 sections_rendered: HashMap::new(),
+                section_lists: HashMap::new(),
                 selected_sections: HashMap::new(),
                 sections_presentation: HashMap::new(),
                 window_roots: HashMap::new(),
@@ -11207,6 +11677,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 radio_tags: HashMap::new(),
                 select_options: HashMap::new(),
                 a11y_labels: HashMap::new(),
+                hrefs: HashMap::new(),
                 select_models: HashMap::new(),
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
                 ledger_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
@@ -11721,7 +12192,7 @@ impl crate::harness::Stage for GtkStage {
             let Some((want, index, composed)) = Self::on_main(move |core| {
                 target_widget(core, target).and_then(|widget| {
                     let want = atspi_role_of(&widget)?;
-                    let composed = composed_picker_role(core, &widget);
+                    let composed = composed_control_role(core, &widget);
                     atspi_rank(&core.window, &widget).map(|rank| (want, rank, composed))
                 })
             }) else {
@@ -11731,12 +12202,15 @@ impl crate::harness::Stage for GtkStage {
             // composed: GTK publishes `grouping` for a picker because it has
             // nothing better, and `group` is the wrong word for a control
             // the other three platforms name for what it is. What the bus
-            // vouches for is unchanged — see composed_picker_role.
+            // vouches for is unchanged — see composed_control_role.
             let role = match composed {
                 Some(named) => named,
                 None => match want {
                     atspi::Role::Button => "button",
                     atspi::Role::CheckBox => "checkbox",
+                    // The platform's own word for a link, unlike the switch
+                    // above it (docs/tasks-s2-plan.md T3).
+                    atspi::Role::Link => "link",
                     // Both text controls fold to the closed set's one name
                     // (docs/search-plan.md S7): UIA and Compose have no search
                     // identity, so `search` cannot join it without lying.
@@ -11872,6 +12346,24 @@ impl crate::harness::Stage for GtkStage {
     /// The prompt OFF THE CONTROL (S3): GTK's own `placeholder-text` on the
     /// two kinds that have the property, and the label this backend draws
     /// over an empty textarea, which is the whole prompt that kind has.
+    /// THE DESTINATION OFF THE CONTROL (docs/tasks-s2-plan.md T3): the
+    /// GtkLinkButton's own uri, which is the string GTK would hand
+    /// `gtk_show_uri` — never `core.hrefs`, which is kaya's copy of what it
+    /// asked for.
+    fn href(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::Cast;
+            let Some(i) = crate::harness::try_resolve(target.index, core.labels.len()) else {
+                return "<no such target>".to_owned();
+            };
+            match core.labels[i].downcast_ref::<gtk4::LinkButton>() {
+                Some(link) => link.uri().to_string(),
+                // WHAT THIS MEASURED: the label is in the registry and the
+                // control there is not a link, so the role never landed.
+                None => "<not a link>".to_owned(),
+            }
+        })
+    }
     fn placeholder_text(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use crate::harness::TargetKind as K;
@@ -12539,7 +13031,7 @@ impl crate::harness::Stage for GtkStage {
     fn toggle(&self, t: crate::harness::Target, on: bool) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.checkboxes.len());
-            core.checkboxes[i].set_active(on);
+            set_checked(&core.checkboxes[i], on);
         });
     }
 
@@ -12893,7 +13385,7 @@ impl crate::harness::Stage for GtkStage {
             let Some(i) = crate::harness::try_resolve(t.index, core.labels.len()) else {
                 return "<no such target>".to_string();
             };
-            core.labels[i].text().to_string()
+            label_text(&core.labels[i])
         })
     }
 
@@ -13015,9 +13507,10 @@ impl crate::harness::Stage for GtkStage {
                         .into_iter()
                         .filter_map(|cell| {
                             let label = cell.downcast::<gtk4::Label>().ok()?;
+                            let cell: gtk4::Widget = label.clone().upcast();
                             core.labels
                                 .iter()
-                                .any(|l| l == &label)
+                                .any(|l| l == &cell)
                                 .then(|| label.text().to_string())
                         })
                         .collect::<Vec<_>>()
@@ -13546,10 +14039,8 @@ impl crate::harness::Stage for GtkStage {
             let mut texts = Vec::new();
             let mut child = registry[i].first_child();
             while let Some(widget) = child {
-                if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
-                    if core.labels.iter().any(|l| l == label) {
-                        texts.push(label.text().to_string());
-                    }
+                if core.labels.iter().any(|l| *l == widget) {
+                    texts.push(label_text(&widget));
                 }
                 child = widget.next_sibling();
             }
@@ -14935,6 +15426,14 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn section_badge(&self, title: &str) -> String {
+        let title = title.to_owned();
+        // The pump is section_symbol's, for the same reason.
+        Self::on_main(move |core| {
+            while glib::MainContext::default().iteration(false) {}
+            section_badge_read(core, &title)
+        })
+    }
     fn section_symbol(&self, title: &str) -> String {
         let title = title.to_owned();
         // The pump is sections_presentation's, for the same reason: a
@@ -15006,13 +15505,18 @@ fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
     let stack = core.section_stacks.get(&window);
     let mut built: Vec<&'static str> = Vec::new();
     let mut kinds: Vec<String> = Vec::new();
+    // The sidebar's rows are kaya's own list (docs/tasks-s2-plan.md T2), and
+    // "wired to THIS window's stack" is that list being the one registered
+    // for this window — its row-selected handler drives that stack — and
+    // still standing inside this chrome.
+    if let Some(list) = sidebar_list(core, window) {
+        if list.is_ancestor(chrome) {
+            built.push("sidebar");
+        }
+    }
     let mut child = chrome.first_child();
     while let Some(widget) = child {
-        if let Some(sidebar) = widget.downcast_ref::<gtk4::StackSidebar>() {
-            if sidebar.stack().as_ref() == stack {
-                built.push("sidebar");
-            }
-        } else if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
+        if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
             if switcher.stack().as_ref() == stack {
                 built.push("bar");
             }
@@ -15044,27 +15548,22 @@ fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
     arm.to_owned()
 }
 
-/// THE SECTION ROW'S SYMBOL, off the GtkImage the real switcher button draws
-/// — never `GtkSectionPage::symbol` beside it and never the accessible
-/// Description kaya wrote. TITLE -> ROW is positional and the platform forces
-/// it: a switcher renders icon OR title, so a section WITH a symbol has no
-/// visible label to match on, and its Nth button is the stack's Nth page.
-/// EVERY WINDOW, in id order.
+/// The section a title names, with the window that holds it and its place in
+/// that window's order — the pair both sidebar reads start from. EVERY
+/// WINDOW, in id order. The miss carries the titles the chrome DOES hold,
+/// because "no section by that name" and "the pages are not built yet" are
+/// different bugs and the reader chases the sentence.
 #[cfg(all(feature = "harness", target_os = "linux"))]
-fn section_symbol_read(core: &CoreState, title: &str) -> String {
+fn section_by_title(core: &CoreState, title: &str) -> Result<(u64, u64, usize), Vec<String>> {
     use gtk4::prelude::{Cast, WidgetExt};
     let mut windows: Vec<u64> = core.sections.keys().copied().collect();
     windows.sort_unstable();
-    // What the switchers DO carry, for the miss sentence: "no row by
-    // that name" and "the rows are not built yet" are different bugs and
-    // the reader chases the sentence.
     let mut seen: Vec<String> = Vec::new();
     for window in windows {
         let Some(stack) = core.section_stacks.get(&window) else {
             continue;
         };
         let ids = core.sections.get(&window).cloned().unwrap_or_default();
-        let mut index = None;
         for (i, sid) in ids.iter().enumerate() {
             let Some(record) = core.section_pages.get(sid) else {
                 continue;
@@ -15078,58 +15577,133 @@ fn section_symbol_read(core: &CoreState, title: &str) -> String {
                 .map(|t| t.to_string())
                 .unwrap_or_default();
             if page_title == title {
-                index = Some(i);
-                break;
+                return Ok((window, *sid, i));
             }
             seen.push(page_title);
         }
-        let Some(index) = index else { continue };
-        let Some((_, chrome)) = core.section_chrome.get(&window) else {
-            return format!("window#{window} has no sections chrome");
-        };
-        let mut child = chrome.first_child();
-        while let Some(widget) = child {
-            if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
-                let mut button = switcher.first_child();
-                let mut at = 0usize;
-                while let Some(b) = button {
-                    if at == index {
-                        let Some(icon) = first_image_icon_name(&b) else {
-                            // WHAT THIS MEASURED: the button is in the real
-                            // switcher and holds no GtkImage.
-                            // GtkStackSwitcher builds one ONLY from the
-                            // page's icon-name, so this is "the row draws no
-                            // glyph" and not "the app declared none".
-                            return "no glyph on the section row".to_owned();
-                        };
-                        return match symbol_name_of_icon(&icon) {
-                            Some(name) => name.to_owned(),
-                            None => format!(
-                                "the section row {title:?} draws {icon:?}, which is not in \
-                                 this backend's symbol table"
-                            ),
-                        };
-                    }
-                    at += 1;
-                    button = b.next_sibling();
-                }
-                return format!(
-                    "the switcher holding {title:?} has {at} buttons, so there is none at #{index}"
-                );
-            }
-            if widget.downcast_ref::<gtk4::StackSidebar>().is_some() {
-                // MEASURED, GTK 4.18.6 (refresh_section_symbols' fact 2):
-                // GtkStackSidebar binds the page TITLE into a GtkLabel and
-                // ignores icon-name entirely, so the sidebar arm draws no
-                // glyph for any section. This is the component, not a
-                // lowering that forgot.
-                return "a GtkStackSidebar row carries no icon".to_owned();
-            }
-            child = widget.next_sibling();
-        }
-        return format!("window#{window} sections chrome holds no switcher");
     }
-    format!("no section row is titled {title:?} (the switchers carry: {seen:?})")
+    Err(seen)
+}
+
+/// The rows a sidebar list holds, for the miss sentences.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn sidebar_row_count(list: &gtk4::ListBox) -> usize {
+    let mut n = 0;
+    while list.row_at_index(n as i32).is_some() {
+        n += 1;
+    }
+    n
+}
+
+/// THE SECTION ROW'S SYMBOL, off the GtkImage the row really draws — never
+/// `GtkSectionPage::symbol` beside it and never the accessible Description
+/// kaya wrote. The sidebar's rows are kaya's own (docs/tasks-s2-plan.md T2)
+/// and carry their section's id, so that read is BY ID; the bar's buttons are
+/// GtkStackSwitcher's and the platform forces the positional pairing there —
+/// a switcher renders icon OR title, so a section WITH a symbol has no
+/// visible label to match on, and its Nth button is the stack's Nth page.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn section_symbol_read(core: &CoreState, title: &str) -> String {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let (window, sid, index) = match section_by_title(core, title) {
+        Ok(found) => found,
+        Err(seen) => {
+            return format!("no section row is titled {title:?} (the switchers carry: {seen:?})")
+        }
+    };
+    let Some((_, chrome)) = core.section_chrome.get(&window) else {
+        return format!("window#{window} has no sections chrome");
+    };
+    if let Some(list) = sidebar_list(core, window) {
+        let Some(row) = section_row(&list, sid) else {
+            return format!(
+                "the sidebar holding {title:?} has {} rows and none of them stands for \
+                 section#{sid}",
+                sidebar_row_count(&list)
+            );
+        };
+        let Some(icon) = first_image_icon_name(row.upcast_ref::<gtk4::Widget>()) else {
+            // WHAT THIS MEASURED: the row is in the real sidebar and holds no
+            // GtkImage with a name. kaya's own row draws one only for a
+            // declared symbol, so this is "the row draws no glyph".
+            return "no glyph on the section row".to_owned();
+        };
+        return match symbol_name_of_icon(&icon) {
+            Some(name) => name.to_owned(),
+            None => format!(
+                "the section row {title:?} draws {icon:?}, which is not in this backend's \
+                 symbol table"
+            ),
+        };
+    }
+    let mut child = chrome.first_child();
+    while let Some(widget) = child {
+        if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
+            let mut button = switcher.first_child();
+            let mut at = 0usize;
+            while let Some(b) = button {
+                if at == index {
+                    let Some(icon) = first_image_icon_name(&b) else {
+                        // WHAT THIS MEASURED: the button is in the real
+                        // switcher and holds no GtkImage.
+                        // GtkStackSwitcher builds one ONLY from the
+                        // page's icon-name, so this is "the row draws no
+                        // glyph" and not "the app declared none".
+                        return "no glyph on the section row".to_owned();
+                    };
+                    return match symbol_name_of_icon(&icon) {
+                        Some(name) => name.to_owned(),
+                        None => format!(
+                            "the section row {title:?} draws {icon:?}, which is not in \
+                             this backend's symbol table"
+                        ),
+                    };
+                }
+                at += 1;
+                button = b.next_sibling();
+            }
+            return format!(
+                "the switcher holding {title:?} has {at} buttons, so there is none at #{index}"
+            );
+        }
+        child = widget.next_sibling();
+    }
+    format!("window#{window} sections chrome holds no switcher")
+}
+
+/// THE COUNT THE REAL SIDEBAR ROW DRAWS (docs/tasks-s2-plan.md T2), off the
+/// pill's own GtkLabel — never `GtkSectionPage::badge` beside it. The row is
+/// found by the section id it was stamped with.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn section_badge_read(core: &CoreState, title: &str) -> String {
+    let (window, sid, _) = match section_by_title(core, title) {
+        Ok(found) => found,
+        Err(seen) => {
+            return format!("no section row is titled {title:?} (the switchers carry: {seen:?})")
+        }
+    };
+    if core.section_chrome.get(&window).is_none() {
+        return format!("window#{window} has no sections chrome");
+    }
+    let Some(list) = sidebar_list(core, window) else {
+        // The bar arm's carve-out, stated where it is measured (see
+        // refresh_section_rows): GtkStackSwitcher builds its own button
+        // content and kaya has nowhere to hang a pill.
+        return "a GtkStackSwitcher button carries no badge".to_owned();
+    };
+    let Some(row) = section_row(&list, sid) else {
+        return format!(
+            "the sidebar holding {title:?} has {} rows and none of them stands for \
+             section#{sid}",
+            sidebar_row_count(&list)
+        );
+    };
+    // NO PILL AND A HIDDEN PILL ARE THE SAME COUNT: zero clears the badge,
+    // and the ruling's clear is "draws none".
+    match badge_pill_of(&row).filter(gtk4::prelude::WidgetExt::is_visible) {
+        Some(pill) => pill.text().to_string(),
+        None => "0".to_owned(),
+    }
 }
 
 /// The inset MEASURED on a widget's own CSS box, per side, in whole layout
@@ -15167,8 +15741,10 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
     }
     match target.kind {
         K::Button => nth!(core.buttons),
-        K::Checkbox => nth!(core.checkboxes),
-        K::Label => nth!(core.labels),
+        // The two role-typed registries already hold widgets (see CoreState).
+        K::Checkbox => try_resolve(target.index, core.checkboxes.len())
+            .map(|i| core.checkboxes[i].clone()),
+        K::Label => try_resolve(target.index, core.labels.len()).map(|i| core.labels[i].clone()),
         K::Entry => nth!(core.entries),
         K::Search => nth!(core.searches),
         K::Textarea => nth!(core.textareas),
@@ -15241,6 +15817,23 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
             atspi::Role::CheckBox
         });
     }
+    // THE SWITCH SHARES THE CHECK BOX'S FAMILY ON THIS TOOLKIT, measured
+    // 2026-09-07 in the lane's own image: GTK maps GTK_ACCESSIBLE_ROLE_SWITCH
+    // onto ATSPI_ROLE_CHECK_BOX (7) — the same number a GtkCheckButton
+    // publishes — and never ATSPI_ROLE_SWITCH (130), which the atspi 0.30
+    // crate's enum could not decode anyway (it ends at 129). So the ordinal
+    // family is the check box's, and the WORD `switch` comes from the widget
+    // this backend built (`composed_control_role`), the picker's route.
+    if w.is::<gtk4::Switch>() {
+        return Some(atspi::Role::CheckBox);
+    }
+    // A GtkLinkButton is a GtkButton SUBCLASS and must not count as one:
+    // the bus publishes `link` (88) for it, with its caption as a Label node
+    // of its own — so the label family's ordinals are unchanged by the role
+    // (both measured 2026-09-07). BEFORE the Button check for that reason.
+    if w.is::<gtk4::LinkButton>() {
+        return Some(atspi::Role::Link);
+    }
     // ToggleButton is a Button subclass and must not count as one: the
     // drop-down's internal button is a toggle, and the bus agrees.
     if w.is::<gtk4::ToggleButton>() {
@@ -15285,8 +15878,9 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     None
 }
 
-/// The closed set's name for a widget THIS BACKEND COMPOSED AS A PICKER,
-/// or None for everything else.
+/// The closed set's name for a widget THIS BACKEND BUILT and the bus cannot
+/// name — a composed picker, and the switch role's GtkSwitch — or None for
+/// everything else.
 ///
 /// It exists because GTK cannot say it. Every role GTK publishes comes out
 /// of one switch keyed on `GtkAccessibleRole`, that switch never returns
@@ -15310,8 +15904,17 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
 /// accessible wiring broke reads "<not in the accessibility tree>" exactly
 /// as it did before.
 #[cfg(all(feature = "harness", target_os = "linux"))]
-fn composed_picker_role(core: &CoreState, widget: &gtk4::Widget) -> Option<&'static str> {
+fn composed_control_role(core: &CoreState, widget: &gtk4::Widget) -> Option<&'static str> {
     use gtk4::prelude::Cast;
+    // THE SWITCH IS THE SECOND SUCH WORD (docs/tasks-s2-plan.md T1), for the
+    // same reason one control up: measured 2026-09-07 in the lane's image,
+    // GTK publishes ATSPI_ROLE_CHECK_BOX for a GtkSwitch — the check button's
+    // own number — so the bus cannot tell the two apart and `checkbox` would
+    // be the word for both. Keyed on the widget, not on kaya's model: a
+    // `label#0` can never read `switch`.
+    if widget.is::<gtk4::Switch>() {
+        return Some("switch");
+    }
     let is_root = core
         .date_pickers
         .iter()

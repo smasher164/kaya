@@ -483,6 +483,15 @@ class _Handle:
             wire.tx_bind_placeholder, wire.tx_bind_placeholder_element))
         return self
 
+    def href(self, url):
+        """Set the DESTINATION a `role="link"` label opens
+        (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
+        nothing is emitted. Returns the handle."""
+        _records().append(_prop_source(
+            "href", self, url, wire.tx_set_href,
+            wire.tx_bind_href, wire.tx_bind_href_element))
+        return self
+
     def fill(self, on):
         """Whether this widget spans its container's cross axis — a
         column's width, a row's height — whatever the container's
@@ -2815,13 +2824,17 @@ class Role:
     primary action; HEADING a text hierarchy heading (the platform's
     style AND the accessibility trait); CAPTION the footnote tier under
     the content it explains; PLAIN an action at low emphasis (a row's
-    accessory)."""
+    accessory); SWITCH a checkbox drawn as the platform's switch, for a
+    setting that takes effect at once; LINK a label drawn as the
+    platform's link, opening its `href` (docs/tasks-s2-plan.md T1, T3)."""
 
     DESTRUCTIVE = wire.ROLE_DESTRUCTIVE
     PROMINENT = wire.ROLE_PROMINENT
     HEADING = wire.ROLE_HEADING
     CAPTION = wire.ROLE_CAPTION
     PLAIN = wire.ROLE_PLAIN
+    SWITCH = wire.ROLE_SWITCH
+    LINK = wire.ROLE_LINK
 
 
 _ROLE_NAMES = {
@@ -2830,6 +2843,8 @@ _ROLE_NAMES = {
     "heading": wire.ROLE_HEADING,
     "caption": wire.ROLE_CAPTION,
     "plain": wire.ROLE_PLAIN,
+    "switch": wire.ROLE_SWITCH,
+    "link": wire.ROLE_LINK,
 }
 
 
@@ -2859,7 +2874,8 @@ def _role_value(role):
         raise ValueError(
             f"kaya: {role} is not a role — the vocabulary is "
             f"{sorted(_ROLE_NAMES)} "
-            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN)"
+            "(kaya.Role.DESTRUCTIVE/PROMINENT/HEADING/CAPTION/PLAIN/"
+            "SWITCH/LINK)"
         )
     return role
 
@@ -3369,9 +3385,11 @@ def search(text=None, on_change=None, grow=None, placeholder=None):
     return handle
 
 
-def label(text=None, bind=None, grow=None):
+def label(text=None, bind=None, grow=None, href=None):
     """A label; `text` for a constant, `bind` for a Signal or an
-    Element (the enclosing For's, levels computed)."""
+    Element (the enclosing For's, levels computed). `href=` with
+    `role="link"` is the destination the platform opens
+    (docs/tasks-s2-plan.md T3)."""
     handle = _widget(wire.KIND_LABEL)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("label text", text)))
@@ -3392,6 +3410,8 @@ def label(text=None, bind=None, grow=None):
             f"or one of its fields (el.title), not {type(bind).__name__} — "
             "inside a case arm project the field: kaya.label(bind=note.text)"
         )
+    if href is not None:
+        handle.href(href)
     _set_grow(handle, grow)
     return handle
 
@@ -3709,7 +3729,7 @@ class _TxScope:
                  sections_presentation=None, inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None, host_window=0,
-                 symbol=None):
+                 symbol=None, badge=None):
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -3736,6 +3756,7 @@ class _TxScope:
         self._on_selected = on_selected
         # Already through _symbol_value at the add_section call site.
         self._symbol = symbol
+        self._badge = badge
 
     def __del__(self):
         # A construct BUILT AND NEVER ENTERED emits nothing and says
@@ -3776,6 +3797,13 @@ class _TxScope:
             if self._symbol is not None:
                 _records().append(
                     wire.tx_set_section_symbol(self._window, self._symbol))
+            if self._badge is not None:
+                if isinstance(self._badge, Signal):
+                    _records().append(wire.tx_bind_section_badge(
+                        self._window, self._badge.id))
+                else:
+                    _records().append(wire.tx_set_section_badge(
+                        self._window, float(self._badge)))
             # Per-section, NOT one-shot; a programmatic select never
             # fires it.
             if self._on_selected is not None:
@@ -4080,7 +4108,7 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def add_section(self, section_id, title=None, symbol=None,
+    def add_section(self, section_id, title=None, symbol=None, badge=None,
                     on_selected=None, window=0):
         """A section's scene scope (DESIGN.md, Sections): the single
         top-level container mounts INTO IT on exit. The set is
@@ -4090,13 +4118,16 @@ class App:
         not at the `with`: a raise from __enter__ would point at the
         block rather than at the word.
 
+        `badge=` is the COUNT on the switcher item (docs/tasks-s2-plan.md
+        T2) — a number or a Signal holding one; zero clears.
+
         on_selected() fires each time the USER switches to this section,
         NOT one-shot. A programmatic kaya.select_section does not fire
         it."""
         return _TxScope(
             self, mount_on_exit=True, window=section_id, section=True,
             title=title, symbol=None if symbol is None else _symbol_value(symbol),
-            on_selected=on_selected, host_window=window)
+            badge=badge, on_selected=on_selected, host_window=window)
 
     def menu(self, label, enabled=None, icon=None, symbol=None, window=0):
         """A top-level menu in `window`'s command catalog (DESIGN.md,

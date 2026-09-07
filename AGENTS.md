@@ -73,6 +73,21 @@ in docs/deferred.md.
   the route the lanes use; a bare `swiftc` in the shell is a shim that
   names the wrapper (ruled 2026-09-07 after the same miss for the nth
   time).
+- EVERY CHANGE NAMES ITS GUARD (the maintainer, 2026-09-07): invariant 3
+  applies to every edit, not only to a fix. Before the commit, say which
+  wall, gate or compile-time refusal would catch the mistake this change
+  could have been, and add it if it is missing — or record why not.
+- A RED LEG IS READ FROM THE FLIGHT RECORDER FIRST. Every failed leg
+  prints `flightrec: bundle <path>`; the bundle (leg log, verb trace, the
+  lane's samplers) and the leg's step clock are read before any
+  hypothesis, and a fault sentence that names no call is the first thing
+  to fix (docs/traps.md, the row-window fault of 2026-09-07 — a guard was
+  proposed from a mechanism the code contradicted, before the bundle was
+  opened).
+- A FEATURE SLICE ENDS WITH A REVIEW PAGE: captures of the change on
+  every lane, each one viewed before it is published, on an artifact the
+  maintainer reviews (the search field's page is the shape). A feature
+  the maintainer has not seen is not delivered.
 - The maintainer approves every commit and its exact message. Do not
   commit or push on your own initiative.
 
@@ -734,7 +749,17 @@ in docs/deferred.md.
    because the `plain` role reached both interpreters by hand with
    no gate reading either copy — the sweep had been holding six
    families and the two that change with a ruling were not among
-   them),
+   them.
+   AND THE AX WORD SET IS CLOSED since 2026-09-07: harness.rs's ROLES is
+   the vocabulary a shared scene may assert, and the two interpreters
+   mint their words from their own platform readers, so a word one
+   interpreter answers and ROLES lacks cannot be asserted on GTK or
+   WinUI, and a word tools/scenes asserts must be answered by all three
+   — the tasks scene asserted `switch/` on every lane while ROLES lacked
+   it, which GTK and WinUI would have read as a parse refusal. The
+   census reads each reader's own body plus Compose's KayaAxKind
+   stamps, with floors on every set; four watched negatives, counts
+   printed),
    `tools/check-file-modes.py` (the file-mode NUMBERS agree with the
    spec's wherever they are written down. `kaya_open_picked` takes an
    integer, crates/kaya/src/spec.rs decides what it means, and five

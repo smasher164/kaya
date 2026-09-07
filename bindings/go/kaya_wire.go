@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x50347d52a1eef1b4
+	SpecHash uint64 = 0x0e5f6241c88af41c
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -103,6 +103,7 @@ const (
 	PropMinColumnWidth = 28
 	PropWrap = 29
 	PropPlaceholder = 30
+	PropHref = 31
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -116,6 +117,7 @@ const (
 	SpropTitle = 1
 	SpropIcon = 2
 	SpropSymbol = 3
+	SpropBadge = 4
 	MenuKindMenu = 1
 	MenuKindAction = 2
 	MenuKindToggle = 3
@@ -160,6 +162,8 @@ const (
 	RoleHeading = 3
 	RoleCaption = 4
 	RolePlain = 5
+	RoleSwitch = 6
+	RoleLink = 7
 	SymbolAdd = 1
 	SymbolRemove = 2
 	SymbolDelete = 3
@@ -1835,6 +1839,38 @@ func TxBindPlaceholderElement(widgetID uint64, level uint32, field uint32) []byt
 	return endRecord(b)
 }
 
+// TxSetHref: set_property with a constant href value.
+func TxSetHref(widgetID uint64, href string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHref)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, href)
+	return endRecord(b)
+}
+
+// TxBindHref: set_property with a signal-bound href value.
+func TxBindHref(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHref)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindHrefElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindHrefElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHref)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -2090,6 +2126,26 @@ func TxBindSectionSymbol(section uint64, signalID uint64) []byte {
 	b := beginRecord(txSetSectionProp)
 	b = binary.LittleEndian.AppendUint64(b, section)
 	b = binary.LittleEndian.AppendUint32(b, SpropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetSectionBadge: set_section_prop with a constant badge value.
+func TxSetSectionBadge(section uint64, badge float64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropBadge)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, badge)
+	return endRecord(b)
+}
+
+// TxBindSectionBadge: set_section_prop with a signal-bound badge value.
+func TxBindSectionBadge(section uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropBadge)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

@@ -337,6 +337,7 @@ pub(crate) const PROP_FILL: u32 = 27;
 pub(crate) const PROP_MIN_COLUMN_WIDTH: u32 = 28;
 pub(crate) const PROP_WRAP: u32 = 29;
 pub(crate) const PROP_PLACEHOLDER: u32 = 30;
+pub(crate) const PROP_HREF: u32 = 31;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -372,6 +373,7 @@ pub(crate) const WPROP_INSET: u32 = 8;
 pub(crate) const SPROP_TITLE: u32 = 1;
 pub(crate) const SPROP_ICON: u32 = 2;
 pub(crate) const SPROP_SYMBOL: u32 = 3;
+pub(crate) const SPROP_BADGE: u32 = 4;
 
 /// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
 /// and `radio_group` are the grouping nodes.
@@ -514,6 +516,8 @@ pub(crate) const ROLE_PROMINENT: u32 = 2;
 pub(crate) const ROLE_HEADING: u32 = 3;
 pub(crate) const ROLE_CAPTION: u32 = 4;
 pub(crate) const ROLE_PLAIN: u32 = 5;
+pub(crate) const ROLE_SWITCH: u32 = 6;
+pub(crate) const ROLE_LINK: u32 = 7;
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
@@ -786,6 +790,7 @@ fn prop(raw: u32) -> Prop {
         PROP_MIN_COLUMN_WIDTH => Prop::MinColumnWidth,
         PROP_WRAP => Prop::Wrap,
         PROP_PLACEHOLDER => Prop::Placeholder,
+        PROP_HREF => Prop::Href,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -822,6 +827,7 @@ fn section_prop(raw: u32) -> SectionProp {
         SPROP_TITLE => SectionProp::Title,
         SPROP_ICON => SectionProp::Icon,
         SPROP_SYMBOL => SectionProp::Symbol,
+        SPROP_BADGE => SectionProp::Badge,
         other => panic!("kaya: unknown section property {other}"),
     }
 }
@@ -831,6 +837,7 @@ fn section_prop_raw(p: SectionProp) -> u32 {
         SectionProp::Title => SPROP_TITLE,
         SectionProp::Icon => SPROP_ICON,
         SectionProp::Symbol => SPROP_SYMBOL,
+        SectionProp::Badge => SPROP_BADGE,
     }
 }
 
@@ -3600,6 +3607,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::MinColumnWidth => PROP_MIN_COLUMN_WIDTH,
         Prop::Wrap => PROP_WRAP,
         Prop::Placeholder => PROP_PLACEHOLDER,
+        Prop::Href => PROP_HREF,
     }
 }
 

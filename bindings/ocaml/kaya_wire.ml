@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x50347d52a1eef1b4L
+let spec_hash = 0x0e5f6241c88af41cL
 
 let value_bool = 1
 let value_i64 = 2
@@ -119,6 +119,7 @@ let prop_fill = 27
 let prop_min_column_width = 28
 let prop_wrap = 29
 let prop_placeholder = 30
+let prop_href = 31
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -132,6 +133,7 @@ let eprop_intercept_back = 2
 let sprop_title = 1
 let sprop_icon = 2
 let sprop_symbol = 3
+let sprop_badge = 4
 let menu_kind_menu = 1
 let menu_kind_action = 2
 let menu_kind_toggle = 3
@@ -176,6 +178,8 @@ let role_prominent = 2
 let role_heading = 3
 let role_caption = 4
 let role_plain = 5
+let role_switch = 6
+let role_link = 7
 let symbol_add = 1
 let symbol_remove = 2
 let symbol_delete = 3
@@ -1539,6 +1543,32 @@ let tx_bind_placeholder_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant href value. *)
+let tx_set_href widget_id href =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_href);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str href))
+
+(* set_property with a signal-bound href value. *)
+let tx_bind_href widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_href);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_href_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_href);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -1744,6 +1774,22 @@ let tx_bind_section_symbol section signal_id =
   finish tx_kind_set_section_prop (fun b ->
       Buffer.add_int64_le b section;
       Buffer.add_int32_le b (Int32.of_int sprop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_section_prop with a constant badge value. *)
+let tx_set_section_badge section badge =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_badge);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 badge))
+
+(* set_section_prop with a signal-bound badge value. *)
+let tx_bind_section_badge section signal_id =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_badge);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 

@@ -97,6 +97,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.clickable
@@ -124,6 +126,7 @@ import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.SideEffect
 import androidx.compose.material3.TextButton
@@ -224,6 +227,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.DeviceFontFamilyName
 import androidx.compose.ui.text.font.Font
@@ -370,6 +379,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * box's placeholder slot draws from it, and so does the search field's
      * accessibility name (S7). */
     var placeholder by mutableStateOf("")
+
+    /** THE DESTINATION A `role link` LABEL OPENS (docs/tasks-s2-plan.md
+     * T3), never spoken and never emitted. Composition state — the link
+     * arm builds its AnnotatedString from it. */
+    var href by mutableStateOf("")
 
     /** The widget's accept list, verbatim. Recorded here because the
      * paste hook and the standard commands' enablement both read it off
@@ -887,6 +901,9 @@ class KayaSection(val id: Long) {
     // (docs/styling-plan.md D6), drawn in the NavigationBarItem's icon
     // slot.
     var symbol by mutableStateOf(0L)
+    // The switcher item's COUNT (docs/tasks-s2-plan.md T2), 0 = none,
+    // drawn as the BadgedBox around the item's icon slot.
+    var badge by mutableStateOf(0.0)
     val entries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
 }
 
@@ -1248,7 +1265,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x50347d52a1eef1b4uL
+    private const val SPEC_HASH: ULong = 0x0e5f6241c88af41cuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1365,6 +1382,7 @@ object KayaCompose {
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     private const val SPROP_SYMBOL = 3
+    private const val SPROP_BADGE = 4
     // Navigation-entry properties: their own typed table;
     // intercept_back is the close-veto class transplanted to POP.
     private const val EPROP_TITLE = 1
@@ -1424,6 +1442,13 @@ object KayaCompose {
      * one shared tag, because two rows sharing a tag are two rows the
      * tree cannot tell apart. */
     const val SECTION_TAG_PREFIX = "kaya:section#"
+
+    /** The COUNT pill inside a switcher row (docs/tasks-s2-plan.md T2),
+     * tagged so `expect_section_badge` reads the badge the row really
+     * drew AND so [kayaSectionProp] can step over it: the pill is a
+     * `Text` in the icon slot, ahead of the row's own label slot, and an
+     * untagged one would answer every "what is this row titled" read. */
+    const val SECTION_BADGE_TAG = "kaya:section-badge"
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -1458,6 +1483,7 @@ object KayaCompose {
     private const val PROP_MIN_COLUMN_WIDTH = 28
     private const val PROP_WRAP = 29
     private const val PROP_PLACEHOLDER = 30
+    private const val PROP_HREF = 31
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1496,6 +1522,8 @@ object KayaCompose {
     const val ROLE_HEADING = 3L
     const val ROLE_CAPTION = 4L
     const val ROLE_PLAIN = 5L
+    const val ROLE_SWITCH = 6L
+    const val ROLE_LINK = 7L
     // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     // docs/styling-plan.md D6). Long, like the role values: the prop
     // rides as an i64 and the model's field is what the render arms
@@ -1760,7 +1788,7 @@ object KayaCompose {
             KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
             val host = KayaPresent.specHash()
             check(host.toULong() == SPEC_HASH) {
-                "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
+                "kaya: stale Compose interpreter — its spec hash " + SPEC_HASH.toString(16).padStart(16, '0') + " does not match the core's " + host.toULong().toString(16).padStart(16, '0') + "; rebuild the APK"
             }
             startPump()
         }
@@ -1985,6 +2013,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.minColumnWidth = readF64(b)
                         PROP_PLACEHOLDER ->
                             KayaSceneModel.nodes[id]!!.placeholder = readString(b)
+                        PROP_HREF ->
+                            KayaSceneModel.nodes[id]!!.href = readString(b)
                         PROP_WRAP ->
                             KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
@@ -2312,6 +2342,9 @@ object KayaCompose {
                         // The SEMANTIC ICON: drawn in the bar item's
                         // icon slot (docs/styling-plan.md D6).
                         SPROP_SYMBOL -> section.symbol = readI64(b)
+                        // The switcher item's COUNT (docs/tasks-s2-plan.md
+                        // T2): an F64 like every signal-bound number.
+                        SPROP_BADGE -> section.badge = readF64(b)
                         else -> error("kaya: unknown section prop $prop")
                     }
                 }
@@ -5092,20 +5125,26 @@ object KayaCompose {
         if (heading) return "heading"
         // What the node PUBLISHED about itself, ahead of role and class:
         // the pickers' `datetime` has no native source at compose-ui
-        // 1.7.5 (docs/datetime-plan.md P4, [KayaPickerKind]).
+        // 1.7.5 (docs/datetime-plan.md P4, [KayaAxKind]).
         if (published != null) return published
         val byRole =
             when (role) {
                 Role.Button -> "button"
                 Role.Checkbox -> "checkbox"
+                // The switch role (docs/tasks-s2-plan.md T1). IT MUST BE
+                // ANSWERED HERE: compose-ui 1.7.5 gives Role.Switch no
+                // legacy class name (SemanticsUtils_androidKt names only
+                // Button, CheckBox, ImageView, RadioButton and Spinner),
+                // so the class arm below could only ever say `group`.
+                Role.Switch -> "switch"
                 Role.Image -> "image"
                 // The chooser, which every platform spells its own way
                 // (AXPopUpButton on macOS, ComboBox on AT-SPI and UIA).
                 Role.DropdownList -> "combobox"
-                // Role.Switch, Role.RadioButton and Role.Tab are
-                // deliberately NOT mapped: the closed set has no name
-                // for them, and inventing one would report a role no
-                // scene can spell. They fall through to the class name.
+                // Role.RadioButton and Role.Tab are deliberately NOT
+                // mapped: the closed set has no name for them, and
+                // inventing one would report a role no scene can spell.
+                // They fall through to the class name.
                 else -> null
             }
         if (byRole != null) return byRole
@@ -5184,7 +5223,7 @@ object KayaCompose {
             out.append(" [").append(node.id)
                 .append(" tag=").append(node.config.getOrNull(SemanticsProperties.TestTag))
                 .append(" role=").append(node.config.getOrNull(SemanticsProperties.Role))
-                .append(" published=").append(node.config.getOrNull(KayaPickerKind))
+                .append(" published=").append(node.config.getOrNull(KayaAxKind))
                 .append(" class=")
                 .append(provider?.createAccessibilityNodeInfo(node.id)?.className ?: "no-info")
                 .append(" name=").append(kayaAxName(node))
@@ -5209,7 +5248,7 @@ object KayaCompose {
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
         val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         val role = node.config.getOrNull(SemanticsProperties.Role)
-        val published = node.config.getOrNull(KayaPickerKind)
+        val published = node.config.getOrNull(KayaAxKind)
         // THE SEMANTICS-ONLY FALLBACK, computed on every read but
         // consulted only after the provider's leash expires (see the
         // expect_ax arm): the same platform-owned tree the provider
@@ -5511,6 +5550,9 @@ object KayaCompose {
      * the merged node, so a bar drawing icons has NO ContentDescription
      * where a TalkBack user focuses (2026-08-17). The answer is the
      * first the UNMERGED subtree publishes — the render, not the model.
+     * THE BADGE'S SUBTREE IS STEPPED OVER: its count is a `Text` in the
+     * icon slot, ahead of the row's own label, so a badged row would
+     * otherwise answer "2" to every title read (T2).
      */
     private fun kayaSectionProp(
         node: SemanticsNode,
@@ -5518,6 +5560,7 @@ object KayaCompose {
         depth: Int = 0,
     ): String {
         if (depth > 16) return ""
+        if (node.config.getOrNull(SemanticsProperties.TestTag) == SECTION_BADGE_TAG) return ""
         val here = read(node)
         if (!here.isNullOrEmpty()) return here
         for (child in node.children) {
@@ -5570,6 +5613,55 @@ object KayaCompose {
             return "the section row describes itself \"$described\", which is not a symbol name"
         }
         return described
+    }
+
+    /**
+     * THE expect_section_badge READ: the count the REAL switcher row
+     * titled [title] draws, off the pill itself and never the model
+     * (docs/tasks-s2-plan.md T2). MAIN THREAD ONLY and TOTAL, the
+     * symbol read's shape. "0" IS THE ANSWER FOR A ROW WITH NO PILL:
+     * a cleared count draws nothing, so no badge and a badge of zero
+     * are the same picture by design.
+     */
+    private fun kayaSectionBadgeRead(activity: ComponentActivity, title: String): String {
+        val rows = kayaSectionRows(activity)
+        val hit = rows.firstOrNull { kayaSectionTitleOf(it) == title }
+        if (hit == null) {
+            if (rows.isEmpty()) return "the window has no section switcher"
+            val shown = rows.joinToString(", ") { kayaSectionTitleOf(it) }
+            return "no section row titled $title (the switchers carry: $shown)"
+        }
+        val pill = kayaSectionBadgeNode(hit) ?: return "0"
+        val count = kayaSectionBadgeCount(pill)
+        if (count.isEmpty()) {
+            // The pill composed and published no text. It says the pill's
+            // size rather than guessing why, because "drew an empty badge"
+            // and "drew no badge" are different bugs (invariant 3).
+            return "the section row's badge draws no count " +
+                "(the pill has ${pill.children.size} child nodes)"
+        }
+        return count
+    }
+
+    private fun kayaSectionBadgeNode(node: SemanticsNode, depth: Int = 0): SemanticsNode? {
+        if (depth > 16) return null
+        if (node.config.getOrNull(SemanticsProperties.TestTag) == SECTION_BADGE_TAG) return node
+        for (child in node.children) {
+            kayaSectionBadgeNode(child, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun kayaSectionBadgeCount(node: SemanticsNode, depth: Int = 0): String {
+        if (depth > 8) return ""
+        val here = node.config.getOrNull(SemanticsProperties.Text)
+            ?.joinToString("") { it.text }
+        if (!here.isNullOrEmpty()) return here
+        for (child in node.children) {
+            val found = kayaSectionBadgeCount(child, depth + 1)
+            if (found.isNotEmpty()) return found
+        }
+        return ""
     }
 
     /** The first catalog item with this label, in CATALOG PREORDER —
@@ -6307,6 +6399,28 @@ object KayaCompose {
                                 failures.add(
                                     "section \"${head.first}\" symbol \"$got\", " +
                                         "wanted \"${want.first}\"")
+                            }
+                        }
+                    }
+                    "expect_section_badge" -> {
+                        // THE COUNT on the REAL switcher row
+                        // (docs/tasks-s2-plan.md T2), read off the pill
+                        // the row drew; "0" is a row with no pill.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val want = head?.second?.trim() ?: ""
+                        if (head == null || want.isEmpty()) {
+                            failures.add(
+                                "expect_section_badge wants a quoted section title and " +
+                                    "a count: $line")
+                        } else {
+                            val got = onUi(activity) {
+                                kayaSectionBadgeRead(activity, head.first)
+                            }
+                            if (got == want) {
+                                observed.add("section \"${head.first}\" badge $want")
+                            } else {
+                                failures.add(
+                                    "section \"${head.first}\" badge $got, wanted $want")
                             }
                         }
                     }
@@ -8107,6 +8221,23 @@ object KayaCompose {
                                 observed.add("placeholder \"$want\"")
                             } else {
                                 failures.add("placeholder \"$got\", wanted \"$want\"")
+                            }
+                        }
+                    }
+                    "expect_href" -> {
+                        // The destination the link carries
+                        // (docs/tasks-s2-plan.md T3), off the node the
+                        // AnnotatedString was built from.
+                        val want = quoted(parts.drop(2))
+                        val node = kayaWidgetTarget(parts[1])
+                        if (node == null) {
+                            failures.add("no such target ${parts[1]}")
+                        } else {
+                            val got = onUi(activity) { node.href }
+                            if (got == want) {
+                                observed.add("href \"$want\"")
+                            } else {
+                                failures.add("href \"$got\", wanted \"$want\"")
                             }
                         }
                     }
@@ -10950,6 +11081,30 @@ private fun KayaRenderCore(
                     onTextLayout = { kayaTypefaceSites["caption"] = it },
                     modifier = boxFill.then(a11y),
                 )
+            } else if (node.role == KayaCompose.ROLE_LINK) {
+                // THE LINK ROLE (docs/tasks-s2-plan.md T3): the URL rides
+                // the text as a LinkAnnotation, so COMPOSE opens it
+                // through LocalUriHandler and kaya emits nothing. The
+                // classification is kaya's own — compose-ui 1.7.5 lowers
+                // a link to an overlaid clickable carrying no Role, so
+                // the reader would answer `label` (see [KayaAxKind]).
+                Text(
+                    buildAnnotatedString {
+                        // The platform's link look (docs/tasks-s2-plan.md T3):
+                        // LinkAnnotation draws nothing of its own.
+                        withLink(
+                            LinkAnnotation.Url(
+                                node.href,
+                                styles = TextLinkStyles(
+                                    style = SpanStyle(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        textDecoration = TextDecoration.Underline)))) {
+                            append(node.text)
+                        }
+                    },
+                    modifier = boxFill.then(a11y)
+                        .semantics(mergeDescendants = true) { this[KayaAxKind] = "link" },
+                )
             } else {
                 // A role with no arm above is REFUSED, not quietly worn as
                 // a plain label — the interpreters are the historic miss
@@ -10965,7 +11120,15 @@ private fun KayaRenderCore(
                     modifier = boxFill.then(a11y),
                 )
             }
-        KayaCompose.KIND_CHECKBOX ->
+        KayaCompose.KIND_CHECKBOX -> {
+            // THE SWITCH ROLE (docs/tasks-s2-plan.md T1): the SAME model —
+            // `checked`, the toggled emit, the a11y label — drawn as
+            // Material's Switch and published as Role.Switch. A role with
+            // no arm is REFUSED, the label arm's rule.
+            val asSwitch = node.role == KayaCompose.ROLE_SWITCH
+            check(node.role == 0L || asSwitch) {
+                "kaya: checkbox role ${node.role} has no compose arm"
+            }
             // Uncontrolled toward the app, the entry's shape. The TOGGLE
             // LIVES ON THE ROW and the box takes onCheckedChange = null:
             // a box with its own handler is independently focusable and
@@ -10976,7 +11139,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(a11y)
                     .toggleable(
                         value = node.checked,
-                        role = Role.Checkbox,
+                        role = if (asSwitch) Role.Switch else Role.Checkbox,
                         onValueChange = { newValue ->
                             node.checked = newValue
                             KayaPresent.emitToggled(node.tag, newValue)
@@ -10986,9 +11149,14 @@ private fun KayaRenderCore(
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = node.checked, onCheckedChange = null)
+                if (asSwitch) {
+                    Switch(checked = node.checked, onCheckedChange = null)
+                } else {
+                    Checkbox(checked = node.checked, onCheckedChange = null)
+                }
                 Text(node.text)
             }
+        }
         KayaCompose.KIND_SLIDER -> KayaSliderSurface(node, boxFill.then(a11y))
         KayaCompose.KIND_IMAGE -> {
             // Fixed to the decoded bitmap's intrinsic size. The one kind
@@ -13112,7 +13280,26 @@ fun KayaSectionsScaffold(active: KayaSection) {
                     // affordance and the label is the caption under it.
                     // A section that declares no symbol still passes an
                     // empty slot, exactly as before.
-                    icon = { KayaSymbolIcon(section.symbol) },
+                    //
+                    // THE COUNT (docs/tasks-s2-plan.md T2) rides the icon
+                    // slot, which is where M3 puts it: BadgedBox draws the
+                    // pill on the icon's corner. 0 is no badge at all, so
+                    // a cleared count leaves the row exactly as it was.
+                    icon = {
+                        val count = section.badge
+                        if (count > 0) {
+                            BadgedBox(
+                                badge = {
+                                    Badge(
+                                        modifier = Modifier.testTag(
+                                            KayaCompose.SECTION_BADGE_TAG),
+                                    ) { Text(count.toInt().toString()) }
+                                },
+                            ) { KayaSymbolIcon(section.symbol) }
+                        } else {
+                            KayaSymbolIcon(section.symbol)
+                        }
+                    },
                     // ONE LINE: the item's label slot is 56dp on a 360dp
                     // phone with five sections, and "Upcoming" wrapped to
                     // "Upcomin" / "g" (captured 2026-09-06). A long title
@@ -13285,19 +13472,21 @@ private fun KayaSliderSurface(node: KayaNode, modifier: Modifier) {
     )
 }
 
+/**
+ * WHAT KAYA PUBLISHES ABOUT A NODE THE TOOLKIT HAS NO ROLE FOR, read
+ * back by [KayaCompose]'s role reader on BOTH its routes: the pickers'
+ * `datetime` (docs/datetime-plan.md P4; docs/traps.md, "compose-ui 1.7.5
+ * has no picker Role, and the Material date field publishes an
+ * EditText") and a `role link` label's `link` (docs/tasks-s2-plan.md T3
+ * — a text link lowers to an overlaid clickable with no Role at all).
+ */
+val KayaAxKind = SemanticsPropertyKey<String>("KayaAxKind")
+
 // ---- the pickers (docs/datetime-plan.md) ------------------------------------
 // The wire packs a date as YYYYMMDD and a time as HHMM (D2). Compose's
 // DatePickerState stores its selection as UTC MIDNIGHT MILLIS, so both
 // directions go through ZoneOffset.UTC: reading it back through the
 // device's zone is the off-by-one-day genre P2 exists to keep out.
-
-/**
- * THE PICKER'S PUBLISHED CLASSIFICATION (docs/datetime-plan.md P4;
- * docs/traps.md, "compose-ui 1.7.5 has no picker Role, and the Material
- * date field publishes an EditText"). Read back by [KayaCompose]'s role
- * reader on BOTH its routes.
- */
-val KayaPickerKind = SemanticsPropertyKey<String>("KayaPickerKind")
 
 /** The fixed-digit spellings every scene reads (harness.rs's Date and
  * Time Display); nothing asserts what the field displays (D9). */
@@ -13450,7 +13639,7 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier, f
         // (the checkbox arm's measurement).
         modifier = boxFill.then(a11y)
             .then(if (node.grow > 0 || fieldFills) Modifier else Modifier.width(contentWidth))
-            .semantics(mergeDescendants = true) { this[KayaPickerKind] = "datetime" },
+            .semantics(mergeDescendants = true) { this[KayaAxKind] = "datetime" },
         trailingIcon = {
             IconButton(onClick = { open = true }) {
                 Icon(

@@ -8,10 +8,10 @@ expect_sections 2
 expect_sections_presentation "bar"
 # THE SYMBOLS THE ROWS REALLY DRAW, not the ones the guest declared —
 # the assertion whose absence let a garbage decode ship green on five
-# lanes (docs/chrome/sections-symbol.md). Above the phone cut
-# deliberately, since a symbol is what a bottom bar is made of; the
-# SIDEBAR rows below carry none, because GTK's GtkStackSidebar binds
-# only the page title (DESIGN.md, Stated platform divergences).
+# lanes (docs/chrome/sections-symbol.md). Above the phone cut, since a
+# symbol is what a bottom bar is made of. The SIDEBAR rows' symbols are
+# asserted in tasks.steps, whose sections live in window#0 and so run on
+# every lane — an assertion below this cut is one the phones refuse.
 expect_section_symbol "Feed" "home"
 expect_section_symbol "Archive" "star"
 expect_section "Feed"

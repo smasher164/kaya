@@ -1331,6 +1331,8 @@ pub enum Prop {
     /// The prompt an empty text field shows (Str-valued; docs/search-plan.md
     /// S3): the platform's own placeholder, never the text, never emitted.
     Placeholder,
+    /// A link's destination on a `role link` label (docs/tasks-s2-plan.md T3).
+    Href,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;
@@ -1495,6 +1497,9 @@ pub enum SectionProp {
     /// "symbol" enum; docs/styling-plan.md D6) — the names-not-bytes half
     /// of the same slot.
     Symbol,
+    /// The count on the switcher item (F64-valued; zero clears;
+    /// docs/tasks-s2-plan.md T2).
+    Badge,
 }
 
 /// Navigation-entry property keys (spec::ENTRY_PROPS; DESIGN.md,

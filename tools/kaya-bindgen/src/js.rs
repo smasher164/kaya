@@ -321,7 +321,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let up = prop.to_uppercase();
         let (param, expr) = value_expr(kind, prop);
         assert!(
-            matches!(kind, PropKind::Str | PropKind::Blob | PropKind::Enum(_)),
+            matches!(kind, PropKind::Str | PropKind::Blob | PropKind::Enum(_) | PropKind::F64),
             "no section prop carries {kind:?}"
         );
         c.line("");

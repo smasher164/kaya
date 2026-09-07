@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x50347d52a1eef1b4
+specHash = 0x0e5f6241c88af41c
 
 valueBool :: Word32
 valueBool = 1
@@ -200,6 +200,8 @@ propWrap :: Word32
 propWrap = 29
 propPlaceholder :: Word32
 propPlaceholder = 30
+propHref :: Word32
+propHref = 31
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -226,6 +228,8 @@ spropIcon :: Word32
 spropIcon = 2
 spropSymbol :: Word32
 spropSymbol = 3
+spropBadge :: Word32
+spropBadge = 4
 menuKindMenu :: Word32
 menuKindMenu = 1
 menuKindAction :: Word32
@@ -314,6 +318,10 @@ roleCaption :: Word32
 roleCaption = 4
 rolePlain :: Word32
 rolePlain = 5
+roleSwitch :: Word32
+roleSwitch = 6
+roleLink :: Word32
+roleLink = 7
 symbolAdd :: Word32
 symbolAdd = 1
 symbolRemove :: Word32
@@ -1434,6 +1442,25 @@ txBindPlaceholderElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propPlaceholder <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant href value.
+txSetHref :: Word64 -> String -> Builder
+txSetHref widgetId href = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHref <> word32LE sourceConst
+    <> encodeValue (VStr href))
+
+-- set_property with a signal-bound href value.
+txBindHref :: Word64 -> Word64 -> Builder
+txBindHref widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHref <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindHrefElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindHrefElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHref <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -1588,6 +1615,18 @@ txSetSectionSymbol section symbol = wireRecord txKindSetSectionProp
 txBindSectionSymbol :: Word64 -> Word64 -> Builder
 txBindSectionSymbol section signalId = wireRecord txKindSetSectionProp
   (word64LE section <> word32LE spropSymbol <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_section_prop with a constant badge value.
+txSetSectionBadge :: Word64 -> Double -> Builder
+txSetSectionBadge section badge = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropBadge <> word32LE sourceConst
+    <> encodeValue (VF64 badge))
+
+-- set_section_prop with a signal-bound badge value.
+txBindSectionBadge :: Word64 -> Word64 -> Builder
+txBindSectionBadge section signalId = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropBadge <> word32LE sourceSignal
     <> word64LE signalId)
 
 shortcutNamedKeys :: [String]

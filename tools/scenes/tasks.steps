@@ -7,6 +7,10 @@
 expect_title "tasks"
 expect_sections 5
 expect_section "Inbox"
+# THE SYMBOLS THE ROWS REALLY DRAW (docs/chrome/sections-symbol.md): these
+# sections live in window#0, so the sidebar arm is asserted on every lane
+# — the desktops' sidebar rows and the phones' bar.
+expect_section_symbol "Inbox" "home"
 expect label@inbox_count "2 in inbox"
 expect label@title[t1] "Buy milk"
 # The list spans its section and a task row spans the list (R7): the
@@ -42,12 +46,15 @@ expect_window column@inbox_list 0 3
 # Today: the routed rows, and a completion that moves one to the Logbook.
 select_section 1
 expect_section "Today"
+expect_section_symbol "Today" "star"
 expect label@today_count "2 today"
+expect_section_badge "Today" 2
 expect label@title[t3] "Draft chapter 3"
 expect label@caption[t3] "Mon 7 Sep, Thesis"
 expect label@caption[t4] "Mon 7 Sep"
 toggle checkbox@done[t3] on
 expect label@today_count "1 today"
+expect_section_badge "Today" 1
 
 # The Logbook is a View-menu screen on the active section's stack; a
 # task reopened there leaves it and returns to its list.
@@ -60,6 +67,7 @@ expect label@logbook_count "1 done"
 back
 expect_entries 0
 expect label@today_count "2 today"
+expect_section_badge "Today" 2
 
 # Upcoming and Anytime read the seed's routing.
 select_section 2
@@ -82,6 +90,10 @@ expect textarea@notes ""
 expect_breadth textarea@notes
 # The picker's accessibility name IS its row's label (docs/forms-plan.md §4).
 expect_ax date_picker@when "datetime/When: none"
+# A link in the notes (S2, R14): the platform's link and its destination.
+expect_placeholder textarea@notes "Notes"
+expect_href label@reference "https://example.com/tasks/t2"
+expect_ax label@reference "link/Reference"
 set_date date_picker@when 2026-09-08
 expect_ax date_picker@when "datetime/When: Tue 8 Sep"
 back
@@ -128,8 +140,11 @@ menu_activate "View>Settings"
 expect_entries 1
 expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
 choose select@week[s] 1
+# The two settings are switches (S2, R12): the platform's switch trait.
+expect_ax checkbox@hide_badge[s] "switch/Hide the Today badge"
 toggle checkbox@hide_badge[s] on
 expect label@settings[s] "Week starts Sunday; badge hidden; completed move to Logbook"
+expect_section_badge "Today" 0
 toggle checkbox@keep_done[s] on
 expect label@settings[s] "Week starts Sunday; badge hidden; completed stay in place"
 back

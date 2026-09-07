@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x50347d52a1eef1b4
+let kayaSpecHash: UInt64 = 0x0e5f6241c88af41c
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -82,6 +82,7 @@ private let wpropInset: UInt32 = 8
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let spropSymbol: UInt32 = 3
+private let spropBadge: UInt32 = 4
 private let sectionsPresentationAuto: Int64 = 0
 private let sectionsPresentationBar: Int64 = 1
 private let sectionsPresentationSidebar: Int64 = 2
@@ -156,6 +157,8 @@ private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
 private let roleCaption: Int64 = 4
 private let rolePlain: Int64 = 5
+private let roleSwitch: Int64 = 6
+private let roleLink: Int64 = 7
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol"). APPEND-ONLY wire
 /// values; the SF Symbols spelling each maps to is kayaSFSymbol below.
 private let symbolAdd: Int64 = 1
@@ -191,6 +194,7 @@ private let propFill: UInt32 = 27
 private let propMinColumnWidth: UInt32 = 28
 private let propWrap: UInt32 = 29
 private let propPlaceholder: UInt32 = 30
+private let propHref: UInt32 = 31
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -331,6 +335,8 @@ final class KayaNode: Identifiable {
     var inset: Double = 0
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
+    /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
+    var href = ""
     /// The drag declarations (docs/dnd-plan.md D1, D8): what this widget hands
     /// over and allows, what it performs as a destination, and whether its
     /// rows reorder within their collection.
@@ -580,6 +586,8 @@ final class KayaSectionModel: Identifiable {
     var title = ""
     /// The switcher item's SEMANTIC ICON, 0 = none.
     var symbol: Int64 = 0
+    /// The count the switcher item shows, 0 = none (docs/tasks-s2-plan.md T2).
+    var badge: Double = 0
     var entries: [KayaEntryModel] = []
 
     init(id: UInt64) {
@@ -3127,7 +3135,12 @@ func kayaPresentFileDialog(
         // needs: the initial location is honoured at presentation and nowhere
         // else.
         if let pending = kayaPendingPanelDirectory {
-            panel.directoryURL = URL(fileURLWithPath: pending)
+            // KAYA_PICKER_MISAIM=1 aims at the parent on purpose: the shape the
+            // reveal race produces, so expect_file_dialog's descent is watched.
+            let misaim = ProcessInfo.processInfo.environment["KAYA_PICKER_MISAIM"] == "1"
+            let aimed = misaim ? (pending as NSString).deletingLastPathComponent : pending
+            panel.directoryURL = URL(fileURLWithPath: aimed)
+            if misaim { kayaPickerNote("MISAIM: presenting at \(aimed), the parent of \(pending)") }
         }
         let delegate = KayaPickerDelegate(dialog: dialog, save: false)
         panel.delegate = delegate
@@ -4693,6 +4706,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propAccepts, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.accepts = String(decoding: bytes, as: UTF8.self)
+                case (propHref, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.href = String(decoding: bytes, as: UTF8.self)
                 case (propRole, valueI64):
                     kayaScene.nodes[id]!.role =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
@@ -4972,6 +4988,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // is padding that decodes as garbage rendering NO icon.
                     section.symbol =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (spropBadge, valueF64):
+                    // 8-aligned past the type word, like the I64 above.
+                    section.badge =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 default:
                     fatalError("kaya: bad section prop \(prop) value type \(svType)")
                 }
@@ -5190,16 +5210,21 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
 /// of the verb is that the PLATFORM classified the control, so anything kaya
 /// has no name for reports `unknown` rather than being guessed at.
 #if os(macOS)
-    private func kayaAxRole(_ role: String?) -> String {
+    private func kayaAxRole(_ role: String?, subrole: String? = nil) -> String {
         switch role {
         case kAXButtonRole: return "button"
+        // The link role by its string, like AXHeading above: the constant is
+        // not in scope from SwiftUI's imports.
+        case "AXLink": return "link"
         case kAXStaticTextRole: return "label"
         // A label with the heading role (docs/styling-plan.md D4): SwiftUI's
         // .isHeader surfaces as the AXHeading ROLE on macOS — measured on the
         // styling scene's first run, not assumed.
         case "AXHeading": return "heading"
         case kAXTextFieldRole, kAXTextAreaRole: return "field"
-        case kAXCheckBoxRole: return "checkbox"
+        // AppKit publishes the switch style as AXCheckBox with the AXSwitch
+        // subrole (docs/tasks-s2-plan.md T1): the subrole is the word.
+        case kAXCheckBoxRole: return subrole == "AXSwitch" ? "switch" : "checkbox"
         case kAXSliderRole: return "slider"
         // NSDatePicker publishes ONE role for a date and a time picker alike
         // (measured 2026-09-04 on the pickers scene): the closed set's
@@ -5312,7 +5337,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     /// is the count KAYA_AX_COUNT reports per identifier walk.
     private var kayaAxCopyCount = 0
 
-    private func kayaAxRead(_ identifier: String) -> String? {
+    private func kayaAxRead(_ identifier: String, declaredSwitch: Bool = false) -> String? {
         guard !identifier.isEmpty else { return nil }
         // WAIT FOR THE WINDOW, ON THE EVENT — never on a clock: kayaAwaitWindow
         // parks on the registration signal, because an AX call landing during
@@ -5372,7 +5397,9 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                 + "expect_ax addresses the tree by identifier and cannot tell "
                 + "them apart (\(what.joined(separator: ", "))); give each element its own id>"
         }
-        let role = kayaAxRole(kayaAxCopy(hit, kAXRoleAttribute) as? String)
+        let role = kayaAxRole(
+            kayaAxCopy(hit, kAXRoleAttribute) as? String,
+            subrole: kayaAxCopy(hit, kAXSubroleAttribute) as? String)
         // A control's spoken name is its DESCRIPTION when authored and its
         // TITLE when derived, so the authored one comes first. STATIC TEXT
         // publishes nil for both and carries its string in AXValue (measured
@@ -5531,13 +5558,18 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     /// riding several kinds (docs/traps.md, "iOS materializes no accessibility
     /// tree until automation is enabled"). The order below is not stylistic:
     /// SPECIFIC signals are weighed before `.button`.
-    private func kayaAxRole(_ element: NSObject) -> String {
+    /// UIKit has one control for both, so the word follows the declared role
+    /// (docs/tasks-s2-plan.md T1).
+    private func kayaAxRole(_ element: NSObject, declaredSwitch: Bool = false) -> String {
         let traits = element.accessibilityTraits
         // A Toggle publishes button|toggleButton (traits
         // 9007199254740993 = 1 | 1<<53, measured 2026-07-25). The trait
         // is iOS 17; below that the switch is only its class.
-        if #available(iOS 17.0, *), traits.contains(.toggleButton) { return "checkbox" }
-        if element is UISwitch { return "checkbox" }
+        if #available(iOS 17.0, *), traits.contains(.toggleButton) {
+            return declaredSwitch ? "switch" : "checkbox"
+        }
+        if element is UISwitch { return declaredSwitch ? "switch" : "checkbox" }
+        if traits.contains(.link) { return "link" }
         // A compact UIDatePicker is the accessibility element itself and
         // publishes NO traits at all (traits 0, elements 0, measured
         // 2026-09-04), so the CLASS is the only signal there is; it is
@@ -5666,7 +5698,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
         unsafeBitCast(symbol, to: KayaSetAutomation.self)(true)
     }
 
-    private func kayaAxRead(_ identifier: String) -> String? {
+    private func kayaAxRead(_ identifier: String, declaredSwitch: Bool = false) -> String? {
         guard !identifier.isEmpty else { return nil }
         // The tree materializes asynchronously after the switch flips;
         // the step's bounded retry is what waits for it (no sleep here —
@@ -5697,7 +5729,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
                             .lazy
                             .compactMap { $0 }
                             .first { !$0.isEmpty } ?? ""
-                        return kayaAxRole(hit) + "/" + spoken
+                        return kayaAxRole(hit, declaredSwitch: declaredSwitch) + "/" + spoken
                     }
                 }
             }
@@ -7276,6 +7308,42 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("section \"\(got)\", wanted \"\(want)\"")
                 }
+            case "expect_section_badge":
+                // The value the render arm handed `.badge`; SwiftUI has no
+                // read-back (docs/tasks-s2-plan.md T2).
+                let badgeRest = String(line.dropFirst(parts[0].count))
+                guard let (badgeTitle, badgeWantRaw) = kayaQuotedPrefix(badgeRest) else {
+                    failures.append(
+                        "expect_section_badge wants a quoted section title and a count: \(line)")
+                    break
+                }
+                let wantBadge = badgeWantRaw.trimmingCharacters(in: .whitespaces)
+                let gotBadge = DispatchQueue.main.sync { () -> String in
+                    guard let section = kayaScene.sectionsById.values.first(where: {
+                        kayaBytesEqual($0.title, badgeTitle)
+                    }) else {
+                        let shown = kayaScene.sectionsById.values.map(\.title).joined(separator: ", ")
+                        return "<no section titled \(badgeTitle) (the switchers carry: \(shown))>"
+                    }
+                    return String(Int(section.badge))
+                }
+                if gotBadge == wantBadge {
+                    observed.append("section \"\(badgeTitle)\" badge \(wantBadge)")
+                } else {
+                    failures.append(
+                        "section \"\(badgeTitle)\" badge \(gotBadge), wanted \(wantBadge)")
+                }
+            case "expect_href":
+                let wantHref = kayaQuoted(Array(parts[2...]))
+                let gotHref = DispatchQueue.main.sync { () -> String in
+                    guard let node = kayaAnyTarget(parts[1]) else { return "<no such target>" }
+                    return node.href
+                }
+                if gotHref == wantHref {
+                    observed.append("href \"\(wantHref)\"")
+                } else {
+                    failures.append("href \"\(gotHref)\", wanted \"\(wantHref)\"")
+                }
             case "expect_section_symbol":
                 // THE SEMANTIC ICON on the REAL switcher row. Its own arm
                 // rather than a second label on expect_section: check-verbs
@@ -7657,7 +7725,34 @@ private func kayaRunScript(_ script: String) {
                     // OFF the main thread, deliberately: the read goes out to the
                     // host and back, and the picker is a remote view controller
                     // whose UI a blocked main thread would stall.
-                    let (state, simdriveWhy) = kayaSimdriveState()
+                    let read = kayaSimdriveState()
+                    var state = read.0
+                    let simdriveWhy = read.1
+                    // THE REVEAL RACE (docs/traps.md, "The first picker a device
+                    // shows after a boot ignores where you aimed it"): the picker
+                    // opened at the PARENT with the aimed folder as a row. No
+                    // app-side aim exists, so the harness descends once, on the
+                    // record. KAYA_PICKER_MISAIM=1 forces the miss to watch this.
+                    if let (where_, rows) = state, !wantDir.isEmpty,
+                        !where_.hasSuffix(wantDir)
+                    {
+                        let folder = (wantDir as NSString).lastPathComponent
+                        if rows.contains(where: {
+                            ($0 as NSString).deletingPathExtension == folder
+                        }) {
+                            kayaPickerNote(
+                                "aim miss: opened at \"\(where_)\", wanted \"\(wantDir)\"; "
+                                    + "entering \(folder)")
+                            let (ok, lines) = KayaSimdrive.ask("enter \(folder)")
+                            if ok {
+                                state = kayaSimdriveState().0
+                                kayaPickerNote("entered \(folder): now at \"\(state?.0 ?? "")\"")
+                            } else {
+                                kayaPickerNote(
+                                    "enter \(folder) refused: \(lines.first ?? "")")
+                            }
+                        }
+                    }
                 #endif
                 if let (where_, rows) = state {
                     if wantDir.isEmpty {
@@ -8776,17 +8871,19 @@ private func kayaRunScript(_ script: String) {
                 // ITSELF runs on the harness thread ON PURPOSE: requests are
                 // serviced BY the main runloop, so querying from inside
                 // main.sync leaves SwiftUI's elements coming back empty.
-                let identifier = DispatchQueue.main.sync { () -> String? in
+                let resolved = DispatchQueue.main.sync { () -> (String, Bool)? in
                     guard let node = kayaAnyTarget(parts[1]) else { return nil }
-                    return node.a11yId
+                    return (node.a11yId, node.role == roleSwitch)
                 }
+                let identifier = resolved?.0
                 let gotAx: String
-                switch identifier {
+                switch resolved {
                 case .none: gotAx = "<no such target>"
-                case .some(let ident) where ident.isEmpty:
+                case .some((let ident, _)) where ident.isEmpty:
                     gotAx = "<no a11y_id authored on this widget>"
-                case .some(let ident):
-                    gotAx = kayaAxRead(ident) ?? "<not in the accessibility tree>"
+                case .some((let ident, let declaredSwitch)):
+                    gotAx = kayaAxRead(ident, declaredSwitch: declaredSwitch)
+                        ?? "<not in the accessibility tree>"
                 }
                 if gotAx == wantAx {
                     observed.append("ax \"\(wantAx)\"")
@@ -13904,7 +14001,7 @@ struct KayaRender: View {
             // here is REFUSED, never quietly worn as a plain label.
             let _ = precondition(
                 node.role == 0 || node.role == roleHeading
-                    || node.role == roleCaption,
+                    || node.role == roleCaption || node.role == roleLink,
                 "kaya: label role \(node.role) has no swiftui arm")
             let sectionText = kayaGroupedSectionText
             // THE SWAPPED style, not the platform's: a text style set here
@@ -13923,7 +14020,9 @@ struct KayaRender: View {
                 .textCase(
                     node.role == roleHeading && sectionText ? .uppercase : nil)
             Group {
-                if node.role == roleCaption || (node.role == roleHeading && sectionText) {
+                if node.role == roleLink, let url = URL(string: node.href) {
+                    Link(node.text, destination: url)
+                } else if node.role == roleCaption || (node.role == roleHeading && sectionText) {
                     base.foregroundStyle(.secondary)
                 } else {
                     base
@@ -13949,9 +14048,10 @@ struct KayaRender: View {
                     })
             )
             // The checkbox style is AppKit-only; iOS keeps the switch,
-            // its native presentation of an on/off bit.
+            // its native presentation of an on/off bit (role switch:
+            // docs/tasks-s2-plan.md T1).
             #if os(macOS)
-                .toggleStyle(.checkbox)
+                .kayaToggleStyle(asSwitch: node.role == roleSwitch)
             #else
                 // A UIKit switch is greedy on width: unfixed, it took a task
                 // row's whole free width and pushed its neighbours to the
@@ -17756,6 +17856,7 @@ struct KayaTextarea: View {
             a11yId: node.a11yId,
             a11yLabel: node.a11yLabel,
             a11yHint: node.a11yHint,
+            placeholder: node.placeholder,
             // READ HERE, in the body, for the same reason the text is:
             // @Observable tracks a body's reads, so a declaration that arrived
             // while nothing else changed still brings updateNSView around.
@@ -17915,6 +18016,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
     let a11yId: String
     let a11yLabel: String
     let a11yHint: String
+    let placeholder: String
     /// The declared set and THE TEXT IT WAS DECLARED AGAINST. Both, or the set
     /// is unpaintable: see `applyRanges`.
     let highlights: [NSRange]
@@ -18059,6 +18161,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // (measured by reading `AXTextArea id=notes-own` back). Empty stays unset.
         view.setAccessibilityIdentifier(a11yId)
         view.setAccessibilityLabel(a11yLabel.isEmpty ? nil : a11yLabel)
+        // The drawn placeholder (KayaTextareaPlaceholder) is not the text view's,
+        // so AXPlaceholderValue is published by hand — expect_placeholder reads it.
+        view.setAccessibilityPlaceholderValue(placeholder.isEmpty ? nil : placeholder)
         view.setAccessibilityHelp(a11yHint.isEmpty ? nil : a11yHint)
 
         // THE RANGES, IN THE SAME PASS AS THE TEXT PUSH ABOVE — the ordering
@@ -18446,6 +18551,21 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 /// where SwiftUI exposes no image object (measured), a DIAGNOSTIC on iOS.
 let kayaSectionSymbolIdent = "kaya-section-symbol:"
 
+#if os(macOS)
+    extension View {
+        /// `.switch` for `role switch`, the checkbox otherwise; a ViewBuilder
+        /// branch because the two styles are two types.
+        @ViewBuilder
+        func kayaToggleStyle(asSwitch: Bool) -> some View {
+            if asSwitch {
+                self.toggleStyle(.switch)
+            } else {
+                self.toggleStyle(.checkbox)
+            }
+        }
+    }
+#endif
+
 /// ONE ROW BODY FOR EVERY SECTION SWITCHER, so that "what a section row draws" is
 /// a single arm. The identifier is published on EVERY arm, symbol or not: "the
 /// row is there and drew no glyph" and "there is no row" are different
@@ -18526,6 +18646,7 @@ struct KayaSectionsView: View {
                             // (docs/styling-plan.md D6). ONE body with the tab
                             // arm below, so a perturbation moves both.
                             KayaSectionLabel(title: section.title, symbol: section.symbol)
+                                .badge(Int(section.badge))
                                 .tag(section.id)
                         }
                         // EXPLICIT, not inherited: this is what
@@ -18558,6 +18679,7 @@ struct KayaSectionsView: View {
         TabView(selection: selection) {
             ForEach(window.sections) { section in
                 KayaSectionPane(sectionId: section.id)
+                    .badge(Int(section.badge))
                     .tabItem {
                         // The tab bar is the switcher that most wants an icon — a
                         // bare-text bottom bar is not the platform's real thing

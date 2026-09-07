@@ -38,11 +38,25 @@ python3 - "$ROOT/tools/ios/Info.plist.in" >"$APP/Info.plist" <<'PY'
 import pathlib
 import sys
 
+import plistlib
+
 text = pathlib.Path(sys.argv[1]).read_text()
-print(text.replace("@EXECUTABLE@", "KayaExportProbe")
-          .replace("@BUNDLE_ID@", "dev.kaya.exportpreflight")
-          .replace("@NAME@", "KayaExportProbe")
-          .replace("@IDENTITY@", ""), end="")
+out = (text.replace("@EXECUTABLE@", "KayaExportProbe")
+           .replace("@BUNDLE_ID@", "dev.kaya.exportpreflight")
+           .replace("@NAME@", "KayaExportProbe")
+           .replace("@IDENTITY@", "")
+           .replace("@LAUNCH@", "<dict/>"))
+# The template is TEXT: a placeholder nobody substituted ships a plist the
+# simulator refuses to install with no reason printed (2026-09-07, @LAUNCH@).
+try:
+    plistlib.loads(out.encode())
+except Exception as exc:
+    sys.exit(f"exportprobe: the rendered Info.plist does not parse ({exc}); "
+             f"a template placeholder was left unsubstituted")
+left = [tok for tok in ("@EXECUTABLE@", "@BUNDLE_ID@", "@NAME@", "@IDENTITY@", "@LAUNCH@") if tok in out]
+if left:
+    sys.exit(f"exportprobe: Info.plist.in placeholders left unsubstituted: {left}")
+print(out, end="")
 PY
 
 echo "$APP"

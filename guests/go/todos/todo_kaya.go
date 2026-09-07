@@ -102,6 +102,10 @@ func (r todoRow) SetPlaceholder(n kaya.Node, text string) { r.t.SetPlaceholder(n
 
 func (r todoRow) Placeholder(n kaya.Node, f kaya.Field[string]) { r.c.Placeholder(r.t, n, f) }
 
+func (r todoRow) SetHref(n kaya.Node, url string) { r.t.SetHref(n, url) }
+
+func (r todoRow) Href(n kaya.Node, f kaya.Field[string]) { r.c.Href(r.t, n, f) }
+
 func (r todoRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
 func (r todoRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }

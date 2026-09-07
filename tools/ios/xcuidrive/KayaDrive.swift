@@ -19,6 +19,7 @@
 //   parses these shapes — swift/KayaSwiftUI.swift, KayaSimdrive):
 //   state                       <directory> then one row name per line; nothing when no picker
 //   choose <name>               tap the row whose stem matches, confirm if asked, require the picker gone
+//   enter <name>                tap the FOLDER row whose stem matches, require the breadcrumb to read it; answers like state
 //   cancel                      the picker's Cancel (or back until one exists), require it gone
 //   savestate                   <directory> then the name field's text; nothing when no save sheet
 //   savename <name>             type the name into the field and READ IT BACK
@@ -195,8 +196,24 @@ final class KayaDrive: XCTestCase {
                     Date().timeIntervalSince(started), limit))
         return false
     }
+    /// ONE SNAPSHOT OF A SUBTREE, never attribute reads on elements bound by
+    /// index: `snapshot()` throws when the element is gone, where `.label` on
+    /// a stale bound element records an UNRECOVERABLE XCTest issue that ends
+    /// the resident loop whatever continueAfterFailure says (measured
+    /// 2026-09-07: `enter`'s wait read the bar mid-push and the driver died
+    /// with "No matches found for Element at index 3").
+    func descendants(_ el: XCUIElement, _ type: XCUIElement.ElementType) -> [XCUIElementSnapshot] {
+        guard let root = try? el.snapshot() else { return [] }
+        var out: [XCUIElementSnapshot] = []
+        func walk(_ s: XCUIElementSnapshot) {
+            if s.elementType == type { out.append(s) }
+            s.children.forEach(walk)
+        }
+        walk(root)
+        return out
+    }
     func strip(_ a: XCUIApplication) -> [(String, CGRect)] {
-        bar(a).buttons.allElementsBoundByIndex.map { ($0.label, $0.frame) }
+        descendants(bar(a), .button).map { ($0.label, $0.frame) }
     }
     /// simdrive's currentDirectory: the bar's `<dir>, Actions Menu` button.
     func currentDirectory(_ a: XCUIApplication) -> String {
@@ -215,7 +232,7 @@ final class KayaDrive: XCTestCase {
         return identifier
     }
     func rows(_ a: XCUIApplication) -> [(String, CGRect)] {
-        a.collectionViews[fileView].cells.allElementsBoundByIndex.map { (rowName($0.identifier), $0.frame) }
+        descendants(a.collectionViews[fileView], .cell).map { (rowName($0.identifier), $0.frame) }
     }
     /// simdrive's waitForRows: the chrome comes before the rows, so a
     /// read that lands between them reports the directory and no rows.
@@ -567,6 +584,35 @@ final class KayaDrive: XCTestCase {
                 return (false, "the picker was still up after \(rounds) rounds of choosing \(wanted): the row was offered in \(offered) of them; it now lists \(rows(a).map { $0.0 }) and offers \(strip(a).map { $0.0 })")
             }
             return (true, "chose \(wanted) in \(rounds) round(s)")
+        case "enter":
+            // The reveal race's remedy (docs/traps.md, "The first picker a
+            // device shows after a boot ignores where you aimed it"): the
+            // picker opened at the PARENT with the aimed folder as a row.
+            // The proof a tap landed is the breadcrumb reading the folder.
+            guard !rest.isEmpty else { return (false, "enter needs a folder name") }
+            let wanted = stem(rest)
+            guard let r = waitForRows(a) else { return (false, "no picker is up to enter \(wanted) from") }
+            guard r.contains(where: { stem($0.0) == wanted }) else {
+                return (false, "no folder row named \(wanted); the picker lists \(r.map { $0.0 })")
+            }
+            let before = currentDirectory(a)
+            let deadline = Date().addingTimeInterval(budgetNow())
+            var rounds = 0
+            var inside = false
+            while rounds < 6 && !inside && Date() < deadline {
+                rounds += 1
+                if let row = rows(a).first(where: { stem($0.0) == wanted }) {
+                    tapCentre(a, row.1)
+                }
+                inside = waitFor("the picker inside \(wanted)", min(3, left(deadline))) {
+                    pickerUp(a) && currentDirectory(a) == wanted
+                }
+            }
+            guard inside else {
+                return (false, "the picker stayed at \(currentDirectory(a)) after \(rounds) round(s) of entering \(wanted) from \(before)")
+            }
+            guard let now = waitForRows(a) else { return (true, wanted) }
+            return (true, ([currentDirectory(a)] + now.map { $0.0 }).joined(separator: "\n"))
         case "cancel":
             guard waitForPicker(a) else { return (false, "no picker is up to cancel") }
             return cancelSheet(a, "picker")

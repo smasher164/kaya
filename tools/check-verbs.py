@@ -686,6 +686,97 @@ if ax_out:
           file=sys.stderr)
     print("\n".join(ax_out), file=sys.stderr)
 
+# AND THE WORD SET IS CLOSED ACROSS ALL THREE (since 2026-09-07, when the
+# tasks scene asserted `switch/` on every lane and harness.rs's ROLES
+# lacked it — GTK and WinUI would have refused the parse while the two
+# interpreters answered it). ROLES is the vocabulary a shared scene may
+# assert; each interpreter mints its words from its own platform reader.
+AX_WORD_FLOOR = 8
+AX_SCENE_FLOOR = 5
+
+
+def ax_words(harness_src=None, swift_src=None, kotlin_src=None,
+             scenes=None):
+    bad = []
+
+    def load(src, rel):
+        return source_text(
+            src, rel, bad,
+            lambda s, exc: (
+                "cannot read " + s + " for the ax word set ("
+                + str(exc.strerror) + "): the harness whose words this "
+                "rule closes is not there"))
+
+    harness = load(harness_src, HARNESS)
+    swift = load(swift_src, SWIFT)
+    kotlin = load(kotlin_src, KOTLIN)
+    if None in (harness, swift, kotlin):
+        return bad
+    m = re.search(r"const ROLES: \[&str; \d+\] = \[(.*?)\];", harness,
+                  re.S)
+    if not m:
+        return bad + ["harness.rs has no ROLES array the census can read"]
+    roles = set(re.findall(r'"([a-z]+)"', m.group(1)))
+
+    def body_words(text, rel, signature):
+        words, found = set(), 0
+        for hit in re.finditer(re.escape(signature), text):
+            end = text.find("\n    }\n", hit.end())
+            if end < 0:
+                bad.append(f"{rel}: {signature} has no end the census "
+                           "can read")
+                continue
+            found += 1
+            words |= set(re.findall(r'"([a-z]+)"', text[hit.end():end]))
+        if not found:
+            bad.append(f"{rel} has no {signature} the census can read")
+        return words
+
+    swift_words = body_words(swift, "KayaSwiftUI.swift",
+                             "private func kayaAxRole(")
+    kotlin_words = body_words(kotlin, "KayaCompose.kt",
+                              "private fun kayaAxRole(")
+    kotlin_words |= set(re.findall(r'this\[KayaAxKind\] = "([a-z]+)"',
+                                   kotlin))
+    for name, words in (("harness.rs ROLES", roles),
+                        ("KayaSwiftUI.swift", swift_words),
+                        ("KayaCompose.kt", kotlin_words)):
+        if len(words) < AX_WORD_FLOOR:
+            bad.append(f"{name} yields {len(words)} ax words, under the "
+                       f"floor of {AX_WORD_FLOOR}: a census that reads "
+                       "nothing agrees with everything")
+    for rel, words in (("KayaSwiftUI.swift", swift_words),
+                       ("KayaCompose.kt", kotlin_words)):
+        for word in sorted(words - roles):
+            bad.append(f"{rel} answers ax {word}, which harness.rs's "
+                       "ROLES does not admit: no shared scene can assert "
+                       "it on GTK or WinUI")
+    asserted = set()
+    for path in sorted(pathlib.Path(scenes or ROOT / "tools/scenes")
+                       .glob("*.steps")):
+        asserted |= set(re.findall(r'^\s*expect_ax \S+ "([a-z]+)/',
+                                   path.read_text(encoding="utf-8"),
+                                   re.M))
+    if len(asserted) < AX_SCENE_FLOOR:
+        bad.append(f"tools/scenes asserts {len(asserted)} ax words, under "
+                   f"the floor of {AX_SCENE_FLOOR}")
+    for rel, words in (("harness.rs", roles),
+                       ("KayaSwiftUI.swift", swift_words),
+                       ("KayaCompose.kt", kotlin_words)):
+        for word in sorted(asserted - words):
+            bad.append(f"tools/scenes asserts ax {word}, which {rel} "
+                       "cannot answer: the scene is shared verbatim, so "
+                       "that lane reads it as a parse refusal or a miss")
+    return bad
+
+
+words_out = ax_words()
+words_status = 1 if words_out else 0
+if words_out:
+    print("check-verbs: the ax word set is not one closed list across "
+          "the three harnesses and the shared scenes:", file=sys.stderr)
+    print("\n".join(words_out), file=sys.stderr)
+
 clip_out = clip_mirrors()
 clip_status = 1 if clip_out else 0
 if clip_out:
@@ -891,6 +982,56 @@ for rel, pattern, repl, slot, label, finding in (
     kwargs = {f"{slot}_src": drifted}
     score_or_die(introduced(ax_spelling(**kwargs), ax_out, finding),
                  label)
+
+# AND THE WORD SET'S OWN, one per harness and each a different route in:
+# a scene word cut out of ROLES (three findings — the scene's, and the
+# two interpreters now answering a word ROLES lacks), a Compose
+# KayaAxKind word renamed (two: the new word unadmitted, the old word
+# unanswered), and the mac reader's switch renamed (one: the iOS reader
+# still answers it).
+for label, kwargs, findings in (
+    ("switch cut from harness.rs's ROLES",
+     dict(harness_src=perturb("ax-words (switch cut from ROLES)", HARNESS,
+                              r'("unknown", )"switch", ', "")),
+     (r"^tools/scenes asserts ax switch, which harness\.rs cannot answer",
+      r"^KayaSwiftUI\.swift answers ax switch, which harness\.rs's ROLES",
+      r"^KayaCompose\.kt answers ax switch, which harness\.rs's ROLES")),
+    ("the Compose link word renamed",
+     dict(kotlin_src=perturb("ax-words (the Compose link word renamed)",
+                             KOTLIN, r'(this\[KayaAxKind\] = )"link"',
+                             '"hyperlink"')),
+     (r"^KayaCompose\.kt answers ax hyperlink, which harness\.rs's ROLES",
+      r"^tools/scenes asserts ax link, which KayaCompose\.kt cannot")),
+    ("the mac switch word renamed",
+     dict(swift_src=perturb("ax-words (the mac switch word renamed)",
+                            SWIFT, r'(subrole == "AXSwitch" \? )"switch"',
+                            '"toggle"')),
+     (r"^KayaSwiftUI\.swift answers ax toggle, which harness\.rs's ROLES",
+      )),
+):
+    base = set(words_out)
+    new = [line for line in ax_words(**kwargs) if line not in base]
+    hits = [sum(1 for line in new if re.search(pat, line))
+            for pat in findings]
+    if len(new) != len(findings) or hits != [1] * len(findings):
+        print(f"check-verbs: SELF-TEST FAIL ({label}: {len(new)} findings "
+              f"introduced, want {len(findings)}, named {hits}):\n"
+              + "\n".join(new), file=sys.stderr)
+        raise SystemExit(1)
+    print(f"check-verbs: ax-words negative ({label}): {len(new)}/"
+          f"{len(findings)} findings named")
+
+# AND A CENSUS THAT READS NOTHING: a scenes directory with no .steps in
+# it is under the floor, never a clean sheet.
+empty = g.scratch() / "no-scenes"
+empty.mkdir(exist_ok=True)
+under = [line for line in ax_words(scenes=empty) if "under the floor" in line]
+print(f"check-verbs: ax-words negative (an empty scenes directory): "
+      f"{len(under)}/1 findings named")
+if len(under) != 1:
+    print("check-verbs: SELF-TEST FAIL (an empty scenes directory passed "
+          "the ax word census)", file=sys.stderr)
+    raise SystemExit(1)
 
 # An ABSENT harness is a failure that NAMES IT, never a skip.
 gone = ax_spelling(kotlin_src=g.scratch() / "no-such-ax.kt")
@@ -1993,6 +2134,7 @@ if failures:
 # clip_mirrors() ran first and printed its own findings; its verdict
 # is read here so there is exactly ONE verdict line.
 if (clip_status or window_status or ink_status or ax_status
+        or words_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status):
@@ -2000,7 +2142,8 @@ if (clip_status or window_status or ink_status or ax_status
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
           f"the CLIP_* mirrors + the ink tolerance in 3 harnesses + "
-          f"the ax spelling in 3 harnesses + the verb trace in 3 "
+          f"the ax spelling in 3 harnesses + the ax word set closed "
+          f"across them + the verb trace in 3 "
           f"harnesses + the windowed tier's loop "
           f"+ the metrics class channel + the keyed target arms on 4 "
           f"backends + the reorder insertion indicator's 4 WinUI arms "

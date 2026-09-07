@@ -483,22 +483,16 @@ fix.
   and the navigation vocabulary. Synthesizing a marker the platform
   never shows is the rejected alternative: it fails the carve-out test
   in reverse, expressing what no native app expresses.
-- **A Linux sidebar's section rows are text-only (ratified
-  2026-08-17).** A section's `symbol` reaches every backend's own
-  catalog and every arm draws it, except GTK's SIDEBAR presentation:
-  `GtkStackSidebar` binds only the page's title into a `GtkLabel` and
-  ignores `icon-name` entirely (measured on GTK 4.18.6 — gtk.rs's
-  `refresh_section_symbols`, fact 2), and kaya does not hand-build rows
-  inside a component that owns them. So on Linux the section-symbol
-  contract is carried by the BAR presentation's rows, which do draw it,
-  and that is where the shared scene asserts — above the phones' cut,
-  so five lanes read it where a sidebar assertion would have reached
-  three and been red on Linux forever (scenes are shared verbatim,
-  invariant 6). Nothing else diverges: the read and the verb are
-  written for both arms on every other backend, macOS's
-  `NavigationSplitView` sidebar included and measured, so the day GTK's
-  lowering moves to `AdwViewStack` + `AdwViewSwitcher` the scene grows
-  two lines and this paragraph goes away.
+- **~~A Linux sidebar's section rows are text-only (ratified
+  2026-08-17)~~ — lifted 2026-09-07, when its premise fell.** The
+  carve-out rested on `GtkStackSidebar` owning its rows (it binds only the
+  page title and ignores `icon-name`) and on kaya not building rows inside
+  a component that owns them. The section badge (docs/tasks-s2-plan.md T2)
+  needed a row kaya could draw on, and grafting onto the component's rows
+  broke them (docs/traps.md), so GTK's sidebar is kaya's own `GtkListBox`
+  now: each row draws the section's symbol, title and count like every
+  other backend, bound both ways to the stack. The bar presentation is
+  still `GtkStackSwitcher`, which draws icon OR title, never both.
 - **An app that declares an identity is a Dock app on macOS (ratified
   2026-08-18; docs/app-identity-plan.md ruling 2).** `set_app_identity`
   applies everywhere and every platform shows the mark, but macOS is the

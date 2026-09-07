@@ -264,6 +264,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     for (prop, _, kind) in crate::section_prop_variants(spec) {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::F64 => ("F64", *prop),
             crate::PropKind::Blob => ("Blob", "handle"),
             crate::PropKind::Enum(_) => ("I64", *prop),
             crate::PropKind::Date | crate::PropKind::Time => {

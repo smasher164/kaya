@@ -738,6 +738,7 @@ pub const KAYA_PROP_FILL: u32 = 27;
 pub const KAYA_PROP_MIN_COLUMN_WIDTH: u32 = 28;
 pub const KAYA_PROP_WRAP: u32 = 29;
 pub const KAYA_PROP_PLACEHOLDER: u32 = 30;
+pub const KAYA_PROP_HREF: u32 = 31;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -777,6 +778,7 @@ pub const KAYA_SPROP_ICON: u32 = 2;
 /// The switcher item's SEMANTIC ICON NAME (docs/styling-plan.md D6):
 /// a value of the KAYA_SYMBOL_* block below, never bytes.
 pub const KAYA_SPROP_SYMBOL: u32 = 3;
+pub const KAYA_SPROP_BADGE: u32 = 4;
 
 /// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
 /// and `radio_group` are the grouping nodes; the rest are leaves.
@@ -861,6 +863,7 @@ const _: () = assert!(
     KAYA_SPROP_TITLE == wire::SPROP_TITLE
         && KAYA_SPROP_ICON == wire::SPROP_ICON
         && KAYA_SPROP_SYMBOL == wire::SPROP_SYMBOL
+        && KAYA_SPROP_BADGE == wire::SPROP_BADGE
         && KAYA_WPROP_SECTIONS_PRESENTATION == wire::WPROP_SECTIONS_PRESENTATION
         && KAYA_SECTIONS_PRESENTATION_AUTO == wire::SECTIONS_PRESENTATION_AUTO
         && KAYA_SECTIONS_PRESENTATION_BAR == wire::SECTIONS_PRESENTATION_BAR
@@ -874,7 +877,7 @@ const _: () = assert!(
      bump this count"
 );
 const _: () = assert!(
-    crate::spec::SECTION_PROPS.len() == 3,
+    crate::spec::SECTION_PROPS.len() == 4,
     "spec::SECTION_PROPS grew: export the new KAYA_SPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -921,6 +924,7 @@ const _: () = assert!(
         && KAYA_PROP_MIN_COLUMN_WIDTH == wire::PROP_MIN_COLUMN_WIDTH
         && KAYA_PROP_WRAP == wire::PROP_WRAP
         && KAYA_PROP_PLACEHOLDER == wire::PROP_PLACEHOLDER
+        && KAYA_PROP_HREF == wire::PROP_HREF
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1012,12 +1016,16 @@ pub const KAYA_ROLE_PROMINENT: u32 = 2;
 pub const KAYA_ROLE_HEADING: u32 = 3;
 pub const KAYA_ROLE_CAPTION: u32 = 4;
 pub const KAYA_ROLE_PLAIN: u32 = 5;
+pub const KAYA_ROLE_SWITCH: u32 = 6;
+pub const KAYA_ROLE_LINK: u32 = 7;
 const _: () = assert!(
     KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
         && KAYA_ROLE_HEADING == wire::ROLE_HEADING
         && KAYA_ROLE_CAPTION == wire::ROLE_CAPTION
         && KAYA_ROLE_PLAIN == wire::ROLE_PLAIN
+        && KAYA_ROLE_SWITCH == wire::ROLE_SWITCH
+        && KAYA_ROLE_LINK == wire::ROLE_LINK
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
@@ -1091,7 +1099,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 30,
+    crate::spec::PROPS.len() == 31,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

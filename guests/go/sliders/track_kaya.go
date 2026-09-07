@@ -104,6 +104,10 @@ func (r trackRow) SetPlaceholder(n kaya.Node, text string) { r.t.SetPlaceholder(
 
 func (r trackRow) Placeholder(n kaya.Node, f kaya.Field[string]) { r.c.Placeholder(r.t, n, f) }
 
+func (r trackRow) SetHref(n kaya.Node, url string) { r.t.SetHref(n, url) }
+
+func (r trackRow) Href(n kaya.Node, f kaya.Field[string]) { r.c.Href(r.t, n, f) }
+
 func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
 func (r trackRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }

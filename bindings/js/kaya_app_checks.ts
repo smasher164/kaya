@@ -697,6 +697,58 @@ if (isMainThread) {
   check("a value_committed occurrence reaches onCommit and NOT onChange", JSON.stringify(sliderCommits) === "[35]" && JSON.stringify(sliderMoves) === "[40]");
   check("a stamped value_committed hands the row over first", JSON.stringify(sliderRowCommits) === JSON.stringify([["b", 40]]));
 
+  // ------------------- S2: the switch role, href, the section badge
+  // (docs/tasks-s2-plan.md T1, T2, T3.) Three surfaces the generator
+  // hands every binding as NUMBERS and each binding names by hand: a
+  // role name that packed the wrong number draws the wrong control, an
+  // `href` on any prop but 31 opens nothing, and a badge on the wrong
+  // section prop counts on the wrong item — none of it visible to a
+  // scene until a platform is asked to draw it.
+  check("Role.SWITCH and Role.LINK are the wire's own numbers", kaya.Role.SWITCH === wire.ROLE_SWITCH && wire.ROLE_SWITCH === 6 && kaya.Role.LINK === wire.ROLE_LINK && wire.ROLE_LINK === 7);
+  let s2Box!: K.Widget;
+  let s2Link!: K.Widget;
+  let s2Keyed!: K.Widget;
+  let s2Bound!: K.Widget;
+  let s2Named!: K.Widget;
+  let s2Href!: K.Signal<string>;
+  shipped.length = 0;
+  app.window(() => {
+    s2Href = kaya.signal("https://kaya.dev/t/2");
+    kaya.column(() => {
+      s2Box = kaya.checkbox("Hide the badge").role("switch");
+      s2Link = kaya.label("kaya/tasks").role(kaya.Role.LINK).href("https://kaya.dev/t/1");
+      s2Keyed = kaya.label("kaya/tasks", { href: "https://kaya.dev/t/1" });
+      s2Bound = kaya.label("bound").role("link").href(s2Href);
+      s2Named = kaya.checkbox("named").role(kaya.Role.SWITCH);
+    });
+  });
+  const s2Records = shipped[0]!.map((r) => JSON.stringify([...r]));
+  check("a switch-role checkbox packs role value 6", s2Records.includes(JSON.stringify([...wire.tx_set_role(s2Box.id, 6)])));
+  check("a link-role label packs role value 7", s2Records.includes(JSON.stringify([...wire.tx_set_role(s2Link.id, 7)])));
+  check("href packs a const string on the href prop", s2Records.includes(JSON.stringify([...wire.tx_set_href(s2Link.id, "https://kaya.dev/t/1")])));
+  check("label({href}) writes what .href() writes", s2Records.includes(JSON.stringify([...wire.tx_set_href(s2Keyed.id, "https://kaya.dev/t/1")])));
+  check("href takes a signal too", s2Records.includes(JSON.stringify([...wire.tx_bind_href(s2Bound.id, s2Href.id)])));
+  check("the enum spelling packs the record the name packs", s2Records.includes(JSON.stringify([...wire.tx_set_role(s2Named.id, 6)])));
+
+  // THE SECTION BADGE is a SECTION prop (SPROP_BADGE), a different wire
+  // slot from every widget prop above, and it takes a count OR a signal.
+  let badgeSignal!: K.Signal<number>;
+  shipped.length = 0;
+  app.window({ sectionsPresentation: kaya.SECTIONS_BAR }, () => {
+    badgeSignal = kaya.signal(0);
+    kaya.column(() => { kaya.label("shell"); });
+  });
+  app.addSection(5150, { title: "Today", badge: 3 }, () => {
+    kaya.column(() => { kaya.label("today"); });
+  });
+  app.addSection(5151, { title: "Inbox", badge: badgeSignal }, () => {
+    kaya.column(() => { kaya.label("inbox"); });
+  });
+  const badgeRecords = shipped.flat().map((r) => JSON.stringify([...r]));
+  check("addSection({badge: count}) packs the F64 count on SPROP_BADGE", badgeRecords.includes(JSON.stringify([...wire.tx_set_section_badge(5150, 3)])));
+  check("addSection({badge: signal}) binds the section prop instead", badgeRecords.includes(JSON.stringify([...wire.tx_bind_section_badge(5151, badgeSignal.id)])) && !badgeRecords.includes(JSON.stringify([...wire.tx_set_section_badge(5151, 0)])));
+  check("zero is a badge value and not an absent one (it CLEARS)", JSON.stringify([...wire.tx_set_section_badge(5150, 0)]) !== JSON.stringify([...wire.tx_set_section_badge(5150, 3)]));
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

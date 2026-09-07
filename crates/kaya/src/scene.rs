@@ -763,6 +763,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Placeholder => {
             matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
         }
+        // A link's destination: the label alone (docs/tasks-s2-plan.md T3).
+        Prop::Href => matches!(kind, WidgetKind::Label),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
         // AND the select's 0-based index (per-kind domains, checked
@@ -845,7 +847,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Semantic emphasis (docs/styling-plan.md D4). KIND legality here
         // is the union of the variants' homes; WHICH variant fits which
         // kind is value-dependent and lives in check_prop_value.
-        Prop::Role => matches!(kind, WidgetKind::Button | WidgetKind::Label),
+        // The switch role rides the checkbox (docs/tasks-s2-plan.md T1).
+        Prop::Role => matches!(kind, WidgetKind::Button | WidgetKind::Label | WidgetKind::Checkbox),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -971,9 +974,12 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
-        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help | Prop::Placeholder => {
-            ValueType::Str
-        }
+        Prop::A11yId
+        | Prop::A11yLabel
+        | Prop::A11yHint
+        | Prop::Help
+        | Prop::Placeholder
+        | Prop::Href => ValueType::Str,
         // An ACCEPT LIST: the closed kinds by name plus any custom
         // format ids, space separated. Not a mask and not an enum slot
         // — a widget accepts a SET, and half that set is open-ended.
@@ -1040,6 +1046,11 @@ fn check_section_prop_value(prop: SectionProp, value: &Value) {
         // one table over): the wire carries I64 and the domain is the
         // spec enum's values.
         (SectionProp::Symbol, Value::I64(v)) => check_symbol(*v),
+        // A whole non-negative count on the F64 the prop kinds have (docs/tasks-s2-plan.md T2).
+        (SectionProp::Badge, Value::F64(v)) => assert!(
+            *v >= 0.0 && v.fract() == 0.0,
+            "kaya: a section badge is a whole non-negative count, not {v}"
+        ),
         (p, v) => panic!("kaya: section property {p:?} rejects value {v:?}"),
     }
 }
@@ -1430,9 +1441,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             // plain: an action's LOW emphasis — a row's accessory that must
             // not out-shout the row (docs/tasks-plan.md R6).
             5 => kind == WidgetKind::Button,
+            // switch and link (docs/tasks-s2-plan.md T1, T3).
+            6 => kind == WidgetKind::Checkbox,
+            7 => kind == WidgetKind::Label,
             other => panic!(
                 "kaya: {other} is not a role (destructive=1, prominent=2, \
-                 heading=3, caption=4, plain=5)"
+                 heading=3, caption=4, plain=5, switch=6, link=7)"
             ),
         };
         let name = match *role {

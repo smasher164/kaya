@@ -173,6 +173,7 @@ pub enum Step {
     ClearSearch(Target),
     /// The empty field's prompt as the platform shows it (docs/search-plan.md S3).
     ExpectPlaceholder(Target, String),
+    ExpectHref(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
     /// platform (docs/undo-plan.md D7), so a scene built out of set_text
@@ -340,6 +341,7 @@ pub enum Step {
     /// Addressed by title across every window, in window order. TOTAL, like
     /// `menu_symbol`: a miss is a retryable non-match, not a panic.
     ExpectSectionSymbol(String, String),
+    ExpectSectionBadge(String, String),
     /// Drive the switcher to the section at `index` (add order),
     /// through the platform's real switching path — emits
     /// section_selected like a user's switch.
@@ -573,6 +575,7 @@ impl Step {
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
             | Step::ExpectPlaceholder(t, _)
+            | Step::ExpectHref(t, _)
             | Step::ExpectHighlights(t, _)
             | Step::ExpectSelection(t, _)
             | Step::ExpectDrawingHash(t, _)
@@ -610,6 +613,7 @@ impl Step {
             | Step::ExpectSections(..)
             | Step::ExpectSection(..)
             | Step::ExpectSectionSymbol(..)
+            | Step::ExpectSectionBadge(..)
             | Step::ExpectSectionsPresentation(..)
             | Step::SelectSection(..)
             | Step::ExpectWindowSize(..)
@@ -662,6 +666,7 @@ impl Step {
             Step::SetText { .. } => false,
             Step::ClearSearch { .. } => false,
             Step::ExpectPlaceholder { .. } => true,
+            Step::ExpectHref { .. } => true,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
             Step::ExpectStall => true,
@@ -699,6 +704,7 @@ impl Step {
             Step::ExpectSections { .. } => true,
             Step::ExpectSection { .. } => true,
             Step::ExpectSectionSymbol { .. } => true,
+            Step::ExpectSectionBadge { .. } => true,
             Step::ExpectSectionsPresentation { .. } => true,
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
@@ -814,6 +820,8 @@ pub trait Stage: Send + 'static {
     /// The prompt the platform shows in the empty field, read off the
     /// control, never kaya's model (docs/search-plan.md S3).
     fn placeholder_text(&self, target: Target) -> String;
+    /// A `role link` label's destination, off the control (docs/tasks-s2-plan.md T3).
+    fn href(&self, target: Target) -> String;
     /// Whether the widget holds keyboard focus, read from the toolkit
     /// (per-window focus, never global key status — parallel tiled legs
     /// must not steal each other's assertion).
@@ -1116,6 +1124,9 @@ pub trait Stage: Send + 'static {
     /// yet" are three different bugs (invariant 3). TOTAL: a miss is a
     /// retryable non-match.
     fn section_symbol(&self, title: &str) -> String;
+    /// The count the switcher row draws, as decimal text, "0" when none; a miss
+    /// says what it measured, the section_symbol rule (docs/tasks-s2-plan.md T2).
+    fn section_badge(&self, title: &str) -> String;
     /// The ARM the sections render actually took, "bar" or "sidebar", for
     /// the given window — stamped by the render body, never derived from
     /// the declared prop (the expect_split rule).
@@ -1573,6 +1584,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectSectionSymbol(title, parse_string(want)?)
             }
+            "expect_section_badge" => {
+                let (title, want) = parse_quoted_prefix(rest).map_err(|e| {
+                    format!("expect_section_badge wants a quoted section title and a count: {e}")
+                })?;
+                let want = want.trim();
+                if want.is_empty() || !want.chars().all(|c| c.is_ascii_digit()) {
+                    return Err(format!("expect_section_badge wants a whole count, not {want:?}"));
+                }
+                Step::ExpectSectionBadge(title, want.to_owned())
+            }
             "expect_sections_presentation" => {
                 let (window, rest) = parse_window_target(rest);
                 Step::ExpectSectionsPresentation(window, parse_string(rest)?)
@@ -1905,6 +1926,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_placeholder reads a text field, not {target:?}"));
                 }
                 Step::ExpectPlaceholder(target, parse_string(text)?)
+            }
+            "expect_href" => {
+                let (target, url) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_href wants a label target and a quoted url: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Label {
+                    return Err(format!("expect_href reads a label, not {target:?}"));
+                }
+                Step::ExpectHref(target, parse_string(url)?)
             }
             "clear_search" => {
                 let target = parse_target(rest.trim())?;
@@ -2311,10 +2342,10 @@ fn check_ax(spec: &str) -> Result<(), String> {
     // (macOS's AXRadioGroup and AXScrollArea are both `group`), because a
     // name only one backend can produce is a name no shared scene can
     // assert.
-    const ROLES: [&str; 12] = [
+    const ROLES: [&str; 14] = [
         "button", "label", "field", "checkbox", "slider", "image", "progress",
-        "combobox", "group", "heading", "datetime", "unknown",
-    ];
+        "combobox", "group", "heading", "datetime", "unknown", "switch", "link",
+];
     let Some((role, _label)) = spec.split_once('/') else {
         return Err(format!("ax {spec:?} wants <role>/<label>"));
     };
@@ -2958,6 +2989,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("placeholder {got:?}, wanted {want:?}"))
                 }
             })),
+            Step::ExpectHref(target, want) => Some(poll(|| {
+                let got = stage.href(*target);
+                if got == *want {
+                    Ok(format!("href {want:?}"))
+                } else {
+                    Err(format!("href {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::Type(s) => {
                 // POINT 4 IS NOT THIS RULE: it blocks until the keys have
                 // landed IN THE CONTROL, which is a different thing from
@@ -3007,6 +3046,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     // thing that tells "wrong glyph" from "no glyph at
                     // all" from "no such row yet".
                     Err(format!("section {title:?} symbol {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectSectionBadge(title, want) => Some(poll(|| {
+                let got = stage.section_badge(title);
+                if got == *want {
+                    Ok(format!("section {title:?} badge {want}"))
+                } else {
+                    Err(format!("section {title:?} badge {got}, wanted {want}"))
                 }
             })),
             Step::CloseWindow(window) => {
@@ -5356,6 +5403,9 @@ mod tests {
         fn section_symbol(&self, title: &str) -> String {
             if title == "Feed" { "home".to_owned() } else { "no such section row".to_owned() }
         }
+        fn section_badge(&self, _: &str) -> String {
+            "0".to_owned()
+        }
         fn select_section(&self, _: usize) {}
         fn menu_activate(&self, path: &str) {
             self.seen.lock().unwrap().push(format!("menu_activate {path}"));
@@ -5387,6 +5437,9 @@ mod tests {
         }
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
+            String::new()
+        }
+        fn href(&self, _: Target) -> String {
             String::new()
         }
         // The range reads answer NOTHING here on purpose: these mocks
@@ -6182,6 +6235,9 @@ mod tests {
         fn active_section_title(&self) -> String {
             String::new()
         }
+        fn section_badge(&self, _: &str) -> String {
+            "0".to_owned()
+        }
         fn section_symbol(&self, _: &str) -> String {
             String::new()
         }
@@ -6212,6 +6268,9 @@ mod tests {
         }
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
+            String::new()
+        }
+        fn href(&self, _: Target) -> String {
             String::new()
         }
         // The range reads answer NOTHING here on purpose: these mocks
@@ -6442,6 +6501,9 @@ mod tests {
         fn active_section_title(&self) -> String {
             String::new()
         }
+        fn section_badge(&self, _: &str) -> String {
+            "0".to_owned()
+        }
         fn section_symbol(&self, _: &str) -> String {
             String::new()
         }
@@ -6472,6 +6534,9 @@ mod tests {
         }
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
+            String::new()
+        }
+        fn href(&self, _: Target) -> String {
             String::new()
         }
         // The range reads answer NOTHING here on purpose: these mocks

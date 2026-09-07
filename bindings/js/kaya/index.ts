@@ -565,6 +565,14 @@ export class Handle {
     return this;
   }
 
+  /** The DESTINATION a `role("link")` label opens
+   * (docs/tasks-s2-plan.md T3): the platform's own opener takes it and
+   * nothing is emitted. Chains. */
+  href(url: Bindable | string): this {
+    records().push(propSource("href", this, url, wire.tx_set_href, wire.tx_bind_href, wire.tx_bind_href_element));
+    return this;
+  }
+
   /** Whether this widget spans its container's cross axis — a column's
    * width, a row's height — whatever the container's `align`
    * (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds.
@@ -2753,9 +2761,11 @@ export const Role = Object.freeze({
   HEADING: wire.ROLE_HEADING,
   CAPTION: wire.ROLE_CAPTION,
   PLAIN: wire.ROLE_PLAIN,
+  SWITCH: wire.ROLE_SWITCH,
+  LINK: wire.ROLE_LINK,
 });
 export type RoleValue = (typeof Role)[keyof typeof Role];
-export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain";
+export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain" | "switch" | "link";
 const ROLE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Role).map(([k, v]) => [k.toLowerCase(), v]));
 
 function roleValue(role: unknown): number {
@@ -3128,7 +3138,7 @@ export function search(opts: TextInputOptions = {}): Widget {
   return handle;
 }
 
-export type LabelOptions = GrowOption & { bind?: Bindable };
+export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string };
 
 /** A label: a constant, or `{bind}` for a Signal or the enclosing For's
  * element or field. */
@@ -3139,6 +3149,7 @@ export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
   const handle = widget(wire.KIND_LABEL);
   if (text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("label text", text)));
   if (opts.bind !== undefined) bindText("label", handle, opts.bind);
+  if (opts.href !== undefined) handle.href(opts.href);
   setGrow(handle, opts);
   return handle;
 }
@@ -3474,7 +3485,7 @@ function runScope(
 }
 
 export type EntryOptions = { title?: string; interceptBack?: boolean; onPopped?: () => void; onBack?: () => void };
-export type SectionOptions = { title?: string; symbol?: SymbolValue | SymbolName; onSelected?: () => void; window?: number };
+export type SectionOptions = { title?: string; symbol?: SymbolValue | SymbolName; badge?: number | Signal<number>; onSelected?: () => void; window?: number };
 export type BarMenuOptions = MenuOptions & { window?: number };
 export type BarRadioGroupOptions = RadioGroupOptions & { window?: number };
 
@@ -3634,6 +3645,10 @@ export class App {
       records().push(wire.tx_add_section(host, sectionId));
       if (opts.title !== undefined) records().push(wire.tx_set_section_title(sectionId, String(opts.title)));
       if (symbol !== null) records().push(wire.tx_set_section_symbol(sectionId, symbol));
+      if (opts.badge !== undefined) {
+        if (opts.badge instanceof Signal) records().push(wire.tx_bind_section_badge(sectionId, opts.badge.id));
+        else records().push(wire.tx_set_section_badge(sectionId, opts.badge));
+      }
       if (opts.onSelected !== undefined) this._sectionSelected.set(sectionId, opts.onSelected);
     });
   }

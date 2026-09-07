@@ -421,6 +421,15 @@ func (sc SumCase[K, V]) BindPlaceholder(n Node, sel func(*V) *string) {
 	sc.t.BindPlaceholder(n, FieldBy(sel))
 }
 
+// SetHref gives every stamped link of this arm the same destination
+// (Tpl.SetHref; docs/tasks-s2-plan.md T3).
+func (sc SumCase[K, V]) SetHref(n Node, url string) { sc.t.SetHref(n, url) }
+
+// BindHref takes the destination from the field the selector names.
+func (sc SumCase[K, V]) BindHref(n Node, sel func(*V) *string) {
+	sc.t.BindHref(n, FieldBy(sel))
+}
+
 // SetFill gives every stamped copy of this arm the same cross-axis
 // stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
 func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }

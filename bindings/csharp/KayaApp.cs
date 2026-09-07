@@ -374,6 +374,12 @@ enum Role : long
     /// An action at low emphasis: a row's accessory (Details, Open).
     /// Buttons only.
     Plain = KayaWire.RolePlain,
+    /// A checkbox drawn as the platform's SWITCH and reporting its trait
+    /// (docs/tasks-s2-plan.md T1): a setting that takes effect at once.
+    Switch = KayaWire.RoleSwitch,
+    /// A label drawn as the platform's LINK, opening its Href through
+    /// the platform's own opener (docs/tasks-s2-plan.md T3).
+    Link = KayaWire.RoleLink,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
@@ -1749,6 +1755,14 @@ sealed class Tx
     public void SetPlaceholder(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindPlaceholder(w.Id, s.Id));
 
+    /// The DESTINATION a Role.Link label opens (docs/tasks-s2-plan.md
+    /// T3): the platform's own opener takes it and nothing is emitted.
+    public void SetHref(Widget w, string url) =>
+        Records.Add(KayaWire.TxSetHref(w.Id, url));
+
+    public void SetHref(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindHref(w.Id, s.Id));
+
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
     /// looks. Destructive, Prominent and Plain are button emphasis, Heading
     /// and Caption are label hierarchy, and the root refuses a role on a kind
@@ -2968,15 +2982,21 @@ sealed class Tx
     /// root is retained while covered — switching is SELECTION, not
     /// lifecycle; MountIn fills its pane. onSelected fires each time the
     /// USER switches to it, post-fact and NOT one-shot; a programmatic
-    /// SelectSection does not fire it. `symbol:` is its SEMANTIC ICON.
+    /// SelectSection does not fire it. `symbol:` is its SEMANTIC ICON,
+    /// `badge:` the COUNT on the item (docs/tasks-s2-plan.md T2) — a
+    /// number or a Signal holding one; zero clears.
     public void AddSection(
         ulong id, string? title = null, Symbol? symbol = null,
+        double? badge = null, Signal? badgeSignal = null,
         Action<Tx>? onSelected = null, ulong window = 0)
     {
         Records.Add(KayaWire.TxAddSection(window, id));
         if (title is { } t) Records.Add(KayaWire.TxSetSectionTitle(id, t));
         if (symbol is Symbol s)
             Records.Add(KayaWire.TxSetSectionSymbol(id, (long)s));
+        if (badge is double b) Records.Add(KayaWire.TxSetSectionBadge(id, b));
+        if (badgeSignal is { } bs)
+            Records.Add(KayaWire.TxBindSectionBadge(id, bs.Id));
         if (onSelected is { } fn) App.sectionSelected[id] = fn;
     }
 
@@ -3375,6 +3395,16 @@ sealed class Tpl
 
     public void SetPlaceholder(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindPlaceholderElement(n.Id, level, f.Index));
+
+    /// A stamped link's DESTINATION (Tx.SetHref).
+    public void SetHref(Node n, string url) =>
+        tx.Records.Add(KayaWire.TxSetHref(n.Id, url));
+
+    public void SetHref(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindHref(n.Id, s.Id));
+
+    public void SetHref(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindHrefElement(n.Id, level, f.Index));
 
     /// A stamped copy's cross-axis stretch (Tx.SetFill).
     public void SetFill(Node n, bool on) =>

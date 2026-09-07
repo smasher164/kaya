@@ -27,6 +27,7 @@ from lanes import android as android_lane
 from lanes import ios as ios_lane
 from lanes import mac as mac_lane
 from lanes import win as win_lane
+import scene_cut
 
 # Line-buffered stdout: the probes and helper scripts write to the same
 # fd, and block-buffered prints would land AFTER output they preceded.
@@ -3738,6 +3739,84 @@ kinds_out = target_kinds_match_wire(ROOT, TARGET_KINDS)
 if kinds_out is not None:
     print(f"check-steps: {kinds_out}", file=sys.stderr)
     status = 1
+
+
+# EVERY PHONE CUT HOLDS IN THE FAST SWEEP. The two phone runners cut a
+# shared scene at the verb their host cannot express and refuse a cut that
+# takes a kept assertion with it — a refusal that used to print only on the
+# lane, 36s into android's and 513s into iOS's (docs/traps.md, "A cut
+# refusal only the lane could print", 2026-09-07). The runners' own census
+# (tools/lib/scene_cut.py) runs here over both lane tables.
+def phone_cuts(root, android_mods, ios_mods):
+    bad, seen = [], 0
+    root = pathlib.Path(root)
+    for scene, mods in android_mods.items():
+        if "cut" not in mods:
+            continue
+        verb, keep, extra = mods["cut"]
+        seen += 1
+        try:
+            scene_cut.scene_prefix(root / f"tools/scenes/{scene}.steps",
+                                   verb, keep, extra, who="android")
+        except scene_cut.CutRefused as exc:
+            bad.append(str(exc))
+    for (suite, scene), mods in ios_mods.items():
+        if "cut" not in mods:
+            continue
+        seen += 1
+        try:
+            scene_cut.scene_prefix(root / f"tools/scenes/{scene}.steps",
+                                   mods["cut"], mods.get("keep", ""),
+                                   mods.get("extra", ""), who=f"ios {suite}")
+        except scene_cut.CutRefused as exc:
+            bad.append(str(exc))
+    if seen < 4:
+        bad.append(f"{seen} phone cuts read, under the floor of 4 — a census "
+                   "that reads nothing agrees with everything")
+    return bad, seen
+
+
+_cut_android = {"sections": android_lane.MODS["sections"]}
+_cut_ios = {k: v for k, v in ios_lane.MODS.items()
+            if k[1] == "sections" and "cut" in v}
+for label, doctor, want in (
+    ("a kept assertion below the aux-window cut, the shipped shape",
+     lambda s: sub_first(r'(expect_sections_presentation window#1 "sidebar"\n)',
+                         r'\1expect_section_symbol "Shelves" "search"\n', s),
+     "drops"),
+    ("a stale cut verb",
+     lambda s: sub_count(r"^expect_windows ", "expect_windowz ", s, flags=re.M),
+     "has no `expect_windows` step"),
+):
+    with tempfile.TemporaryDirectory(prefix="kaya-cut-") as td:
+        shadow = pathlib.Path(td)
+        (shadow / "tools/scenes").mkdir(parents=True)
+        doctored, n = doctor(read_rel("tools/scenes/sections.steps"))
+        print(f"check-steps: phone-cut self-test ({label}) applied {n} "
+              "substitution(s)")
+        if n < 1:
+            selftest_fail(f"phone-cut perturbation applied nothing ({label})")
+        (shadow / "tools/scenes/sections.steps").write_text(
+            doctored, encoding="utf-8")
+        out, _ = phone_cuts(shadow, _cut_android, _cut_ios)
+    named = [b for b in out if want in b]
+    expected = len(_cut_android) + len(_cut_ios)
+    if len(named) != expected:
+        selftest_fail(f"phone-cut census with {label}: {len(named)} refusals "
+                      f"named of {expected}:\n" + "\n".join(out))
+    print(f"check-steps: phone-cut self-test ({label}): {len(named)}/"
+          f"{expected} lanes refused")
+
+cuts_out, cuts_seen = phone_cuts(ROOT, android_lane.MODS, ios_lane.MODS)
+if cuts_out:
+    print("check-steps: a phone cut takes an assertion its leg exists for, "
+          "or is stale:", file=sys.stderr)
+    for line in cuts_out:
+        print("  " + line, file=sys.stderr)
+    status = 1
+else:
+    print(f"check-steps: {cuts_seen} phone cuts hold (both lane tables, "
+          "the runners' own census)")
 
 if status == 0:
     print("check-steps: OK")

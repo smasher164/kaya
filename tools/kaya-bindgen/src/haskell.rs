@@ -260,6 +260,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let pc = pascal(prop);
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
             crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
             crate::PropKind::Date | crate::PropKind::Time => {

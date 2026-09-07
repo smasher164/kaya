@@ -31,7 +31,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     ComboBoxItem, CommandBar,
     ContentDialog,
     ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
-    ICommandBarElement, IconElement, Image, MenuBar,
+    HyperlinkButton, ICommandBarElement, IconElement, Image, InfoBadge, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
@@ -42,7 +42,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     TextCompositionStartedEventArgs, TextControlPasteEventHandler,
     TimePicker, TimePickerSelectedValueChangedEventArgs,
     TitleBar,
-    ToggleMenuFlyoutItem, TwoPaneView,
+    ToggleMenuFlyoutItem, ToggleSwitch, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
 // The RichEdit text object model: the textarea's text, undo stack and
@@ -88,7 +88,7 @@ use bindings::Microsoft::UI::Xaml::Input::{
     KeyEventHandler, PointerEventHandler, PointerRoutedEventArgs,
 };
 use windows::Win32::System::WinRT::IBufferByteAccess;
-use bindings::Windows::Foundation::{IReference, PropertyValue};
+use bindings::Windows::Foundation::{IReference, PropertyValue, Uri};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, FocusState, FrameworkElement,
@@ -106,10 +106,24 @@ use crate::scene::Scene;
 enum NativeWidget {
     Column(Grid),
     Row(Grid),
-    Checkbox { check: CheckBox, caption: TextBlock },
+    /// `switch` is the `role switch` lowering (docs/tasks-s2-plan.md T1): a
+    /// ToggleSwitch that REPLACES the CheckBox in the tree, with the caption
+    /// moved into its Header. The CheckBox stays in `core.checkboxes`, which
+    /// is the creation-ordered registry `checkbox#index` addresses and the
+    /// only thing that may not be renumbered by a late role.
+    Checkbox {
+        check: CheckBox,
+        caption: TextBlock,
+        switch: Option<ToggleSwitch>,
+    },
     Slider(Slider),
     Button { button: Button, caption: TextBlock },
-    Label(TextBlock),
+    /// `link` is the `role link` lowering (T3): a HyperlinkButton that
+    /// replaces the TextBlock in the tree and takes it as its Content, so the
+    /// text, the typeface and the label registry are the plain label's and
+    /// UIA derives the button's Name from the block exactly as it does for
+    /// `Button`'s caption.
+    Label { block: TextBlock, link: Option<HyperlinkButton> },
     Entry(TextBox),
     Image(Image),
     Scroll(ScrollViewer),
@@ -151,10 +165,19 @@ impl NativeWidget {
         match self {
             NativeWidget::Column(panel) => panel.cast(),
             NativeWidget::Row(panel) => panel.cast(),
-            NativeWidget::Checkbox { check, .. } => check.cast(),
+            // THE OUTER CONTROL ONCE A ROLE SWAPPED IT (T1, T3): what the
+            // parent lays out, what UIA describes and what the a11y props
+            // land on. The registry keeps the inner one — see the variants.
+            NativeWidget::Checkbox { check, switch, .. } => match switch {
+                Some(switch) => switch.cast(),
+                None => check.cast(),
+            },
             NativeWidget::Slider(slider) => slider.cast(),
             NativeWidget::Button { button, .. } => button.cast(),
-            NativeWidget::Label(label) => label.cast(),
+            NativeWidget::Label { block, link } => match link {
+                Some(link) => link.cast(),
+                None => block.cast(),
+            },
             NativeWidget::Entry(field) => field.cast(),
             NativeWidget::Image(image) => image.cast(),
             NativeWidget::Scroll(viewer) => viewer.cast(),
@@ -398,6 +421,10 @@ struct CoreState {
     /// its AutomationId off and what `button@id[key.path]` matches a tag
     /// against.
     button_controls: Vec<Button>,
+    /// A label's declared destination (prop 31, docs/tasks-s2-plan.md T3),
+    /// retained because `href` and `role link` arrive in either order and the
+    /// HyperlinkButton only exists once the role has.
+    hrefs: HashMap<u64, String>,
     checkboxes: Vec<CheckBox>,
     labels: Vec<TextBlock>,
     entries: Vec<TextBox>,
@@ -707,6 +734,9 @@ struct WinSection {
     /// The SEMANTIC ICON (0 = none). Retained because the switcher's item
     /// is minted lazily by `refresh_sections` and re-read there.
     symbol: i64,
+    /// The COUNT the switcher row draws (0 = none; docs/tasks-s2-plan.md T2),
+    /// retained for the same reason the symbol is.
+    badge: f64,
     root: Option<UIElement>,
 }
 
@@ -1008,6 +1038,27 @@ fn apply_symbol(target: &impl IconSlot, symbol: i64) -> windows_core::Result<()>
         return Ok(());
     };
     target.set_icon_element(&icon)
+}
+
+/// THE SWITCHER ROW'S COUNT (docs/tasks-s2-plan.md T2): Fluent's own
+/// InfoBadge on the item's trailing edge. ZERO CLEARS, and it clears by
+/// REMOVING the badge rather than by showing a 0 — an InfoBadge with Value 0
+/// draws the pill with a nought in it.
+fn apply_badge(item: &NavigationViewItem, count: f64) -> windows_core::Result<()> {
+    if count <= 0.0 {
+        return item.SetInfoBadge(None::<&InfoBadge>);
+    }
+    let badge = match item.InfoBadge() {
+        Ok(badge) => badge,
+        // The empty slot arrives as a success-coded error, the `MenuIcon::Empty`
+        // rule one property over.
+        Err(_) => {
+            let badge = InfoBadge::new()?;
+            item.SetInfoBadge(&badge)?;
+            badge
+        }
+    };
+    badge.SetValue(count as i32)
 }
 
 /// What an item's icon slot holds — four outcomes, kept apart because
@@ -2088,7 +2139,7 @@ fn shared_label_width(core: &CoreState, row: WidgetId) -> Option<f64> {
         let Some(first) = core.child_order.children(*sibling).first() else {
             continue;
         };
-        let Some(NativeWidget::Label(block)) = core.widgets.get(first) else {
+        let Some(NativeWidget::Label { block, .. }) = core.widgets.get(first) else {
             continue;
         };
         if block.Measure(unbounded).is_ok() {
@@ -2547,7 +2598,7 @@ fn baseline_compensate(
         };
         let element: FrameworkElement = widget.element()?.cast()?;
         let baseline = match widget {
-            NativeWidget::Label(text) => Some(text.BaselineOffset()?),
+            NativeWidget::Label { block, .. } => Some(block.BaselineOffset()?),
             NativeWidget::Button { caption, .. } | NativeWidget::Checkbox { caption, .. } => {
                 // The caption sits inside the control: its baseline in
                 // the CONTROL's space is its offset there plus its own
@@ -4429,6 +4480,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         // The icon rides its OWN slot, not the content, so the title
         // stays a plain string and the trap above stays shut.
         apply_symbol(&item, core.section_panes[sid].symbol)?;
+        apply_badge(&item, core.section_panes[sid].badge)?;
         nav.MenuItems()?.Append(&item)?;
         core.section_items.insert(*sid, item);
     }
@@ -10381,6 +10433,213 @@ fn text_block() -> windows_core::Result<TextBlock> {
     Ok(block)
 }
 
+/// THE FOUR UNIVERSAL FACTS a widget wears, moved to the control a role
+/// swapped it for (docs/tasks-s2-plan.md T1, T3). Every one of them is
+/// written to `identity_element()`, and a role may arrive AFTER them — the
+/// scene's own switch is declared `role`, then `a11y_label`, then `a11y_id`,
+/// and nothing in the protocol fixes that order.
+fn carry_identity(old: &UIElement, new: &UIElement) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+    use bindings::Microsoft::UI::Xaml::Controls::ToolTipService;
+    use bindings::Microsoft::UI::Xaml::DependencyObject;
+    let (from, to): (DependencyObject, DependencyObject) = (old.cast()?, new.cast()?);
+    let id = AutomationProperties::GetAutomationId(&from)?;
+    if !id.is_empty() {
+        AutomationProperties::SetAutomationId(&to, &id)?;
+    }
+    let name = AutomationProperties::GetName(&from)?;
+    if !name.is_empty() {
+        AutomationProperties::SetName(&to, &name)?;
+    }
+    let hint = AutomationProperties::GetHelpText(&from)?;
+    if !hint.is_empty() {
+        AutomationProperties::SetHelpText(&to, &hint)?;
+    }
+    // An element with no tooltip answers a success-coded error, the empty
+    // icon slot's rule one property over — there is nothing to carry.
+    if let Ok(tip) = ToolTipService::GetToolTip(&from) {
+        ToolTipService::SetToolTip(new, &tip)?;
+    }
+    Ok(())
+}
+
+/// SWAP THE CONTROL A WIDGET IS, IN PLACE (T1, T3). The two roles that change
+/// the control CLASS arrive AFTER the widget is parented — every sugar emits
+/// AddChild immediately after Create (crates/kaya/src/app.rs, `auto_parent`)
+/// — so the new control takes the old one's seat wherever the old one sat,
+/// and the container is MARKED, since `reindex` stamps the attached
+/// Grid.Row/Column onto whatever `element()` answers by then.
+fn swap_element(
+    core: &mut CoreState,
+    id: WidgetId,
+    old: &UIElement,
+    new: &UIElement,
+) -> windows_core::Result<()> {
+    carry_identity(old, new)?;
+    if let Some(panel) = core.parents.get(&id).cloned() {
+        let children = panel.Children()?;
+        let mut at = 0u32;
+        if children.IndexOf(old, &mut at)? {
+            children.RemoveAt(at)?;
+            children.InsertAt(at, new)?;
+        }
+        if let Some(parent) = core.child_order.parent_of(id) {
+            core.child_order.mark(parent);
+        }
+        return Ok(());
+    }
+    // A 2D grid keeps its children in a list of its own, which `reflow_grid`
+    // re-places the panel from.
+    let in_grid = core.grid_children.iter_mut().find_map(|(grid, kids)| {
+        let slot = kids.iter().position(|held| held == old)?;
+        kids[slot] = new.clone();
+        Some(*grid)
+    });
+    if let Some(grid) = in_grid {
+        core.child_order.mark(WidgetId(grid));
+        return Ok(());
+    }
+    // A scroll's ONE child, which the viewer holds directly (the AddChild arm).
+    let viewer = core.widgets.values().find_map(|widget| match widget {
+        NativeWidget::Scroll(viewer) => {
+            let held = viewer.Content().ok().and_then(|c| c.cast::<UIElement>().ok());
+            (held.as_ref() == Some(old)).then(|| viewer.clone())
+        }
+        _ => None,
+    });
+    if let Some(viewer) = viewer {
+        viewer.SetContent(new)?;
+        return Ok(());
+    }
+    // NOTHING THIS BACKEND TRACKS HOLDS IT. Two states look like this and
+    // only the element itself can tell them apart: a widget the batch has not
+    // added to anything yet (the common one — its AddChild, and a root's
+    // Mount, both read `element()` afterwards, so there is nothing to move),
+    // and one held by something else, which is a finding. So the sentence is
+    // printed on the second alone, and names what held it.
+    let fe: FrameworkElement = old.cast()?;
+    if let Ok(parent) = fe.Parent() {
+        let held = parent
+            .cast::<windows_core::IInspectable>()
+            .and_then(|i| i.GetRuntimeClassName())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|_| "an object with no runtime class name".to_owned());
+        eprintln!(
+            "kaya: winui widget#{} changed control class while held by {held}, which is \
+             neither a container panel, a 2D grid nor a scroll — the old control stays \
+             in the tree and the new one is not shown (docs/tasks-s2-plan.md T1, T3)",
+            id.0
+        );
+    }
+    Ok(())
+}
+
+/// The link's destination on the control (docs/tasks-s2-plan.md T3). A
+/// string Windows cannot parse as a Uri leaves the button WITHOUT one — a
+/// link that goes nowhere, which is what the app declared — rather than
+/// failing the whole batch; the `href` read then says the link carries no
+/// destination, and this sentence says why.
+fn set_navigate_uri(link: &HyperlinkButton, url: &str) -> windows_core::Result<()> {
+    match Uri::CreateUri(&HSTRING::from(url)) {
+        Ok(uri) => link.SetNavigateUri(&uri)?,
+        Err(e) => eprintln!("kaya: winui href {url:?} is not a uri Windows can open: {e}"),
+    }
+    Ok(())
+}
+
+/// THE TWO ROLES THAT CHANGE THE CONTROL (docs/tasks-s2-plan.md T1, T3):
+/// `switch` on a checkbox and `link` on a label. Answers whether the role was
+/// one of them; a `false` falls through to the property match, whose
+/// catch-all dies naming the prop and the value — which is what a role on a
+/// kind it does not fit is supposed to do.
+fn apply_control_role(
+    core: &mut CoreState,
+    id: WidgetId,
+    role: i64,
+) -> windows_core::Result<bool> {
+    if role == i64::from(crate::wire::ROLE_SWITCH) {
+        let Some(NativeWidget::Checkbox { check, caption, switch }) = core.widgets.get(&id) else {
+            return Ok(false);
+        };
+        if switch.is_some() {
+            return Ok(true);
+        }
+        let (check, caption) = (check.clone(), caption.clone());
+        let toggle = ToggleSwitch::new()?;
+        // The stock ToggleSwitch reserves ToggleSwitchThemeMinWidth for its
+        // On/Off words; with neither there is nothing to reserve, and the
+        // CheckBox's own MinWidth(0) note one arm over applies unchanged.
+        toggle.SetMinWidth(0.0)?;
+        // NO ON/OFF WORDS: the state IS the drawing on every platform kaya
+        // lowers a switch to, and a word beside it would be a Windows-only
+        // string that no shared scene could compare.
+        toggle.SetOnContent(None::<&windows_core::IInspectable>)?;
+        toggle.SetOffContent(None::<&windows_core::IInspectable>)?;
+        let on = check
+            .IsChecked()
+            .and_then(|held| held.Value())
+            .unwrap_or(false);
+        // THE SAME OCCURRENCE THE CHECKBOX SENDS, with the widget's own tag
+        // and behind the same echo guard: `toggled` has one semantics and the
+        // role picks the drawing (T1). ToggleSwitch raises ONE event for both
+        // directions, so the state is read off the sender.
+        let tag = core.widget_tags.get(&id.0).cloned().unwrap_or_default();
+        let sink = core.occurrences.clone();
+        let quiet = core.apply_quiet.clone();
+        toggle.Toggled(&RoutedEventHandler::new(move |sender, _| {
+            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                return Ok(());
+            }
+            let Some(sender) = sender.as_ref() else { return Ok(()) };
+            sink.send_toggle_tag(&tag, sender.cast::<ToggleSwitch>()?.IsOn()?);
+            Ok(())
+        }))?;
+        // The seat first, so the caption has left the CheckBox's Content
+        // before the Header claims it: a TextBlock has ONE logical parent.
+        swap_element(core, id, &check.cast()?, &toggle.cast()?)?;
+        check.SetContent(None::<&windows_core::IInspectable>)?;
+        toggle.SetHeader(&caption)?;
+        // Quiet, like every apply-side write: setting the initial state is
+        // configuration, not the user's flip.
+        core.apply_quiet
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = toggle.SetIsOn(on);
+        core.apply_quiet
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+        if let Some(NativeWidget::Checkbox { switch, .. }) = core.widgets.get_mut(&id) {
+            *switch = Some(toggle);
+        }
+        return Ok(true);
+    }
+    if role == i64::from(crate::wire::ROLE_LINK) {
+        let Some(NativeWidget::Label { block, link }) = core.widgets.get(&id) else {
+            return Ok(false);
+        };
+        if link.is_some() {
+            return Ok(true);
+        }
+        let block = block.clone();
+        let button = HyperlinkButton::new()?;
+        // A HyperlinkButton wears the Button's padding, which would indent the
+        // link from the labels it sits among.
+        button.SetPadding(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: 0.0 })?;
+        if let Some(url) = core.hrefs.get(&id.0).cloned() {
+            set_navigate_uri(&button, &url)?;
+        }
+        swap_element(core, id, &block.cast()?, &button.cast()?)?;
+        // THE SAME TextBlock, as `Button` wears its caption: the label
+        // registry, `read_label`'s Text() and the typeface census all keep
+        // reading the block, and UIA derives the button's Name from it.
+        button.SetContent(&block)?;
+        if let Some(NativeWidget::Label { link, .. }) = core.widgets.get_mut(&id) {
+            *link = Some(button);
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// The app-level dictionary that re-points the CONTROL ramp: four keys, and a
 /// fifth that must NEVER join them. `XamlAutoFontFamily` reaches Fluent's
 /// controls through `ContentControlThemeFontFamily`, a `{ThemeResource}` and
@@ -11506,7 +11765,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     });
                     check.Unchecked(&unchecked)?;
                     core.checkboxes.push(check.clone());
-                    NativeWidget::Checkbox { check, caption }
+                    NativeWidget::Checkbox { check, caption, switch: None }
                 }
                 WidgetKind::Slider => {
                     // WinUI raises ValueChanged for programmatic
@@ -11599,7 +11858,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Label => {
                     let label = text_block()?;
                     core.labels.push(label.clone());
-                    NativeWidget::Label(label)
+                    NativeWidget::Label { block: label, link: None }
                 }
                 WidgetKind::Scroll => {
                     let viewer = ScrollViewer::new()?;
@@ -11885,62 +12144,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 Some(panel) => panel,
                 None => panic!("kaya: move_child parent is not a container"),
             };
+            // ONE definition of "the element a parent lays out": a role that
+            // swapped the control (docs/tasks-s2-plan.md T1, T3) moves what
+            // `element()` answers, and a second copy of this table would move
+            // a checkbox's CheckBox while its ToggleSwitch stayed in the Grid.
             let as_element = |core: &CoreState, id: WidgetId| -> UIElement {
-                match core.widgets.get(&id).expect("scene validated the id") {
-                    NativeWidget::Column(p)
-                    | NativeWidget::Row(p)
-                    | NativeWidget::Labeled(p) => {
-                        windows_core::Interface::cast(p).expect("panel is a UIElement")
-                    }
-                    NativeWidget::Button { button, .. } => {
-                        windows_core::Interface::cast(button).expect("button is a UIElement")
-                    }
-                    NativeWidget::Label(label) => {
-                        windows_core::Interface::cast(label).expect("label is a UIElement")
-                    }
-                    NativeWidget::Entry(field) => {
-                        windows_core::Interface::cast(field).expect("entry is a UIElement")
-                    }
-                    NativeWidget::Checkbox { check, .. } => {
-                        windows_core::Interface::cast(check).expect("checkbox is a UIElement")
-                    }
-                    NativeWidget::Slider(slider) => {
-                        windows_core::Interface::cast(slider).expect("slider is a UIElement")
-                    }
-                    NativeWidget::Image(image) => {
-                        windows_core::Interface::cast(image).expect("image is a UIElement")
-                    }
-                    NativeWidget::Scroll(viewer) => {
-                        windows_core::Interface::cast(viewer).expect("scroll is a UIElement")
-                    }
-                    NativeWidget::Progress(bar) => {
-                        windows_core::Interface::cast(bar).expect("progress is a UIElement")
-                    }
-                    NativeWidget::Select(combo) => {
-                        windows_core::Interface::cast(combo).expect("select is a UIElement")
-                    }
-                    NativeWidget::Radio(group) => {
-                        windows_core::Interface::cast(group).expect("radio is a UIElement")
-                    }
-                    NativeWidget::Grid2D(grid) => {
-                        windows_core::Interface::cast(grid).expect("grid is a UIElement")
-                    }
-                    NativeWidget::Textarea(field) => {
-                        windows_core::Interface::cast(field).expect("textarea is a UIElement")
-                    }
-                    NativeWidget::DatePicker(picker) => {
-                        windows_core::Interface::cast(picker).expect("date picker is a UIElement")
-                    }
-                    NativeWidget::TimePicker(picker) => {
-                        windows_core::Interface::cast(picker).expect("time picker is a UIElement")
-                    }
-                    NativeWidget::Canvas(image) => {
-                        windows_core::Interface::cast(image).expect("canvas is a UIElement")
-                    }
-                    NativeWidget::Search { host, .. } => {
-                        windows_core::Interface::cast(host).expect("search host is a UIElement")
-                    }
-                }
+                core.widgets
+                    .get(&id)
+                    .expect("scene validated the id")
+                    .element()
+                    .expect("every widget is a UIElement")
             };
             let children = panel.Children()?;
             let child_elem = as_element(core, child);
@@ -12165,6 +12378,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     pane,
                     title: String::new(),
                     symbol: 0,
+                    badge: 0.0,
                     root: None,
                 },
             );
@@ -12207,6 +12421,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     record.symbol = *symbol;
                     if let Some(item) = core.section_items.get(&section.0) {
                         apply_symbol(item, *symbol)?;
+                    }
+                }
+                // THE COUNT ON THE SWITCHER ROW (docs/tasks-s2-plan.md T2):
+                // NavigationViewItem's own InfoBadge slot, which the SIDEBAR
+                // and the BAR presentations both draw — one arm serves both,
+                // since kaya's two presentations are one NavigationView in
+                // two PaneDisplayModes (see `sections_presentation`).
+                (SectionProp::Badge, Value::F64(count)) => {
+                    record.badge = *count;
+                    if let Some(item) = core.section_items.get(&section.0) {
+                        apply_badge(item, *count)?;
                     }
                 }
                 (p, v) => unreachable!("scene validated section prop {p:?}/{v:?}"),
@@ -12667,7 +12892,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // (docs/forms-plan.md §3), so a bound label's new text re-stamps
             // its row and the column, which re-stamps every sibling row.
             if matches!(prop, Prop::Text)
-                && matches!(core.widgets.get(&id), Some(NativeWidget::Label(_)))
+                && matches!(core.widgets.get(&id), Some(NativeWidget::Label { .. }))
             {
                 if let Some(row) = core.child_order.parent_of(id) {
                     if matches!(core.widgets.get(&row), Some(NativeWidget::Labeled(_))) {
@@ -12678,13 +12903,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                 }
             }
+            // THE TWO ROLES THAT CHANGE THE CONTROL CLASS (T1, T3) run AHEAD
+            // of the match: the swap wants the whole CoreState, which the
+            // match below holds `core.widgets` borrowed out of.
+            if let (Prop::Role, Value::I64(role)) = (prop, &value) {
+                if apply_control_role(core, id, *role)? {
+                    return Ok(());
+                }
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
                 }
-                (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
-                    label.SetText(&HSTRING::from(&s))?;
+                (NativeWidget::Label { block, .. }, Prop::Text, Value::Str(s)) => {
+                    block.SetText(&HSTRING::from(&s))?;
                     // An option label's text lands on its ComboBox row
                     // too, as string content (see select_options for why
                     // never a TextBlock) — or its radio row.
@@ -12725,6 +12958,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
                 }
+                // THE LINK'S DESTINATION (docs/tasks-s2-plan.md T3). Recorded
+                // whichever side of `role link` it arrives on, and stamped on
+                // the HyperlinkButton once there is one; the role arm reads
+                // this map for the other order. WinUI's own shell opens it —
+                // NavigateUri is the whole behaviour, and kaya emits nothing.
+                (NativeWidget::Label { link, .. }, Prop::Href, Value::Str(url)) => {
+                    if let Some(link) = link {
+                        set_navigate_uri(link, &url)?;
+                    }
+                    core.hrefs.insert(id.0, url);
+                }
                 // The prompt an empty field shows (docs/search-plan.md S3),
                 // on all three text kinds: WinUI keeps it in a template slot
                 // of its own, so it is never part of the text.
@@ -12737,11 +12981,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Search { field, .. }, Prop::Placeholder, Value::Str(s)) => {
                     field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
-                (NativeWidget::Checkbox { check, .. }, Prop::Checked, Value::Bool(b)) => {
+                (NativeWidget::Checkbox { check, switch, .. }, Prop::Checked, Value::Bool(b)) => {
                     let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
-                    let write = check.SetIsChecked(&boxed);
+                    // THE CONTROL THE USER SEES: a `role switch` checkbox is a
+                    // ToggleSwitch and the detached CheckBox beside it moves
+                    // nothing (docs/tasks-s2-plan.md T1).
+                    let write = match switch {
+                        Some(switch) => switch.SetIsOn(b),
+                        None => check.SetIsChecked(&boxed),
+                    };
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
@@ -13116,7 +13366,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         "SystemFillColorCriticalBrush",
                     )?)?;
                 }
-                (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
+                (NativeWidget::Label { block: label, .. }, Prop::Role, Value::I64(3)) => {
                     // THE HEADING ROLE IS TWO FACTS AT ONCE: a style changes no
                     // UIA property, and HeadingLevel changes no pixel. The
                     // accessible fact is UIA's own HeadingLevel, which gives
@@ -13134,7 +13384,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // scale — picking numbers out of it is what D4 refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
                 }
-                (NativeWidget::Label(label), Prop::Role, Value::I64(4)) => {
+                (NativeWidget::Label { block: label, .. }, Prop::Role, Value::I64(4)) => {
                     // The caption role: Fluent's own caption step of the
                     // type ramp, on the secondary text fill. STYLE ONLY —
                     // UIA has no caption fact to publish (SetHeadingLevel
@@ -13189,12 +13439,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 let group = group.clone();
                 let items = group.Items()?;
                 let row = items.Size()?;
-                if let NativeWidget::Label(label) =
+                if let NativeWidget::Label { block, .. } =
                     core.widgets.get(&child).expect("scene validated the id")
                 {
-                    items.Append(&PropertyValue::CreateString(&label.Text()?)?)?;
-                    let label = label.clone();
-                    core.labels.retain(|x| x != &label);
+                    items.Append(&PropertyValue::CreateString(&block.Text()?)?)?;
+                    let block = block.clone();
+                    core.labels.retain(|x| x != &block);
                 } else {
                     items.Append(&PropertyValue::CreateString(&HSTRING::new())?)?;
                 }
@@ -13211,15 +13461,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             {
                 let combo = combo.clone();
                 let item = ComboBoxItem::new()?;
-                if let NativeWidget::Label(label) =
+                if let NativeWidget::Label { block, .. } =
                     core.widgets.get(&child).expect("scene validated the id")
                 {
                     // The row initializes from the label's CURRENT text:
                     // children-first sugars (OCaml, Haskell) set the text
                     // BEFORE this AddChild (the GTK empty-row lesson).
-                    item.SetContent(&PropertyValue::CreateString(&label.Text()?)?)?;
-                    let label = label.clone();
-                    core.labels.retain(|x| x != &label);
+                    item.SetContent(&PropertyValue::CreateString(&block.Text()?)?)?;
+                    let block = block.clone();
+                    core.labels.retain(|x| x != &block);
                 }
                 combo.Items()?.Append(&item)?;
                 core.select_options.insert(child.0, (combo, item));
@@ -13230,28 +13480,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 None => panic!("kaya: add_child parent is not a container"),
             };
             let children = panel.Children()?;
-            match core.widgets.get(&child).expect("scene validated the id") {
-                NativeWidget::Column(p) | NativeWidget::Row(p) | NativeWidget::Labeled(p) => {
-                    children.Append(p)?
-                }
-                NativeWidget::Button { button, .. } => children.Append(button)?,
-                NativeWidget::Label(label) => children.Append(label)?,
-                NativeWidget::Entry(field) => children.Append(field)?,
-                NativeWidget::Checkbox { check, .. } => children.Append(check)?,
-                NativeWidget::Slider(slider) => children.Append(slider)?,
-                NativeWidget::Image(image) => children.Append(image)?,
-                NativeWidget::Scroll(viewer) => children.Append(viewer)?,
-                NativeWidget::Progress(bar) => children.Append(bar)?,
-                NativeWidget::Select(combo) => children.Append(combo)?,
-                NativeWidget::Radio(group) => children.Append(group)?,
-                NativeWidget::Grid2D(grid) => children.Append(grid)?,
-                NativeWidget::Textarea(field) => children.Append(field)?,
-                NativeWidget::Canvas(image) => children.Append(image)?,
-                NativeWidget::DatePicker(picker) => children.Append(picker)?,
-                NativeWidget::TimePicker(picker) => children.Append(picker)?,
-                // THE HOST, which is what a parent lays out (see element()).
-                NativeWidget::Search { host, .. } => children.Append(host)?,
-            }
+            // THE ELEMENT A PARENT LAYS OUT is `element()`'s answer — the
+            // Search host, and the outer control of a checkbox or label whose
+            // role swapped it (docs/tasks-s2-plan.md T1, T3).
+            children.Append(
+                &core
+                    .widgets
+                    .get(&child)
+                    .expect("scene validated the id")
+                    .element()?,
+            )?;
             core.parents.insert(child, panel);
             // A new child means a new track and a shifted set of indices —
             // stamped once for the whole batch (winui/order.rs).
@@ -14708,6 +14946,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             buttons: Vec::new(),
             button_controls: Vec::new(),
             checkboxes: Vec::new(),
+            hrefs: HashMap::new(),
             labels: Vec::new(),
             entries: Vec::new(),
             entry_ids: Vec::new(),
@@ -15294,7 +15533,10 @@ fn target_element(
         };
     }
     Ok(Some(match target.kind {
-        K::Checkbox => nth!(core.checkboxes),
+        K::Checkbox => match swapped_element(core, target)? {
+            Some(element) => element,
+            None => return Ok(None),
+        },
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
         // THE FIELD, not the Grid it wears its glyph in: every read a search
@@ -15303,7 +15545,10 @@ fn target_element(
         K::Search => nth!(core.searches),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
-        K::Label => nth!(core.labels),
+        K::Label => match swapped_element(core, target)? {
+            Some(element) => element,
+            None => return Ok(None),
+        },
         K::Slider => nth!(core.sliders),
         K::Row => nth!(core.rows),
         K::Column => nth!(core.columns),
@@ -15341,6 +15586,45 @@ fn target_element(
     }))
 }
 
+/// THE OUTER CONTROL WHEN A ROLE SWAPPED IT (docs/tasks-s2-plan.md T1, T3),
+/// for the two kinds that have one. The registry keeps the CheckBox and the
+/// TextBlock — the creation order `kind#index` means, and the text
+/// `read_label` reads — while the peer, the focus and the a11y props are the
+/// ToggleSwitch's and the HyperlinkButton's, which is what `element()`
+/// answers. ONE walk of the widget table, where `registry_ids` is one per
+/// slot; a slot whose widget is gone answers the registry's own control, so
+/// a destroyed widget's target reads exactly as it did before.
+#[cfg(feature = "harness")]
+fn swapped_element(
+    core: &CoreState,
+    target: crate::harness::Target,
+) -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::UIElement>> {
+    use crate::harness::{try_resolve, TargetKind as K};
+    let (held, widget) = if target.kind == K::Checkbox {
+        let Some(i) = try_resolve(target.index, core.checkboxes.len()) else {
+            return Ok(None);
+        };
+        let held = core.checkboxes[i].clone();
+        let widget = core.widgets.values().find(
+            |w| matches!(w, NativeWidget::Checkbox { check, .. } if *check == held),
+        );
+        (held.cast()?, widget)
+    } else {
+        let Some(i) = try_resolve(target.index, core.labels.len()) else {
+            return Ok(None);
+        };
+        let held = core.labels[i].clone();
+        let widget = core.widgets.values().find(
+            |w| matches!(w, NativeWidget::Label { block, .. } if *block == held),
+        );
+        (held.cast()?, widget)
+    };
+    match widget {
+        Some(widget) => Ok(Some(widget.element()?)),
+        None => Ok(Some(held)),
+    }
+}
+
 /// The widget id behind each slot of a kind's registry, in the registry's
 /// own creation order. The registries and `widgets` hold clones of ONE
 /// control, so equality here is COM identity; a slot whose widget is gone
@@ -15366,7 +15650,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Checkbox => ids!(core.checkboxes, NativeWidget::Checkbox { check, .. }, check),
         K::Slider => ids!(core.sliders, NativeWidget::Slider(slider), slider),
         K::Entry => core.entry_ids.clone(),
-        K::Label => ids!(core.labels, NativeWidget::Label(label), label),
+        K::Label => ids!(core.labels, NativeWidget::Label { block, .. }, block),
         K::Column => core.column_ids.iter().map(|id| id.0).collect(),
         K::Row => ids!(core.rows, NativeWidget::Row(panel), panel),
         K::Labeled => ids!(core.labeleds, NativeWidget::Labeled(panel), panel),
@@ -15745,8 +16029,16 @@ impl crate::harness::Stage for WinUiStage {
             // The reads ask the PEER and never leave this process: an
             // out-of-process UIA client is barred at the Cargo.toml.
             let class = peer.GetClassName()?.to_string();
+            // THE TOGGLE PATTERN, read the way `invoke_menu_native` reads it:
+            // a peer that supports it IS the provider (docs/tasks-s2-plan.md
+            // T1). Cheap, and asked of every kind because the ladder's own
+            // ordering decides what it means.
+            let toggles = peer
+                .cast::<bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider>()
+                .is_ok();
             let role = ax_role(
                 peer.GetHeadingLevel()? != AutomationHeadingLevel::None,
+                toggles,
                 &class,
                 kind,
             );
@@ -15969,6 +16261,33 @@ impl crate::harness::Stage for WinUiStage {
     /// The prompt READ OFF THE CONTROL, never kaya's model
     /// (docs/search-plan.md S3): WinUI keeps it in the template's own
     /// PlaceholderTextContentPresenter, and this is the property behind it.
+    /// THE DESTINATION OFF THE CONTROL (docs/tasks-s2-plan.md T3):
+    /// HyperlinkButton's own NavigateUri, never `core.hrefs` beside it — a
+    /// mirror written by the same arm that writes the control agrees with it
+    /// by construction and could never catch the write dropped.
+    fn href(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = target_widget_id(core, t).map(WidgetId) else {
+                return Ok(format!(
+                    "<no such target — the registry holds {} label(s)>",
+                    core.labels.len()
+                ));
+            };
+            // THREE ANSWERS, NOT ONE: a label that is no link, a link with no
+            // destination, and a destination that would not parse are three
+            // different states and the reader says which it measured.
+            let Some(NativeWidget::Label { link: Some(link), .. }) = core.widgets.get(&widget)
+            else {
+                return Ok("<not a link>".to_owned());
+            };
+            Ok(match link.NavigateUri() {
+                Ok(uri) => uri.RawUri()?.to_string(),
+                Err(e) if e.code().is_ok() => "<the link carries no destination>".to_owned(),
+                Err(e) => format!("<the link's destination could not be read: {e}>"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
     fn placeholder_text(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let field: TextBox = match t.kind {
@@ -16022,8 +16341,10 @@ impl crate::harness::Stage for WinUiStage {
             use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
             use crate::harness::{try_resolve, TargetKind as K};
             let element: bindings::Microsoft::UI::Xaml::UIElement = match target.kind {
-                K::Checkbox => match try_resolve(target.index, core.checkboxes.len()) {
-                    Some(i) => core.checkboxes[i].cast()?,
+                // The IDENTITY element, which a `role switch` moved to the
+                // ToggleSwitch the hint was written on (T1).
+                K::Checkbox => match target_element(core, target)? {
+                    Some(element) => element,
                     None => return Ok("<no such target>".to_owned()),
                 },
                 K::Select => match try_resolve(target.index, core.selects.len()) {
@@ -16547,8 +16868,26 @@ impl crate::harness::Stage for WinUiStage {
     fn toggle(&self, t: crate::harness::Target, on: bool) {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.checkboxes.len());
-            let boxed: IReference<bool> = PropertyValue::CreateBoolean(on)?.cast()?;
-            core.checkboxes[i].SetIsChecked(&boxed)?;
+            let check = core.checkboxes[i].clone();
+            // THE CONTROL THE USER SEES: a `role switch` checkbox IS a
+            // ToggleSwitch, and driving the detached CheckBox beside it would
+            // emit `toggled` with nothing on the screen moving — a green leg
+            // over a switch that never flipped (docs/tasks-s2-plan.md T1).
+            let switch = core.widgets.values().find_map(|widget| match widget {
+                NativeWidget::Checkbox { check: held, switch: Some(switch), .. }
+                    if *held == check =>
+                {
+                    Some(switch.clone())
+                }
+                _ => None,
+            });
+            match switch {
+                Some(switch) => switch.SetIsOn(on)?,
+                None => {
+                    let boxed: IReference<bool> = PropertyValue::CreateBoolean(on)?.cast()?;
+                    check.SetIsChecked(&boxed)?;
+                }
+            }
             Ok(())
         });
     }
@@ -17404,16 +17743,35 @@ impl crate::harness::Stage for WinUiStage {
                     })
                     .map(|i| i as isize));
             }
+            // THE IDENTITY ELEMENT'S OWN id for the two kinds a role can
+            // swap (docs/tasks-s2-plan.md T1, T3): `a11y_id` writes to
+            // `identity_element()`, and once a checkbox is a ToggleSwitch or
+            // a label a HyperlinkButton, that is no longer the control the
+            // registry holds. SECOND, not first: an unswapped widget answers
+            // off the registry exactly as it always did, and this pass —
+            // which is a walk of the widget table per slot — is reached only
+            // when no registry control carries the id.
+            let by_identity = |kind| -> Option<isize> {
+                registry_ids(core, kind)
+                    .into_iter()
+                    .position(|widget| {
+                        widget != 0
+                            && automation_id_of(core, widget).is_some_and(|got| got == id)
+                    })
+                    .map(|i| i as isize)
+            };
             Ok(match kind {
                 // The buttons registry stores click TAGS by design (the stage's
                 // click path emits them directly), so there is no control to
                 // read an AutomationId off: button@id resolves None HERE
                 // ALONE, the dirty read-table's documented-divergence shape.
                 K::Button => find(&core.button_controls, &id),
-                K::Checkbox => find(&core.checkboxes, &id),
+                K::Checkbox => {
+                    find(&core.checkboxes, &id).or_else(|| by_identity(K::Checkbox))
+                }
                 K::Slider => find(&core.sliders, &id),
                 K::Entry => find(&core.entries, &id),
-                K::Label => find(&core.labels, &id),
+                K::Label => find(&core.labels, &id).or_else(|| by_identity(K::Label)),
                 K::Column => find(&core.columns, &id),
                 K::Row => find(&core.rows, &id),
                 K::Labeled => find(&core.labeleds, &id),
@@ -17883,7 +18241,7 @@ impl crate::harness::Stage for WinUiStage {
                 rects.push((start, extent));
                 if !vertical {
                     let baseline = match widget {
-                        NativeWidget::Label(text) => Some(text.BaselineOffset()?),
+                        NativeWidget::Label { block, .. } => Some(block.BaselineOffset()?),
                         NativeWidget::Button { caption, .. }
                         | NativeWidget::Checkbox { caption, .. } => {
                             let inner_at = caption
@@ -19039,6 +19397,55 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_default()
     }
 
+    /// THE COUNT THE REAL SWITCHER ROW DRAWS (docs/tasks-s2-plan.md T2), off
+    /// the item's own InfoBadge and never `WinSection::badge` beside it —
+    /// `section_symbol`'s rule, and the walk is its walk: EVERY window, in id
+    /// order, because a sections scene's rows live in an aux window.
+    fn section_badge(&self, title: &str) -> String {
+        let title = title.to_owned();
+        Self::on_ui_read(move |core| {
+            use windows_core::Interface;
+            let mut windows: Vec<u64> = core.section_navs.keys().copied().collect();
+            windows.sort_unstable();
+            let mut seen: Vec<String> = Vec::new();
+            for window in windows {
+                let Some(nav) = core.section_navs.get(&window) else {
+                    continue;
+                };
+                let items = nav.MenuItems()?;
+                for i in 0..items.Size()? {
+                    let Ok(item) = items.GetAt(i)?.cast::<NavigationViewItem>() else {
+                        continue;
+                    };
+                    let Ok(content) = item.Content() else { continue };
+                    let Ok(text) = content.cast::<IReference<HSTRING>>() else {
+                        continue;
+                    };
+                    let got = text.Value()?.to_string();
+                    if got != title {
+                        seen.push(got);
+                        continue;
+                    }
+                    return Ok(match item.InfoBadge() {
+                        Ok(badge) => badge.Value()?.to_string(),
+                        // The empty slot arrives as a success-coded error (the
+                        // `MenuIcon::Empty` rule): the row is in the real
+                        // switcher and carries NO badge, which is the zero the
+                        // scene spells — never a claim about what the app
+                        // declared, which this reader cannot tell it from.
+                        Err(e) if e.code().is_ok() => "0".to_owned(),
+                        Err(e) => {
+                            format!("the section row {title}'s badge slot could not be read: {e}")
+                        }
+                    });
+                }
+            }
+            Ok(format!(
+                "no section row is titled {title:?} (the switchers carry: {seen:?})"
+            ))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
     fn section_symbol(&self, title: &str) -> String {
         let title = title.to_owned();
         // THE ICON THE REAL ITEM CARRIES — the automation name of the
@@ -19165,7 +19572,7 @@ fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
             core.widgets
                 .iter()
                 .find_map(|(id, w)| match w {
-                    NativeWidget::Label(l) if *l == block => Some(id.0),
+                    NativeWidget::Label { block: l, .. } if *l == block => Some(id.0),
                     _ => None,
                 })
                 .expect("registry labels live in the widget table")
@@ -19222,7 +19629,12 @@ const UNMAPPED_ROLE: &str = "unknown";
 /// kaya role already owns and a type-first ladder could never reach the
 /// right word.
 #[cfg(feature = "harness")]
-fn ax_role(heading: bool, class: &str, kind: AutomationControlType) -> &'static str {
+fn ax_role(
+    heading: bool,
+    toggles: bool,
+    class: &str,
+    kind: AutomationControlType,
+) -> &'static str {
     if heading {
         // Spelled the way every other backend spells it,
         // `heading/<the label's text>` — ONE word for all nine levels,
@@ -19243,8 +19655,21 @@ fn ax_role(heading: bool, class: &str, kind: AutomationControlType) -> &'static 
         // with the display language. iOS classifies its compact UIDatePicker
         // the same way, for the same reason.
         "datetime"
+    } else if kind == AutomationControlType::Button && toggles {
+        // THE SWITCH (docs/tasks-s2-plan.md T1), and its evidence is UIA's
+        // own: a ToggleSwitch publishes `Button` with the TOGGLE PATTERN,
+        // which is the pair every assistive client reads it by. The pattern
+        // rather than the peer's class name, because the class is a WinUI
+        // implementation detail while the pattern is the accessibility fact —
+        // and no other kaya kind is a Button that toggles (a checkbox
+        // publishes `CheckBox`, one arm down).
+        "switch"
     } else if kind == AutomationControlType::Button {
         "button"
+    } else if kind == AutomationControlType::Hyperlink {
+        // THE LINK (T3): HyperlinkButton's peer publishes `Hyperlink`, the
+        // type UIA has for text that navigates.
+        "link"
     } else if kind == AutomationControlType::CheckBox {
         "checkbox"
     } else if kind == AutomationControlType::Edit {
@@ -20449,10 +20874,10 @@ mod tests {
     #[test]
     #[cfg(feature = "harness")]
     fn a_heading_outranks_the_control_type_its_peer_reports() {
-        assert_eq!(ax_role(true, "TextBlock", AutomationControlType::Text), "heading");
+        assert_eq!(ax_role(true, false, "TextBlock", AutomationControlType::Text), "heading");
         // The same element with the role absent. The two calls differ in
         // the property alone, which is the entire claim.
-        assert_eq!(ax_role(false, "TextBlock", AutomationControlType::Text), "label");
+        assert_eq!(ax_role(false, false, "TextBlock", AutomationControlType::Text), "label");
     }
 
     /// THE PICKERS' ORDERING, THE HEADING'S TWIN AND PINNED FOR ITS REASON
@@ -20466,20 +20891,50 @@ mod tests {
     #[cfg(feature = "harness")]
     fn a_picker_class_outranks_the_control_type_its_peer_reports() {
         assert_eq!(
-            ax_role(false, "CalendarDatePicker", AutomationControlType::Button),
+            ax_role(false, false, "CalendarDatePicker", AutomationControlType::Button),
             "datetime"
         );
-        assert_eq!(ax_role(false, "Button", AutomationControlType::Button), "button");
+        assert_eq!(ax_role(false, false, "Button", AutomationControlType::Button), "button");
         assert_eq!(
-            ax_role(false, "TimePicker", AutomationControlType::Group),
+            ax_role(false, false, "TimePicker", AutomationControlType::Group),
             "datetime"
         );
-        assert_eq!(ax_role(false, "Grid", AutomationControlType::Group), "group");
+        assert_eq!(ax_role(false, false, "Grid", AutomationControlType::Group), "group");
         // NOT the compact-date control WinUI also ships: kaya's arm hosts
         // CalendarDatePicker because `DatePicker` bounds by YEAR alone
         // (docs/datetime-plan.md §0), so that class name is nothing this
         // backend can produce and must not be answered for.
-        assert_eq!(ax_role(false, "DatePicker", AutomationControlType::Button), "button");
+        assert_eq!(ax_role(false, false, "DatePicker", AutomationControlType::Button), "button");
+    }
+
+    /// THE SWITCH AND THE LINK (docs/tasks-s2-plan.md T1, T3), and the
+    /// ordering the switch needs: a ToggleSwitch publishes `Button` with the
+    /// TOGGLE PATTERN, so the pattern must be consulted BEFORE the plain
+    /// Button arm or tools/scenes/tasks.steps reads `button/Hide the Today
+    /// badge` where it froze `switch/…`. Each pair differs in the pattern
+    /// alone, which is the entire claim; the link needs no ordering, since
+    /// `Hyperlink` is a type of its own.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn the_toggle_pattern_outranks_the_button_type_a_switch_reports() {
+        assert_eq!(
+            ax_role(false, true, "ToggleSwitch", AutomationControlType::Button),
+            "switch"
+        );
+        assert_eq!(
+            ax_role(false, false, "Button", AutomationControlType::Button),
+            "button"
+        );
+        // A CHECKBOX toggles too, and is told apart by its own control type
+        // one arm down — never by the pattern.
+        assert_eq!(
+            ax_role(false, true, "CheckBox", AutomationControlType::CheckBox),
+            "checkbox"
+        );
+        assert_eq!(
+            ax_role(false, false, "HyperlinkButton", AutomationControlType::Hyperlink),
+            "link"
+        );
     }
 
     /// THE REST OF THE LADDER, PINNED BECAUSE THE HEADING BRANCH WAS INSERTED
@@ -20506,16 +20961,24 @@ mod tests {
         ] {
             // An ordinary class, so the two branches above stand aside and
             // the type ladder answers.
-            assert_eq!(ax_role(false, "Grid", kind), want, "{kind:?} answered the wrong role");
+            assert_eq!(
+                ax_role(false, false, "Grid", kind),
+                want,
+                "{kind:?} answered the wrong role"
+            );
             // And the heading property outranks every one of them — stated
             // across the whole table, because "consult the property first" is
             // a claim about the ladder and not about one arm of it.
-            assert_eq!(ax_role(true, "Grid", kind), "heading", "{kind:?} swallowed the heading");
+            assert_eq!(
+                ax_role(true, false, "Grid", kind),
+                "heading",
+                "{kind:?} swallowed the heading"
+            );
         }
         // A type kaya has no word for reports as such, so the trace in
         // `ax` fires and names it. Window is one the framework really
         // does publish.
-        assert_eq!(ax_role(false, "Grid", AutomationControlType::Window), UNMAPPED_ROLE);
+        assert_eq!(ax_role(false, false, "Grid", AutomationControlType::Window), UNMAPPED_ROLE);
     }
 
     /// The vendored font the typeface scene ships, compiled in so these

@@ -65,12 +65,14 @@ The deferred entry proposed "asserted in the sections scene's desktop
 tail beside the presentation row" — i.e. on the SIDEBAR rows. Measured,
 that is the one place a shared scene cannot assert:
 
-**GTK's sidebar arm draws no symbol at all.** `GtkStackSidebar` binds
-only the page's title into a GtkLabel and ignores `icon-name` entirely
-(gtk.rs's `refresh_section_symbols`, fact 2, measured on GTK 4.18.6),
-and kaya does not hand-build rows inside a component that owns them. So
-a sidebar symbol assertion would be red on linux forever while green on
-the other four — and scenes are shared verbatim (invariant 6).
+**GTK's sidebar arm drew no symbol at all — until 2026-09-07.**
+`GtkStackSidebar` binds only the page's title into a GtkLabel and ignores
+`icon-name` entirely (measured on GTK 4.18.6), and kaya did not hand-build
+rows inside a component that owns them. The task manager's section badge
+needed a row kaya could draw on, so GTK's sidebar is kaya's own GtkListBox
+now (docs/traps.md, "GtkStackSidebar owns its rows' children"), its rows
+draw the symbol, and the sections scene asserts the two sidebar lines on
+every lane.
 
 The BAR rows are the better place anyway, and by more than one step:
 

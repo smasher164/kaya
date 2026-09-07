@@ -255,7 +255,7 @@ ZONES = [
 # the same file, so every name is read out of the zone's own block
 # (docs/tpl-props-plan.md P1/P2, docs/styling-plan.md D3/D4).
 TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset",
-             "help", "placeholder", "fill", "columns_auto", "wrap"]
+             "help", "placeholder", "href", "fill", "columns_auto", "wrap"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -265,42 +265,42 @@ PROP_MEMBERS = {
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "fill": "fill",
+        "href": "href", "fill": "fill",
         "columns_auto": "columns_auto", "wrap": "wrap",
     },
     "go": {
         "grow": "SetGrow", "a11y_id": "SetA11yID", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
-        "placeholder": "SetPlaceholder", "fill": "SetFill",
+        "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
     },
     "csharp": {
         "grow": "SetGrow", "a11y_id": "SetA11yId", "a11y_label": "SetA11yLabel",
         "a11y_hint": "SetA11yHint", "accepts": "SetAccepts", "role": "SetRole",
         "inset": "SetInset", "help": "SetHelp",
-        "placeholder": "SetPlaceholder", "fill": "SetFill",
+        "placeholder": "SetPlaceholder", "href": "SetHref", "fill": "SetFill",
         "columns_auto": "SetColumnsAuto", "wrap": "SetWrap",
     },
     "java": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
-        "placeholder": "setPlaceholder", "fill": "setFill",
+        "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
     },
     "swift": {
         "grow": "setGrow", "a11y_id": "setA11yId", "a11y_label": "setA11yLabel",
         "a11y_hint": "setA11yHint", "accepts": "setAccepts", "role": "setRole",
         "inset": "setInset", "help": "setHelp",
-        "placeholder": "setPlaceholder", "fill": "setFill",
+        "placeholder": "setPlaceholder", "href": "setHref", "fill": "setFill",
         "columns_auto": "setColumnsAuto", "wrap": "setWrap",
     },
     "ocaml": {
         "grow": "set_grow", "a11y_id": "set_a11y_id", "a11y_label": "set_a11y_label",
         "a11y_hint": "set_a11y_hint", "accepts": "set_accepts", "role": "set_role",
         "inset": "set_inset", "help": "set_help",
-        "placeholder": "set_placeholder", "fill": "set_fill",
+        "placeholder": "set_placeholder", "href": "set_href", "fill": "set_fill",
         "columns_auto": "set_columns_auto", "wrap": "set_wrap",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
@@ -309,7 +309,7 @@ PROP_MEMBERS = {
         "grow": "TplGrow", "a11y_id": "TplA11yId", "a11y_label": "TplA11yLabel",
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
         "inset": "TplInset", "help": "TplHelp",
-        "placeholder": "TplPlaceholder", "fill": "TplFill",
+        "placeholder": "TplPlaceholder", "href": "TplHref", "fill": "TplFill",
         "columns_auto": "TplColumnsAuto", "wrap": "TplWrap",
     },
     # JS spells five of the seven as chainable methods on the base handle
@@ -319,7 +319,7 @@ PROP_MEMBERS = {
         "grow": "grow", "a11y_id": "a11yId", "a11y_label": "a11yLabel",
         "a11y_hint": "a11yHint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
-        "fill": "fill",
+        "href": "href", "fill": "fill",
         "columns_auto": "columnsAuto", "wrap": "wrap",
     },
 }
@@ -412,7 +412,7 @@ PROP_ZONES = [
     ("haskell", members_haskell, "data TplAttr (bindings/haskell/KayaApp.hs)", 3),
     ("js", members_js,
      "class Handle plus the zone-blind option writers "
-     "(bindings/js/kaya/index.ts)", 19),
+     "(bindings/js/kaya/index.ts)", 20),
 ]
 
 
