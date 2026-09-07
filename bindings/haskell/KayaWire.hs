@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x0e5f6241c88af41c
+specHash = 0xc80ccf259104a87a
 
 valueBool :: Word32
 valueBool = 1
@@ -218,6 +218,8 @@ wpropDirty :: Word32
 wpropDirty = 7
 wpropInset :: Word32
 wpropInset = 8
+wpropAppearance :: Word32
+wpropAppearance = 9
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
@@ -266,6 +268,12 @@ sectionsPresentationBar :: Word32
 sectionsPresentationBar = 1
 sectionsPresentationSidebar :: Word32
 sectionsPresentationSidebar = 2
+appearanceSystem :: Word32
+appearanceSystem = 0
+appearanceLight :: Word32
+appearanceLight = 1
+appearanceDark :: Word32
+appearanceDark = 2
 alertChoiceAction0 :: Word32
 alertChoiceAction0 = 0
 alertChoiceAction1 :: Word32
@@ -1555,6 +1563,18 @@ txSetWindowInset window inset = wireRecord txKindSetWindowProp
 txBindWindowInset :: Word64 -> Word64 -> Builder
 txBindWindowInset window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropInset <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant appearance value (window 0, the primary surface).
+txSetWindowAppearance :: Word64 -> Int64 -> Builder
+txSetWindowAppearance window appearance = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropAppearance <> word32LE sourceConst
+    <> encodeValue (VI64 appearance))
+
+-- set_window_prop with a signal-bound appearance value (window 0, the primary surface).
+txBindWindowAppearance :: Word64 -> Word64 -> Builder
+txBindWindowAppearance window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropAppearance <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_entry_prop with a constant title value.

@@ -718,6 +718,17 @@ object KayaSceneModel {
     var windowInset by mutableStateOf(16.0)
 
     /**
+     * THE APP'S OWN APPEARANCE CHOICE (wprop 9, docs/tasks-s2b-plan.md
+     * R1-R3): 0 system, 1 light, 2 dark, declared on the default window
+     * and applied process-wide. A COMPOSITION STATE, which is the whole
+     * Compose route (§3): `KayaAppearance` reads it through
+     * `KayaCompose.appearanceAsked()` and re-provides LocalConfiguration
+     * from it, so the choice moves the tree with no configuration change
+     * and no activity recreation.
+     */
+    var appearanceChoice by mutableStateOf(0)
+
+    /**
      * THE REQUESTED BRAND ACCENT, packed 0xRRGGBB, or null (apply 32;
      * docs/styling-plan.md D1/D2). A composition STATE because the theme
      * reads it and the brand arrives AFTER the first composition, where
@@ -1265,7 +1276,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x0e5f6241c88af41cuL
+    private const val SPEC_HASH: ULong = 0xc80ccf259104a87auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1379,6 +1390,7 @@ object KayaCompose {
     private const val WPROP_PANES = 6
     private const val WPROP_DIRTY = 7
     private const val WPROP_INSET = 8
+    private const val WPROP_APPEARANCE = 9
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     private const val SPROP_SYMBOL = 3
@@ -1697,25 +1709,54 @@ object KayaCompose {
 
     /**
      * `KAYA_APPEARANCE=light|dark` (CLAUDE.md's check-appearance
-     * paragraph). UNSET INSTALLS NOTHING; a value that is neither word
-     * dies here. BOTH HALVES MOVE DIRECTLY, WITHOUT A RELAUNCH, and both
-     * are required — `isSystemInDarkTheme()` alone leaves the MANIFEST
-     * theme's background light, the half-dark app D1 fixed.
+     * paragraph). UNSET RECORDS NOTHING; a value that is neither word
+     * dies here. It only answers the KNOB half — what is finally
+     * installed is [appearanceAsked], which the app's own choice wins.
      */
-    private fun applyAppearanceOverride(activity: ComponentActivity) {
+    private fun readAppearanceOverride() {
         val want = System.getenv("KAYA_APPEARANCE") ?: return
         check(want == "light" || want == "dark") {
             "kaya: KAYA_APPEARANCE=$want is not a mode; use light or dark"
         }
         appearanceOverride = want
-        // THE WINDOW BACKGROUND HALF. createConfigurationContext gives the
-        // app's own resources under the forced night bits; setting the
-        // manifest theme on it resolves values-night/themes.xml exactly as
-        // the system would have on a night device.
-        val forced = Configuration(activity.resources.configuration).apply {
-            uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightBits(want)
-        }
-        val themed = activity.createConfigurationContext(forced)
+    }
+
+    /**
+     * WHAT APPEARANCE IS ASKED FOR (docs/tasks-s2b-plan.md R3): the app's
+     * own `appearance` prop first, then the harness knob, then nothing —
+     * null being "the platform's own", which is what puts System back
+     * after Dark. Every install site on this backend is dominated by this
+     * one answer, both halves of it.
+     */
+    internal fun appearanceAsked(): String? = when (KayaSceneModel.appearanceChoice) {
+        1 -> "light"
+        2 -> "dark"
+        else -> appearanceOverride
+    }
+
+    /**
+     * THE WINDOW BACKGROUND HALF, the half `isSystemInDarkTheme()` cannot
+     * move: without it the MANIFEST theme's background stays light behind
+     * the composition's insets, the measured half-dark app D1 fixed.
+     * createConfigurationContext gives the app's own resources under the
+     * asked night bits; setting the manifest theme on that context
+     * resolves values-night/themes.xml exactly as the system would have
+     * on a night device. `want == null` resolves against the activity's
+     * OWN configuration, which is the system's — no configuration change
+     * is ever written, so this is a plain resource lookup and NOT a
+     * relaunch (docs/canvas-plan.md §6, the setApplicationNightMode deaths).
+     */
+    private fun installAppearanceBackground(activity: ComponentActivity, want: String?) {
+        val base = activity.resources.configuration
+        val resolved =
+            if (want == null) {
+                base
+            } else {
+                Configuration(base).apply {
+                    uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or nightBits(want)
+                }
+            }
+        val themed = activity.createConfigurationContext(resolved)
         themed.setTheme(activity.applicationInfo.theme)
         val attrs = themed.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
         val background = attrs.getDrawable(0) ?: ColorDrawable(attrs.getColor(0, 0))
@@ -1746,10 +1787,11 @@ object KayaCompose {
         val first = !mounted
         mounted = true
         mountedActivity = activity
-        // PER WINDOW, so it runs on every attach: the override's second
-        // half is a window-background write and the new window has the
-        // manifest theme's again (tools/check-appearance.py).
-        applyAppearanceOverride(activity)
+        // PER WINDOW, so it runs on every attach: the background half is
+        // a window-background write and a new window carries the manifest
+        // theme's again (tools/check-appearance.py).
+        readAppearanceOverride()
+        installAppearanceBackground(activity, appearanceAsked())
         // THE LAG-FREE HALF OF THE STRAGGLER-BACK GATE
         // (KayaHarnessAccessibility.dismiss): a dialog on top means this
         // activity is PAUSED, and onActivityResult precedes onResume by
@@ -2100,6 +2142,19 @@ object KayaCompose {
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         WPROP_INSET -> KayaSceneModel.windowInset = readF64(b)
+                        // PROCESS-WIDE FROM THE DEFAULT WINDOW
+                        // (docs/tasks-s2b-plan.md R1-R3). Both halves,
+                        // as at mount: the composition state
+                        // `KayaAppearance` re-provides
+                        // LocalConfiguration from, and the window
+                        // background under it. This apply is already on
+                        // the UI thread (startPump posts it there).
+                        WPROP_APPEARANCE -> {
+                            KayaSceneModel.appearanceChoice = readI64(b).toInt()
+                            mountedActivity?.let {
+                                installAppearanceBackground(it, appearanceAsked())
+                            }
+                        }
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
@@ -5908,11 +5963,12 @@ object KayaCompose {
                     if (onUi(now) { kayaComposeRoot(now.window.decorView) != null }) {
                         val twins = kayaSecondMountThreads()
                         if (twins != null) return twins
-                        if (appearanceOverride != null && appearanceAppliedTo !== now) {
-                            return "recreate: KAYA_APPEARANCE=$appearanceOverride but the " +
-                                "override's window background was never applied to the " +
-                                "re-created window — it is per-window, and this one " +
-                                "carries the manifest theme's"
+                        if (appearanceAppliedTo !== now) {
+                            return "recreate: the appearance's window background was " +
+                                "never applied to the re-created window (asked " +
+                                (appearanceAsked() ?: "nothing, so the platform's own") +
+                                ") — that half is per-window, and this one carries the " +
+                                "manifest theme's"
                         }
                         Log.i("kaya", "KAYA_REMOUNT: re-attached")
                         return null
@@ -6341,6 +6397,18 @@ object KayaCompose {
                         }
                         if (got == want) observed.add("section \"$want\"")
                         else failures.add("section \"$got\", wanted \"$want\"")
+                    }
+                    "expect_appearance" -> {
+                        // THE PLATFORM'S OWN ANSWER
+                        // (docs/tasks-s2b-plan.md R4): the composition's
+                        // isSystemInDarkTheme() reading, never the
+                        // declared prop and never the knob.
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) {
+                            if (KayaSceneModel.presentationDark) "dark" else "light"
+                        }
+                        if (got == want) observed.add("appearance $want")
+                        else failures.add("appearance $got, wanted $want")
                     }
                     "expect_sections_presentation" -> {
                         // THE ARM THE SECTIONS RENDER TOOK, off the
@@ -12327,15 +12395,22 @@ private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
 )
 
 /**
- * The composition half of `KAYA_APPEARANCE` (KayaCompose.mount holds the
- * other half and the reasoning). `isSystemInDarkTheme()` reads
+ * THE COMPOSITION HALF of the asked appearance — the app's `appearance`
+ * prop or the `KAYA_APPEARANCE` knob, whichever
+ * `KayaCompose.appearanceAsked()` answers (KayaCompose holds the window
+ * background half and the reasoning). `isSystemInDarkTheme()` reads
  * `LocalConfiguration`'s night bits and NOTHING ELSE, so forcing those
- * bits moves every reading at once; unset provides nothing. The rest of
- * the configuration is COPIED, since the size class reads screenWidthDp.
+ * bits moves every reading at once; nothing asked provides nothing. The
+ * rest of the configuration is COPIED, since the size class reads
+ * screenWidthDp.
+ *
+ * THE COMPOSE-STATE ROUTE (docs/tasks-s2b-plan.md §3): the choice is
+ * composition state, so a runtime write recomposes from here down with
+ * no configuration change and no activity recreation.
  */
 @Composable
 internal fun KayaAppearance(content: @Composable () -> Unit) {
-    val want = KayaCompose.appearanceOverride
+    val want = KayaCompose.appearanceAsked()
     if (want == null) {
         content()
         return

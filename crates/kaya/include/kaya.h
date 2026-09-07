@@ -776,6 +776,8 @@
  */
 #define KAYA_WPROP_INSET 8
 
+#define KAYA_WPROP_APPEARANCE 9
+
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
  * table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -857,6 +859,15 @@
 #define KAYA_SECTIONS_PRESENTATION_BAR 1
 
 #define KAYA_SECTIONS_PRESENTATION_SIDEBAR 2
+
+/**
+ * The appearance enum (spec enum "appearance"; docs/tasks-s2b-plan.md).
+ */
+#define KAYA_APPEARANCE_SYSTEM 0
+
+#define KAYA_APPEARANCE_LIGHT 1
+
+#define KAYA_APPEARANCE_DARK 2
 
 /**
  * Alert choices (the alert_result occurrence's `choice`): action

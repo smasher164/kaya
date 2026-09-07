@@ -660,9 +660,16 @@ in docs/deferred.md.
    reads are deliberately untouched and audited, since `kayaBrandTint`
    and `kayaPlatformFont` are reached only from view bodies where
    `.current` is exactly what SwiftUI set.
-   Thirteen watched negatives, counts printed. The runtime halves are the legs:
+   AND THE APP'S OWN CHOICE SINCE 2026-09-07 (docs/tasks-s2b-plan.md): the
+   `appearance` window prop is applied process-wide, so every install
+   site is dominated by ONE asked function per backend — the prop first,
+   the knob second, nothing third, and nothing puts the platform's default
+   back — the asked function is held to falling through to the knob for
+   the system choice, and the `expect_appearance` readers are held to the
+   toolkit, never the prop or the knob. Seventeen watched negatives,
+   counts printed. The runtime halves are the legs:
    `canvas-*` is the unset proof and `canvasdark-*` the set proof, on all
-   five lanes),
+   five lanes, and the tasks scene's Dark-then-System round trip),
    `tools/check-abort.py` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.py` (a transaction is usable only inside

@@ -2685,6 +2685,7 @@ sealed class Tx
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         double? inset = null, long? sectionsPresentation = null,
+        long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
@@ -2699,6 +2700,10 @@ sealed class Tx
         if (inset is { } ins) Records.Add(KayaWire.TxSetWindowInset(id, ins));
         if (sectionsPresentation is { } sp)
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
+        // The app's OWN light/dark choice, applied process-wide from the
+        // default window (docs/tasks-s2b-plan.md R1-R3).
+        if (appearance is { } ap)
+            Records.Add(KayaWire.TxSetWindowAppearance(id, ap));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
         // Each fires every time kaya routes an undo (or a redo) there,
@@ -2727,6 +2732,7 @@ sealed class Tx
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
         double? inset = null, long? sectionsPresentation = null,
+        long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
@@ -2734,7 +2740,7 @@ sealed class Tx
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         Window(title, width, height, vetoClose, panes, dirty, inset, sectionsPresentation,
-            onCloseRequested, onClosed, onUndone, onRedone, menus, id);
+            appearance, onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 
     /// Request a modal alert (the request/result grammar). The result

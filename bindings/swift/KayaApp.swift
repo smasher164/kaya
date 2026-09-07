@@ -3739,6 +3739,7 @@ final class KayaAppTx {
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
+        appearance: Int64? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -3750,7 +3751,8 @@ final class KayaAppTx {
         window(
             id, title: title, width: width, height: height,
             vetoClose: vetoClose, dirty: dirty, panes: panes,
-            sectionsPresentation: sectionsPresentation, inset: inset,
+            sectionsPresentation: sectionsPresentation,
+            appearance: appearance, inset: inset,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
             menus: menus)
@@ -3767,6 +3769,7 @@ final class KayaAppTx {
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
+        appearance: Int64? = nil,
         inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -3783,6 +3786,9 @@ final class KayaAppTx {
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)
         }
+        // The app's OWN light/dark choice, applied process-wide from the
+        // default window (docs/tasks-s2b-plan.md R1-R3).
+        if let appearance { tx.setWindowAppearance(id, appearance) }
         if let inset { tx.setWindowInset(id, inset) }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }

@@ -93,7 +93,8 @@ pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, Date, EntryProp, MenuItemId, MenuItemKind,
-    MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId, TemplateNodeId,
+    Appearance, MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId,
+    TemplateNodeId, WindowProp,
     FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
 };
@@ -197,3 +198,12 @@ pub(crate) fn exit_hard(code: i32) -> ! {
     std::process::exit(code)
 }
 
+
+/// The `appearance` enum's wire value for a sugar-level choice.
+pub fn appearance_raw(mode: Appearance) -> i64 {
+    match mode {
+        Appearance::System => 0,
+        Appearance::Light => 1,
+        Appearance::Dark => 2,
+    }
+}

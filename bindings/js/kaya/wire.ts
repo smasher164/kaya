@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x0e5f6241c88af41cn;
+export const SPEC_HASH = 0xc80ccf259104a87an;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -105,6 +105,7 @@ export const WPROP_SECTIONS_PRESENTATION = 5;
 export const WPROP_PANES = 6;
 export const WPROP_DIRTY = 7;
 export const WPROP_INSET = 8;
+export const WPROP_APPEARANCE = 9;
 export const EPROP_TITLE = 1;
 export const EPROP_INTERCEPT_BACK = 2;
 export const SPROP_TITLE = 1;
@@ -129,6 +130,9 @@ export const MPROP_SYMBOL = 9;
 export const SECTIONS_PRESENTATION_AUTO = 0;
 export const SECTIONS_PRESENTATION_BAR = 1;
 export const SECTIONS_PRESENTATION_SIDEBAR = 2;
+export const APPEARANCE_SYSTEM = 0;
+export const APPEARANCE_LIGHT = 1;
+export const APPEARANCE_DARK = 2;
 export const ALERT_CHOICE_ACTION0 = 0;
 export const ALERT_CHOICE_ACTION1 = 1;
 export const ALERT_CHOICE_CANCEL = 4294967295;
@@ -1228,6 +1232,16 @@ export function tx_set_window_inset(window: number, inset: number): Uint8Array {
 /** set_window_prop with a signal-bound inset value; window 0, the primary surface. */
 export function tx_bind_window_inset(window: number, signal_id: number): Uint8Array {
   return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_INSET), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_window_prop with a constant appearance value; window 0, the primary surface. */
+export function tx_set_window_appearance(window: number, appearance: number): Uint8Array {
+  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_APPEARANCE), u32(SOURCE_CONST), enc.value(new I64(appearance))));
+}
+
+/** set_window_prop with a signal-bound appearance value; window 0, the primary surface. */
+export function tx_bind_window_appearance(window: number, signal_id: number): Uint8Array {
+  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_APPEARANCE), u32(SOURCE_SIGNAL), u64(signal_id)));
 }
 
 /** set_entry_prop with a constant title value. */

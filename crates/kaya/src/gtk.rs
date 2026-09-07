@@ -9137,6 +9137,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
                 }
+                (WindowProp::Appearance, Value::I64(raw)) => {
+                    // Process-wide from the default window (docs/tasks-s2b-plan.md R1).
+                    // A pre-mount write is the normal case: the choice is
+                    // stored, and the activation's own apply_appearance() call
+                    // installs it once libadwaita exists (StyleManager::default
+                    // panics before adw::init).
+                    crate::canvas::set_appearance_choice(*raw);
+                    if adw::is_initialized() {
+                        apply_appearance();
+                    }
+                }
                 (WindowProp::Inset, Value::F64(units)) => {
                     // LAYOUT, not appearance (docs/styling-plan.md D3):
                     // rewrite the one provider the padding lives in.
@@ -11105,6 +11116,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
 /// nothing and silently inherits. The panic is raised HERE and not in the
 /// handler, since `load_from_data` calls it synchronously and unwinding
 /// through GTK's C frames for a diagnostic is not worth it.
+/// The appearance the app asked for, on libadwaita's own knob: light and
+/// dark force the scheme, nothing asked puts the platform's default back
+/// (docs/tasks-s2b-plan.md R3; tools/check-appearance.py).
+fn apply_appearance() {
+    let scheme = match crate::canvas::appearance_asked() {
+        Some(crate::canvas::Mode::Dark) => adw::ColorScheme::ForceDark,
+        Some(crate::canvas::Mode::Light) => adw::ColorScheme::ForceLight,
+        None => adw::ColorScheme::Default,
+    };
+    adw::StyleManager::default().set_color_scheme(scheme);
+}
+
 fn load_kaya_css(
     provider: &gtk4::CssProvider, what: &str, css: &str,
     error: &Rc<RefCell<Option<String>>>,
@@ -11338,12 +11361,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // light). Every `StyleManager::is_dark()` reading in this file then
         // answers the forced scheme, including the one presentation_report
         // sends (tools/check-appearance.py).
-        if let Some(mode) = crate::canvas::appearance_override() {
-            adw::StyleManager::default().set_color_scheme(match mode {
-                crate::canvas::Mode::Dark => adw::ColorScheme::ForceDark,
-                crate::canvas::Mode::Light => adw::ColorScheme::ForceLight,
-            });
-        }
+        apply_appearance();
         let Some((occ_tx, tx_rx)) = ends.borrow_mut().take() else {
             return;
         };
@@ -15385,6 +15403,13 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn appearance(&self) -> String {
+        // The toolkit's own reading, the same one presentation_report sends;
+        // on the main thread, where libadwaita's StyleManager lives.
+        Self::on_main(|_core| {
+            if adw::StyleManager::default().is_dark() { "dark".to_string() } else { "light".to_string() }
+        })
+    }
     fn sections_presentation(&self, window: u64) -> String {
         // The pump is container_inset's: chrome assembled in this same
         // drain has not been allocated or mapped until the loop turns,

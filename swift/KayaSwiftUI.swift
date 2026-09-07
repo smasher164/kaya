@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x0e5f6241c88af41c
+let kayaSpecHash: UInt64 = 0xc80ccf259104a87a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -79,6 +79,7 @@ private let wpropSectionsPresentation: UInt32 = 5
 private let wpropPanes: UInt32 = 6
 private let wpropDirty: UInt32 = 7
 private let wpropInset: UInt32 = 8
+private let wpropAppearance: UInt32 = 9
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let spropSymbol: UInt32 = 3
@@ -4211,6 +4212,15 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (wpropInset, valueF64):
                     model?.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (wpropAppearance, valueI64):
+                    // Process-wide from the default window (docs/tasks-s2b-plan.md R1).
+                    let choice = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self))
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            kayaAppearanceChoice = choice
+                            kayaApplyAppearance()
+                        }
+                    }
                 case (wpropSectionsPresentation, valueI64):
                     // ADVISORY (the width/height precedent): honored
                     // where this platform has the idiom.
@@ -8925,6 +8935,16 @@ private func kayaRunScript(_ script: String) {
                     failures.append(
                         "resize_window: this host does not command window size")
                 #endif
+            case "expect_appearance":
+                // THE PLATFORM'S OWN ANSWER, the same read the canvas verb uses
+                // (docs/tasks-s2b-plan.md R4) — never the declared prop.
+                let wantMode = kayaQuoted(Array(parts[1...]))
+                let gotMode = DispatchQueue.main.sync { kayaCanvasAppearance() }
+                if gotMode == wantMode {
+                    observed.append("appearance \(wantMode)")
+                } else {
+                    failures.append("appearance \(gotMode), wanted \(wantMode)")
+                }
             case "expect_sections_presentation":
                 // THE ARM THE SECTIONS RENDER TOOK — "bar" or "sidebar", read
                 // off the stamp the render body wrote (never derived from the
@@ -13370,12 +13390,36 @@ func kayaAppearanceOverride() -> String? {
     return want
 }
 
-/// Installs that override on the PLATFORM's own appearance. NOT
+/// THE APP'S OWN CHOICE, the `appearance` window prop applied process-wide
+/// (docs/tasks-s2b-plan.md R1-R3): 0 system, 1 light, 2 dark.
+@MainActor var kayaAppearanceChoice = 0
+
+/// What appearance is ASKED FOR: the app's light or dark first, then the
+/// harness knob, then nothing. Every install site is dominated by this one
+/// answer (tools/check-appearance.py), and nil puts the platform's own back.
+@MainActor func kayaAppearanceAsked() -> String? {
+    switch kayaAppearanceChoice {
+    case 1: return "light"
+    case 2: return "dark"
+    default: return kayaAppearanceOverride()
+    }
+}
+
+/// Installs the asked appearance on the PLATFORM's own knob. NOT
 /// `.preferredColorScheme`, which moves one of kaya's two readings while
 /// `NSApp.effectiveAppearance` answers the host's. `-AppleInterfaceStyle Dark`
 /// does NOT reach this stack (docs/measurements/canvas-palette-look-2026-08-27.txt).
-@MainActor func kayaApplyAppearanceOverride() {
-    guard let mode = kayaAppearanceOverride() else { return }
+@MainActor func kayaApplyAppearance() {
+    guard let mode = kayaAppearanceAsked() else {
+        #if os(macOS)
+            NSApp.appearance = nil
+        #else
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { window.overrideUserInterfaceStyle = .unspecified }
+            }
+        #endif
+        return
+    }
     #if os(macOS)
         NSApp.appearance = NSAppearance(named: mode == "dark" ? .darkAqua : .aqua)
     #else
@@ -18734,7 +18778,7 @@ private struct KayaPresentationReporter: ViewModifier {
                 // first window, in KayaAppDelegate). Installing it here flips
                 // the trait, which fires the colorScheme onChange below, so the
                 // report corrects itself whatever order these run in.
-                kayaApplyAppearanceOverride()
+                kayaApplyAppearance()
                 report()
             }
             .onChange(of: displayScale) { _, _ in report() }

@@ -50,7 +50,7 @@ runtime; each backend applying it through the site it already has; a
 harness verb that reads the platform back; and the switch in the task
 manager's Settings driving it.
 
-## §2 — The rulings (PROPOSED; each has a recommendation)
+## §2 — The rulings (RULED 2026-09-07 as recommended: "i'm okay with these rulings")
 
 ### R1 — Scope: the whole app, not a window (RECOMMEND: app-wide)
 
@@ -117,13 +117,27 @@ here keeps S2b from growing a store of its own.
 
 ## §3 — The lowering, per backend
 
+As built (2026-09-07): every backend's install is dominated by ONE asked
+function — `appearance_asked()` in the core for GTK and WinUI,
+`kayaAppearanceAsked()` in the SwiftUI interpreter, `appearanceAsked()` in
+KayaCompose — answering the prop first, the knob second, nothing third;
+nothing asked puts the platform's default back (libadwaita `Default`,
+WinUI `ElementTheme::Default`, `NSApp.appearance = nil`, iOS
+`.unspecified`, Compose's background from the activity's own
+configuration). The eight non-Rust bindings spell `appearance` as
+`sections_presentation` is spelled in each — a raw integer plus the
+generated constants, no per-language enum, since Rust alone has one and
+minting eight would make `appearance` the only enum window prop spelled
+differently from every other; a typed sweep over both enum props is a
+ruling of its own if the maintainer wants it.
+
 | backend | the arm | at runtime |
 |---|---|---|
 | SwiftUI (macOS) | `NSApp.appearance` from the prop; `nil` for `system` (then the knob, then the OS) | immediate, app-wide |
 | SwiftUI (iOS) | `overrideUserInterfaceStyle` on every `UIWindow` kaya owns; `.unspecified` for `system` | immediate |
 | GTK 4 | `StyleManager::default().set_color_scheme(...)`; `Default` for `system` | immediate |
-| WinUI 3 | `SetRequestedTheme` on every window's root element; `Default` for `system` | immediate |
-| Compose | the env path installs at MOUNT (window background + `LocalConfiguration` night bits); the prop must re-provide `LocalConfiguration` and repaint the window background WITHOUT recreating the activity — to be measured (§7) | measured first |
+| WinUI 3 | `SetRequestedTheme` on every window's root element; `Default` for `system` — AND THE GROUND AND THE CAPTION, found by the first dark capture (2026-09-07): element-scope theming recolours the controls but a root that paints nothing shows the XAML host's white, which is where the caption buttons seemed to lose their contrast. The menu shell carries `ApplicationPageBackgroundThemeBrush` as a `{ThemeResource}` so the ground follows the root; with the ground dark, WinUI recolours the system-drawn caption buttons from the root's theme by itself (measured on the second capture — no AppWindowTitleBar colours needed, which is fortunate since the bindings cannot box an IReference<Color> without windows-implement). A window with no menu shell still paints the host's white under a dark theme — the themed host for every window's content is a follow-up on the ledger. AND THE SECONDARY TEXT, the maintainer's second finding on the review page: `theme_resource::<Brush>("TextFillColorSecondaryBrush")` hands back the CURRENT theme's SolidColorBrush, a static object, so caption-role labels and the settings footer kept the light theme's grey on the dark window (dark on dark); a role's colour is applied as a Style whose setter says `{ThemeResource …}`, which re-resolves against the element's ActualTheme — the same mechanism the shell background uses | immediate |
+| Compose | THE COMPOSE-STATE ROUTE (ruled 2026-09-07: "if android users are okay with the compose route, i'm alright with that" — the route Compose-first apps and Google's Now in Android sample take): the choice is composition state, `LocalConfiguration`'s night bits are re-provided from it and the window background repainted, no configuration change and no activity recreation; surfaces other processes own (the document picker, toasts, the share sheet) follow the SYSTEM's mode, as they do for every Android app | immediate; the re-provision measured in the depth build (§7) |
 
 ## §4 — The wire
 
@@ -147,7 +161,7 @@ here keeps S2b from growing a store of its own.
 - check-sugar-surface: the window-prop row for `appearance` in nine.
 - check-verbs: the verb in three harnesses, the observation's spelling.
 
-## §6 — Build order (after the rulings)
+## §6 — Build order (rulings taken 2026-09-07; steps 1-3 built the same afternoon, step 4 in flight)
 
 1. Spec + regenerate; the ledger entry with its KEY line.
 2. Depth on the mac: the arm, the verb, Rust's sugar, the tasks
@@ -158,12 +172,16 @@ here keeps S2b from growing a store of its own.
 
 ## §7 — To be measured before the design is frozen
 
-- Compose: re-providing `LocalConfiguration` with new night bits at
+The maintainer's frame for every arm (2026-09-07): "do what people on those
+platforms expect from those apps in light/dark mode."
+
+- ~~Compose: re-providing `LocalConfiguration` with new night bits at
   runtime recomposes the tree with the right colours WITHOUT an activity
-  recreation, and the window background repaints (the env path only
-  ever installed at mount). If it does not, the arm is the one platform
-  where the switch takes effect at the next screen, stated as a carve-out
-  uniformly.
+  recreation, and the window background repaints~~ — MEASURED 2026-09-07
+  on emulator-5554: choose-to-recomposed 183ms both ways, `wm_on_create_called`
+  1 and `wm_relaunch_activity` 0 for the process, the whole window dark
+  (status band, bars, empty ground) and light again; the next-screen
+  carve-out is not needed.
 - WinUI: `SetRequestedTheme` on a root while a ContentDialog or flyout
   is open.
 - macOS: the sidebar's vibrancy under `NSApp.appearance` set at runtime

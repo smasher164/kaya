@@ -367,6 +367,7 @@ pub(crate) const WPROP_SECTIONS_PRESENTATION: u32 = 5;
 pub(crate) const WPROP_PANES: u32 = 6;
 pub(crate) const WPROP_DIRTY: u32 = 7;
 pub(crate) const WPROP_INSET: u32 = 8;
+pub(crate) const WPROP_APPEARANCE: u32 = 9;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -401,6 +402,12 @@ pub(crate) const MPROP_SYMBOL: u32 = 9;
 pub(crate) const SECTIONS_PRESENTATION_AUTO: u32 = 0;
 pub(crate) const SECTIONS_PRESENTATION_BAR: u32 = 1;
 pub(crate) const SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
+
+/// The appearance enum's wire values (spec enum "appearance"):
+/// docs/tasks-s2b-plan.md R2.
+pub(crate) const APPEARANCE_SYSTEM: u32 = 0;
+pub(crate) const APPEARANCE_LIGHT: u32 = 1;
+pub(crate) const APPEARANCE_DARK: u32 = 2;
 
 /// The panes enum's wire values (spec enum "panes"): the declared
 /// ceiling on side-by-side stack entries. VALUES ARE THE COUNTS
@@ -805,6 +812,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_PANES => WindowProp::Panes,
         WPROP_DIRTY => WindowProp::Dirty,
         WPROP_INSET => WindowProp::Inset,
+        WPROP_APPEARANCE => WindowProp::Appearance,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -819,6 +827,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Panes => WPROP_PANES,
         WindowProp::Dirty => WPROP_DIRTY,
         WindowProp::Inset => WPROP_INSET,
+        WindowProp::Appearance => WPROP_APPEARANCE,
     }
 }
 

@@ -764,6 +764,7 @@ pub const KAYA_WPROP_DIRTY: u32 = 7;
 /// root; defaults to 16, and 0 is full bleed. Platform safe areas are
 /// not part of it and are not removed by it.
 pub const KAYA_WPROP_INSET: u32 = 8;
+pub const KAYA_WPROP_APPEARANCE: u32 = 9;
 
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -859,6 +860,10 @@ pub const KAYA_WPROP_SECTIONS_PRESENTATION: u32 = 5;
 pub const KAYA_SECTIONS_PRESENTATION_AUTO: u32 = 0;
 pub const KAYA_SECTIONS_PRESENTATION_BAR: u32 = 1;
 pub const KAYA_SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
+/// The appearance enum (spec enum "appearance"; docs/tasks-s2b-plan.md).
+pub const KAYA_APPEARANCE_SYSTEM: u32 = 0;
+pub const KAYA_APPEARANCE_LIGHT: u32 = 1;
+pub const KAYA_APPEARANCE_DARK: u32 = 2;
 const _: () = assert!(
     KAYA_SPROP_TITLE == wire::SPROP_TITLE
         && KAYA_SPROP_ICON == wire::SPROP_ICON
@@ -868,6 +873,9 @@ const _: () = assert!(
         && KAYA_SECTIONS_PRESENTATION_AUTO == wire::SECTIONS_PRESENTATION_AUTO
         && KAYA_SECTIONS_PRESENTATION_BAR == wire::SECTIONS_PRESENTATION_BAR
         && KAYA_SECTIONS_PRESENTATION_SIDEBAR == wire::SECTIONS_PRESENTATION_SIDEBAR
+        && KAYA_APPEARANCE_SYSTEM == wire::APPEARANCE_SYSTEM
+        && KAYA_APPEARANCE_LIGHT == wire::APPEARANCE_LIGHT
+        && KAYA_APPEARANCE_DARK == wire::APPEARANCE_DARK
 );
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
@@ -935,6 +943,7 @@ const _: () = assert!(
         && KAYA_PANES_THREE == wire::PANES_THREE
         && KAYA_WPROP_DIRTY == wire::WPROP_DIRTY
         && KAYA_WPROP_INSET == wire::WPROP_INSET
+        && KAYA_WPROP_APPEARANCE == wire::WPROP_APPEARANCE
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -1103,7 +1112,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 8,
+    crate::spec::WINDOW_PROPS.len() == 9,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );

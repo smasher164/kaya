@@ -147,6 +147,13 @@ expect label@settings[s] "Week starts Sunday; badge hidden; completed move to Lo
 expect_section_badge "Today" 0
 toggle checkbox@keep_done[s] on
 expect label@settings[s] "Week starts Sunday; badge hidden; completed stay in place"
+# The app-wide appearance (S2b): the select writes the window prop, and
+# the observation is the PLATFORM's own reading, never the prop. The lanes
+# are light hosts, so System reads back light.
+choose select@appearance[s] 2
+expect_appearance "dark"
+choose select@appearance[s] 0
+expect_appearance "light"
 back
 expect_entries 0
 select_section 3

@@ -1613,6 +1613,15 @@ public final class KayaApp {
             return this;
         }
 
+        /** The app's OWN light/dark choice, applied process-wide from
+         * the default window (KayaWire.APPEARANCE_SYSTEM/LIGHT/DARK,
+         * docs/tasks-s2b-plan.md R1-R3). SYSTEM defers to the harness
+         * knob and then the OS; LIGHT and DARK win over both. */
+        public WindowRef appearance(long mode) {
+            tx.emit(KayaWire.txSetWindowAppearance(id, mode));
+            return this;
+        }
+
         /** The window id, for mountIn. */
         public long id() {
             return id;

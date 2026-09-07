@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x0e5f6241c88af41c
+SPEC_HASH = 0xc80ccf259104a87a
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -108,6 +108,7 @@ WPROP_SECTIONS_PRESENTATION = 5
 WPROP_PANES = 6
 WPROP_DIRTY = 7
 WPROP_INSET = 8
+WPROP_APPEARANCE = 9
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
@@ -132,6 +133,9 @@ MPROP_SYMBOL = 9
 SECTIONS_PRESENTATION_AUTO = 0
 SECTIONS_PRESENTATION_BAR = 1
 SECTIONS_PRESENTATION_SIDEBAR = 2
+APPEARANCE_SYSTEM = 0
+APPEARANCE_LIGHT = 1
+APPEARANCE_DARK = 2
 ALERT_CHOICE_ACTION0 = 0
 ALERT_CHOICE_ACTION1 = 1
 ALERT_CHOICE_CANCEL = 4294967295
@@ -1125,6 +1129,16 @@ def tx_set_window_inset(window, inset):
 def tx_bind_window_inset(window, signal_id):
     """set_window_prop with a signal-bound inset value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_INSET, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_appearance(window, appearance):
+    """set_window_prop with a constant appearance value (int); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_APPEARANCE, SOURCE_CONST) + _enc.value(int(appearance)))
+
+
+def tx_bind_window_appearance(window, signal_id):
+    """set_window_prop with a signal-bound appearance value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_APPEARANCE, SOURCE_SIGNAL, signal_id))
 
 
 def tx_set_entry_title(entry, title):

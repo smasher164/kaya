@@ -1686,6 +1686,12 @@ export const SECTIONS_AUTO = wire.SECTIONS_PRESENTATION_AUTO;
 export const SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR;
 export const SECTIONS_SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR;
 
+/** The appearance's closed set, spelled for guests
+ * (docs/tasks-s2b-plan.md R1-R3). */
+export const APPEARANCE_SYSTEM = wire.APPEARANCE_SYSTEM;
+export const APPEARANCE_LIGHT = wire.APPEARANCE_LIGHT;
+export const APPEARANCE_DARK = wire.APPEARANCE_DARK;
+
 /** The alert_choice cancel sentinel: `if (choice === kaya.CANCEL)`. */
 export const CANCEL = wire.ALERT_CHOICE_CANCEL;
 
@@ -3359,6 +3365,10 @@ export type WindowProps = {
   dirty?: boolean;
   panes?: number;
   sectionsPresentation?: number;
+  /** The app's OWN light/dark choice, applied process-wide from the
+   * default window (kaya.APPEARANCE_SYSTEM / _LIGHT / _DARK,
+   * docs/tasks-s2b-plan.md R1-R3). */
+  appearance?: number;
   inset?: number;
 };
 
@@ -3379,6 +3389,7 @@ function windowProps(window: number, p: WindowProps): void {
   if (p.dirty !== undefined) recs.push(wire.tx_set_window_dirty(window, Boolean(p.dirty)));
   if (p.panes !== undefined) recs.push(wire.tx_set_window_panes(window, Math.trunc(p.panes)));
   if (p.sectionsPresentation !== undefined) recs.push(wire.tx_set_window_sections_presentation(window, Math.trunc(p.sectionsPresentation)));
+  if (p.appearance !== undefined) recs.push(wire.tx_set_window_appearance(window, Math.trunc(p.appearance)));
   if (p.inset !== undefined) recs.push(wire.tx_set_window_inset(window, Number(p.inset)));
   if (p.width !== undefined || p.height !== undefined) {
     if (p.width === undefined || p.height === undefined) throw new Error("kaya: window width and height travel together");

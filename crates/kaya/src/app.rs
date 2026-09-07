@@ -5021,6 +5021,15 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// The app's own appearance, applied process-wide from the default
+    /// window (docs/tasks-s2b-plan.md R1-R3). Written again from a handler
+    /// through [`Tx::set_window_prop`] with [`WindowProp::Appearance`].
+    pub fn appearance(self, mode: crate::Appearance) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::Appearance, crate::appearance_raw(mode));
+        self
+    }
+
     pub fn id(&self) -> WindowId {
         self.window
     }

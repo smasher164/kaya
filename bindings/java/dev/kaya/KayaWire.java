@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x0e5f6241c88af41cL;
+    public static final long SPEC_HASH = 0xc80ccf259104a87aL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -111,6 +111,7 @@ public final class KayaWire {
     public static final int WPROP_PANES = 6;
     public static final int WPROP_DIRTY = 7;
     public static final int WPROP_INSET = 8;
+    public static final int WPROP_APPEARANCE = 9;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
@@ -135,6 +136,9 @@ public final class KayaWire {
     public static final int SECTIONS_PRESENTATION_AUTO = 0;
     public static final int SECTIONS_PRESENTATION_BAR = 1;
     public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
+    public static final int APPEARANCE_SYSTEM = 0;
+    public static final int APPEARANCE_LIGHT = 1;
+    public static final int APPEARANCE_DARK = 2;
     public static final int ALERT_CHOICE_ACTION0 = 0;
     public static final int ALERT_CHOICE_ACTION1 = 1;
     public static final int ALERT_CHOICE_CANCEL = -1;
@@ -1734,6 +1738,21 @@ public final class KayaWire {
     public static byte[] txBindWindowInset(long window, long signalId) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_INSET).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant appearance value (window 0, the primary surface). */
+    public static byte[] txSetWindowAppearance(long window, long appearance) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_APPEARANCE).putInt(SOURCE_CONST);
+        encodeValue(b, appearance);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound appearance value (window 0, the primary surface). */
+    public static byte[] txBindWindowAppearance(long window, long signalId) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_APPEARANCE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

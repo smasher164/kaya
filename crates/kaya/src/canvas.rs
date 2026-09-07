@@ -58,6 +58,29 @@ pub(crate) fn appearance_override() -> Option<Mode> {
     }
 }
 
+/// THE APP'S OWN CHOICE, the `appearance` window prop applied process-wide
+/// (docs/tasks-s2b-plan.md R1-R3): 0 system, 1 light, 2 dark.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+static APPEARANCE_CHOICE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn set_appearance_choice(raw: i64) {
+    APPEARANCE_CHOICE.store(raw as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// What appearance is ASKED FOR: the app's light or dark first, then the
+/// harness knob, then nothing — every install site is dominated by this
+/// one answer (tools/check-appearance.py), and None installs the platform's
+/// own default.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn appearance_asked() -> Option<Mode> {
+    match APPEARANCE_CHOICE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Some(Mode::Light),
+        2 => Some(Mode::Dark),
+        _ => appearance_override(),
+    }
+}
+
 /// A validated drawing: the viewbox plus the op stream folded into a
 /// form that cannot fail again. Held on the widget so a scale or
 /// appearance change re-rasters without re-validating.

@@ -11735,6 +11735,21 @@ Remedy: make the measure answer natural >= min by construction and hold it
 with a gate that fails the linux lane on any Gtk-WARNING from a kaya
 layout manager, since a warning nobody reads is the false green's shape.
 
+## COST — the mac lane re-sweeps every gate under a plain matrix when the matrix token mismatches at its start (measured 2026-09-07; the ceiling's anomaly on two plain runs)
+
+KEY: KAYA_MATRIX_GATES_TOKEN, gates whose inputs moved, core-build+gates, mac ceiling, matrix token mismatch
+- validate-all keys the gate sweep at launch and hands the mac lane the token; the lane skips its own sweep when the tree's fingerprint still matches (the everyday run on the S2b tree: `core-build+gates 14`). On BOTH plain runs of the day the token mismatched and the lane ran the whole sweep under peak contention, each token-taking gate waiting behind the other lanes' exclusive holds: `core-build+gates 314` (S2, 1072s against the 1000 ceiling) and `611` (S2b, 1105s). The lane names the movers: `check-compose-state, check-ledger, check-pane-ladder, check-stubs, check-sugar-surface, check-table-tier` — the same six both times.
+- Reading: two of the six key on the SwiftUI interpreter's bytes and four on sources nobody edited between the launch and the lane's start, so the inputs that "moved" were written by the lanes themselves — the android lane's build writes `KayaBuildId.java` into android/, the ios and linux lanes stage into paths the input sets glob — and under a plain matrix the mac lane's core build runs long enough for those writes to land before its fingerprint. The everyday run's mac lane is at its fingerprint before any other lane writes. This is a race between lanes' build-time writes and the mac lane's keying, not a slowdown in any leg; the phases row is what makes it legible.
+- NOT FIXED in the slice; the remedy is either to key the sweep on content the lanes never write (exclude the lanes' generated files from those six input sets) or to hand the mac lane validate-all's fingerprint as authoritative and have it skip whenever validate-all's own sweep will run. The mac ceiling stays at 1000 so the shape keeps being reported until then.
+
+## BUILD — task manager S2b: the app-wide appearance switch (rulings TAKEN 2026-09-07; depth green on the mac the same afternoon)
+
+KEY: tasks S2b, appearance prop, WPROP_APPEARANCE, APPEARANCE_SYSTEM, appearance_asked, kayaAppearanceAsked, expect_appearance, KAYA_APPEARANCE, dark mode switch, Appearance select
+- The maintainer's ask (2026-09-07): dark mode PROGRAMMATICALLY toggleable — "users often just want to select one of those things … nobody uses Discord's light mode"; the frame for every arm, "do what people on those platforms expect from those apps in light/dark mode". docs/tasks-s2b-plan.md carries the six rulings (app-wide; an `appearance` WINDOW prop on the default window, system/light/dark; the app's choice over the knob with system falling through to it; `expect_appearance` reading each toolkit back; a three-way select in Settings; no persistence until S4) and the Compose-state route for Android.
+- BUILT the same afternoon: spec (WINDOW_PROPS id 9, enum appearance; hash 0xc80ccf259104a87a), the core's `appearance_asked()` dominating GTK's and WinUI's installs with a Default reset, SwiftUI's `kayaAppearanceAsked()`/`kayaApplyAppearance()` with the nil / `.unspecified` reset, the verb in harness.rs and the SwiftUI interpreter, Rust's `WindowBuilder::appearance`, the tasks Settings select and the scene's four steps; the mac leg green by hand (`expect_appearance "dark"` then `"light"`). check-appearance rewritten around the asked function (17 negatives). BREADTH the same afternoon: Compose's arm on the Compose-state route, measured 183ms choose-to-recomposed with one onCreate and no relaunch for the process; the eight bindings' sugar in the sections_presentation shape (raw integer plus generated constants; a typed-enum sweep over both enum window props is a ruling if wanted); check-sugar-surface, check-appearance (19 negatives), check-verbs green; the iOS rust-swiftui suite 41/41 with the round trip. IN FLIGHT: the matrix and the review page.
+- FOUND AND FIXED IN THE SLICE (WinUI, 2026-09-07, the maintainer's review): secondary text stayed the light theme's grey on the dark window, since `theme_resource::<Brush>` resolves a static brush; every role foreground is a `{ThemeResource}` Style setter now, and the three sites that resolved a brush statically are gone (docs/tasks-s2b-plan.md §3).
+- OPEN (WinUI, 2026-09-07): a window with no menu shell has no themed ground — its content root paints nothing and the XAML host's white shows under a dark theme; the menu shell carries the page background as a `{ThemeResource}` today, and every window's content wants the same host (docs/tasks-s2b-plan.md §3).
+
 ## BUILD — task manager S2: switches, the Today badge, a link in notes, the launch slot (rulings TAKEN 2026-09-07; depth green on the mac the same day)
 KEY: tasks S2, role switch, role link, href, section badge, SPROP_BADGE, expect_section_badge, expect_href, launch slot, [launch], UILaunchScreen, UIColorName, actool, launch catalog, core-splashscreen, installSplashScreen, kaya_launch_background, Theme.Kaya.Launch, docs/tasks-s2-plan.md
 - CLOSED IN THE SLICE (2026-09-07 afternoon): the notes field's `Notes`
@@ -11745,10 +11760,13 @@ KEY: tasks S2, role switch, role link, href, section badge, SPROP_BADGE, expect_
   refused) to tasks.steps, and the runners' cut census moved into
   tools/lib/scene_cut.py where check-steps runs it in the fast sweep
   (docs/traps.md, "A cut refusal only the lane could print").
-- OPEN (polish, 2026-09-07): the WinUI ToggleSwitch's label sits a few
-  pixels above the control's centre on the VM capture; the checkbox row
-  centres its label on a CheckBox's box and the ToggleSwitch is taller
-  (docs/tasks-s2-plan.md §3).
+- ~~OPEN (polish, 2026-09-07): the WinUI ToggleSwitch's label sits a few pixels above the control's centre on the VM capture~~ — FIXED 2026-09-07 evening
+  at the maintainer's review of the S2b page: the switch arm had
+  moved the checkbox's caption into the ToggleSwitch's HEADER, which
+  WinUI draws above the knob and which reserves a text line even when
+  the caption is empty, so the knob sat a line below the row's label; a
+  caption rides the Off/On content seats beside the knob now and an
+  empty one leaves them empty (docs/tasks-s2-plan.md §3).
 
 The four rulings are docs/tasks-s2-plan.md §2 (T1 a switch is a role on
 checkbox; T2 the badge a section prop holding a count, zero clears; T3 a

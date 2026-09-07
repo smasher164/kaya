@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x0e5f6241c88af41c;
+    public const ulong SpecHash = 0xc80ccf259104a87a;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -110,6 +110,7 @@ static class KayaWire
     public const uint WpropPanes = 6;
     public const uint WpropDirty = 7;
     public const uint WpropInset = 8;
+    public const uint WpropAppearance = 9;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
     public const uint SpropTitle = 1;
@@ -134,6 +135,9 @@ static class KayaWire
     public const uint SectionsPresentationAuto = 0;
     public const uint SectionsPresentationBar = 1;
     public const uint SectionsPresentationSidebar = 2;
+    public const uint AppearanceSystem = 0;
+    public const uint AppearanceLight = 1;
+    public const uint AppearanceDark = 2;
     public const uint AlertChoiceAction0 = 0;
     public const uint AlertChoiceAction1 = 1;
     public const uint AlertChoiceCancel = 4294967295;
@@ -1832,6 +1836,23 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(window); w.Write(WpropInset); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant appearance value (window 0, the primary surface).
+    public static byte[] TxSetWindowAppearance(ulong window, long appearance)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropAppearance); w.Write(SourceConst);
+        EncodeValue(w, appearance);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound appearance value (window 0, the primary surface).
+    public static byte[] TxBindWindowAppearance(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropAppearance); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 

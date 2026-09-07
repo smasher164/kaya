@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x0e5f6241c88af41c
+let kayaSpecHash: UInt64 = 0xc80ccf259104a87a
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -1725,6 +1725,26 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_INSET))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a constant appearance value (window 0, the primary surface).
+    mutating func setWindowAppearance(_ window: UInt64, _ appearance: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_APPEARANCE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(appearance))
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a signal-bound appearance value (window 0, the primary surface).
+    mutating func bindWindowAppearance(_ window: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_APPEARANCE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(kayaAt)

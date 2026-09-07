@@ -3067,6 +3067,15 @@ func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
 	return w
 }
 
+// Appearance is the app's OWN light/dark choice, applied process-wide
+// from the default window (AppearanceSystem/Light/Dark;
+// docs/tasks-s2b-plan.md R1-R3). System defers to the harness knob and
+// then to the OS; Light and Dark win over both.
+func (w WindowRef) Appearance(mode int64) WindowRef {
+	w.tx.emit(TxSetWindowAppearance(w.id, mode))
+	return w
+}
+
 // VetoClose arms the veto class: the close button emits
 // close_requested and nothing closes until DestroyWindow agrees.
 func (w WindowRef) VetoClose(on bool) WindowRef {

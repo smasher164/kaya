@@ -1803,7 +1803,7 @@ let app_identity ?icon ?icon_asset name =
    EXACTLY [create_window]'s; the primary differs only in having no
    creation moment, since the process owns it. *)
 let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
-    ?sections_presentation
+    ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
@@ -1827,6 +1827,13 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
   Option.iter
     (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
     sections_presentation;
+  (* [~appearance] is the app's OWN light/dark choice, applied
+     process-wide from the default window (docs/tasks-s2b-plan.md
+     R1-R3): [Kaya_wire.appearance_system] defers to the harness knob
+     and then the OS, [_light] and [_dark] win over both. *)
+  Option.iter
+    (fun a -> emit tx (Kaya_wire.tx_set_window_appearance id a))
+    appearance;
   (* The handlers ride the declaration: [~on_close_requested] fires per
      chrome close while veto_close is armed (answer with [destroy_window]
      to agree); [~on_closed] fires when the non-veto auxiliary is
@@ -1853,12 +1860,12 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
 (* Create an auxiliary window (capability-gated: phone hosts reject at the
    root); materializes hidden, [mount_in] presents. *)
 let create_window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
-    ?sections_presentation
+    ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
   window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
-    ?sections_presentation
+    ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's

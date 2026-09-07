@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x0e5f6241c88af41c
+	SpecHash uint64 = 0xc80ccf259104a87a
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -112,6 +112,7 @@ const (
 	WpropPanes = 6
 	WpropDirty = 7
 	WpropInset = 8
+	WpropAppearance = 9
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	SpropTitle = 1
@@ -136,6 +137,9 @@ const (
 	SectionsPresentationAuto = 0
 	SectionsPresentationBar = 1
 	SectionsPresentationSidebar = 2
+	AppearanceSystem = 0
+	AppearanceLight = 1
+	AppearanceDark = 2
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
@@ -2026,6 +2030,26 @@ func TxBindWindowInset(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropInset)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetWindowAppearance: set_window_prop with a constant appearance value (window 0, the primary surface).
+func TxSetWindowAppearance(window uint64, appearance int64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropAppearance)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, appearance)
+	return endRecord(b)
+}
+
+// TxBindWindowAppearance: set_window_prop with a signal-bound appearance value (window 0, the primary surface).
+func TxBindWindowAppearance(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropAppearance)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

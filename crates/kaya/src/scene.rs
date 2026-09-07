@@ -1026,6 +1026,12 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
                  sidebar (2), got {v}"
             );
         }
+        (WindowProp::Appearance, Value::I64(v)) => {
+            assert!(
+                (0..=2).contains(v),
+                "kaya: appearance must be system (0), light (1), or dark (2), got {v}"
+            );
+        }
         (p, v) => panic!("kaya: window property {p:?} rejects value {v:?}"),
     }
 }

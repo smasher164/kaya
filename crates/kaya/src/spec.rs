@@ -242,6 +242,10 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // padding inside the root, so 0 is honored unconditionally; it does
     // NOT remove a platform's safe area.
     ("inset", 8, PropKind::F64),
+    // THE APP'S OWN APPEARANCE, applied process-wide from the default
+    // window (docs/tasks-s2b-plan.md R1-R3): system (the default) defers
+    // to KAYA_APPEARANCE and then the OS; light and dark win over both.
+    ("appearance", 9, PropKind::Enum("appearance")),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -2771,6 +2775,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("panes", 6),
                 ("dirty", 7),
                 ("inset", 8),
+                ("appearance", 9),
             ],
         },
         EnumSpec {
@@ -2816,6 +2821,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // idiom, bar = horizontal, sidebar = the leading-edge list.
             name: "sections_presentation",
             variants: &[("auto", 0), ("bar", 1), ("sidebar", 2)],
+        },
+        EnumSpec {
+            name: "appearance",
+            variants: &[("system", 0), ("light", 1), ("dark", 2)],
         },
         EnumSpec {
             // The sentinel is deliberately not an index: any
@@ -3451,6 +3460,7 @@ mod tests {
                     ("wprop", "dirty") => wire::WPROP_DIRTY,
                     ("wprop", "inset") => wire::WPROP_INSET,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
+                    ("wprop", "appearance") => wire::WPROP_APPEARANCE,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("sprop", "title") => wire::SPROP_TITLE,
@@ -3477,6 +3487,9 @@ mod tests {
                     ("sections_presentation", "sidebar") => {
                         wire::SECTIONS_PRESENTATION_SIDEBAR
                     }
+                    ("appearance", "system") => wire::APPEARANCE_SYSTEM,
+                    ("appearance", "light") => wire::APPEARANCE_LIGHT,
+                    ("appearance", "dark") => wire::APPEARANCE_DARK,
                     ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
                     ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,

@@ -191,10 +191,14 @@ The bindings, as built (2026-09-07): all eight DO, no carve-out. Swift's
 enum case is written `` `switch` `` because the word is reserved; Rust's
 `.href(…)` chains the way `.placeholder(…)` does; Go and C# gained the
 generated `SetHref` forwards; check-sugar-surface's str-prop row holds
-`href` in all nine. Observed on the VM capture and left as polish: the
-WinUI ToggleSwitch's label sits a few pixels above the control's centre
-(the checkbox row centres its label on a CheckBox's box, and the
-ToggleSwitch is taller) — on the ledger's S2 entry.
+`href` in all nine. Observed on the VM capture: the WinUI ToggleSwitch's label sat a
+line above the knob. FIXED 2026-09-07 evening at the maintainer's review
+of the S2b page — the cause was the arm's `SetHeader(caption)`: WinUI
+draws the Header ABOVE the knob and reserves a line even for an empty
+caption. A caption rides the Off/On content seats beside the knob now
+(the block as Off content so the baseline read still finds it, its
+string as On content, refreshed with the text), and an empty caption
+leaves both seats empty.
 
 THE REVIEW'S FINDINGS, taken the same afternoon (the maintainer's, from
 the S2 review page): the notes field carries a `Notes` placeholder,

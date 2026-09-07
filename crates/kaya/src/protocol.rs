@@ -1463,6 +1463,10 @@ pub enum WindowProp {
     /// full bleed, honored unconditionally. Platform safe areas are
     /// separate facts and are not removed by it.
     Inset,
+    /// The app's own appearance (I64-valued: the `appearance` enum —
+    /// system, light, dark), applied PROCESS-WIDE from the default window
+    /// (docs/tasks-s2b-plan.md R1-R3).
+    Appearance,
 }
 
 /// The presentation hint's closed set (spec enum
@@ -1477,6 +1481,16 @@ pub enum SectionsPresentation {
     Auto,
     Bar,
     Sidebar,
+}
+
+/// The app's own appearance (docs/tasks-s2b-plan.md): `System` defers to
+/// the harness knob and then the OS; `Light` and `Dark` win over both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Appearance {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 /// Section property keys — the third typed surface table (see

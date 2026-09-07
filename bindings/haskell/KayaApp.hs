@@ -1189,6 +1189,11 @@ data WindowAttr
     -- judgment where it has one; the root refuses 0 and anything above 3.
     WPanes Word32
   | WSectionsPresentation Int64
+  | -- | The app's OWN light/dark choice, applied process-wide from the
+    -- default window (docs/tasks-s2b-plan.md R1-R3):
+    -- 'W.appearanceSystem' defers to the harness knob and then the OS,
+    -- '_light' and '_dark' win over both.
+    WAppearance Int64
   | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
     -- D1). 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
     -- byte-compared across platforms.
@@ -1225,6 +1230,7 @@ window n = mapM_ apply
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
     apply (WPanes ceiling') = emitB (W.txSetWindowPanes n (fromIntegral ceiling'))
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
+    apply (WAppearance a) = emitB (W.txSetWindowAppearance n a)
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
     apply (WInset units) = emitB (W.txSetWindowInset n units)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)

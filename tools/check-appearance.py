@@ -57,9 +57,15 @@ LEGS = [
 # them, so N3 and N4 first passed with the call deleted — the bare-name
 # trap that let three of check-tx-liveness's clauses pass with the guard
 # gone (CLAUDE.md invariant 3).
-GUARD_SWIFT = r"guard let mode = kayaAppearanceOverride\(\) else \{ return \}"
-GUARD_RUST = r"if let Some\(mode\) = crate::canvas::appearance_override\(\)"
+# THE ASKED FUNCTION dominates every install since 2026-09-07 (docs/tasks-s2b-plan.md
+# R3): the app's `appearance` prop first, the knob second, nothing third —
+# and nothing puts the platform's own default back, which is inert.
+GUARD_SWIFT = r"guard let mode = kayaAppearanceAsked\(\) else \{"
+GUARD_RUST = r"crate::canvas::appearance_asked\(\)"
 GUARD_KT = r'System\.getenv\("KAYA_APPEARANCE"\) \?: return'
+# Compose's window-background half installs what the asked function answers
+# at both its call sites, and null is an install too (the system's own back).
+GUARD_KT_ASKED = r"installAppearanceBackground\(\w+, appearanceAsked\(\)\)"
 # KayaAppearance's own early-out, the composition half's inert clause.
 GUARD_KT_UI = r"if \(want == null\) \{"
 
@@ -75,7 +81,7 @@ FUNCTION_START = re.compile(r"^\s*(?:private |internal |public |pub )?"
 # Every install site: the file, the call that installs the override, and
 # the guard that must dominate it. The guard is what makes clause A true.
 INSTALLS = [
-    (ENTRY, r"kayaApplyAppearanceOverride\(\)", None,
+    (ENTRY, r"kayaApplyAppearance\(\)", None,
      "macOS installs the override before its first window"),
     (MAC, r"NSApp\.appearance = NSAppearance\(named:", GUARD_SWIFT,
      "the macOS arm sets NSApp's own appearance"),
@@ -90,8 +96,10 @@ INSTALLS = [
     # and isSystemInDarkTheme() from LocalConfiguration, and nothing on
     # Android moves both without relaunching the activity (which kills the
     # process — see KayaCompose.applyAppearanceOverride).
-    (COMPOSE, r"activity\.window\.setBackgroundDrawable\(", GUARD_KT,
+    (COMPOSE, r"activity\.window\.setBackgroundDrawable\(", None,
      "Compose moves the WINDOW BACKGROUND half"),
+    (COMPOSE, GUARD_KT_ASKED, None,
+     "Compose's background half is fed by the asked function"),
     (COMPOSE, r"CompositionLocalProvider\(LocalConfiguration provides forced",
      GUARD_KT_UI,
      "Compose moves the isSystemInDarkTheme half"),
@@ -173,6 +181,26 @@ def census(src):
             f"{CANVAS}: appearance_override() no longer returns None for an "
             f"absent KAYA_APPEARANCE — the unset case must install nothing"
         )
+    # AND THE ASKED FUNCTION FALLS THROUGH TO THE KNOB when the app chose
+    # `system` (0): an asked function that answered the choice alone would
+    # take the dark canvas legs' knob away with every lane still light.
+    if not re.search(r"default: return kayaAppearanceOverride\(\)", swift):
+        out.append(
+            f"{MAC}: kayaAppearanceAsked() no longer falls through to "
+            f"kayaAppearanceOverride() for the system choice — the knob would "
+            f"be dead on every dark leg"
+        )
+    if not re.search(r"_ => appearance_override\(\),", rust):
+        out.append(
+            f"{CANVAS}: appearance_asked() no longer falls through to "
+            f"appearance_override() for the system choice — the knob would be "
+            f"dead on every dark leg"
+        )
+    if not re.search(r"else -> appearanceOverride", code[COMPOSE]):
+        out.append(
+            f"{COMPOSE}: appearanceAsked() no longer falls through to the knob "
+            f"for the system choice — the knob would be dead on the dark leg"
+        )
     if 'System.getenv("KAYA_APPEARANCE") ?: return' not in code[COMPOSE]:
         out.append(
             f"{COMPOSE}: applyAppearanceOverride no longer returns early for "
@@ -229,6 +257,35 @@ def census(src):
                     f"`{banned}` — the override must move the toolkit and "
                     f"the report must then read the TOOLKIT back, or the "
                     f"dark leg passes with the window still light"
+                )
+
+    # --- B3. The expect_appearance readers answer the TOOLKIT, never the
+    # prop or the knob (docs/tasks-s2b-plan.md R4): a reader that echoed
+    # what the app asked for would pass with the window unmoved.
+    for path, needle, banned in (
+        (GTK, "fn appearance(&self) -> String {",
+         ("appearance_asked", "APPEARANCE_CHOICE", "KAYA_APPEARANCE", "appearance_override")),
+        (WINUI, "fn appearance(&self) -> String {",
+         ("appearance_asked", "APPEARANCE_CHOICE", "KAYA_APPEARANCE", "appearance_override")),
+        (MAC, 'case "expect_appearance":',
+         ("kayaAppearanceChoice", "kayaAppearanceAsked", "KAYA_APPEARANCE",
+          "kayaAppearanceOverride")),
+        (COMPOSE, '"expect_appearance" ->',
+         ("appearanceAsked", "appearanceChoice", "KAYA_APPEARANCE",
+          "appearanceOverride")),
+    ):
+        text = code[path]
+        start = text.find(needle)
+        if start < 0:
+            out.append(f"{path}: no `{needle}` — the appearance read-back is gone")
+            continue
+        body = text[start:start + 700]
+        # The arm ends at the next case/fn; 700 characters covers each.
+        for word in banned:
+            if word in body:
+                out.append(
+                    f"{path}: the expect_appearance reader names `{word}` — it "
+                    f"must read the toolkit back, never what the app asked for"
                 )
 
     # --- A4. The relaunching mechanism may not come back. ----------------
@@ -350,8 +407,8 @@ g.negative(
 g.negative(
     "N4 the macOS override installed UNCONDITIONALLY (the inert clause)",
     lambda: census(without(
-        MAC, r"guard let mode = kayaAppearanceOverride\(\) else \{ return \}",
-        "let mode = \"dark\"", "N4")),
+        MAC, r"guard let mode = kayaAppearanceAsked\(\) else \{",
+        "let mode = \"dark\"; if false {", "N4")),
     want="is not guarded by",
 )
 g.negative(
@@ -410,7 +467,41 @@ g.negative(
         "UITraitCollection.current.userInterfaceStyle == .dark", "N11")),
     want="reads UITraitCollection.current",
 )
-g.negatives_ran(14)
+g.negative(
+    "N12 the Rust asked function no longer falling through to the knob",
+    lambda: census(without(
+        CANVAS, r"_ => appearance_override\(\),", "_ => None,", "N12")),
+    want="no longer falls through",
+)
+g.negative(
+    "N13 the mac expect_appearance arm echoing what the app asked for",
+    lambda: census(without(
+        MAC, r"let gotMode = DispatchQueue\.main\.sync \{ kayaCanvasAppearance\(\) \}",
+        "let gotMode = DispatchQueue.main.sync { kayaAppearanceAsked() ?? \"light\" }",
+        "N13")),
+    want="must read the toolkit back",
+)
+g.negative(
+    "N14 GTK's appearance read-back answering the asked function",
+    lambda: census(without(
+        GTK, r"if adw::StyleManager::default\(\)\.is_dark\(\) \{ \"dark\"\.to_string\(\) \}",
+        "if crate::canvas::appearance_asked().is_some() { \"dark\".to_string() }", "N14")),
+    want="must read the toolkit back",
+)
+g.negative(
+    "N15 Compose's asked function no longer falling through to the knob",
+    lambda: census(without(
+        COMPOSE, r"else -> appearanceOverride", "else -> null", "N15")),
+    want="no longer falls through",
+)
+g.negative(
+    "N16 Compose's background half fed by the choice alone",
+    lambda: census(without(
+        COMPOSE, r"installAppearanceBackground\((\w+), appearanceAsked\(\)\)",
+        r"installAppearanceBackground(\1, null)", "N16", want=2)),
+    want="fed by the asked function",
+)
+g.negatives_ran(19)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

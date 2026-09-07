@@ -39,6 +39,7 @@ struct Settings {
     week_start: f64,
     hide_badge: bool,
     keep_done: bool,
+    appearance: f64,
     line: String,
 }
 
@@ -75,6 +76,7 @@ enum Msg {
     ProjectPopped,
     WeekStart(f64),
     HideBadge(bool),
+    Appearance(f64),
     KeepDone(bool),
     Section(WindowId),
     OpenLogbook,
@@ -216,6 +218,7 @@ struct App {
     draft: String,
     pdraft: String,
     week_start: usize,
+    appearance: usize,
     hide_badge: bool,
     keep_done: bool,
 }
@@ -411,6 +414,7 @@ impl App {
     fn settings_row(&self) -> Settings {
         Settings {
             week_start: self.week_start as f64,
+            appearance: self.appearance as f64,
             hide_badge: self.hide_badge,
             keep_done: self.keep_done,
             line: format!(
@@ -432,6 +436,7 @@ impl App {
                 .week_start(row.week_start)
                 .hide_badge(row.hide_badge)
                 .keep_done(row.keep_done)
+                .appearance(row.appearance)
                 .line(row.line);
         });
     }
@@ -599,6 +604,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         draft: String::new(),
         pdraft: String::new(),
         week_start: 0,
+        appearance: 0,
         hide_badge: false,
         keep_done: false,
     };
@@ -938,6 +944,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 app.write_settings(&ctx);
                 ctx.apply(|tx| app.update_count(tx, List::Today));
             }
+            Msg::Appearance(index) => {
+                app.appearance = index as usize;
+                app.write_settings(&ctx);
+                let mode = match index as usize {
+                    1 => kaya::Appearance::Light,
+                    2 => kaya::Appearance::Dark,
+                    _ => kaya::Appearance::System,
+                };
+                ctx.apply(|tx| {
+                    tx.window(kaya::DEFAULT_WINDOW).appearance(mode);
+                });
+            }
             Msg::KeepDone(on) => {
                 app.keep_done = on;
                 let done: Vec<(String, TaskRow)> = app
@@ -1017,6 +1035,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                     let week = t.select(&["Monday", "Sunday"], Settings::week_start());
                                     t.a11y_id(week, "week");
                                     msgs.on_value_node(week, |_, index| Msg::WeekStart(index));
+                                    t.caption("Appearance");
+                                    let appearance =
+                                        t.select(&["System", "Light", "Dark"], Settings::appearance());
+                                    t.a11y_id(appearance, "appearance");
+                                    msgs.on_value_node(appearance, |_, index| Msg::Appearance(index));
                                     t.row(|t| {
                                         let hide = t.checkbox(Settings::hide_badge());
                                         t.role(hide, kaya::Role::Switch);

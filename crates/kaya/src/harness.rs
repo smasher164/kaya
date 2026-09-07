@@ -329,6 +329,9 @@ pub enum Step {
     /// would agree with the lowering by construction. None = the primary;
     /// Some(n) prefixes the observation with `window#n `.
     ExpectSectionsPresentation(Option<u64>, String),
+    /// The appearance the PLATFORM reports for the app, "light" or "dark" —
+    /// the toolkit read back, never the declared prop (docs/tasks-s2b-plan.md R4).
+    ExpectAppearance(String),
     /// The primary window's section count, from the REAL switcher.
     ExpectSections(usize),
     /// The ACTIVE section's title, from the platform's own selection
@@ -615,6 +618,7 @@ impl Step {
             | Step::ExpectSectionSymbol(..)
             | Step::ExpectSectionBadge(..)
             | Step::ExpectSectionsPresentation(..)
+            | Step::ExpectAppearance(..)
             | Step::SelectSection(..)
             | Step::ExpectWindowSize(..)
             | Step::ExpectDirty(..)
@@ -706,6 +710,7 @@ impl Step {
             Step::ExpectSectionSymbol { .. } => true,
             Step::ExpectSectionBadge { .. } => true,
             Step::ExpectSectionsPresentation { .. } => true,
+            Step::ExpectAppearance { .. } => true,
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
             Step::ExpectDirty { .. } => true,
@@ -1131,6 +1136,9 @@ pub trait Stage: Send + 'static {
     /// the given window — stamped by the render body, never derived from
     /// the declared prop (the expect_split rule).
     fn sections_presentation(&self, window: u64) -> String;
+    /// The appearance the platform reports for the app — "light" or "dark",
+    /// read back from the toolkit (docs/tasks-s2b-plan.md R4; tools/check-appearance.py).
+    fn appearance(&self) -> String;
     /// Drive the switcher to the section at `index` (add order) through the
     /// platform's real switching path — the user's route, so it emits
     /// section_selected (choose/toggle precedent).
@@ -1597,6 +1605,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_sections_presentation" => {
                 let (window, rest) = parse_window_target(rest);
                 Step::ExpectSectionsPresentation(window, parse_string(rest)?)
+            }
+            "expect_appearance" => {
+                let want = parse_string(rest)?;
+                if want != "light" && want != "dark" {
+                    return Err(format!("expect_appearance takes light or dark, got {want:?}"));
+                }
+                Step::ExpectAppearance(want)
             }
             "select_section" => Step::SelectSection(
                 rest.trim()
@@ -3740,6 +3755,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectAppearance(want) => Some(poll(|| {
+                let got = stage.appearance();
+                if got == *want {
+                    Ok(format!("appearance {want}"))
+                } else {
+                    Err(format!("appearance {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectWindowSize(window, w, h) => {
                 // The surface's REAL content extent against the
                 // advisory request, within 2 device units.
@@ -5394,6 +5417,9 @@ mod tests {
         fn sections_presentation(&self, _window: u64) -> String {
             "bar".into()
         }
+        fn appearance(&self) -> String {
+            "light".into()
+        }
         fn active_section_title(&self) -> String {
             String::new()
         }
@@ -6232,6 +6258,9 @@ mod tests {
         fn sections_presentation(&self, _window: u64) -> String {
             "bar".into()
         }
+        fn appearance(&self) -> String {
+            "light".into()
+        }
         fn active_section_title(&self) -> String {
             String::new()
         }
@@ -6497,6 +6526,9 @@ mod tests {
         }
         fn sections_presentation(&self, _window: u64) -> String {
             "bar".into()
+        }
+        fn appearance(&self) -> String {
+            "light".into()
         }
         fn active_section_title(&self) -> String {
             String::new()

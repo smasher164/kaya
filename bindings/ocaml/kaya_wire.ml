@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x0e5f6241c88af41cL
+let spec_hash = 0xc80ccf259104a87aL
 
 let value_bool = 1
 let value_i64 = 2
@@ -128,6 +128,7 @@ let wprop_sections_presentation = 5
 let wprop_panes = 6
 let wprop_dirty = 7
 let wprop_inset = 8
+let wprop_appearance = 9
 let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
@@ -152,6 +153,9 @@ let mprop_symbol = 9
 let sections_presentation_auto = 0
 let sections_presentation_bar = 1
 let sections_presentation_sidebar = 2
+let appearance_system = 0
+let appearance_light = 1
+let appearance_dark = 2
 let alert_choice_action0 = 0
 let alert_choice_action1 = 1
 let alert_choice_cancel = 4294967295
@@ -1694,6 +1698,22 @@ let tx_bind_window_inset window signal_id =
   finish tx_kind_set_window_prop (fun b ->
       Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_inset);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant appearance value (window 0, the primary surface). *)
+let tx_set_window_appearance window appearance =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_appearance);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 appearance))
+
+(* set_window_prop with a signal-bound appearance value (window 0, the primary surface). *)
+let tx_bind_window_appearance window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_appearance);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 

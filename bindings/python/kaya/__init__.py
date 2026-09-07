@@ -1543,6 +1543,13 @@ SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR
 SECTIONS_SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR
 
 
+# The appearance's closed set, spelled for guests
+# (docs/tasks-s2b-plan.md R1-R3).
+APPEARANCE_SYSTEM = wire.APPEARANCE_SYSTEM
+APPEARANCE_LIGHT = wire.APPEARANCE_LIGHT
+APPEARANCE_DARK = wire.APPEARANCE_DARK
+
+
 # The alert_choice cancel sentinel. Deliberately not an index.
 CANCEL = wire.ALERT_CHOICE_CANCEL
 
@@ -3672,7 +3679,7 @@ def when(sig):
 
 
 def _window_props(window, title, width, height, veto_close, dirty,
-                  panes, sections_presentation, inset):
+                  panes, sections_presentation, appearance, inset):
     """The window construct's props — ONE place, so the scene scope and
     the live call cannot drift apart."""
     records = _records()
@@ -3689,6 +3696,9 @@ def _window_props(window, title, width, height, veto_close, dirty,
     if sections_presentation is not None:
         records.append(wire.tx_set_window_sections_presentation(
             window, int(sections_presentation)))
+    if appearance is not None:
+        records.append(wire.tx_set_window_appearance(
+            window, int(appearance)))
     # float() so it lands as the F64 the prop is typed as — an I64 is
     # refused for its TYPE, a true complaint about the wrong mistake.
     if inset is not None:
@@ -3726,7 +3736,8 @@ class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
                  window=0, create=False, veto_close=None, dirty=None,
                  panes=None,
-                 sections_presentation=None, inset=None, push=False,
+                 sections_presentation=None, appearance=None,
+                 inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None, host_window=0,
                  symbol=None, badge=None):
@@ -3747,6 +3758,7 @@ class _TxScope:
         self._dirty = dirty
         self._panes = panes
         self._sections_presentation = sections_presentation
+        self._appearance = appearance
         self._inset = inset
         self._push = push
         self._intercept_back = intercept_back
@@ -3846,7 +3858,7 @@ class _TxScope:
         _window_props(
             self._window, self._title, self._width, self._height,
             self._veto_close, self._dirty, self._panes,
-            self._sections_presentation, self._inset)
+            self._sections_presentation, self._appearance, self._inset)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -4009,7 +4021,8 @@ class App:
 
     def create_window(self, window_id, title=None, width=None, height=None,
                       veto_close=None, dirty=None, panes=None,
-                      sections_presentation=None, inset=None,
+                      sections_presentation=None, appearance=None,
+                      inset=None,
                       on_close_requested=None, on_closed=None,
                       on_undone=None, on_redone=None):
         """An auxiliary surface's scene scope: create_window plus its
@@ -4030,10 +4043,12 @@ class App:
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
             dirty=dirty, panes=panes,
-            sections_presentation=sections_presentation, inset=inset)
+            sections_presentation=sections_presentation,
+            appearance=appearance, inset=inset)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
                dirty=None, panes=None, sections_presentation=None,
+               appearance=None,
                inset=None, on_close_requested=None, on_closed=None,
                on_undone=None, on_redone=None, window_id=0):
         """The scene scope: an ambient transaction whose single top-level
@@ -4041,6 +4056,9 @@ class App:
         the surface; `width`/`height` request content size in DIP
         (advisory); `veto_close` arms the close-veto class;
         `sections_presentation` is the ADVISORY sections hint;
+        `appearance` is the app's own light/dark choice, applied
+        process-wide from the default window (kaya.APPEARANCE_SYSTEM /
+        _LIGHT / _DARK, docs/tasks-s2b-plan.md R1-R3);
         `window_id` names the surface the attributes are about.
 
         `panes` is the CEILING on how many of this window's stack entries
@@ -4079,13 +4097,15 @@ class App:
             # the one `__enter__` does (see _require_app_thread).
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
-                          dirty, panes, sections_presentation, inset)
+                          dirty, panes, sections_presentation, appearance,
+                          inset)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
             title=title, width=width, height=height,
             veto_close=veto_close, dirty=dirty, panes=panes,
-            sections_presentation=sections_presentation, inset=inset)
+            sections_presentation=sections_presentation,
+            appearance=appearance, inset=inset)
 
     def build(self):
         """An ambient transaction without the mount — for mutations

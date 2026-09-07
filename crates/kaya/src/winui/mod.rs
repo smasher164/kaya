@@ -1223,6 +1223,20 @@ fn defer_role_refresh() {
 /// `XamlRoot.RasterizationScale` is this platform's density reading —
 /// what `WM_DPICHANGED` moves — and `ActualTheme` the appearance, the
 /// same reading `canvas_ink`'s answer names.
+/// A switch's caption beside its knob: the block as the Off content, its
+/// string as the On content, nothing when the caption is empty.
+fn switch_caption(toggle: &ToggleSwitch, caption: &TextBlock) -> windows_core::Result<()> {
+    let text = caption.Text()?;
+    if text.is_empty() {
+        toggle.SetOffContent(None::<&windows_core::IInspectable>)?;
+        toggle.SetOnContent(None::<&windows_core::IInspectable>)?;
+    } else {
+        toggle.SetOffContent(caption)?;
+        toggle.SetOnContent(&PropertyValue::CreateString(&text)?)?;
+    }
+    Ok(())
+}
+
 fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     let Ok(root) = core.window.Content() else { return Ok(()) };
     let element: FrameworkElement = windows_core::Interface::cast(&root)?;
@@ -1232,14 +1246,13 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     // content root arrives with the app's FIRST MOUNT. Re-applied per report
     // and only when it differs, so it cannot loop through the
     // ActualThemeChanged edge below (tools/check-appearance.py).
-    if let Some(mode) = crate::canvas::appearance_override() {
-        let want = match mode {
-            crate::canvas::Mode::Dark => ElementTheme::Dark,
-            crate::canvas::Mode::Light => ElementTheme::Light,
-        };
-        if element.RequestedTheme()? != want {
-            element.SetRequestedTheme(want)?;
-        }
+    let want = match crate::canvas::appearance_asked() {
+        Some(crate::canvas::Mode::Dark) => ElementTheme::Dark,
+        Some(crate::canvas::Mode::Light) => ElementTheme::Light,
+        None => ElementTheme::Default,
+    };
+    if element.RequestedTheme()? != want {
+        element.SetRequestedTheme(want)?;
     }
     // THE TWO EDGES, wired the first time there is a XamlRoot to wire one of
     // them to: Windows delivers a DPI change per top-level window and a theme
@@ -2599,6 +2612,11 @@ fn baseline_compensate(
         let element: FrameworkElement = widget.element()?.cast()?;
         let baseline = match widget {
             NativeWidget::Label { block, .. } => Some(block.BaselineOffset()?),
+            NativeWidget::Checkbox { caption, switch: Some(_), .. }
+                if caption.Text()?.is_empty() =>
+            {
+                None
+            }
             NativeWidget::Button { caption, .. } | NativeWidget::Checkbox { caption, .. } => {
                 // The caption sits inside the control: its baseline in
                 // the CONTROL's space is its offset there plus its own
@@ -2731,6 +2749,13 @@ const TABLE_RULE_XAML: &str = concat!(
 /// A TABLE BOUNDS ITS OWN EXTENT (docs/deferred.md's table-card entry) —
 /// Fluent's layer card, FLAT: fill, a 1 DIP stroke and the radius, no shadow.
 /// IT SITS BEHIND THE THREE TRACKS, NOT AROUND THEM: a BorderThickness on the
+/// The menu shell, a window's own ground: the page background as the theme
+/// resource Fluent's own pages use (docs/tasks-s2b-plan.md §3).
+const MENU_SHELL_XAML: &str = concat!(
+    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+    "Background=\"{ThemeResource ApplicationPageBackgroundThemeBrush}\"/>"
+);
+
 /// container takes 2 DIP out of the box every track arithmetic divides. AND IT
 /// CARRIES A NEGATIVE MARGIN of the card's interior padding, which rides the
 /// CONTAINER's own Padding, so the card cannot move a cell edge.
@@ -4715,7 +4740,11 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     // milliseconds later on a dispatcher tick.
     require_control_resources("this window declares a menu");
     let target = winui_window(core, window)?;
-    let shell = Grid::new()?;
+    // THE PAGE BACKGROUND RIDES THE SHELL as a {ThemeResource}, so the
+    // window's own ground follows the root's RequestedTheme: a window whose
+    // content paints nothing shows the XAML root's white under a dark
+    // theme, which is what the first dark capture showed (docs/tasks-s2b-plan.md §3).
+    let shell: Grid = XamlReader::Load(&HSTRING::from(MENU_SHELL_XAML))?.cast()?;
     let defs = shell.RowDefinitions()?;
     let bar_row = RowDefinition::new()?;
     bar_row.SetHeight(GridLength {
@@ -10394,6 +10423,28 @@ fn theme_resource<T: windows_core::Interface>(key: &str) -> windows_core::Result
     })
 }
 
+/// A foreground that FOLLOWS THE THEME: `theme_resource::<Brush>` answers the
+/// current theme's brush as a static object, which stays the light theme's
+/// grey on a window switched dark (docs/tasks-s2b-plan.md §3). A Style whose
+/// setter says `{ThemeResource key}` re-resolves against the element's own
+/// ActualTheme, so a role's colour is applied as one. `based_on` keeps the
+/// text style the role already wears.
+fn themed_foreground_style(
+    target: &str,
+    based_on: Option<&str>,
+    brush_key: &str,
+) -> windows_core::Result<Style> {
+    let based_on = based_on
+        .map(|key| format!(" BasedOn=\"{{StaticResource {key}}}\""))
+        .unwrap_or_default();
+    let markup = format!(
+        "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+         TargetType=\"{target}\"{based_on}>\
+         <Setter Property=\"Foreground\" Value=\"{{ThemeResource {brush_key}}}\"/></Style>"
+    );
+    XamlReader::Load(&HSTRING::from(markup))?.cast()
+}
+
 // ---------------------------------------------------------------------
 // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). Measured mechanics:
 // docs/styling/typeface-winui.md and typeface-winui-arm.md.
@@ -10570,9 +10621,10 @@ fn apply_control_role(
         // On/Off words; with neither there is nothing to reserve, and the
         // CheckBox's own MinWidth(0) note one arm over applies unchanged.
         toggle.SetMinWidth(0.0)?;
-        // NO ON/OFF WORDS: the state IS the drawing on every platform kaya
-        // lowers a switch to, and a word beside it would be a Windows-only
-        // string that no shared scene could compare.
+        // NO ON/OFF WORDS OF ITS OWN: the state IS the drawing on every
+        // platform kaya lowers a switch to, and a Windows-only word beside it
+        // is a string no shared scene could compare. The app's CAPTION, when
+        // there is one, rides those seats instead (below).
         toggle.SetOnContent(None::<&windows_core::IInspectable>)?;
         toggle.SetOffContent(None::<&windows_core::IInspectable>)?;
         let on = check
@@ -10598,7 +10650,13 @@ fn apply_control_role(
         // before the Header claims it: a TextBlock has ONE logical parent.
         swap_element(core, id, &check.cast()?, &toggle.cast()?)?;
         check.SetContent(None::<&windows_core::IInspectable>)?;
-        toggle.SetHeader(&caption)?;
+        // BESIDE THE KNOB, NEVER ABOVE IT: the Header row sits over the switch
+        // and reserves a line even when the caption is empty, which pushed the
+        // knob below the row's own label (the S2 review, 2026-09-07). The
+        // caption block is the Off content — still in the tree, so the
+        // baseline read finds it — and the On seat carries its string,
+        // refreshed with the text; an empty caption leaves both seats empty.
+        switch_caption(&toggle, &caption)?;
         // Quiet, like every apply-side write: setting the initial state is
         // configuration, not the user's flip.
         core.apply_quiet
@@ -11706,7 +11764,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Bottom: 0.0,
                     })?;
                     glyph.SetIsHitTestVisible(false)?;
-                    glyph.SetForeground(&theme_resource::<Brush>(
+                    glyph.SetStyle(&themed_foreground_style(
+                        "FontIcon",
+                        None,
                         "TextFillColorSecondaryBrush",
                     )?)?;
                     // OUT OF THE ASSISTIVE TREE, the twin of the SwiftUI
@@ -12218,6 +12278,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // (docs/dirty-plan.md D1).
                     core.window_titles.insert(window.0, title.clone());
                     refresh_caption(core, window.0)?;
+                }
+                (WindowProp::Appearance, Value::I64(raw)) => {
+                    // Process-wide from the default window (docs/tasks-s2b-plan.md R1);
+                    // presentation_report re-applies the asked theme on every
+                    // window's root and reports what took.
+                    crate::canvas::set_appearance_choice(*raw);
+                    presentation_report(core)?;
                 }
                 (WindowProp::Inset, Value::F64(units)) => {
                     // LAYOUT, not appearance (docs/styling-plan.md D3).
@@ -12955,8 +13022,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     core.banked_text.insert(id.0, s.clone());
                 }
-                (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Checkbox { caption, switch, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
+                    if let Some(toggle) = switch {
+                        switch_caption(toggle, caption)?;
+                    }
                 }
                 // THE LINK'S DESTINATION (docs/tasks-s2-plan.md T3). Recorded
                 // whichever side of `role link` it arrives on, and stamped on
@@ -13362,7 +13432,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // (docs/styling-plan.md D4). ON THE CAPTION, NOT ON THE
                     // BUTTON: the Button template re-points the presenter's
                     // Foreground in PointerOver and Pressed.
-                    caption.SetForeground(&theme_resource::<Brush>(
+                    caption.SetStyle(&themed_foreground_style(
+                        "TextBlock",
+                        None,
                         "SystemFillColorCriticalBrush",
                     )?)?;
                 }
@@ -13390,8 +13462,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // UIA has no caption fact to publish (SetHeadingLevel
                     // is headings alone), the same carve-out Apple's stack
                     // has and a11yrows.steps records.
-                    label.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
-                    label.SetForeground(&theme_resource::<Brush>(
+                    label.SetStyle(&themed_foreground_style(
+                        "TextBlock",
+                        Some("CaptionTextBlockStyle"),
                         "TextFillColorSecondaryBrush",
                     )?)?;
                 }
@@ -19327,6 +19400,16 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn appearance(&self) -> String {
+        // The root's ActualTheme, the reading presentation_report sends.
+        Self::on_ui_read(|core| {
+            let Ok(root) = core.window.Content() else { return Ok("light".to_string()) };
+            let element: FrameworkElement = windows_core::Interface::cast(&root)?;
+            let dark = element.ActualTheme()? == ElementTheme::Dark;
+            Ok(if dark { "dark".to_string() } else { "light".to_string() })
+        })
+        .unwrap_or_else(|_| "light".to_string())
+    }
     fn sections_presentation(&self, window: u64) -> String {
             // THE CONTROL'S OWN ANSWER, the way split_presentation asks
             // TwoPaneView for its Mode: a mirror written beside the
