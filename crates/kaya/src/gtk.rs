@@ -8215,6 +8215,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
+                WidgetKind::Search => crate::depth_stub("search"),
                 WidgetKind::Labeled => {
                     // THE LABELLED ROW (docs/forms-plan.md §3): Adwaita's own
                     // labelled row, its title left to kaya's LABEL WIDGET in
@@ -11685,6 +11686,12 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
+    fn clear_search(&self, _: crate::harness::Target) {
+        crate::depth_stub("search")
+    }
+    fn placeholder_text(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("search")
+    }
     /// The control's tooltip text, off the widget GTK would show it for
     /// (docs/tooltip-plan.md T5).
     fn help_text(&self, target: crate::harness::Target) -> String {

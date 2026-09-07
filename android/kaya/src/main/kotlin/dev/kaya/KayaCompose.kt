@@ -1232,7 +1232,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x78077d8d3ee2fc37uL
+    private const val SPEC_HASH: ULong = 0x50347d52a1eef1b4uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1426,6 +1426,7 @@ object KayaCompose {
     const val KIND_DATE_PICKER = 16
     const val KIND_TIME_PICKER = 17
     const val KIND_LABELED = 18
+    const val KIND_SEARCH = 19
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -1440,6 +1441,7 @@ object KayaCompose {
     private const val PROP_FILL = 27
     private const val PROP_MIN_COLUMN_WIDTH = 28
     private const val PROP_WRAP = 29
+    private const val PROP_PLACEHOLDER = 30
     private const val PROP_COLUMNS = 11
     // The accessibility identifier (never spoken) and label (spoken).
     // Universal: every widget kind carries both.
@@ -1890,6 +1892,7 @@ object KayaCompose {
                         KIND_DATE_PICKER -> KayaSceneModel.datePickers.add(node)
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
+                        KIND_SEARCH -> depthStub("search")
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -1928,6 +1931,7 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.fill = readBool(b)
                         PROP_MIN_COLUMN_WIDTH ->
                             KayaSceneModel.nodes[id]!!.minColumnWidth = readF64(b)
+                        PROP_PLACEHOLDER -> depthStub("search")
                         PROP_WRAP ->
                             KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
@@ -4818,6 +4822,7 @@ object KayaCompose {
             "select" -> KayaSceneModel.selects
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
+            "search" -> depthStub("search")
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -7793,6 +7798,10 @@ object KayaCompose {
                             }
                         }
                     }
+                    "clear_search" -> {
+                        depthStub("search")
+                    }
+                    "expect_placeholder" -> depthStub("search")
                     "expect_help" -> {
                         // The state the platform's own tooltip draws
                         // from (docs/tooltip-plan.md T5): the wrapper in
@@ -10467,6 +10476,7 @@ private fun KayaRenderCore(
                 }
             }
         }
+        KayaCompose.KIND_SEARCH -> depthStub("search")
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -13097,3 +13107,8 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier, f
         DatePicker(state = dateState)
     }
 }
+
+/// The one spelling of "this backend has not reached that scene yet";
+/// tools/check-stubs.py reads the CALL (docs/search-plan.md §6).
+private fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on android")

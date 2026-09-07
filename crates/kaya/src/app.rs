@@ -1128,6 +1128,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// The prompt this field shows while empty — [`Tx::placeholder`] chained.
+    pub fn placeholder(self, text: impl Into<LiveSource<StrKind>>) -> Self {
+        self.tx.placeholder(self.id, text);
+        self
+    }
+
     /// This widget's spoken accessibility label — [`Tx::a11y_label`]
     /// chained.
     pub fn a11y_label(self, label: impl Into<LiveSource<StrKind>>) -> Self {
@@ -2071,6 +2077,12 @@ impl<'a> Tx<'a> {
         self.set_live(widget, Prop::Help, text.into());
     }
 
+    /// The prompt an empty text field shows (docs/search-plan.md S3): the
+    /// platform's own placeholder, never the text, never emitted.
+    pub fn placeholder(&mut self, widget: WidgetId, text: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::Placeholder, text.into());
+    }
+
     /// Cross-axis stretch for one child (docs/layout-knobs-plan.md §1).
     pub fn fill(&mut self, widget: WidgetId, on: bool) {
         self.set(widget, Prop::Fill, on);
@@ -2277,6 +2289,13 @@ impl<'a> Tx<'a> {
     /// apply) over the platform's real multi-line editor.
     pub fn textarea(&mut self) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Textarea);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A search field (docs/search-plan.md): the entry's contract under
+    /// the platform's search chrome, filtering on every keystroke.
+    pub fn search(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Search);
         Widget { id: w, out: (), tx: self }
     }
 
@@ -3477,6 +3496,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().textarea_bound(src)
     }
 
+    pub fn search(&mut self) -> TemplateNodeId {
+        self.tpl().search()
+    }
+
+    pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().search_bound(src)
+    }
+
     pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
         self.tpl().scroll(body)
     }
@@ -3560,6 +3587,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn help(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.tpl().help(node, src)
+    }
+
+    pub fn placeholder(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().placeholder(node, src)
     }
 
     pub fn fill(&mut self, node: TemplateNodeId, on: bool) {
@@ -6183,6 +6214,20 @@ impl<'b> Tpl<'_, 'b> {
         n
     }
 
+    /// A search field per stamped copy (docs/search-plan.md), the entry's
+    /// uncontrolled contract under the platform's search chrome.
+    pub fn search(&mut self) -> TemplateNodeId {
+        self.widget(WidgetKind::Search)
+    }
+
+    /// A search field seeded from any addressable source;
+    /// [`Self::entry_bound`]'s reasoning, one kind over.
+    pub fn search_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Search);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
     /// A vertical scroll viewport over exactly one child, per copy.
     pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (TemplateNodeId, R) {
         self.container_of(WidgetKind::Scroll, body)
@@ -6375,6 +6420,12 @@ impl<'b> Tpl<'_, 'b> {
     /// own field being the point (docs/tooltip-plan.md T1).
     pub fn help(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
         self.apply_source(node, Prop::Help, src.into().inner);
+    }
+
+    /// A stamped field's prompt, from any addressable source
+    /// (docs/search-plan.md S3).
+    pub fn placeholder(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::Placeholder, src.into().inner);
     }
 
     /// What activating a stamped copy does. The root admits this on the

@@ -44,7 +44,7 @@ SCENES = [
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "search"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -85,6 +85,9 @@ HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python"}
 ORDER = [
     ("milestone2", LANGS),
     ("entry", LANGS),
+    # RUST ALONE while the eight bindings' sugar is the breadth slice
+    # (docs/search-plan.md §6).
+    ("search", ("rust",)),
     ("gallery", LANGS),
     ("todos", LANGS),
     ("reorder", LANGS),

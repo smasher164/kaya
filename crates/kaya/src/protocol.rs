@@ -934,6 +934,11 @@ pub enum WidgetKind {
     /// column of nothing but these is a FORM, derived. The root holds the
     /// shape at the end of the transaction. No occurrence, no tag.
     Labeled,
+    /// A SEARCH FIELD (docs/search-plan.md): the entry's uncontrolled text
+    /// contract (Prop::Text, text_changed, clear and focus) under the
+    /// platform's own search chrome, clear affordance and keyboard. Escape
+    /// on a desktop clears it like the affordance does; no submit.
+    Search,
 }
 
 /// A civil calendar date, the value a date picker holds
@@ -1092,7 +1097,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 18] = [
+    pub(crate) const ALL: [WidgetKind; 19] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -1111,6 +1116,7 @@ impl WidgetKind {
         WidgetKind::DatePicker,
         WidgetKind::TimePicker,
         WidgetKind::Labeled,
+        WidgetKind::Search,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -1130,7 +1136,8 @@ impl WidgetKind {
             | WidgetKind::Select
             | WidgetKind::Radio
             | WidgetKind::DatePicker
-            | WidgetKind::TimePicker => true,
+            | WidgetKind::TimePicker
+            | WidgetKind::Search => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
@@ -1321,6 +1328,9 @@ pub enum Prop {
     /// A row that flows its children onto new lines (Bool-valued;
     /// docs/layout-knobs-plan.md §2).
     Wrap,
+    /// The prompt an empty text field shows (Str-valued; docs/search-plan.md
+    /// S3): the platform's own placeholder, never the text, never emitted.
+    Placeholder,
     /// An image's encoded source bytes (Blob-valued).
     Source,
     /// A container's inter-child gap on its main axis (F64-valued, DIP;

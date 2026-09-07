@@ -1,0 +1,25 @@
+# The search field (docs/search-plan.md): the platform's prompt while empty,
+# the list narrowing on every keystroke, and ONE clear act everywhere — the
+# field's own affordance empties the text, keeps the focus and reaches the
+# app as text_changed(""). The a11y verdict stays `field` by the
+# normalize-down rule (S7): UIA and Compose have no search identity.
+expect_placeholder search@find "Search"
+expect label@count "4 items"
+expect_order column@list "apple|banana|cherry|mango"
+click search@find
+expect_focused search@find
+type "an"
+expect label@count "2 of 4 match"
+expect_order column@list "banana|mango"
+type "g"
+expect label@count "1 of 4 match"
+expect_order column@list "mango"
+clear_search search@find
+expect search@find ""
+expect_focused search@find
+expect label@count "4 items"
+expect_order column@list "apple|banana|cherry|mango"
+set_text search@find "ch"
+expect label@count "1 of 4 match"
+expect_order column@list "cherry"
+expect_ax search@find "field/Find items"

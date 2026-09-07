@@ -9544,3 +9544,16 @@ inner wait is `min(window, left(deadline))`, the window sized from the
 measured dismissal, and the reading per round is printed so the refusal
 can say what each attempt did. tools/check-steps.py holds the arm;
 docs/deferred.md's save-press WATCH holds the sighting.
+
+## A SwiftUI identifier on a row reaches every element inside it and wins over a child's own (2026-09-06)
+
+`kayaA11y` puts the universal props on a widget's own view. For the search
+field that view was an HStack holding the glyph, the TextField and the clear
+button, and `.accessibilityIdentifier` on the HStack landed on BOTH the
+AXTextField/AXSearchField and the AXButton; giving the button its own
+identifier inside changed nothing, because the outer modifier wins. The
+AX read then refused the id as ambiguous (`2 elements share id 'find'`,
+and the refusal names the elements' roles now). The wrapper takes a `leaf`
+flag: a search node's row gets nothing and KayaSearch applies the props to
+its TextField itself (docs/search-plan.md §3). Any future kind whose view
+is a row of controls has the same shape.

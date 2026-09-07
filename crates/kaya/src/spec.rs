@@ -196,6 +196,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // a weight inside one has no track to take, so grow is refused at the
     // end of the transaction.
     ("wrap", 29, PropKind::Bool),
+    // THE PROMPT AN EMPTY TEXT FIELD SHOWS (docs/search-plan.md S3): the
+    // platform's own placeholder, never part of the text and never
+    // emitted. Legal on the three text kinds; the root refuses an empty one.
+    ("placeholder", 30, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2655,6 +2659,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("date_picker", 16),
                 ("time_picker", 17),
                 ("labeled", 18),
+                ("search", 19),
             ],
         },
         EnumSpec {
@@ -2747,6 +2752,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("fill", 27),
                 ("min_column_width", 28),
                 ("wrap", 29),
+                ("placeholder", 30),
             ],
         },
         EnumSpec {
@@ -3392,6 +3398,7 @@ mod tests {
                     ("kind", "date_picker") => wire::KIND_DATE_PICKER,
                     ("kind", "time_picker") => wire::KIND_TIME_PICKER,
                     ("kind", "labeled") => wire::KIND_LABELED,
+                    ("kind", "search") => wire::KIND_SEARCH,
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -3427,6 +3434,7 @@ mod tests {
                     ("prop", "fill") => wire::PROP_FILL,
                     ("prop", "min_column_width") => wire::PROP_MIN_COLUMN_WIDTH,
                     ("prop", "wrap") => wire::PROP_WRAP,
+                    ("prop", "placeholder") => wire::PROP_PLACEHOLDER,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

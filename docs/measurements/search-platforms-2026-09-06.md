@@ -123,7 +123,7 @@ control and no documented "search" style for `TextBox`.
   appears**."
 <https://learn.microsoft.com/en-us/windows/apps/design/controls/auto-suggest-box>
 
-### Android / Compose Material 3 (`android/kaya/.../KayaCompose.kt`)
+### Android / Compose Material 3 (`android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`)
 
 **Version matters here.** `android/kaya/build.gradle.kts` pins
 `platform("androidx.compose:compose-bom:2024.10.01")`, which maps to

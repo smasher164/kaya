@@ -213,6 +213,10 @@ name = "entry"
 path = "../../guests/rust/entry.rs"
 
 [[example]]
+name = "search"
+path = "../../guests/rust/search.rs"
+
+[[example]]
 name = "gallery"
 path = "../../guests/rust/gallery.rs"
 

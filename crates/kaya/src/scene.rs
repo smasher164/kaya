@@ -756,7 +756,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Entry
                 | WidgetKind::Checkbox
                 | WidgetKind::Textarea
+                | WidgetKind::Search
         ),
+        // The prompt an empty field shows: the text kinds alone
+        // (docs/search-plan.md S3).
+        Prop::Placeholder => {
+            matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
+        }
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's fraction
         // AND the select's 0-based index (per-kind domains, checked
@@ -850,7 +856,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
 /// target can legitimately vanish under rebuild.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
-        CommandKind::Clear => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
+        CommandKind::Clear => {
+            matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
+        }
         CommandKind::Focus => matches!(
             kind,
             WidgetKind::Entry
@@ -860,6 +868,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
                 | WidgetKind::Textarea
                 | WidgetKind::DatePicker
                 | WidgetKind::TimePicker
+                | WidgetKind::Search
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -962,7 +971,9 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Role => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap => ValueType::Bool,
         Prop::Columns | Prop::MinColumnWidth => ValueType::F64,
-        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help => ValueType::Str,
+        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint | Prop::Help | Prop::Placeholder => {
+            ValueType::Str
+        }
         // An ACCEPT LIST: the closed kinds by name plus any custom
         // format ids, space separated. Not a mask and not an enum slot
         // — a widget accepts a SET, and half that set is open-ended.
@@ -1464,6 +1475,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             !help.is_empty(),
             "kaya: {kind:?} declares empty help text — say what the control is, or leave help off"
+        );
+    }
+    // A placeholder says something or is left off, for help's reason.
+    if let (Prop::Placeholder, Value::Str(placeholder)) = (prop, value) {
+        assert!(
+            !placeholder.is_empty(),
+            "kaya: {kind:?} declares an empty placeholder — say what the field takes, or leave \
+             the placeholder off"
         );
     }
     // A packed date that is not a date, or a time that is not a time,
@@ -2698,7 +2717,10 @@ impl Scene {
                         panic!("kaya: context_attach to unknown widget {widget:?}")
                     });
                     assert!(
-                        !matches!(wkind, WidgetKind::Entry | WidgetKind::Textarea),
+                        !matches!(
+                            wkind,
+                            WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search
+                        ),
                         "kaya: context_attach rejected on {wkind:?} — the editable text \
                          controls keep their native edit menus (dress)"
                     );
@@ -3739,7 +3761,9 @@ impl Scene {
             // stack. A stamped copy's kind is not in the widget table, so an
             // internal id is admitted.
             let editable = match self.widgets.get(&id) {
-                Some(kind) => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
+                Some(kind) => {
+                    matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
+                }
                 None => id.0 & INTERNAL_BIT != 0,
             };
             if !editable {
@@ -5119,7 +5143,10 @@ impl Scene {
                 );
                 let node_kind = self.template_nodes[&node.0];
                 assert!(
-                    !matches!(node_kind, WidgetKind::Entry | WidgetKind::Textarea),
+                    !matches!(
+                        node_kind,
+                        WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search
+                    ),
                     "kaya: context_attach_node rejected on {node_kind:?} — the editable \
                      text controls keep their native edit menus (dress)"
                 );

@@ -629,6 +629,7 @@ pub const KAYA_KIND_CANVAS: u32 = 15;
 pub const KAYA_KIND_DATE_PICKER: u32 = 16;
 pub const KAYA_KIND_TIME_PICKER: u32 = 17;
 pub const KAYA_KIND_LABELED: u32 = 18;
+pub const KAYA_KIND_SEARCH: u32 = 19;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -648,6 +649,7 @@ const _: () = assert!(
         && KAYA_KIND_DATE_PICKER == wire::KIND_DATE_PICKER
         && KAYA_KIND_TIME_PICKER == wire::KIND_TIME_PICKER
         && KAYA_KIND_LABELED == wire::KIND_LABELED
+        && KAYA_KIND_SEARCH == wire::KIND_SEARCH
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -665,7 +667,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 18,
+        kinds == 19,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -735,6 +737,7 @@ pub const KAYA_PROP_HELP: u32 = 26;
 pub const KAYA_PROP_FILL: u32 = 27;
 pub const KAYA_PROP_MIN_COLUMN_WIDTH: u32 = 28;
 pub const KAYA_PROP_WRAP: u32 = 29;
+pub const KAYA_PROP_PLACEHOLDER: u32 = 30;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -917,6 +920,7 @@ const _: () = assert!(
         && KAYA_PROP_FILL == wire::PROP_FILL
         && KAYA_PROP_MIN_COLUMN_WIDTH == wire::PROP_MIN_COLUMN_WIDTH
         && KAYA_PROP_WRAP == wire::PROP_WRAP
+        && KAYA_PROP_PLACEHOLDER == wire::PROP_PLACEHOLDER
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1087,7 +1091,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 29,
+    crate::spec::PROPS.len() == 30,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

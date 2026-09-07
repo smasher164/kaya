@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x78077d8d3ee2fc37
+specHash = 0x50347d52a1eef1b4
 
 valueBool :: Word32
 valueBool = 1
@@ -88,6 +88,8 @@ kindTimePicker :: Word32
 kindTimePicker = 17
 kindLabeled :: Word32
 kindLabeled = 18
+kindSearch :: Word32
+kindSearch = 19
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -196,6 +198,8 @@ propMinColumnWidth :: Word32
 propMinColumnWidth = 28
 propWrap :: Word32
 propWrap = 29
+propPlaceholder :: Word32
+propPlaceholder = 30
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -1409,6 +1413,25 @@ txBindWrap widgetId signalId = wireRecord txKindSetProperty
 txBindWrapElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindWrapElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propWrap <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant placeholder value.
+txSetPlaceholder :: Word64 -> String -> Builder
+txSetPlaceholder widgetId placeholder = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlaceholder <> word32LE sourceConst
+    <> encodeValue (VStr placeholder))
+
+-- set_property with a signal-bound placeholder value.
+txBindPlaceholder :: Word64 -> Word64 -> Builder
+txBindPlaceholder widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlaceholder <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindPlaceholderElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindPlaceholderElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlaceholder <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

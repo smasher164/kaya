@@ -57,7 +57,7 @@ PYTHON_SCENES = ["portfolio", "varied"]
 # same script-not-app rule as the swift roster's `listdetail:split`.
 RUST_SCENES = [
     "milestone2",
-    "entry", "todos", "gallery", "reorder", "feed",
+    "entry", "search", "todos", "gallery", "reorder", "feed",
     "grow", "align", "layout", "stall", "confirm",
     "nav", "scroll", "filedialog", "save", "clipboard",
     "a11y", "a11yrows", "styling", "ranges", "progress",

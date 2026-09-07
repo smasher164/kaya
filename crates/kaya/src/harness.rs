@@ -80,6 +80,9 @@ pub enum TargetKind {
     /// The labelled row (docs/forms-plan.md), targetable under the
     /// container convention like Row.
     Labeled,
+    /// The search field (docs/search-plan.md): the entry's verbs, plus
+    /// clear_search and expect_placeholder.
+    Search,
     /// Grids are targetable under the container convention: only index
     /// 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.py).
@@ -166,6 +169,10 @@ pub enum Step {
     /// The CONTROL's slider value in the fixed spelling (docs/slider-plan.md S8).
     ExpectSlider(Target, String),
     SetText(Target, String),
+    /// The search field's clear affordance (docs/search-plan.md S5).
+    ClearSearch(Target),
+    /// The empty field's prompt as the platform shows it (docs/search-plan.md S3).
+    ExpectPlaceholder(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES. A
     /// programmatic write CLEARS the field's native undo history on every
     /// platform (docs/undo-plan.md D7), so a scene built out of set_text
@@ -541,6 +548,7 @@ impl Step {
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
             | Step::ExpectAtEnd(t)
+            | Step::ClearSearch(t)
             | Step::ContextOpen(t) => vec![t],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
@@ -564,6 +572,7 @@ impl Step {
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
+            | Step::ExpectPlaceholder(t, _)
             | Step::ExpectHighlights(t, _)
             | Step::ExpectSelection(t, _)
             | Step::ExpectDrawingHash(t, _)
@@ -651,6 +660,8 @@ impl Step {
             Step::ExpectPicker { .. } => true,
             Step::ExpectSlider { .. } => true,
             Step::SetText { .. } => false,
+            Step::ClearSearch { .. } => false,
+            Step::ExpectPlaceholder { .. } => true,
             Step::Type { .. } => false,
             Step::Expect { .. } => true,
             Step::ExpectStall => true,
@@ -794,6 +805,15 @@ pub trait Stage: Send + 'static {
     /// The displayed text of an entry, read from the toolkit — the
     /// observation the clear command is pinned by.
     fn read_text(&self, target: Target) -> String;
+    /// Operate the search field's own clear affordance — the platform's
+    /// button where the platform draws one, kaya's where it does not, and
+    /// Escape on a desktop where the button is kaya's own, so both paths
+    /// are exercised across the lanes (docs/search-plan.md S5). An action:
+    /// the text becoming empty is the observable.
+    fn clear_search(&self, target: Target);
+    /// The prompt the platform shows in the empty field, read off the
+    /// control, never kaya's model (docs/search-plan.md S3).
+    fn placeholder_text(&self, target: Target) -> String;
     /// Whether the widget holds keyboard focus, read from the toolkit
     /// (per-window focus, never global key status — parallel tiled legs
     /// must not steal each other's assertion).
@@ -1873,6 +1893,26 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectHelp(parse_target(target)?, parse_string(text)?)
             }
+            "expect_placeholder" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_placeholder wants a target and a prompt string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if !matches!(
+                    target.kind,
+                    TargetKind::Entry | TargetKind::Textarea | TargetKind::Search
+                ) {
+                    return Err(format!("expect_placeholder reads a text field, not {target:?}"));
+                }
+                Step::ExpectPlaceholder(target, parse_string(text)?)
+            }
+            "clear_search" => {
+                let target = parse_target(rest.trim())?;
+                if target.kind != TargetKind::Search {
+                    return Err(format!("clear_search drives a search field, not {target:?}"));
+                }
+                Step::ClearSearch(target)
+            }
             "expect_ax_hint" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_ax_hint wants a target and a hint string: {line:?}")
@@ -2116,6 +2156,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "date_picker" => TargetKind::DatePicker,
         "time_picker" => TargetKind::TimePicker,
         "labeled" => TargetKind::Labeled,
+        "search" => TargetKind::Search,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -2902,6 +2943,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 await_answer(answered);
                 None
             }
+            Step::ClearSearch(t) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.clear_search(*t);
+                await_answer(answered);
+                None
+            }
+            Step::ExpectPlaceholder(target, want) => Some(poll(|| {
+                let got = stage.placeholder_text(*target);
+                if got == *want {
+                    Ok(format!("placeholder {want:?}"))
+                } else {
+                    Err(format!("placeholder {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::Type(s) => {
                 // POINT 4 IS NOT THIS RULE: it blocks until the keys have
                 // landed IN THE CONTROL, which is a different thing from
@@ -3296,13 +3352,16 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // silently read a different widget.
                 TargetKind::Entry
                 | TargetKind::Textarea
+                | TargetKind::Search
                 | TargetKind::Image
                 | TargetKind::Label
                 | TargetKind::Progress
                 | TargetKind::Select
                 | TargetKind::Radio => poll(|| {
                     let got = match t.kind {
-                        TargetKind::Entry | TargetKind::Textarea => stage.read_text(*t),
+                        TargetKind::Entry | TargetKind::Textarea | TargetKind::Search => {
+                            stage.read_text(*t)
+                        }
                         TargetKind::Image => stage.image_size(*t),
                         TargetKind::Label => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
@@ -3887,7 +3946,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // menus are dress — scene.rs refuses the attach), so
                 // driving the gesture there would probe a menu that cannot
                 // exist.
-                if matches!(t.kind, TargetKind::Entry | TargetKind::Textarea) {
+                if matches!(t.kind, TargetKind::Entry | TargetKind::Textarea | TargetKind::Search) {
                     Some(Err(format!(
                         "{t:?} is editable text — its context menu is dress, not a context_open target"
                     )))
@@ -4187,6 +4246,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::DatePicker => "date_picker",
         TargetKind::TimePicker => "time_picker",
         TargetKind::Labeled => "labeled",
+        TargetKind::Search => "search",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(
@@ -5274,6 +5334,10 @@ mod tests {
         fn help_text(&self, _: Target) -> String {
             "Saves the draft".to_string()
         }
+        fn clear_search(&self, _: Target) {}
+        fn placeholder_text(&self, _: Target) -> String {
+            String::new()
+        }
         // The range reads answer NOTHING here on purpose: these mocks
         // exist for the parse/flow tests, and a mock that invented a
         // highlight would be a fixture pretending to be a platform.
@@ -6095,6 +6159,10 @@ mod tests {
         fn help_text(&self, _: Target) -> String {
             String::new()
         }
+        fn clear_search(&self, _: Target) {}
+        fn placeholder_text(&self, _: Target) -> String {
+            String::new()
+        }
         // The range reads answer NOTHING here on purpose: these mocks
         // exist for the parse/flow tests, and a mock that invented a
         // highlight would be a fixture pretending to be a platform.
@@ -6349,6 +6417,10 @@ mod tests {
             String::new()
         }
         fn help_text(&self, _: Target) -> String {
+            String::new()
+        }
+        fn clear_search(&self, _: Target) {}
+        fn placeholder_text(&self, _: Target) -> String {
             String::new()
         }
         // The range reads answer NOTHING here on purpose: these mocks

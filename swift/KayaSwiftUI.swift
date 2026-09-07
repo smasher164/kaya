@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x78077d8d3ee2fc37
+let kayaSpecHash: UInt64 = 0x50347d52a1eef1b4
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -125,6 +125,7 @@ private let kindCanvas: UInt32 = 15
 private let kindDatePicker: UInt32 = 16
 private let kindTimePicker: UInt32 = 17
 private let kindLabeled: UInt32 = 18
+private let kindSearch: UInt32 = 19
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -189,6 +190,7 @@ private let propIndeterminate: UInt32 = 10
 private let propFill: UInt32 = 27
 private let propMinColumnWidth: UInt32 = 28
 private let propWrap: UInt32 = 29
+private let propPlaceholder: UInt32 = 30
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -310,6 +312,8 @@ final class KayaNode: Identifiable {
     var a11yLabel = ""
     var a11yHint = ""
     var help = ""
+    /// The prompt an empty text field shows (docs/search-plan.md S3).
+    var placeholder = ""
     /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
     /// leaves the kind's default to the arm that draws it.
     var fill: Bool? = nil
@@ -679,6 +683,7 @@ final class KayaSceneModel {
     var grids: [KayaNode] = []
     var textareas: [KayaNode] = []
     var labeleds: [KayaNode] = []
+    var searches: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface. An
@@ -4148,6 +4153,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindGrid: kayaScene.grids.append(node)
                 case kindTextarea: kayaScene.textareas.append(node)
                 case kindLabeled: kayaScene.labeleds.append(node)
+                case kindSearch: kayaScene.searches.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -4681,6 +4687,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propHelp, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.help = String(decoding: bytes, as: UTF8.self)
+                case (propPlaceholder, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.placeholder = String(decoding: bytes, as: UTF8.self)
                 case (propAccepts, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.accepts = String(decoding: bytes, as: UTF8.self)
@@ -5131,7 +5140,21 @@ func kayaStartSelftest() {
 /// CONTROL, never a wrapping Group, where an identifier never appears in the
 /// tree. Empty means unset and stays untouched: an empty label SILENCES.
 @ViewBuilder
-func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
+func kayaA11y(_ view: some View, _ node: KayaNode, leaf: Bool = false) -> some View {
+    // THE SEARCH FIELD CARRIES ITS PROPS ON ITS TEXT FIELD, not on the row
+    // that holds the glyph and the clear button beside it: an identifier on
+    // that row reaches every element in it and wins over the button's own
+    // (measured 2026-09-06: `2 elements share id`, AXTextField/AXSearchField
+    // and AXButton), so KayaSearch calls back in with `leaf: true`.
+    if node.kind == kindSearch && !leaf {
+        view
+    } else {
+        kayaA11yProps(view, node)
+    }
+}
+
+@ViewBuilder
+private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // Containers need `.contain` first or these props do the wrong thing on
     // them (docs/traps.md, "SwiftUI containers do not take accessibility props
     // the way leaves do").
@@ -5337,9 +5360,17 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         // addresses the tree BY IDENTIFIER, so two elements sharing one id
         // leave it guessing. The refusal names only what it measured.
         if matches.count > 1 {
+            // What the elements ARE is printed, since the fix differs by
+            // which view inherited the id (a stamped twin, an inner control,
+            // a container's own element).
+            let what = matches.map { element -> String in
+                let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "?"
+                let sub = kayaAxCopy(element, kAXSubroleAttribute) as? String
+                return sub.map { "\(role)/\($0)" } ?? role
+            }
             return "<ambiguous: \(matches.count) elements share id '\(identifier)' — "
                 + "expect_ax addresses the tree by identifier and cannot tell "
-                + "them apart; give each element its own id>"
+                + "them apart (\(what.joined(separator: ", "))); give each element its own id>"
         }
         let role = kayaAxRole(kayaAxCopy(hit, kAXRoleAttribute) as? String)
         // A control's spoken name is its DESCRIPTION when authored and its
@@ -5410,6 +5441,26 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
                 highlights: runs,
                 selection: cfRange(kAXSelectedTextRangeAttribute),
                 visible: cfRange(kAXVisibleCharacterRangeAttribute))
+        }
+    }
+
+    /// The PROMPT as the platform publishes it: AXPlaceholderValue on the
+    /// field (docs/search-plan.md S3), never the model.
+    private func kayaAxPlaceholderRead(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String? in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            guard let hit = kayaAxFind(app, identifier) else { return nil }
+            return kayaAxCopy(hit, kAXPlaceholderValueAttribute as String) as? String ?? ""
         }
     }
 
@@ -6189,8 +6240,17 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "entry": return kayaTarget(spec, "entry", kayaScene.entryWidgets)
     case "textarea": return kayaTarget(spec, "textarea", kayaScene.textareas)
     case "labeled": return kayaTarget(spec, "labeled", kayaScene.labeleds)
+    case "search": return kayaTarget(spec, "search", kayaScene.searches)
     default: return nil
     }
+}
+
+/// The text kinds by prefix — entry, textarea, search — for the verbs that
+/// drive or read a field's text (harness.rs routes the same three).
+private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
+    if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
+    if spec.hasPrefix("search") { return kayaTarget(spec, "search", kayaScene.searches) }
+    return kayaTarget(spec, "entry", kayaScene.entryWidgets)
 }
 
 /// Cut one script LINE into statements at `;` — the newline stand-in for
@@ -6479,6 +6539,7 @@ private func kayaRunScript(_ script: String) {
                     // focus command; a makeFirstResponder would fight it.
                     if let node = kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
                         ?? kayaTarget(parts[1], "textarea", kayaScene.textareas)
+                        ?? kayaTarget(parts[1], "search", kayaScene.searches)
                     {
                         kayaScene.focusedId = node.id
                         return true
@@ -6634,15 +6695,59 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "clear_search":
+                // The field's own clear affordance (docs/search-plan.md S5): on
+                // this backend the button is kaya's, so the verb takes the path
+                // the button takes.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "search", kayaScene.searches) else {
+                        return false
+                    }
+                    kayaSearchClear(node)
+                    return true
+                }
+                if ok {
+                    kayaAwaitAnswer(answered)
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "expect_placeholder":
+                // The prompt as the platform shows it: AXPlaceholderValue on the
+                // Mac, read off the tree by the field's a11y_id; the model on iOS,
+                // where the harness thread has no tree walk for a field's prompt
+                // (docs/search-plan.md S3).
+                let wantPrompt = kayaQuoted(Array(parts[2...]))
+                let promptNode = DispatchQueue.main.sync { () -> (String, String)? in
+                    guard let node = kayaTextTarget(parts[1]) else { return nil }
+                    return (node.a11yId, node.placeholder)
+                }
+                let gotPrompt: String
+                switch promptNode {
+                case .none: gotPrompt = "<no such target>"
+                case .some((let ident, let modelPrompt)):
+                    #if os(macOS)
+                        if ident.isEmpty {
+                            gotPrompt = "<no a11y_id authored on this field>"
+                        } else {
+                            gotPrompt = kayaAxPlaceholderRead(ident) ?? "<not in the accessibility tree>"
+                        }
+                    #else
+                        _ = ident
+                        gotPrompt = modelPrompt
+                    #endif
+                }
+                if gotPrompt == wantPrompt {
+                    observed.append("placeholder \"\(wantPrompt)\"")
+                } else {
+                    failures.append("placeholder \"\(gotPrompt)\", wanted \"\(wantPrompt)\"")
+                }
             case "set_text":
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
                 let ok = DispatchQueue.main.sync { () -> Bool in
-                    let node =
-                        parts[1].hasPrefix("textarea")
-                        ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
-                        : kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
-                    guard let node else {
+                    guard let node = kayaTextTarget(parts[1]) else {
                         return false
                     }
                     kayaUserWrite { node.text = kayaLF(kayaQuoted(Array(parts[2...]))) }
@@ -6692,6 +6797,8 @@ private func kayaRunScript(_ script: String) {
                 let got = DispatchQueue.main.sync { () -> String? in
                     parts[1].hasPrefix("textarea")
                         ? kayaTarget(parts[1], "textarea", kayaScene.textareas)?.text
+                        : parts[1].hasPrefix("search")
+                        ? kayaTarget(parts[1], "search", kayaScene.searches)?.text
                         : parts[1].hasPrefix("entry")
                         ? kayaTarget(parts[1], "entry", kayaScene.entryWidgets)?.text
                         : parts[1].hasPrefix("image")
@@ -6754,11 +6861,7 @@ private func kayaRunScript(_ script: String) {
                 // lands as (the entry view's FocusState mirrors it into
                 // SwiftUI). Counts as an expect for the zero-expect rule.
                 let focused = DispatchQueue.main.sync { () -> Bool? in
-                    let node =
-                        parts[1].hasPrefix("textarea")
-                        ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
-                        : kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
-                    guard let node else {
+                    guard let node = kayaTextTarget(parts[1]) else {
                         return nil
                     }
                     return kayaScene.focusedId == node.id
@@ -8986,7 +9089,9 @@ private func kayaRunScript(_ script: String) {
                 // catalog for the following menu_activate. Editable text is
                 // rejected up front — its native menu is dress.
                 let failure = DispatchQueue.main.sync { () -> String? in
-                    if parts[1].hasPrefix("entry") || parts[1].hasPrefix("textarea") {
+                    if parts[1].hasPrefix("entry") || parts[1].hasPrefix("textarea")
+                        || parts[1].hasPrefix("search")
+                    {
                         return
                             "\(parts[1]) is editable text — its context menu is dress, not a context_open target"
                     }
@@ -13835,6 +13940,8 @@ struct KayaRender: View {
                 .fixedSize()
         case kindEntry:
             KayaEntry(node: node, flexVertical: flexVertical)
+        case kindSearch:
+            KayaSearch(node: node, flexVertical: flexVertical)
         case kindTextarea:
             KayaTextarea(node: node, flexVertical: flexVertical, flexStretch: flexStretch)
         case kindSelect:
@@ -14262,6 +14369,7 @@ func kayaRoleEnabled(_ role: String) -> Bool {
             guard let id = kayaScene.focusedId else { return false }
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
                 || kayaScene.textareas.contains(where: { $0.id == id })
+                || kayaScene.searches.contains(where: { $0.id == id })
         case "paste":
             guard let id = kayaScene.focusedId,
                 let node = kayaScene.nodes[id]
@@ -14303,6 +14411,7 @@ func kayaRoleEnabled(_ role: String) -> Bool {
             guard let id = kayaScene.focusedId else { return false }
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
                 || kayaScene.textareas.contains(where: { $0.id == id })
+                || kayaScene.searches.contains(where: { $0.id == id })
         case "paste":
             guard let id = kayaScene.focusedId,
                 let node = kayaScene.nodes[id]
@@ -17415,7 +17524,7 @@ struct KayaEntry: View {
         // back. Focus is model-driven the same way, with a user-driven change
         // flowing back so the model stays truthful.
         TextField(
-            "",
+            node.placeholder,
             text: Binding(
                 get: { node.text },
                 set: { newValue in
@@ -17442,6 +17551,109 @@ struct KayaEntry: View {
                 kayaScene.focusedId = node.id
             } else if kayaScene.focusedId == node.id {
                 kayaScene.focusedId = nil
+            }
+        }
+    }
+}
+
+/// ONE CLEAR PATH for the search field (docs/search-plan.md S5): the clear
+/// button, Escape and the harness's clear_search all come here, so the app
+/// sees the same text_changed("") for each and the focus stays.
+func kayaSearchClear(_ node: KayaNode) {
+    kayaUserWrite { node.text = "" }
+    KayaHost.emitText(node, "")
+    kayaScene.focusedId = node.id
+}
+
+/// The search field (docs/search-plan.md §3): SwiftUI has no search field view
+/// and `.searchable` is a request to the navigation container, so a field the
+/// app places is the platform's TextField wearing the platform's search glyph,
+/// clear affordance, trait and keyboard. KayaEntry's contract otherwise.
+struct KayaSearch: View {
+    let node: KayaNode
+    var flexVertical: Bool? = nil
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField(
+                node.placeholder,
+                text: Binding(
+                    get: { node.text },
+                    set: { newValue in
+                        let value = kayaLF(newValue)
+                        kayaUserWrite { node.text = value }
+                        KayaHost.emitText(node, value)
+                    })
+            )
+            .textFieldStyle(.plain)
+            .modifier(KayaSearchA11y(node: node))
+            .focused($focused)
+            #if os(macOS)
+                .onExitCommand { kayaSearchClear(node) }
+            #else
+                .textInputAutocapitalization(.never)
+                .submitLabel(.search)
+                .onSubmit { focused = false }
+                .onKeyPress(.escape) {
+                    kayaSearchClear(node)
+                    return .handled
+                }
+            #endif
+            if !node.text.isEmpty {
+                Button(action: { kayaSearchClear(node) }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear text")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+        .frame(
+            maxWidth: (node.grow > 0 || (flexVertical == true && node.fill != false))
+                ? .infinity : 200)
+        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onChange(of: kayaScene.focusedId) { _, newValue in
+            focused = newValue == node.id
+        }
+        .onChange(of: focused) { _, newValue in
+            if newValue {
+                kayaScene.focusedId = node.id
+            } else if kayaScene.focusedId == node.id {
+                kayaScene.focusedId = nil
+            }
+        }
+    }
+}
+
+/// The search field's universal props land on its TEXT FIELD (see kayaA11y),
+/// with the platform's search trait beside them.
+struct KayaSearchA11y: ViewModifier {
+    let node: KayaNode
+    func body(content: Content) -> some View {
+        kayaA11y(content.accessibilityAddTraits(.isSearchField), node, leaf: true)
+    }
+}
+
+/// The prompt over an empty multi-line editor (docs/search-plan.md S3): the
+/// text views carry none of their own, so it is drawn over them and never hit.
+struct KayaTextareaPlaceholder: ViewModifier {
+    let node: KayaNode
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .topLeading) {
+            if node.text.isEmpty && !node.placeholder.isEmpty {
+                Text(node.placeholder)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 8)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
     }
@@ -17503,6 +17715,7 @@ struct KayaTextarea: View {
             revealRequest: node.revealRequest,
             revealSeq: node.revealSeq
         )
+        .modifier(KayaTextareaPlaceholder(node: node))
         .kayaTextareaFrame(
             grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
         .border(Color.gray.opacity(0.4))
@@ -17910,6 +18123,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 revealRequest: node.revealRequest,
                 revealSeq: node.revealSeq
             )
+            .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
                 grow: node.grow, flexVertical: flexVertical, stretch: flexStretch, fill: node.fill)
             .border(Color.gray.opacity(inGroupedCard ? 0 : 0.4))

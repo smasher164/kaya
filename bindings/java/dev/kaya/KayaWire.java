@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x78077d8d3ee2fc37L;
+    public static final long SPEC_HASH = 0x50347d52a1eef1b4L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -46,6 +46,7 @@ public final class KayaWire {
     public static final int KIND_DATE_PICKER = 16;
     public static final int KIND_TIME_PICKER = 17;
     public static final int KIND_LABELED = 18;
+    public static final int KIND_SEARCH = 19;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -100,6 +101,7 @@ public final class KayaWire {
     public static final int PROP_FILL = 27;
     public static final int PROP_MIN_COLUMN_WIDTH = 28;
     public static final int PROP_WRAP = 29;
+    public static final int PROP_PLACEHOLDER = 30;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -1561,6 +1563,29 @@ public final class KayaWire {
     public static byte[] txBindWrapElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_WRAP).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant placeholder value. */
+    public static byte[] txSetPlaceholder(long widgetId, String placeholder) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACEHOLDER).putInt(SOURCE_CONST);
+        encodeValue(b, placeholder);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound placeholder value. */
+    public static byte[] txBindPlaceholder(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACEHOLDER).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindPlaceholderElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACEHOLDER).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

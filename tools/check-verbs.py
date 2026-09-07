@@ -1628,6 +1628,9 @@ ACTION_VERBS = (
     # the harness's one `select_*` action is `select_section`.
     "set_date", "set_time", "select_section", "set_text", "type",
     "menu_activate", "back", "close_window", "scroll_end", "resize_window",
+    # The search field's clear affordance (docs/search-plan.md S5): the
+    # text becoming empty is the app's answer.
+    "clear_search",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
@@ -1654,6 +1657,10 @@ REFUSALS = {
     (KOTLIN, "close_window"): "close_window: this host has no chrome close",
     (KOTLIN, "resize_window"):
         "resize_window: this host does not command window size",
+    # A DEPTH STUB is a refusal too, until the breadth slice lands the arm
+    # (docs/search-plan.md §6; check-stubs holds the stub against the
+    # lane's roster). The exemption goes with the stub.
+    (KOTLIN, "clear_search"): 'depthStub("search")',
 }
 # What "does nothing" is, in the Compose runner: every arm that acts goes
 # to the UI thread to do it.
@@ -1818,10 +1825,15 @@ for (refused_rel, refused_verb), sentence in REFUSALS.items():
         fail(f"check-verbs SELF-TEST: {refused_rel} has no single "
              f"`{refused_verb}` arm to doctor for the refusal exemption")
         continue
+    # A DEPTH STUB refuses through the helper and has no failure sentence
+    # to bank, so its "started acting" perturbation puts the UI hop in
+    # front of the stub call instead (docs/search-plan.md §6).
+    acting = (r'depthStub\(', KOTLIN_ACTS + "activity) { true }; depthStub(") \
+        if sentence.startswith("depthStub(") \
+        else (r'failures\.add\(', KOTLIN_ACTS + "activity) { true }; failures.add(")
     for label, pattern, repl in (
         ("the refusal sentence", re.escape(sentence), "gone"),
-        ("a refusal that started acting", r'failures\.add\(',
-         KOTLIN_ACTS + "activity) { true }; failures.add("),
+        ("a refusal that started acting", *acting),
     ):
         cut = g.doctor(
             f"{label} in {refused_rel}'s `{refused_verb}` arm", arm,

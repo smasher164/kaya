@@ -11186,6 +11186,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 // docs/forms-plan.md §3: the row's three tracks are stamped
                 // by `reindex_labeled`, which also carries the shared pin.
+                WidgetKind::Search => crate::depth_stub("search"),
                 WidgetKind::Labeled => {
                     let grid = Grid::new()?;
                     grid.SetColumnSpacing(8.0)?;
@@ -14995,6 +14996,7 @@ fn target_element(
         K::Checkbox => nth!(core.checkboxes),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
+        K::Search => crate::depth_stub("search"),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
         K::Label => nth!(core.labels),
@@ -15071,6 +15073,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Radio => ids!(core.radios, NativeWidget::Radio(group), group),
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
+        K::Search => crate::depth_stub("search"),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
         K::TimePicker => core.time_picker_ids.clone(),
@@ -15599,6 +15602,12 @@ impl crate::harness::Stage for WinUiStage {
         );
     }
 
+    fn clear_search(&self, _: crate::harness::Target) {
+        crate::depth_stub("search")
+    }
+    fn placeholder_text(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("search")
+    }
     /// The control's tooltip as ToolTipService holds it (docs/tooltip-plan.md T5).
     fn help_text(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
@@ -16952,6 +16961,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Radio => find(&core.radios, &id),
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
+                K::Search => crate::depth_stub("search"),
                 K::Canvas => find(&core.canvases, &id),
                 K::DatePicker => find(&core.date_pickers, &id),
                 K::TimePicker => find(&core.time_pickers, &id),

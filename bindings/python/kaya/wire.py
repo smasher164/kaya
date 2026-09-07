@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x78077d8d3ee2fc37
+SPEC_HASH = 0x50347d52a1eef1b4
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -43,6 +43,7 @@ KIND_CANVAS = 15
 KIND_DATE_PICKER = 16
 KIND_TIME_PICKER = 17
 KIND_LABELED = 18
+KIND_SEARCH = 19
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -97,6 +98,7 @@ PROP_HELP = 26
 PROP_FILL = 27
 PROP_MIN_COLUMN_WIDTH = 28
 PROP_WRAP = 29
+PROP_PLACEHOLDER = 30
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -1009,6 +1011,21 @@ def tx_bind_wrap(widget_id, signal_id):
 def tx_bind_wrap_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_WRAP, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_placeholder(widget_id, placeholder):
+    """set_property with a constant placeholder value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_PLACEHOLDER, SOURCE_CONST) + _enc.value(placeholder))
+
+
+def tx_bind_placeholder(widget_id, signal_id):
+    """set_property with a signal-bound placeholder value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_PLACEHOLDER, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_placeholder_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLACEHOLDER, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

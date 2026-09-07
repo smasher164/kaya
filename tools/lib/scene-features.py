@@ -111,6 +111,12 @@ VERB_FEATURE = {
     # legs off too.
     "expect_raster": "sizepolicy",
     "frame": "sizepolicy",
+    # docs/search-plan.md §5. The verbs, not the scene name: the task
+    # manager's lists will carry a search field without being called after
+    # it, and a backend still declaring depth_stub("search") has to hold
+    # those legs off too.
+    "clear_search": "search",
+    "expect_placeholder": "search",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

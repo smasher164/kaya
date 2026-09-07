@@ -11856,3 +11856,25 @@ compose field that sends on Return is the consumer that pays for the
 occurrence; a search that asks a server or a form whose Return submits
 ride the same record. It arrives with the shape taken, so the work is
 the arms in four backends and nine bindings.
+
+## S1 — the search field's depth slice is on the mac and iOS (2026-09-06); the GTK, WinUI and Compose arms, the eight bindings' sugar, the gallery and the task manager's fields are the breadth slice (docs/search-plan.md §6)
+KEY: search field depth slice, search kind, placeholder prop, clear_search, expect_placeholder, DEPTH STUB search, breadth slice search
+
+The `search` kind (wire 19), the `placeholder` prop (30) on the three
+text kinds, the `clear_search` and `expect_placeholder` verbs, the Rust
+sugar in both zones, the SwiftUI arm and tools/scenes/search.steps are on
+the mac and iOS lanes with the Rust guest alone. The three other backends
+hold the scene's legs off through the depth-stub convention until their
+arms exist:
+
+- DEPTH STUB: search on gtk (GtkSearchEntry, `search-delay` 0, S7's SEARCH_BOX role)
+- DEPTH STUB: search on winui (AutoSuggestBox with QueryIcon Find measured for an empty flyout first, the TextBox-plus-glyph fallback)
+- DEPTH STUB: search on compose (BasicTextField through KayaTextField with the Search leading icon, kaya's clear button, ImeAction.Search, no capitalization)
+
+The breadth slice also carries: `search()` and `placeholder` in both
+construction zones of the eight other bindings (check-sugar-surface's kind
+census names them), the ten gallery guests taking the kind, the task
+manager's per-list search fields (docs/search-plan.md S10) with their
+steps, the placeholder on entry and textarea in every backend, the gate
+clauses for S5's Escape arms and S7's identity per backend, and the
+matrix. The entry is struck when the last lane's arm lands.

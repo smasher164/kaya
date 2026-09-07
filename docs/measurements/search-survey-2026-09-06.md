@@ -943,18 +943,20 @@ floor of 5, reading both interpreters' private copies.
 The file list, grouped (full stat in the command output; every path below
 is from that stat):
 
+```
 | group | files | notable line counts |
 |---|---|---|
-| core | `crates/kaya/src/{spec.rs +2, wire.rs +3, protocol.rs +13, scene.rs +212, harness.rs +11, capi.rs +4, app.rs +39}`, `crates/kaya/include/kaya.h +2` | scene.rs +212 is the root's shape validation and its six unit tests |
-| backends | `crates/kaya/src/gtk.rs +235`, `crates/kaya/src/winui/mod.rs +288`, `swift/KayaSwiftUI.swift +254`, `android/.../KayaCompose.kt +169` | ~950 lines across four arms |
-| generated wire files (9) | `bindings/{c/kaya_wire.h, csharp/KayaWire.cs, go/kaya_wire.go, haskell/KayaWire.hs, java/dev/kaya/KayaWire.java, js/kaya/wire.ts, ocaml/kaya_wire.ml, python/kaya/wire.py, swift/KayaWire.swift}` | 2-4 lines each — GENERATED, so free |
-| hand-written binding sugar (8 + Rust in-crate) | `bindings/{csharp/KayaApp.cs +46, go/app.go +52, haskell/KayaApp.hs +19, java/.../KayaApp.java +61, js/kaya/index.ts +22, ocaml/kaya_app.ml +35, python/kaya/__init__.py +28, swift/KayaApp.swift +73}` + `crates/kaya/src/app.rs +39` | **~375 hand-written lines, nine idioms, BOTH construction zones** |
-| conformance guests (10) | `guests/{c/gallery.c, csharp/GalleryScene.cs, go/gallery/gallery.go, haskell/gallery.hs, java/dev/kaya/guests/Gallery.java, js/gallery.ts, ocaml/gallery.ml, python/gallery.py, rust/gallery.rs, swift/gallery.swift}` | 4-19 lines each — every kind joins the gallery scene |
-| generated record classes (7) | `guests/csharp/{Account,DndItem,Item,TableItem,Task,Todo,Track}Kaya.cs` +8 each | generated |
-| scenes | `tools/scenes/gallery.steps +3`, `tools/scenes/tasks.steps +5` | |
+| core | `crates/kaya/src/spec.rs (+2 lines), crates/kaya/src/wire.rs (+3 lines), crates/kaya/src/protocol.rs (+13 lines), crates/kaya/src/scene.rs (+212 lines), crates/kaya/src/harness.rs (+11 lines), crates/kaya/src/capi.rs (+4 lines), crates/kaya/src/app.rs (+39 lines)`, `crates/kaya/include/kaya.h (+2 lines)` | scene.rs (+212 lines) is the root's shape validation and its six unit tests |
+| backends | `crates/kaya/src/gtk.rs (+235 lines)`, `crates/kaya/src/winui/mod.rs (+288 lines)`, `swift/KayaSwiftUI.swift (+254 lines)`, `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt (+169 lines)` | ~950 lines across four arms |
+| generated wire files (9) | `bindings/c/kaya_wire.h, bindings/csharp/KayaWire.cs, bindings/go/kaya_wire.go, bindings/haskell/KayaWire.hs, bindings/java/dev/kaya/KayaWire.java, bindings/js/kaya/wire.ts, bindings/ocaml/kaya_wire.ml, bindings/python/kaya/wire.py, bindings/swift/KayaWire.swift` | 2-4 lines each — GENERATED, so free |
+| hand-written binding sugar (8 + Rust in-crate) | `bindings/csharp/KayaApp.cs (+46 lines), bindings/go/app.go (+52 lines), bindings/haskell/KayaApp.hs (+19 lines), bindings/java/dev/kaya/KayaApp.java (+61 lines), bindings/js/kaya/index.ts (+22 lines), bindings/ocaml/kaya_app.ml (+35 lines), bindings/python/kaya/__init__.py (+28 lines), bindings/swift/KayaApp.swift (+73 lines)` + `crates/kaya/src/app.rs (+39 lines)` | **~375 hand-written lines, nine idioms, BOTH construction zones** |
+| conformance guests (10) | `guests/c/gallery.c, guests/csharp/GalleryScene.cs, guests/go/gallery/gallery.go, guests/haskell/gallery.hs, guests/java/dev/kaya/guests/Gallery.java, guests/js/gallery.ts, guests/ocaml/gallery.ml, guests/python/gallery.py, guests/rust/gallery.rs, guests/swift/gallery.swift` | 4-19 lines each — every kind joins the gallery scene |
+| generated record classes (7) | `guests/csharp/Account, guests/csharp/DndItem, guests/csharp/Item, guests/csharp/TableItem, guests/csharp/Task, guests/csharp/Todo, guests/csharp/TrackKaya.cs` +8 each | generated |
+| scenes | `tools/scenes/gallery.steps (+3 lines)`, `tools/scenes/tasks.steps (+5 lines)` | |
 | gates | `tools/check-steps.py`, `tools/tpl-surfaces.py`, `tools/kaya-csgen/Program.cs`, `tools/run-leg.py`, `tools/linux/run-suites.sh` | small edits: TARGET_KINDS, the 18-kind census |
-| docs | `DESIGN.md +11`, `docs/{forms-plan.md +93, layout-knobs-plan.md +63, deferred.md +52, traps.md +33, adaptive-layout-plan.md +11, tasks-plan.md +17}` | |
-| the consuming guest | `guests/rust/tasks.rs +53/-…` | |
+| docs | `DESIGN.md (+11 lines)`, docs/forms-plan.md (+93 lines), docs/layout-knobs-plan.md (+63 lines), docs/deferred.md (+52 lines), docs/traps.md (+33 lines), docs/adaptive-layout-plan.md (+11 lines), docs/tasks-plan.md (+17 lines) | |
+| the consuming guest | `guests/rust/tasks.rs (+53 lines)/-…` | |
+```
 
 **Caveat, stated honestly:** `847de659` is not a pure new-kind commit —
 it also carried the derived-form lowering (a column of labelled rows IS
@@ -1058,7 +1060,7 @@ three to six target-resolution arms:
   registry `:681`, apply `:4150`, target table `:6191`,
   `KayaLabeledFold` `:11836`, form detect `:12045`, **render
   `:13677-13710`**
-- **Compose** `android/.../KayaCompose.kt`, 8 sites: registry `:848`,
+- **Compose** `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`, 8 sites: registry `:848`,
   constant `:1428`, apply `:1892`, target table `:4824`, `:9941`,
   `:10018`, `:10351`, **render `:10470`**
 
@@ -1071,7 +1073,7 @@ winui +250/-17, SwiftUI +197/-18, Compose +101/-5 = +754/-41.**
 |---|---|---|
 | `tools/gen-header.py` (cbindgen) | `crates/kaya/include/kaya.h` | yes — one `#define` |
 | `tools/gen-bindings.py` → `tools/kaya-bindgen/src/{c,csharp,go,haskell,java,js,ocaml,python,swift}.rs` | the nine `bindings/*/…Wire.*` files + `bindings/.generator-id` | yes (one constant each) — but **no emitter edit needed**. Contrast: the pickers' new PROP KINDS forced edits in all nine emitters, `tools/kaya-bindgen/src/*.rs` **+572/-95** |
-| `tools/gen-guests.py` (go generate, java processor, `tools/kaya-csgen`, `tools/kaya-swift-gen`) | `guests/*_kaya.go`, `guests/*Kaya.java`, `guests/*Kaya.cs`, `guests/*+Kaya.swift` | **YES, indirectly** — C#'s generated `<Rec>Row` façade forwards every template-zone constructor, so `847de659` regenerated **seven `guests/csharp/*Kaya.cs` at +8 each (+56)** and edited `tools/kaya-csgen/Program.cs` (+3). The naive reading ("gen-guests is record-driven, kinds do not touch it") is wrong |
+| `tools/gen-guests.py` (go generate, java processor, `tools/kaya-csgen`, `tools/kaya-swift-gen`) | `guests/go/*/*_kaya.go`, `guests/java/dev/kaya/guests/*Kaya.java`, `guests/csharp/*Kaya.cs`, `guests/swift/*+Kaya.swift` | **YES, indirectly** — C#'s generated `<Rec>Row` façade forwards every template-zone constructor, so `847de659` regenerated **seven `guests/csharp/*Kaya.cs` at +8 each (+56)** and edited `tools/kaya-csgen/Program.cs` (+3). The naive reading ("gen-guests is record-driven, kinds do not touch it") is wrong |
 | Rust "binding" | none — `crates/kaya/src/app.rs` is hand-written | n/a |
 
 **The gates a new kind trips.**
@@ -1142,7 +1144,7 @@ props, two occurrences and a new field-type family.
 2. `swift/KayaSwiftUI.swift:6169-6194` `kayaAnyTarget` — `case
    "labeled": return kayaTarget(spec, "labeled", kayaScene.labeleds)`,
    behind it a registry array (`:681`) and an apply arm (`:4150`)
-3. `android/.../KayaCompose.kt:4803-4833` `kayaWidgetTarget` —
+3. `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt:4803-4833` `kayaWidgetTarget` —
    `"labeled" -> KayaSceneModel.labeleds`, registry `:848`, apply `:1892`
 
 `tools/check-verbs.py:1002-1046` censuses (2) and (3) against (1) with a
@@ -1558,7 +1560,7 @@ guests/python/portfolio.py:347-369 is the only reconciler to copy.**
 
 Three implementations that must agree: `crates/kaya/src/harness.rs`
 (Rust runner; GTK + WinUI), `swift/KayaSwiftUI.swift` (mac AND iOS),
-`android/.../KayaCompose.kt`. The grammar is `pub fn parse(…)`,
+`android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt`. The grammar is `pub fn parse(…)`,
 `harness.rs:1268-2016` — 88 tokens as `tools/check-verbs.py:970` extracts
 them (three — `cancel`, `0`, `1` — are sub-arguments of
 `alert_choose`/`file_save`). **No `focus`, `clear`, `key`, `press` or

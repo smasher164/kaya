@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x78077d8d3ee2fc37
+	SpecHash uint64 = 0x50347d52a1eef1b4
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -47,6 +47,7 @@ const (
 	KindDatePicker = 16
 	KindTimePicker = 17
 	KindLabeled = 18
+	KindSearch = 19
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -101,6 +102,7 @@ const (
 	PropFill = 27
 	PropMinColumnWidth = 28
 	PropWrap = 29
+	PropPlaceholder = 30
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -1795,6 +1797,38 @@ func TxBindWrapElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropWrap)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetPlaceholder: set_property with a constant placeholder value.
+func TxSetPlaceholder(widgetID uint64, placeholder string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlaceholder)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, placeholder)
+	return endRecord(b)
+}
+
+// TxBindPlaceholder: set_property with a signal-bound placeholder value.
+func TxBindPlaceholder(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlaceholder)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindPlaceholderElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindPlaceholderElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlaceholder)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

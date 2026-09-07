@@ -636,6 +636,8 @@
 
 #define KAYA_KIND_LABELED 18
 
+#define KAYA_KIND_SEARCH 19
+
 /**
  * Property keys.
  */
@@ -727,6 +729,8 @@
 #define KAYA_PROP_MIN_COLUMN_WIDTH 28
 
 #define KAYA_PROP_WRAP 29
+
+#define KAYA_PROP_PLACEHOLDER 30
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
