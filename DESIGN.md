@@ -484,7 +484,8 @@ fix.
   never shows is the rejected alternative: it fails the carve-out test
   in reverse, expressing what no native app expresses.
 - **~~A Linux sidebar's section rows are text-only (ratified
-  2026-08-17)~~ — lifted 2026-09-07, when its premise fell.** The
+  2026-08-17)~~ — lifted 2026-09-07, when its premise fell.** Accepted by the
+  maintainer the same day, from the S2 review page. The
   carve-out rested on `GtkStackSidebar` owning its rows (it binds only the
   page title and ignores `icon-name`) and on kaya not building rows inside
   a component that owns them. The section badge (docs/tasks-s2-plan.md T2)
