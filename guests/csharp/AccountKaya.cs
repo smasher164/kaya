@@ -164,6 +164,22 @@ sealed class AccountRow
         System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
         t.Textarea(text, onChange);
 
+    public Node Search(
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Search(onChange);
+
+    public Node Search(string text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Search(text, onChange);
+
+    public Node Search(Signal text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Search(text, onChange);
+
+    public Node Search(Field<string> text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Search(text, onChange);
+
     public Node Progress(double value) => t.Progress(value);
 
     public Node Progress(Signal value) => t.Progress(value);
@@ -266,6 +282,13 @@ sealed class AccountRow
 
     public void SetHelp(Node n, Field<string> f, uint level = 0) =>
         t.SetHelp(n, f, level);
+
+    public void SetPlaceholder(Node n, string text) => t.SetPlaceholder(n, text);
+
+    public void SetPlaceholder(Node n, Signal s) => t.SetPlaceholder(n, s);
+
+    public void SetPlaceholder(Node n, Field<string> f, uint level = 0) =>
+        t.SetPlaceholder(n, f, level);
 
     public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
 

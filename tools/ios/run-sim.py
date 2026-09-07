@@ -1107,6 +1107,30 @@ def clip_verb(udid, parts):
     return 0, got
 
 
+# Every verb the SwiftUI harness answers through KayaSimdrive.ask on iOS:
+# the picker's, the save sheet's, the pasteboard's, and the keys of `type`
+# and `compose` (swift/KayaSwiftUI.swift, the `#else` arms).
+BRIDGE_VERBS = frozenset((
+    "type", "compose", "file_dialog_goto", "file_choose", "file_dialog_name",
+    "file_save", "expect_file_dialog", "expect_save_dialog", "clipboard_seed",
+    "expect_clipboard", "drag_file",
+))
+
+
+def needs_bridge(script):
+    """Does this leg's script reach the host bridge? Read off its verbs."""
+    return any(line.split()[0] in BRIDGE_VERBS
+               for line in script.splitlines()
+               if line.strip() and not line.lstrip().startswith("#"))
+
+
+# The derivation watched both ways before any leg trusts it.
+if not needs_bridge('expect label#0 "x"\ntype "an"') \
+        or needs_bridge('expect label#0 "x"\n# type "an"'):
+    die("run-sim: needs_bridge does not read the script's verbs — the host "
+        "bridge would be started by luck")
+
+
 def simdrive_watch(udid, bundle_id, docs_dir, log_path, stop):
     """Answer the guest's simdrive requests for the life of one leg.
     The protocol is two files: the guest writes `kaya-simdrive-request`
@@ -1304,8 +1328,11 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     watcher = None
     simdrive_log = None
     # The host bridge serves the picker, the clipboard AND the `type`
-    # verb's keys — so every scene that types.
-    if scene in ("filedialog", "clipboard", "save", "editor", "undo", "ranges"):
+    # verb's keys — decided by the SCRIPT'S VERBS, never the scene's name:
+    # a name list left the search scene typing with no watcher, sixty
+    # seconds of silence per leg (matrix #20, 2026-09-06; the class
+    # tools/lib/scene-features.py was built for, one runner over).
+    if needs_bridge(script):
         data_container = out_of(["xcrun", "simctl", "get_app_container",
                                  udid, bundle_id, "data"]).strip()
         simdrive_log = SIMDRIVE_LOG_DIR / f"{name}.log"

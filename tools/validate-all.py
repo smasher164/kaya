@@ -230,7 +230,10 @@ BUDGETS = {
     # than beside it. run-sim.py prints the LocalStorage admission's
     # per-device time and the join's wait, so the next anomaly says
     # whether the admission reached the critical path.
-    "ios": 600,
+    # 640 since 2026-09-06: the roster grew 128 -> 131 legs with the search
+    # scene; 538s quiet at 128 (matrix #19), 608s at 131 under a five-minute
+    # load of 84 (matrix #21) with no leg slowed in kind.
+    "ios": 640,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot

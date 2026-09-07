@@ -9,7 +9,9 @@ drag WATCH red on dnd-go; §5 holds what the first runs taught. §6 is the
 sequencing; S1 (the search field) is next, and its design pass is
 docs/search-plan.md (RULED 2026-09-06: a `search` KIND rather than the
 role this file guessed, a `placeholder` prop on every text kind, one clear
-verb, the filter the app's).
+verb, the filter the app's); its depth slice is on the mac and iOS
+(7b228406) and the breadth slice, with this app's per-list fields (S10),
+follows.
 The editor (docs/editor-plan.md) and the portfolio
 (docs/portfolio-plan.md) are the precedents this file follows; the
 prioritization it serves is docs/probes/roadmap-app-needs-2026-09-05.md

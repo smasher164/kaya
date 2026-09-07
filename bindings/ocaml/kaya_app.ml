@@ -663,6 +663,15 @@ let bind_a11y_hint (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_
 let set_help (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_help id value)
 let bind_help (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_help id s)
 
+(* The PROMPT a text field shows while it is empty (docs/search-plan.md
+   S3): the platform's own placeholder, never part of the text and never
+   emitted. Entry, textarea and search only, checked at the root. *)
+let set_placeholder (Widget id) value =
+  emit (the_tx ()) (Kaya_wire.tx_set_placeholder id value)
+
+let bind_placeholder (Widget id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s)
+
 (* The three universal props as they ride every constructor: applied
    together, in one place, so a new constructor cannot pick up [~grow]
    and quietly miss these. *)
@@ -883,12 +892,14 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
 
 (* A multi-line text editor: the entry's uncontrolled contract over
    the platform's real multi-line editor. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?on_change () =
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_placeholder w v) placeholder;
+  Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -919,12 +930,32 @@ let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?hel
 let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
   label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?text ?bind ()
 
-let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?on_change () =
+let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_placeholder w v) placeholder;
+  Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
+  (match on_change with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  w
+
+(* A search field: the entry's uncontrolled contract under the platform's
+   search chrome (docs/search-plan.md), filtering on every keystroke. The
+   clear affordance reaches [~on_change] with "". *)
+let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change () =
+  let tx = the_tx () in
+  let w = widget Kaya_wire.kind_search in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_placeholder w v) placeholder;
+  Option.iter (fun s -> bind_placeholder w s) placeholder_bind;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -2714,6 +2745,17 @@ module Tpl = struct
     let bind_help_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_help_element ~level ~field:fd.fd_index id)
 
+    (* A stamped field's PROMPT while it is empty (docs/search-plan.md
+       S3). *)
+    let set_placeholder (Node id) value =
+      emit (the_tx ()) (Kaya_wire.tx_set_placeholder id value)
+
+    let bind_placeholder (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_placeholder id s)
+
+    let bind_placeholder_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_placeholder_element ~level ~field:fd.fd_index id)
+
     (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. It cannot
        be a type here ([node] is not typed by kind), so the wall is the
        constructors and the root's own refusal at DECLARE time. *)
@@ -2972,13 +3014,17 @@ module Tpl = struct
   (* A multi-line editor per stamped copy: the entry's uncontrolled contract
      over the platform's real multi-line control. *)
   let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?accepts ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
+      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_textarea in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
+    Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
+    Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -3028,13 +3074,42 @@ module Tpl = struct
      twin is: the copy owns its text and every edit arrives at
      [~on_change] with that copy's keys first. *)
   let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?accepts ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
+      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
     let n = Floor.widget Kaya_wire.kind_entry in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
+    Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
+    Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
+    Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
+    (match on_change with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace (the_tx ()).app.node_changes id handler
+    | None -> ());
+    n
+
+  (* A search field per stamped copy: [entry]'s uncontrolled contract
+     under the platform's search chrome (docs/search-plan.md). *)
+  let search ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?placeholder
+      ?placeholder_bind ?placeholder_field ?accepts ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_search in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_placeholder n v) placeholder;
+    Option.iter (fun s -> Floor.bind_placeholder n s) placeholder_bind;
+    Option.iter (fun fd -> Floor.bind_placeholder_field ~level n fd) placeholder_field;
     Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;

@@ -473,6 +473,16 @@ class _Handle:
             wire.tx_bind_help, wire.tx_bind_help_element))
         return self
 
+    def placeholder(self, text):
+        """Set the PROMPT this field shows while its text is empty
+        (docs/search-plan.md S3): the platform's own placeholder, never
+        part of the text and never emitted. Entry, textarea and search
+        only, checked at the root. Returns the handle."""
+        _records().append(_prop_source(
+            "placeholder", self, text, wire.tx_set_placeholder,
+            wire.tx_bind_placeholder, wire.tx_bind_placeholder_element))
+        return self
+
     def fill(self, on):
         """Whether this widget spans its container's cross axis — a
         column's width, a row's height — whatever the container's
@@ -3315,25 +3325,44 @@ def time_picker(value=None, step=None, on_change=None, grow=None):
     return handle
 
 
-def entry(text=None, on_change=None, grow=None):
+def entry(text=None, on_change=None, grow=None, placeholder=None):
     """A single-line text field. UNCONTROLLED: the widget owns its text
     and reports each edit to `on_change`, template copies getting the
     stamped keys first. There is no read-back."""
     handle = _widget(wire.KIND_ENTRY)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
+    if placeholder is not None:
+        handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     _set_grow(handle, grow)
     return handle
 
 
-def textarea(text=None, on_change=None, grow=None):
+def textarea(text=None, on_change=None, grow=None, placeholder=None):
     """A multi-line text editor: the entry's uncontrolled contract over
     the platform's real multi-line editor."""
     handle = _widget(wire.KIND_TEXTAREA)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
+    if placeholder is not None:
+        handle.placeholder(placeholder)
+    if on_change is not None:
+        _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    _set_grow(handle, grow)
+    return handle
+
+
+def search(text=None, on_change=None, grow=None, placeholder=None):
+    """A search field (docs/search-plan.md): the entry's uncontrolled
+    contract under the platform's search chrome, filtering on every
+    keystroke. The clear affordance reaches `on_change` with ""."""
+    handle = _widget(wire.KIND_SEARCH)
+    if text is not None:
+        _records().append(wire.tx_set_text(handle.id, _text_value("search text", text)))
+    if placeholder is not None:
+        handle.placeholder(placeholder)
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     _set_grow(handle, grow)

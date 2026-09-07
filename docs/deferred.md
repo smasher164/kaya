@@ -10810,6 +10810,18 @@ each a stub the runner reads (tools/check-stubs.py):
     SECOND SIGHTING 2026-09-06 (matrix #10 on the text-field fill slice,
     load 16 at launch): the same shape, label#5 "no drag yet" for the whole
     leg while the witness handed over; the only red on the linux lane.
+    THIRD SIGHTING 2026-09-06 (matrix #20, the search field's breadth
+    tree, load 7.7 at launch and 56 over five minutes by the verdict, the
+    windows VM at 102% beside it): the same shape, and the geometry this
+    entry asked for is read — the failing half is KAYA'S OWN drag, the
+    scene's first step `drag label#0 to label#3` inside kaya's window on
+    x11 (`KAYA_DIAG dragdrive: x11 content at (5, 5); pressed (55, 77),
+    released (73, 161)`, both points inside the 540x330 window), which
+    never raised drag_ended; the witness's handover (`copy` then `none`)
+    is the SECOND half and was never reached. So the press-across-two-
+    windows reading is not the cause; GTK's own drag under a contended
+    host is (the android dnd class one lane over). Green standalone the
+    same hour on the GTK agent's lane run (739 legs).
     The `KAYA_DIAG dragdrive` read the first sighting asked for is still
     owed.
   - ~~**DEPTH STUB: dnd on winui**~~ — LANDED 2026-09-03: BOTH routes, as
@@ -11857,7 +11869,7 @@ occurrence; a search that asks a server or a form whose Return submits
 ride the same record. It arrives with the shape taken, so the work is
 the arms in four backends and nine bindings.
 
-## S1 — the search field's depth slice is on the mac and iOS (2026-09-06); the GTK, WinUI and Compose arms, the eight bindings' sugar, the gallery and the task manager's fields are the breadth slice (docs/search-plan.md §6)
+## ~~S1 — the search field's depth slice is on the mac and iOS (2026-09-06); the GTK, WinUI and Compose arms, the eight bindings' sugar, the gallery and the task manager's fields are the breadth slice (docs/search-plan.md §6)~~ — COMPLETE 2026-09-06: the breadth slice merged the same evening — GtkSearchEntry on `changed` with stop-search clearing, a TextBox with the template's DeleteButton on WinUI (AutoSuggestBox measured and refused: its peer reports Group and it swallows Escape, docs/measurements/search-winui-2026-09-06.md), Compose's BasicTextField with the Search icon and kaya's clear button, `search()` and `placeholder` in both zones of all nine bindings, the ten gallery guests, nine search guests, the task manager's per-list fields (S10), tools/check-search.py holding S5's one clear path and S7's identity per backend; every DEPTH STUB below is gone and the matrix on the merged tree is in the commit that struck this
 KEY: search field depth slice, search kind, placeholder prop, clear_search, expect_placeholder, DEPTH STUB search, breadth slice search
 
 The `search` kind (wire 19), the `placeholder` prop (30) on the three

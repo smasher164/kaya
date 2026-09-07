@@ -556,6 +556,15 @@ export class Handle {
     return this;
   }
 
+  /** The PROMPT this field shows while its text is empty
+   * (docs/search-plan.md S3): the platform's own placeholder, never part
+   * of the text and never emitted. Entry, textarea and search only,
+   * checked at the root. Chains. */
+  placeholder(text: Bindable | string): this {
+    records().push(propSource("placeholder", this, text, wire.tx_set_placeholder, wire.tx_bind_placeholder, wire.tx_bind_placeholder_element));
+    return this;
+  }
+
   /** Whether this widget spans its container's cross axis — a column's
    * width, a row's height — whatever the container's `align`
    * (docs/layout-knobs-plan.md §1). Unset, the kind's own default holds.
@@ -3083,13 +3092,14 @@ export function timePicker(opts: TimePickerOptions = {}): Widget {
   return handle;
 }
 
-export type TextInputOptions = GrowOption & { text?: string; onChange?: Handler };
+export type TextInputOptions = GrowOption & { text?: string; onChange?: Handler; placeholder?: string };
 
 /** A single-line text field. Uncontrolled, by doctrine: the widget owns
  * its text and reports each edit to onChange; there is no read-back. */
 export function entry(opts: TextInputOptions = {}): Widget {
   const handle = widget(wire.KIND_ENTRY);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("entry text", opts.text)));
+  if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   setGrow(handle, opts);
   return handle;
@@ -3100,6 +3110,19 @@ export function entry(opts: TextInputOptions = {}): Widget {
 export function textarea(opts: TextInputOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
   if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
+  if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
+  if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
+  setGrow(handle, opts);
+  return handle;
+}
+
+/** A search field: the entry's uncontrolled contract under the platform's
+ * search chrome (docs/search-plan.md), filtering on every keystroke. The
+ * clear affordance arrives at onChange with "". */
+export function search(opts: TextInputOptions = {}): Widget {
+  const handle = widget(wire.KIND_SEARCH);
+  if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("search text", opts.text)));
+  if (opts.placeholder !== undefined) handle.placeholder(opts.placeholder);
   if (opts.onChange !== undefined) app()._register(handle, wire.OCC_TEXT_CHANGED, opts.onChange);
   setGrow(handle, opts);
   return handle;

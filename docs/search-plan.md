@@ -314,6 +314,12 @@ reach the kind). check-gates holds the census.
 
 ## §6 — Build order, if ruled
 
+DONE 2026-09-06: the depth slice (7b228406) and the breadth slice the
+same evening, four agents on the four backends and the eight bindings in
+parallel (docs/measurements/search-winui-2026-09-06.md for the WinUI
+probe; docs/traps.md for the four measured traps). §7's questions have
+their answers below each.
+
 Depth then breadth, the pickers' and sliders' shape:
 
 1. spec.rs: kind 19, prop 30; regenerate; the root's checks and their
@@ -338,13 +344,30 @@ that owns it:
   closes the question the plan's "role on entry" wording left open.
 - Whether an `AutoSuggestBox` with an empty `ItemsSource` ever opens an
   empty flyout on WinUI 3, and what `AutomationControlType` its peer
-  reports.
+  reports. MEASURED (docs/measurements/search-winui-2026-09-06.md, WinUI
+  3 2.2.0 on Windows 11 arm64, real keystrokes): the flyout NEVER opens
+  (0 popups across 143 samples), one TextChanged per keystroke with
+  Reason UserInput and ProgrammaticChange for a property write — and the
+  control was REFUSED anyway: its peer reports `Group` (a TextBox reports
+  `Edit`, S7's `field`), it swallows Escape from the ordinary KeyDown a
+  WinRT delegate can register, and it is not a TextBox, so it cannot be
+  the entry's Editable. The lowering is a TextBox whose own template
+  already carries the clear button (`DeleteButton`, invoked through
+  IInvokeProvider: it empties, keeps focus, reports as a user edit), with
+  PlaceholderText and kaya's Fluent Find glyph overlaid and hidden from
+  the assistive tree. §3's table row is superseded by this.
 - Whether dismissing search on iOS clears the text binding (moot under
   S1's styled TextField, which has no dismiss).
 - The literal subrole string macOS publishes for the styled field once
-  `.isSearchField` is added, read off the live tree.
+  `.isSearchField` is added, read off the live tree. MEASURED: `AXTextField`
+  with subrole `AXSearchField` (the ambiguity refusal printed it on the
+  search scene's first run).
 - What AT-SPI reports for GtkSearchEntry's placeholder and role from the
-  lane's container.
+  lane's container. MEASURED (GTK 4.18): GtkSearchEntry publishes the
+  `entry` role where GtkEntry and GtkTextView publish `text`, so the search
+  box is its own ordinal family; an a11y label arrives as the bus name.
+  GtkTextView has no placeholder at all and the overlaid prompt is two
+  accessible nodes unless both take `AccessibleRole::None` (docs/traps.md).
 - The keystroke-to-list latency of the app-side diff on the android and
   wayland lanes under a matrix, since S1 is the first text-driven filter
   and the action-wait rule is what makes the scene observable.

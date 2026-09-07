@@ -412,6 +412,15 @@ func (sc SumCase[K, V]) BindHelp(n Node, sel func(*V) *string) {
 	sc.t.BindHelp(n, FieldBy(sel))
 }
 
+// SetPlaceholder prompts every stamped field of this arm while it is
+// empty (Tpl.SetPlaceholder; docs/search-plan.md S3).
+func (sc SumCase[K, V]) SetPlaceholder(n Node, text string) { sc.t.SetPlaceholder(n, text) }
+
+// BindPlaceholder takes the prompt from the field the selector names.
+func (sc SumCase[K, V]) BindPlaceholder(n Node, sel func(*V) *string) {
+	sc.t.BindPlaceholder(n, FieldBy(sel))
+}
+
 // SetFill gives every stamped copy of this arm the same cross-axis
 // stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
 func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }

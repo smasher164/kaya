@@ -47,6 +47,7 @@ import androidx.compose.foundation.interaction.PressInteraction
 // five members are the ONLY experimental surface here at foundation
 // 1.7.5.
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
@@ -173,6 +174,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clipToBounds
@@ -187,6 +189,11 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
@@ -225,6 +232,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -355,6 +364,12 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * by the platform's own tooltip. Composition state — [KayaRenderHelped]
      * draws from it. */
     var help by mutableStateOf("")
+
+    /** THE PROMPT AN EMPTY FIELD SHOWS (docs/search-plan.md S3), never part
+     * of the text and never emitted. Composition state — the decoration
+     * box's placeholder slot draws from it, and so does the search field's
+     * accessibility name (S7). */
+    var placeholder by mutableStateOf("")
 
     /** The widget's accept list, verbatim. Recorded here because the
      * paste hook and the standard commands' enablement both read it off
@@ -846,6 +861,7 @@ object KayaSceneModel {
     val datePickers = ArrayList<KayaNode>()
     val timePickers = ArrayList<KayaNode>()
     val labeleds = ArrayList<KayaNode>()
+    val searches = ArrayList<KayaNode>()
     /**
      * The appearance the core last rastered with — written by the ONE
      * reading the presentation report sends (KayaRoot), so
@@ -1892,7 +1908,7 @@ object KayaCompose {
                         KIND_DATE_PICKER -> KayaSceneModel.datePickers.add(node)
                         KIND_TIME_PICKER -> KayaSceneModel.timePickers.add(node)
                         KIND_LABELED -> KayaSceneModel.labeleds.add(node)
-                        KIND_SEARCH -> depthStub("search")
+                        KIND_SEARCH -> KayaSceneModel.searches.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -1931,7 +1947,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.fill = readBool(b)
                         PROP_MIN_COLUMN_WIDTH ->
                             KayaSceneModel.nodes[id]!!.minColumnWidth = readF64(b)
-                        PROP_PLACEHOLDER -> depthStub("search")
+                        PROP_PLACEHOLDER ->
+                            KayaSceneModel.nodes[id]!!.placeholder = readString(b)
                         PROP_WRAP ->
                             KayaSceneModel.nodes[id]!!.wrap = readBool(b)
                         PROP_COLUMNS ->
@@ -3954,7 +3971,8 @@ object KayaCompose {
             "cut", "copy" -> {
                 val id = KayaSceneModel.focusedId ?: return false
                 return KayaSceneModel.entryWidgets.any { it.id == id } ||
-                    KayaSceneModel.textareas.any { it.id == id }
+                    KayaSceneModel.textareas.any { it.id == id } ||
+                    KayaSceneModel.searches.any { it.id == id }
             }
             "paste" -> {
                 val id = KayaSceneModel.focusedId ?: return false
@@ -4581,6 +4599,7 @@ object KayaCompose {
 
     private fun kayaTextTarget(spec: String): KayaNode? =
         if (spec.startsWith("textarea")) target(spec, "textarea", KayaSceneModel.textareas)
+        else if (spec.startsWith("search")) target(spec, "search", KayaSceneModel.searches)
         else target(spec, "entry", KayaSceneModel.entryWidgets)
 
     /** The merged semantics node carrying this test tag — [kayaAxFind]'s
@@ -4822,7 +4841,7 @@ object KayaCompose {
             "select" -> KayaSceneModel.selects
             "radio" -> KayaSceneModel.radios
             "grid" -> KayaSceneModel.grids
-            "search" -> depthStub("search")
+            "search" -> KayaSceneModel.searches
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -5857,6 +5876,7 @@ object KayaCompose {
                             // direct requestFocus would fight it.
                             val text = target(parts[1], "entry", KayaSceneModel.entryWidgets)
                                 ?: target(parts[1], "textarea", KayaSceneModel.textareas)
+                                ?: target(parts[1], "search", KayaSceneModel.searches)
                             if (text != null) {
                                 KayaDiag.note(
                                     "click ${parts[1]} -> focus node=${text.id} " +
@@ -6122,10 +6142,7 @@ object KayaCompose {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
                         val ok = onUi(activity) {
-                            val node =
-                                if (parts[1].startsWith("textarea"))
-                                    target(parts[1], "textarea", KayaSceneModel.textareas)
-                                else target(parts[1], "entry", KayaSceneModel.entryWidgets)
+                            val node = kayaTextTarget(parts[1])
                             node?.also {
                                 // Through kayaWriteText like every other
                                 // programmatic write, so it carries D7
@@ -6147,12 +6164,11 @@ object KayaCompose {
                         // read could not see a native undo that moved
                         // the widget and not yet the mirror.
                         val got = onUi(activity) {
-                            if (parts[1].startsWith("textarea"))
-                                target(parts[1], "textarea", KayaSceneModel.textareas)?.let {
-                                    kayaLf(it.textState.text.toString())
-                                }
-                            else if (parts[1].startsWith("entry"))
-                                target(parts[1], "entry", KayaSceneModel.entryWidgets)?.let {
+                            if (parts[1].startsWith("textarea") ||
+                                parts[1].startsWith("entry") ||
+                                parts[1].startsWith("search")
+                            )
+                                kayaTextTarget(parts[1])?.let {
                                     kayaLf(it.textState.text.toString())
                                 }
                             else if (parts[1].startsWith("image"))
@@ -6186,10 +6202,9 @@ object KayaCompose {
                         // Counts as an expect for the zero-expect
                         // rule, exactly as in harness.rs.
                         val focused = onUi(activity) {
-                            (if (parts[1].startsWith("textarea"))
-                                target(parts[1], "textarea", KayaSceneModel.textareas)
-                            else target(parts[1], "entry", KayaSceneModel.entryWidgets))
-                                ?.let { KayaSceneModel.focusedId == it.id }
+                            kayaTextTarget(parts[1])?.let {
+                                KayaSceneModel.focusedId == it.id
+                            }
                         }
                         when (focused) {
                             true -> observed.add("${parts[1]} focused")
@@ -7799,9 +7814,33 @@ object KayaCompose {
                         }
                     }
                     "clear_search" -> {
-                        depthStub("search")
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val ok = onUi(activity) {
+                            target(parts[1], "search", KayaSceneModel.searches)
+                                ?.also { kayaSearchClear(it) } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
-                    "expect_placeholder" -> depthStub("search")
+                    "expect_placeholder" -> {
+                        // The prompt the composed field draws from
+                        // (docs/search-plan.md S3), the state the decoration
+                        // box's placeholder slot reads — expect_help's arm,
+                        // one prop over.
+                        val want = quoted(parts.drop(2))
+                        val node = kayaTextTarget(parts[1])
+                        if (node == null) {
+                            failures.add("no such target ${parts[1]}")
+                        } else {
+                            val got = onUi(activity) { node.placeholder }
+                            if (got == want) {
+                                observed.add("placeholder \"$want\"")
+                            } else {
+                                failures.add("placeholder \"$got\", wanted \"$want\"")
+                            }
+                        }
+                    }
                     "expect_help" -> {
                         // The state the platform's own tooltip draws
                         // from (docs/tooltip-plan.md T5): the wrapper in
@@ -8335,7 +8374,11 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
     // to write into: touching `textState` would mint a state object per
     // label for nothing. The model assignment above is their whole
     // write.
-    if (node.kind != KayaCompose.KIND_ENTRY && node.kind != KayaCompose.KIND_TEXTAREA) return
+    if (node.kind != KayaCompose.KIND_ENTRY && node.kind != KayaCompose.KIND_TEXTAREA &&
+        node.kind != KayaCompose.KIND_SEARCH
+    ) {
+        return
+    }
     if (node.textState.text.contentEquals(next)) return
     node.textState.setTextAndPlaceCursorAtEnd(next)
     KayaUndoState.clearHistory(node)
@@ -8502,7 +8545,10 @@ internal fun kayaClearUndoForGroup() {
 internal fun kayaFocusedTextNode(): KayaNode? {
     val id = KayaSceneModel.focusedId ?: return null
     val node = KayaSceneModel.nodes[id] ?: return null
-    return if (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA) {
+    return if (node.kind == KayaCompose.KIND_ENTRY ||
+        node.kind == KayaCompose.KIND_TEXTAREA ||
+        node.kind == KayaCompose.KIND_SEARCH
+    ) {
         node
     } else {
         null
@@ -10045,6 +10091,7 @@ private fun KayaRenderCore(
         // (the maintainer's review of the Android form, 2026-09-06).
         val textFills = flexVertical &&
             (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA ||
+                node.kind == KayaCompose.KIND_SEARCH ||
                 node.kind == KayaCompose.KIND_DATE_PICKER ||
                 node.kind == KayaCompose.KIND_TIME_PICKER ||
                 node.kind == KayaCompose.KIND_SELECT)
@@ -10067,7 +10114,13 @@ private fun KayaRenderCore(
     // only when the name rides its own contentDescription PARAMETER
     // (measured 2026-07-25: through the modifier it read `unknown/Logo`).
     val a11yTag = if (node.a11yId.isNotEmpty()) Modifier.testTag(node.a11yId) else Modifier
-    val a11yNamed = node.a11yLabel.ifEmpty { a11yFallback }
+    val a11yNamed = node.a11yLabel.ifEmpty {
+        // NO SEARCH IDENTITY EXISTS HERE (docs/search-plan.md S7), so the
+        // prompt is the field's name when the app authored none.
+        a11yFallback.ifEmpty {
+            if (node.kind == KayaCompose.KIND_SEARCH) node.placeholder else ""
+        }
+    }
     val a11yName =
         if (a11yNamed.isNotEmpty()) {
             Modifier.semantics { contentDescription = a11yNamed }
@@ -10476,7 +10529,8 @@ private fun KayaRenderCore(
                 }
             }
         }
-        KayaCompose.KIND_SEARCH -> depthStub("search")
+        KayaCompose.KIND_SEARCH ->
+            KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -10763,8 +10817,21 @@ private fun KayaRenderCore(
 }
 
 /**
- * THE ENTRY AND THE TEXTAREA, on `BasicTextField(state:)` with M3
- * dressing (docs/undo-plan.md §1.4) — NOT `TextField(value:,
+ * ONE CLEAR PATH for the search field (docs/search-plan.md S5): the clear
+ * button, a hardware Escape and the harness's clear_search all come here, so
+ * each reaches the app as the same text_changed("") the user deleting every
+ * character would send, and the focus stays. UI thread.
+ */
+internal fun kayaSearchClear(node: KayaNode) {
+    kayaWriteText(node, "")
+    KayaPresent.emitTextChanged(
+        node.tag, "", KayaSceneModel.focusedId == node.id, false)
+    KayaSceneModel.focusedId = node.id
+}
+
+/**
+ * THE ENTRY, THE TEXTAREA AND THE SEARCH FIELD, on `BasicTextField(state:)`
+ * with M3 dressing (docs/undo-plan.md §1.4) — NOT `TextField(value:,
  * onValueChange:)`, whose undo stack no app can see. THE ECHO GUARD:
  * `snapshotFlow { state.text }` fires for kaya's OWN writes too, so this
  * collector reports only what makes model and widget DIFFER.
@@ -10783,6 +10850,13 @@ fun KayaTextField(
      */
     fill: Modifier,
     singleLine: Boolean,
+    /**
+     * THE SEARCH KIND (docs/search-plan.md §3). Material's SearchBar expands
+     * to a results screen by design, so a filter the app places in its column
+     * is the platform's own text field wearing the search glyph, a clear
+     * button, the Search IME action and no capitalization.
+     */
+    search: Boolean = false,
 ) {
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
@@ -10824,6 +10898,17 @@ fun KayaTextField(
         // reads it — the same ScrollState `expect_at_end` already reads
         // off a scroll node.
         scrollState = node.scrollState,
+        // S8: a filter query is not prose, and the phone's Return key says
+        // Search. Autocorrection stays the platform's default.
+        keyboardOptions =
+            if (search) {
+                KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    imeAction = ImeAction.Search,
+                )
+            } else {
+                KeyboardOptions.Default
+            },
         // The platform's own text layout, kept as the PROVIDER LAMBDA
         // and not as a result: reading it stays in the layout/draw phase
         // and never invalidates composition. Measured on this backend
@@ -10837,6 +10922,26 @@ fun KayaTextField(
         modifier = a11y
             .then(fill)
             .focusRequester(focusRequester)
+            // ESCAPE IS THE CLEAR ACT ON A DESKTOP KEYBOARD (S5), and an
+            // EMPTY field does nothing — the key goes on to whatever else
+            // wants it. PREVIEW, because the field consumes the key itself.
+            .then(
+                if (search) {
+                    Modifier.onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown &&
+                            event.key == Key.Escape &&
+                            node.textState.text.isNotEmpty()
+                        ) {
+                            kayaSearchClear(node)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
             // Gain-only back-propagation: onFocusChanged also fires with
             // the initial unfocused state at attach, and a loss branch
             // there would clear a focusedId the LaunchedEffect below has
@@ -10848,6 +10953,36 @@ fun KayaTextField(
         // container, indicator line and padding, so the two kinds look
         // exactly as they did before the migration.
         decorator = { inner ->
+            // The prompt an empty field shows (docs/search-plan.md S3): the
+            // platform's own slot, on all three text kinds.
+            val prompt: (@Composable () -> Unit)? =
+                if (node.placeholder.isEmpty()) {
+                    null
+                } else {
+                    { Text(node.placeholder) }
+                }
+            val glyph: (@Composable () -> Unit)? =
+                if (!search) {
+                    null
+                } else {
+                    { Icon(Icons.Default.Search, contentDescription = null) }
+                }
+            // THE CLEAR AFFORDANCE, kaya's own because Material draws none
+            // (S5): shown only while there is text, and it does not take the
+            // focus, because clearing KEEPS it.
+            val clear: (@Composable () -> Unit)? =
+                if (!search || node.textState.text.isEmpty()) {
+                    null
+                } else {
+                    {
+                        IconButton(
+                            onClick = { kayaSearchClear(node) },
+                            modifier = Modifier.focusProperties { canFocus = false },
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear text")
+                        }
+                    }
+                }
             TextFieldDefaults.DecorationBox(
                 value = node.textState.text.toString(),
                 // THE HIGHLIGHT LAYER GOES AROUND THE INNER FIELD, not
@@ -10859,6 +10994,9 @@ fun KayaTextField(
                 singleLine = singleLine,
                 visualTransformation = VisualTransformation.None,
                 interactionSource = interaction,
+                placeholder = prompt,
+                leadingIcon = glyph,
+                trailingIcon = clear,
                 contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
             )
         },
@@ -13107,8 +13245,3 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier, f
         DatePicker(state = dateState)
     }
 }
-
-/// The one spelling of "this backend has not reached that scene yet";
-/// tools/check-stubs.py reads the CALL (docs/search-plan.md §6).
-private fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on android")

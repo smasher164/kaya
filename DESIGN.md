@@ -1017,7 +1017,7 @@ The known normalization worklist:
   surface, the way a For with headers is a table; the side-by-side
   against stacked decision is the platform control's, never kaya's
   arithmetic.
-- A text field fills its column's width. An entry or a textarea is an
+- A text field fills its column's width. An entry, a textarea or a search field is an
   input region, not content, so in a vertical container it spans the
   cross axis the way a scroll does; in a row it keeps its intrinsic
   width unless it grows (docs/tasks-plan.md R10 — the task manager's
@@ -1025,6 +1025,29 @@ The known normalization worklist:
   480 cap on the fifth, the maintainer's review of 2026-09-05). On
   Android the date and time pickers and the select are text fields, so
   the rule covers them there; the compact pickers elsewhere hug.
+- A search field is a text field under the platform's search chrome
+  (docs/search-plan.md, ruled 2026-09-06). `search` is a KIND, not a role:
+  it takes the entry's whole contract — Prop::Text uncontrolled,
+  text_changed on every user edit and on the clear command, the clear and
+  focus commands, the same harness verbs — and adds what a role cannot
+  carry: the platform's glyph and clear affordance, the search trait
+  where the platform has one (the Mac's AXSearchField subrole, iOS's
+  searchField trait, GTK's SEARCH_BOX role; UIA and Compose have none, so
+  the shared a11y verdict stays `field`), the phones' Search key with
+  capitalization off, and `placeholder`, a prop legal on entry, textarea
+  and search alike: the platform's own prompt while the text is empty,
+  never the text, never emitted. Clearing is ONE act everywhere — the
+  affordance, or Escape on a desktop, empties the text, keeps the focus
+  and reaches the app as text_changed("") — and no backend debounces:
+  every keystroke reports, GTK's 150 ms search delay set to zero. Return
+  publishes nothing (the chat app's milestone pays for a `submitted`
+  occurrence, docs/deferred.md). The field sits where the app puts it,
+  never in the chrome (every HIG puts a list filter above its list, and
+  docs/chrome-plan.md refused free-form toolbar widgets); on the Apple
+  platforms and Compose that is the platform's text field wearing the
+  platform's search parts, since `.searchable` and Material's SearchBar
+  are chrome-owned constructs no app can place. The filter is the app's,
+  as sorting is.
 - `fill` is the child's own word on that cross axis
   (docs/layout-knobs-plan.md §1): true spans the container's cross axis
   whatever its `align`, false hugs, and unset leaves the kind's default —

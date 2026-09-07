@@ -1657,11 +1657,10 @@ REFUSALS = {
     (KOTLIN, "close_window"): "close_window: this host has no chrome close",
     (KOTLIN, "resize_window"):
         "resize_window: this host does not command window size",
-    # A DEPTH STUB is a refusal too, until the breadth slice lands the arm
-    # (docs/search-plan.md §6; check-stubs holds the stub against the
-    # lane's roster). The exemption goes with the stub.
-    (KOTLIN, "clear_search"): 'depthStub("search")',
 }
+# A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
+# its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the
+# negative below knows the shape (the search field's slice, 2026-09-06).
 # What "does nothing" is, in the Compose runner: every arm that acts goes
 # to the UI thread to do it.
 KOTLIN_ACTS = "onUi("

@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
             "radio" -> Radio::app
             "grid" -> GridScene::app
             "textarea" -> TextareaScene::app
+            "search" -> Search::app
             "sections" -> Sections::app
             "menus" -> Menus::app
             "commands" -> Commands::app

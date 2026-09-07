@@ -23,7 +23,7 @@ SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
     "reorder", "feed", "grow", "layout", "align", "window", "panels",
     "confirm", "nav", "split", "panes", "table", "scroll",
-    "progress", "select", "radio", "grid", "textarea", "sections",
+    "progress", "select", "radio", "grid", "textarea", "search", "sections",
     "menus", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
@@ -174,6 +174,28 @@ ORDER = [
     # would put a composition in someone else's control.
     [
      "ranges_rust",
+    ],
+    # EACH search LEG ALONE, ranges' reason exactly: its `type` verb puts
+    # REAL KEYSTROKES on the system input queue and foregrounds the guest to
+    # do it, so a pooled neighbour taking the foreground mid-scene would eat
+    # the query (docs/search-plan.md §5).
+    [
+     "search_rust",
+    ],
+    [
+     "search_python",
+    ],
+    [
+     "search_js",
+    ],
+    [
+     "search_go",
+    ],
+    [
+     "search_csharp",
+    ],
+    [
+     "search_java",
     ],
     # The filedialog family, ONE LEG PER DRAIN: the Shell's dialog is
     # OS-GLOBAL modal chrome — it must hold the FOREGROUND to be driven,

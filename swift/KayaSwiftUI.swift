@@ -17585,6 +17585,11 @@ struct KayaSearch: View {
                     get: { node.text },
                     set: { newValue in
                         let value = kayaLF(newValue)
+                        // SwiftUI sets the binding at mount with the text it
+                        // read; a set that changes nothing is not an edit
+                        // (measured 2026-09-06: text_changed("") twice before
+                        // the first step, on this arm alone).
+                        if value == node.text { return }
                         kayaUserWrite { node.text = value }
                         KayaHost.emitText(node, value)
                     })

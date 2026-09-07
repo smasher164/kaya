@@ -9557,3 +9557,65 @@ and the refusal names the elements' roles now). The wrapper takes a `leaf`
 flag: a search node's row gets nothing and KayaSearch applies the props to
 its TextField itself (docs/search-plan.md §3). Any future kind whose view
 is a row of controls has the same shape.
+
+## GTK's text view has no placeholder, and an overlay label is two accessible nodes (2026-09-06)
+
+`GtkTextView` has no `placeholder-text`; the prompt (docs/search-plan.md S3)
+is drawn through `gtk_text_view_add_overlay`. Measured in the lane's
+container: the overlay child is parented inside a `GtkTextViewChild` that
+AT-SPI publishes as a `panel`, and the label under `Hidden(true)` STAYS on
+the bus (`role='label'`), so SwiftUI's `accessibilityHidden` has no
+one-for-one GTK spelling. Only `AccessibleRole::None` on BOTH the label and
+its wrapper leaves the walk unchanged; gtk.rs also skips both in
+`atspi_role_of` by a private data key. No in-tree scene sets a textarea
+placeholder yet; the first that does AND asserts `expect_ax` on a group
+must re-measure the ordinals. Beside it, two bus facts: GtkSearchEntry
+publishes `entry` while GtkEntry and GtkTextView publish `text`, so the
+search box is its own ordinal family, and an a11y label on it arrives as
+the bus name with no extra wiring.
+
+## Swift's `String.contains("")` is false (2026-09-06)
+
+Every other language's substring test on an empty needle is true (python's
+`"" in s`, Rust's `contains("")`, Go's `strings.Contains(s, "")`, Java's
+`contains("")`). Swift's `String.contains(_:)` with an empty string answers
+FALSE, so the Swift search guest emptied its list on the clear
+(`column@list ordered ""`) with every earlier step green. A shared filter
+spells the empty query out (`query.isEmpty || name.contains(query)`), and a
+scene that clears a filter is what catches the port; the eight other ports
+hid it. Found by tools/scenes/search.steps on the swift leg.
+
+## A lane dies at the build-id verify when the tree moves under it (2026-09-06)
+
+Editing any file under `crates/` while tools/validate-linux.py runs kills
+the run at `build-id --verify` (`libkaya.so: STALE — carries <a>, but core
+in this tree is <b>`), not at a compile: the guard is right, the artifact
+WAS built from the sources as they were a minute earlier. Three agents
+editing three backends in one tree hit it three times in a row. Hold the
+tree still for the length of a lane, or run the lane last.
+
+## WinUI's AutoSuggestBox is a Group to UIA and eats Escape (2026-09-06)
+
+Microsoft's text-controls page says to build a search box out of
+`AutoSuggestBox`. Measured on the VM with real keystrokes
+(docs/measurements/search-winui-2026-09-06.md): its automation peer reports
+`AutomationControlType.Group`, not `Edit`, so a harness folding roles would
+read `group` where every other platform reads `field`; it swallows Escape
+from the ordinary `KeyDown` registration (only `AddHandler`'s
+handled-events-too form sees it, which a Rust WinRT delegate cannot make,
+the slider's documented limit); and it is not a `TextBox`, so nothing that
+treats the entry's control applies. Its one advertised gift, the clear
+button, a plain TextBox already has in its template (`DeleteButton`,
+invokable through `IInvokeProvider`). The empty flyout, the thing the
+design feared, never opens. kaya's search field on WinUI is a TextBox.
+
+## A runner that starts its host bridge by scene NAME misses the next scene that types (2026-09-06)
+
+tools/ios/run-sim.py started the simdrive watcher, the bridge the SwiftUI
+harness asks for the picker, the pasteboard and the keys of `type`, for a
+hand-written tuple of scene names. The search scene types; it was not in
+the tuple; its three iOS legs sat the whole 60s step ceiling inside `type`
+with the driver "never asked for anything" (matrix #20). The same class
+tools/lib/scene-features.py was built to kill, one runner over: the rule is
+keyed on the script's VERBS now (`needs_bridge`), self-checked both ways
+before any leg runs. A list of names is right until the next scene.

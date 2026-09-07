@@ -37,6 +37,9 @@ public final class Main {
             case "reorder":
                 app = Reorder::app;
                 break;
+            case "search":
+                app = Search::app;
+                break;
             case "table":
                 app = Table::app;
                 break;

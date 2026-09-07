@@ -42,7 +42,7 @@ struct Settings {
     line: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum List {
     Inbox,
     Today,
@@ -55,6 +55,7 @@ enum List {
 enum Msg {
     Draft(String),
     Add,
+    Search(List, String),
     Toggle(kaya::Path, bool),
     Details(kaya::Path),
     Notes(String),
@@ -196,6 +197,12 @@ struct App {
     projects_coll: kaya::Collection<ProjectRow>,
     // Caches of the collections: rebuilt from them after undo and redo.
     tasks: BTreeMap<String, (List, TaskRow)>,
+    // The per-list search (docs/search-plan.md S9, S10): the query, and the
+    // rows it has taken OUT of their collection — the app owns the filter,
+    // and a hidden row lives here and in `tasks`, in no collection.
+    queries: BTreeMap<List, String>,
+    hidden: BTreeMap<String, (List, TaskRow)>,
+    counts: BTreeMap<List, kaya::SignalId>,
     projects: BTreeMap<String, String>,
     order: BTreeMap<String, Vec<String>>,
     next: u32,
@@ -233,6 +240,68 @@ impl App {
         }
     }
 
+    fn matches(&self, list: List, row: &TaskRow) -> bool {
+        let Some(query) = self.queries.get(&list).filter(|q| !q.is_empty()) else { return true };
+        let query = query.to_lowercase();
+        row.title.to_lowercase().contains(&query) || row.notes.to_lowercase().contains(&query)
+    }
+
+    fn count_text(&self, list: List) -> String {
+        let total = self.tasks.values().filter(|(l, _)| *l == list).count();
+        let hidden = self.hidden.values().filter(|(l, _)| *l == list).count();
+        if self.queries.get(&list).is_some_and(|q| !q.is_empty()) {
+            return format!("{} of {total} match", total - hidden);
+        }
+        match list {
+            List::Inbox => format!("{total} in inbox"),
+            List::Today => format!("{total} today"),
+            List::Upcoming => format!("{total} upcoming"),
+            List::Anytime => format!("{total} anytime"),
+            List::Logbook => format!("{total} done"),
+        }
+    }
+
+    fn update_count(&self, tx: &mut kaya::Tx, list: List) {
+        if let Some(sig) = self.counts.get(&list) {
+            tx.write(*sig, self.count_text(list));
+        }
+    }
+
+    /// The list's visible set follows its query: a DIFF of removes and
+    /// inserts by key, never undoable, the rows back in creation order.
+    fn apply_filter(&mut self, tx: &mut kaya::Tx, list: List) {
+        let coll = self.coll(list);
+        let mut keys: Vec<(u32, String)> = self
+            .tasks
+            .iter()
+            .filter(|(_, (l, _))| *l == list)
+            .map(|(k, _)| (k.trim_start_matches('t').parse::<u32>().unwrap_or(0), k.clone()))
+            .collect();
+        keys.sort();
+        let mut inserted = false;
+        for (_, key) in &keys {
+            let (_, row) = self.tasks[key].clone();
+            let want = self.matches(list, &row);
+            let visible = !self.hidden.contains_key(key);
+            if want && !visible {
+                self.hidden.remove(key);
+                tx.insert(&coll, key.clone(), row);
+                inserted = true;
+            } else if !want && visible {
+                self.hidden.insert(key.clone(), (list, row));
+                tx.remove(&coll, key.clone());
+            }
+        }
+        if inserted {
+            for (_, key) in &keys {
+                if !self.hidden.contains_key(key) {
+                    tx.move_to_end(&coll, key.clone());
+                }
+            }
+        }
+        self.update_count(tx, list);
+    }
+
     fn caption(&self, row: &TaskRow) -> String {
         let mut parts = Vec::new();
         if let Some(w) = parse_date(&row.when) {
@@ -253,26 +322,40 @@ impl App {
         row.caption = self.caption(&row);
         let target = self.list_of(&row);
         let current = self.tasks.get(key).map(|(l, _)| *l);
+        // A row a filter has hidden is in no collection: nothing to patch or
+        // remove; apply_filter below decides whether it comes back.
+        let was_hidden = self.hidden.remove(key).is_some();
         match current {
             Some(cur) if cur == target => {
-                self.coll(cur)
-                    .patch(tx, key.to_string())
-                    .title(row.title.clone())
-                    .caption(row.caption.clone())
-                    .done(row.done)
-                    .notes(row.notes.clone())
-                    .when(row.when.clone())
-                    .deadline(row.deadline.clone())
-                    .reminder(row.reminder.clone())
-                    .project(row.project.clone());
+                if !was_hidden {
+                    self.coll(cur)
+                        .patch(tx, key.to_string())
+                        .title(row.title.clone())
+                        .caption(row.caption.clone())
+                        .done(row.done)
+                        .notes(row.notes.clone())
+                        .when(row.when.clone())
+                        .deadline(row.deadline.clone())
+                        .reminder(row.reminder.clone())
+                        .project(row.project.clone());
+                }
             }
             Some(cur) => {
-                tx.remove(&self.coll(cur), key.to_string());
+                if !was_hidden {
+                    tx.remove(&self.coll(cur), key.to_string());
+                }
                 tx.insert(&self.coll(target), key.to_string(), row.clone());
             }
             None => tx.insert(&self.coll(target), key.to_string(), row.clone()),
         }
+        if was_hidden && current == Some(target) {
+            tx.insert(&self.coll(target), key.to_string(), row.clone());
+        }
         self.tasks.insert(key.to_string(), (target, row));
+        self.apply_filter(tx, target);
+        if let Some(cur) = current.filter(|c| *c != target) {
+            self.update_count(tx, cur);
+        }
     }
 
     fn project_count(&mut self, tx: &mut kaya::Tx, project: &str) {
@@ -296,6 +379,15 @@ impl App {
                     self.tasks.insert(k, (list, row));
                 }
             }
+        }
+        // The rows a filter holds out of their collections are model too.
+        for (key, entry) in &self.hidden {
+            self.tasks.insert(key.clone(), entry.clone());
+        }
+        // Undo may have put a row back that the filter hides: the diff runs
+        // again, and every count is rewritten from the model.
+        for list in [List::Inbox, List::Today, List::Upcoming, List::Anytime] {
+            self.apply_filter(tx, list);
         }
         if let Some((project, lines)) = self.open_project.clone() {
             let order: Vec<String> = tx
@@ -343,7 +435,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let today = today();
 
-    let (lists, projects_coll, quick) = ctx.apply(|tx| {
+    let (lists, projects_coll, quick, counts) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
@@ -373,21 +465,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             (List::Anytime, ANYTIME, "Anytime", kaya::Symbol::More),
         ];
         let mut lists = Vec::new();
+        let mut counts = BTreeMap::new();
         let mut quick = kaya::WidgetId(0);
         for (list, window, name, symbol) in sections {
             let section = tx.add_section(window).title(name).symbol(symbol).id();
             msgs.on_section_selected(section, Msg::Section(window));
             let coll = tx.collection::<TaskRow>();
-            let count = coll.derive(tx, move |items| {
-                let n = items.len();
-                match list {
-                    List::Inbox => format!("{n} in inbox"),
-                    List::Today => format!("{n} today"),
-                    List::Upcoming => format!("{n} upcoming"),
-                    List::Anytime => format!("{n} anytime"),
-                    List::Logbook => format!("{n} done"),
-                }
+            // Written by the app (count_text): a derived signal could count
+            // the visible rows and not the total a filter hides.
+            let count = tx.signal(match list {
+                List::Inbox => "0 in inbox",
+                List::Today => "0 today",
+                List::Upcoming => "0 upcoming",
+                List::Anytime => "0 anytime",
+                List::Logbook => "0 done",
             });
+            counts.insert(list, count);
             let count_id = match list {
                 List::Inbox => "inbox_count",
                 List::Today => "today_count",
@@ -397,6 +490,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             };
             let root = tx
                 .column(|tx| {
+                    // The list's search field, first, filtering this list
+                    // alone (docs/search-plan.md S10).
+                    let find = tx
+                        .search()
+                        .placeholder("Search")
+                        .a11y_id(format!("{}_find", count_id.trim_end_matches("_count")))
+                        .id();
+                    msgs.on_change(find, move |q| Msg::Search(list, q));
                     tx.caption(count).a11y_id(count_id).id();
                     if list == List::Inbox {
                         tx.row(|tx| {
@@ -462,7 +563,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-        (lists, projects_coll, quick)
+        (lists, projects_coll, quick, counts)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -472,6 +573,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         lists,
         projects_coll,
         tasks: BTreeMap::new(),
+        queries: BTreeMap::new(),
+        hidden: BTreeMap::new(),
+        counts,
         projects: BTreeMap::new(),
         order: BTreeMap::new(),
         next: 1,
@@ -531,6 +635,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Draft(text) => app.draft = text,
+            Msg::Search(list, query) => {
+                // Never undoable: a search must not un-type under Undo.
+                app.queries.insert(list, query);
+                ctx.apply(|tx| app.apply_filter(tx, list));
+            }
             Msg::Add => {
                 if app.draft.trim().is_empty() {
                     continue;
@@ -697,10 +806,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     order.retain(|k| *k != key);
                 }
                 app.tasks.remove(&key);
+                let hidden = app.hidden.remove(&key).is_some();
                 ctx.apply(|tx| {
                     tx.undoable(format!("delete {}", row.title));
-                    tx.remove(&app.coll(list), key.clone());
+                    if !hidden {
+                        tx.remove(&app.coll(list), key.clone());
+                    }
                     app.project_count(tx, &row.project);
+                    app.update_count(tx, list);
                 });
                 ctx.apply(|tx| tx.pop_entry_in(section));
                 app.detail = None;

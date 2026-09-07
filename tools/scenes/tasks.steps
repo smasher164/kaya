@@ -26,6 +26,19 @@ expect label@title[t10] "Buy oat milk"
 expect entry@quick ""
 expect_focused entry@quick
 
+# S1 (docs/search-plan.md S10): each list's search field filters that list
+# alone by title and notes, and the count caption says how many match; the
+# clear affordance restores the list with the focus kept.
+expect_placeholder search@inbox_find "Search"
+set_text search@inbox_find "oat"
+expect label@inbox_count "1 of 3 match"
+expect label@title[t10] "Buy oat milk"
+expect_window column@inbox_list 0 1
+clear_search search@inbox_find
+expect search@inbox_find ""
+expect label@inbox_count "3 in inbox"
+expect_window column@inbox_list 0 3
+
 # Today: the routed rows, and a completion that moves one to the Logbook.
 select_section 1
 expect_section "Today"

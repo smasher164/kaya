@@ -18,3 +18,6 @@ expect label#1 "volume: 75%"
 # The labelled row (docs/forms-plan.md §4): the control's accessibility name
 # IS the label's text, on every platform, with no a11y_label of its own.
 expect_ax slider#1 "slider/Level"
+# The search field (docs/search-plan.md S3): the prompt as the platform shows
+# it, read off the control by the field's a11y_id.
+expect_placeholder search#0 "Search"

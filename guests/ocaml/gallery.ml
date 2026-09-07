@@ -43,6 +43,7 @@ let () =
                label ~bind:volume;
                button ~text:"quarter" ~on_click:on_quarter;
              ];
+           search ~placeholder:"Search" ~a11y_id:"find";
            (* Deliberately invalid bytes: a decode failure reads 0x0. *)
            row
              [

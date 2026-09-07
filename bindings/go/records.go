@@ -894,3 +894,11 @@ func (c RecordCollection[K, T]) Help[S interface {
 }](t *Tpl, n Node, src S) {
 	t.applyRecordStrProp[T](n, src, TxSetHelp, TxBindHelp, TxBindHelpElement)
 }
+
+// Placeholder prompts each stamped field while it is empty, from any
+// addressable source (Tpl.SetPlaceholder; docs/search-plan.md S3).
+func (c RecordCollection[K, T]) Placeholder[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetPlaceholder, TxBindPlaceholder, TxBindPlaceholderElement)
+}

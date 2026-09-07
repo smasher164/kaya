@@ -596,6 +596,31 @@ fn set_text_field(widget: &gtk4::Widget) {
     unsafe { widget.set_data(TEXT_FIELD_KEY, true) }
 }
 
+/// The two widgets a textarea's drawn placeholder is made of — the label and
+/// the `GtkTextViewChild` `add_overlay` wraps it in. Both carry
+/// `AccessibleRole::None`, so the bus publishes no node for either, and both
+/// are skipped by `atspi_role_of`: a walk that counted a node the bus does
+/// not publish puts every later ordinal one ahead of it, silently.
+const PROMPT_OVERLAY_KEY: &str = "kaya-prompt-overlay";
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn is_prompt_overlay(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to
+    // `true` by set_prompt_overlay below.
+    unsafe { widget.data::<bool>(PROMPT_OVERLAY_KEY).is_some() }
+}
+fn set_prompt_overlay(widget: &gtk4::Widget) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(PROMPT_OVERLAY_KEY, true) }
+}
+
+/// The prompt shows exactly while the buffer is empty (docs/search-plan.md
+/// S3: never part of the text).
+fn sync_textarea_prompt(view: &gtk4::TextView, label: &gtk4::Label) {
+    use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
+    let empty = view.buffer().char_count() == 0;
+    label.set_visible(empty && !label.text().is_empty());
+}
+
 /// One child's own `fill` (docs/layout-knobs-plan.md §1): 1 spans, 2 hugs,
 /// unset leaves the kind's default to apply_cross_align.
 const FILL_KEY: &str = "kaya-fill";
@@ -1749,6 +1774,10 @@ enum NativeWidget {
     Button(gtk4::Button),
     Label(gtk4::Label),
     Entry(gtk4::Entry),
+    /// The entry's contract on GTK's own search widget (docs/search-plan.md
+    /// S2): `GtkSearchEntry` is a `GtkWidget` implementing `GtkEditable`, NOT
+    /// a `GtkEntry` subclass, so no `is::<gtk4::Entry>()` site sees it.
+    Search(gtk4::SearchEntry),
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
     Slider(GtkSlider),
@@ -1785,6 +1814,7 @@ impl NativeWidget {
             NativeWidget::Button(w) => w.clone().upcast(),
             NativeWidget::Label(w) => w.clone().upcast(),
             NativeWidget::Entry(w) => w.clone().upcast(),
+            NativeWidget::Search(w) => w.clone().upcast(),
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
@@ -2290,6 +2320,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Checkbox => core.checkboxes.iter().map(|w| w.clone().upcast()).collect(),
         K::Slider => core.sliders.iter().map(|w| w.scale.clone().upcast()).collect(),
         K::Entry => core.entries.iter().map(|w| w.clone().upcast()).collect(),
+        K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Label => core.labels.iter().map(|w| w.clone().upcast()).collect(),
         K::Column => core.columns.iter().map(|w| w.clone().upcast()).collect(),
         K::Row => core.rows.iter().map(|w| w.clone().upcast()).collect(),
@@ -2999,6 +3030,7 @@ struct CoreState {
     /// entry, 2026-09-01).
     widget_tags: HashMap<u64, Vec<u8>>,
     entries: Vec<gtk4::Entry>,
+    searches: Vec<gtk4::SearchEntry>,
     sliders: Vec<GtkSlider>,
     /// The composed pickers, in creation order like every other registry;
     /// each entry carries the parts `set_date`/`set_time` drive and
@@ -3022,6 +3054,11 @@ struct CoreState {
     grids: Vec<gtk4::Grid>,
     labeleds: Vec<adw::ActionRow>,
     textareas: Vec<gtk4::TextView>,
+    /// The label drawn over an empty textarea, by widget id — GTK's own
+    /// answer for the one text kind with no `placeholder-text` property
+    /// (docs/search-plan.md S3). Created only when a placeholder is set, so a
+    /// textarea without one has the widget tree it always had.
+    textarea_prompts: HashMap<u64, gtk4::Label>,
     /// Each labelled row's seats (docs/forms-plan.md §3), by widget id.
     labeled_rows: HashMap<u64, GtkLabeledRow>,
     /// The boxed list a QUALIFYING column's rows live in — the derived
@@ -6042,7 +6079,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Canvas => core.canvases[resolve(t.index, core.canvases.len())].clone().upcast(),
         // The harness rejects editable text before the stage sees it
         // (their native context menus are dress).
-        K::Entry | K::Textarea => {
+        K::Entry | K::Textarea | K::Search => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
         K::DatePicker => core.date_pickers[resolve(t.index, core.date_pickers.len())]
@@ -6418,7 +6455,9 @@ impl CoreState {
                 let buffer = view.buffer();
                 if redo { buffer.can_redo() } else { buffer.can_undo() }
             }
-            Some(NativeWidget::Entry(_)) => self.native_dirty.borrow().contains(&id),
+            Some(NativeWidget::Entry(_) | NativeWidget::Search(_)) => {
+                self.native_dirty.borrow().contains(&id)
+            }
             _ => false,
         }
     }
@@ -6429,7 +6468,9 @@ impl CoreState {
     fn native_undo_filled(&self, id: WidgetId) -> bool {
         match self.widgets.get(&id) {
             Some(NativeWidget::Textarea(_, view)) => view.buffer().can_undo(),
-            Some(NativeWidget::Entry(_)) => self.native_dirty.borrow().contains(&id.0),
+            Some(NativeWidget::Entry(_) | NativeWidget::Search(_)) => {
+                self.native_dirty.borrow().contains(&id.0)
+            }
             _ => false,
         }
     }
@@ -6457,7 +6498,11 @@ impl CoreState {
             .filter(|id| {
                 matches!(
                     self.widgets.get(id),
-                    Some(NativeWidget::Entry(_) | NativeWidget::Textarea(..))
+                    Some(
+                        NativeWidget::Entry(_)
+                            | NativeWidget::Textarea(..)
+                            | NativeWidget::Search(_)
+                    )
                 )
             });
         let window = self.undo_window();
@@ -6509,6 +6554,11 @@ impl CoreState {
                 entry.set_enable_undo(false);
                 entry.set_enable_undo(true);
             }
+            Some(NativeWidget::Search(search)) => {
+                use gtk4::prelude::EditableExt;
+                search.set_enable_undo(false);
+                search.set_enable_undo(true);
+            }
             Some(NativeWidget::Textarea(_, view)) => {
                 let buffer = view.buffer();
                 buffer.begin_irreversible_action();
@@ -6526,6 +6576,9 @@ impl CoreState {
     fn text_of(&self, id: WidgetId) -> Option<String> {
         match self.widgets.get(&id) {
             Some(NativeWidget::Entry(entry)) => Some(lf(entry.text().to_string())),
+            Some(NativeWidget::Search(search)) => {
+                Some(lf(gtk4::prelude::EditableExt::text(search).to_string()))
+            }
             Some(NativeWidget::Textarea(_, view)) => {
                 let b = view.buffer();
                 Some(lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string()))
@@ -6604,6 +6657,13 @@ fn perform_undo_role(role: &str) -> bool {
                             let action = if redo { "text.redo" } else { "text.undo" };
                             let delegate = gtk4::prelude::EditableExt::delegate(entry)
                                 .unwrap_or_else(|| entry.clone().upcast());
+                            let _ = delegate.activate_action(action, None);
+                        }
+                        Some(NativeWidget::Search(search)) => {
+                            use gtk4::prelude::WidgetExt;
+                            let action = if redo { "text.redo" } else { "text.undo" };
+                            let delegate = gtk4::prelude::EditableExt::delegate(search)
+                                .unwrap_or_else(|| search.clone().upcast());
                             let _ = delegate.activate_action(action, None);
                         }
                         Some(NativeWidget::Textarea(_, view)) => {
@@ -6708,8 +6768,10 @@ fn focused_text_in(core: &CoreState, window: WindowId) -> Option<WidgetId> {
     core.widgets
         .iter()
         .find(|(_, w)| {
-            matches!(w, NativeWidget::Entry(_) | NativeWidget::Textarea(..))
-                && (focus == w.control() || focus.is_ancestor(&w.control()))
+            matches!(
+                w,
+                NativeWidget::Entry(_) | NativeWidget::Textarea(..) | NativeWidget::Search(_)
+            ) && (focus == w.control() || focus.is_ancestor(&w.control()))
         })
         .map(|(id, _)| *id)
 }
@@ -7930,7 +7992,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.widget_tags.insert(id.0, t.clone());
             }
             let clip_editable =
-                matches!(kind, WidgetKind::Entry | WidgetKind::Textarea);
+                matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search);
             let native = match kind {
                 WidgetKind::Entry => {
 // Uncontrolled: the widget owns its text; each edit goes up with
@@ -8215,7 +8277,40 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.grids.push(grid.clone());
                     NativeWidget::Grid(grid)
                 }
-                WidgetKind::Search => crate::depth_stub("search"),
+                WidgetKind::Search => {
+// The entry's contract on GTK's own search widget (docs/search-plan.md
+// S2/S6). `changed` AND NOT `search-changed`: GtkSearchEntry's
+// search-changed fires `search-delay` ms after the last keystroke (150 by
+// default), and S6 rules no debounce anywhere — `changed` is the
+// GtkEditable signal, one per edit, undelayed.
+                    let search = gtk4::SearchEntry::new();
+                    set_text_field(search.clone().upcast_ref());
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("search fields carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let ledger_quiet = core.ledger_quiet.clone();
+                    let dirty = core.native_dirty.clone();
+                    let wid = id.0;
+                    gtk4::prelude::EditableExt::connect_changed(&search, move |e| {
+                        if !quiet.get() {
+                            let text = lf(gtk4::prelude::EditableExt::text(e).to_string());
+                            sink.send_text_tag(&tag, &text);
+                            if !ledger_quiet.get() {
+                                dirty.borrow_mut().insert(wid);
+                                bank_text_changed(tag.clone(), text, widget_focused(e));
+                            }
+                        }
+                    });
+// ESCAPE IS THE CLEAR ACT (S5), and GTK's own signal is the handler:
+// `stop-search` fires on Escape and clears NOTHING by itself. It empties
+// the text through the write the clear icon makes, so both reach the app as
+// one `changed` — text_changed("") — with the focus untouched.
+                    search.connect_stop_search(|e| {
+                        gtk4::prelude::EditableExt::set_text(e, "");
+                    });
+                    core.searches.push(search.clone());
+                    NativeWidget::Search(search)
+                }
                 WidgetKind::Labeled => {
                     // THE LABELLED ROW (docs/forms-plan.md §3): Adwaita's own
                     // labelled row, its title left to kaya's LABEL WIDGET in
@@ -9672,6 +9767,64 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.apply_quiet.set(false);
                     note_quiet_text_write(core, id, &previous, &s);
                 }
+                (NativeWidget::Search(search), Prop::Text, Value::Str(s)) => {
+                    // The entry's arm above, one kind over.
+                    let previous = lf(gtk4::prelude::EditableExt::text(search).to_string());
+                    core.apply_quiet.set(true);
+                    gtk4::prelude::EditableExt::set_text(search, &s);
+                    core.apply_quiet.set(false);
+                    note_quiet_text_write(core, id, &previous, &s);
+                }
+// THE PROMPT AN EMPTY FIELD SHOWS (docs/search-plan.md S3): the platform's
+// own property on the two kinds that have one, and a label drawn over the
+// one that does not. Empty means unset, the universal prop rule.
+                (NativeWidget::Entry(entry), Prop::Placeholder, Value::Str(s)) => {
+                    entry.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
+                }
+                (NativeWidget::Search(search), Prop::Placeholder, Value::Str(s)) => {
+                    search.set_placeholder_text((!s.is_empty()).then_some(s.as_str()));
+                }
+                (NativeWidget::Textarea(_, view), Prop::Placeholder, Value::Str(s)) => {
+                    use gtk4::prelude::{
+                        AccessibleExt, Cast, TextBufferExt, TextViewExt, WidgetExt,
+                    };
+                    let label = core.textarea_prompts.entry(id.0).or_insert_with(|| {
+                        let label = gtk4::Label::new(None);
+                        label.set_xalign(0.0);
+                        label.add_css_class("dim-label");
+// IT IS DECORATION: no pointer reaches it, no focus lands on it, and role
+// None keeps it OUT of the accessible tree — the prompt is not part of the
+// text and never a node of its own (the SwiftUI arm's accessibilityHidden).
+// NOT the Hidden STATE, which was measured leaving the label on the bus.
+                        label.set_can_target(false);
+                        label.set_can_focus(false);
+                        label.set_accessible_role(gtk4::AccessibleRole::None);
+                        set_prompt_overlay(label.upcast_ref());
+                        view.add_overlay(&label, 0, 0);
+// AND THE WRAPPER GTK PUT AROUND IT: add_overlay parents the child inside a
+// GtkTextViewChild, which publishes a `panel` node of its own on the bus
+// (measured 2026-09-06 — role None on both silences it, PRESENTATION did
+// not). Out of the tree AND out of the ordinal walk, since a node the walk
+// cannot see shifts every later ordinal silently.
+                        if let Some(wrapper) = label.parent() {
+                            wrapper.set_accessible_role(gtk4::AccessibleRole::None);
+                            set_prompt_overlay(&wrapper);
+                        }
+                        let weak = glib::WeakRef::<gtk4::Label>::new();
+                        weak.set(Some(&label));
+                        let weak_view = glib::WeakRef::<gtk4::TextView>::new();
+                        weak_view.set(Some(view));
+                        view.buffer().connect_changed(move |_| {
+                            if let (Some(view), Some(label)) = (weak_view.upgrade(), weak.upgrade())
+                            {
+                                sync_textarea_prompt(&view, &label);
+                            }
+                        });
+                        label
+                    });
+                    label.set_text(&s);
+                    sync_textarea_prompt(view, label);
+                }
                 (NativeWidget::Textarea(_, view), Prop::Text, Value::Str(s)) => {
                     let buffer = view.buffer();
                     let previous =
@@ -10436,6 +10589,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let previous = core.text_of(id).unwrap_or_default();
                     match widget {
                         NativeWidget::Entry(entry) => entry.set_text(""),
+                        NativeWidget::Search(search) => {
+                            gtk4::prelude::EditableExt::set_text(search, "")
+                        }
                         NativeWidget::Textarea(_, view) => view.buffer().set_text(""),
                         _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
                     }
@@ -11015,6 +11171,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 checkboxes: Vec::new(),
                 labels: Vec::new(),
                 entries: Vec::new(),
+                searches: Vec::new(),
                 sliders: Vec::new(),
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
@@ -11029,6 +11186,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 grids: Vec::new(),
                 labeleds: Vec::new(),
                 textareas: Vec::new(),
+                textarea_prompts: HashMap::new(),
                 labeled_rows: HashMap::new(),
                 form_lists: HashMap::new(),
                 grid_children: HashMap::new(),
@@ -11571,7 +11729,10 @@ impl crate::harness::Stage for GtkStage {
                 None => match want {
                     atspi::Role::Button => "button",
                     atspi::Role::CheckBox => "checkbox",
-                    atspi::Role::Text => "field",
+                    // Both text controls fold to the closed set's one name
+                    // (docs/search-plan.md S7): UIA and Compose have no search
+                    // identity, so `search` cannot join it without lying.
+                    atspi::Role::Text | atspi::Role::Entry => "field",
                     atspi::Role::Label => "label",
                     // The heading role, spelled the way every other backend
                     // spells it: `heading/<the label's text>`.
@@ -11686,11 +11847,61 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    fn clear_search(&self, _: crate::harness::Target) {
-        crate::depth_stub("search")
+    /// THE CLEAR ACT (docs/search-plan.md S5), through the SIGNAL and not a
+    /// write: GtkSearchEntry draws its own clear icon and no code can click
+    /// it, so the harness takes Escape's door — `stop-search`, whose handler
+    /// is the one this backend installed at create, so the button, the key
+    /// and this verb are one path. On the main thread, like set_text.
+    fn clear_search(&self, target: crate::harness::Target) {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.searches.len()) else {
+                return;
+            };
+            core.searches[i].emit_stop_search();
+        });
     }
-    fn placeholder_text(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("search")
+
+    /// The prompt OFF THE CONTROL (S3): GTK's own `placeholder-text` on the
+    /// two kinds that have the property, and the label this backend draws
+    /// over an empty textarea, which is the whole prompt that kind has.
+    fn placeholder_text(&self, target: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use crate::harness::TargetKind as K;
+            match target.kind {
+                K::Search => match crate::harness::try_resolve(target.index, core.searches.len()) {
+                    None => "<no such target>".to_owned(),
+                    Some(i) => core.searches[i]
+                        .placeholder_text()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default(),
+                },
+                K::Entry => match crate::harness::try_resolve(target.index, core.entries.len()) {
+                    None => "<no such target>".to_owned(),
+                    Some(i) => core.entries[i]
+                        .placeholder_text()
+                        .map(|s| s.to_string())
+                        .unwrap_or_default(),
+                },
+                K::Textarea => {
+                    match crate::harness::try_resolve(target.index, core.textareas.len()) {
+                        None => "<no such target>".to_owned(),
+                        Some(i) => {
+                            let view = core.textareas[i].clone().upcast::<gtk4::Widget>();
+                            match core
+                                .widgets
+                                .iter()
+                                .find(|(_, w)| w.control() == view)
+                                .and_then(|(id, _)| core.textarea_prompts.get(&id.0))
+                            {
+                                None => String::new(),
+                                Some(label) => label.text().to_string(),
+                            }
+                        }
+                    }
+                }
+                other => panic!("kaya: placeholder_text not wired for {other:?} on gtk"),
+            }
+        })
     }
     /// The control's tooltip text, off the widget GTK would show it for
     /// (docs/tooltip-plan.md T5).
@@ -12305,6 +12516,10 @@ impl crate::harness::Stage for GtkStage {
                     let i = crate::harness::resolve(t.index, core.textareas.len());
                     core.textareas[i].grab_focus();
                 }
+                crate::harness::TargetKind::Search => {
+                    let i = crate::harness::resolve(t.index, core.searches.len());
+                    core.searches[i].grab_focus();
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.buttons[i].emit_clicked();
@@ -12453,6 +12668,9 @@ impl crate::harness::Stage for GtkStage {
             match core.widgets.get(&id) {
                 Some(NativeWidget::Entry(entry)) => {
                     gtk4::prelude::EditableExt::set_position(entry, -1);
+                }
+                Some(NativeWidget::Search(search)) => {
+                    gtk4::prelude::EditableExt::set_position(search, -1);
                 }
                 Some(NativeWidget::Textarea(_, view)) => {
                     let buffer = view.buffer();
@@ -12641,6 +12859,10 @@ impl crate::harness::Stage for GtkStage {
                 let i = crate::harness::resolve(t.index, core.textareas.len());
                 core.textareas[i].buffer().set_text(&text);
                 core.textareas[i].clone().upcast::<gtk4::Widget>()
+            } else if t.kind == crate::harness::TargetKind::Search {
+                let i = crate::harness::resolve(t.index, core.searches.len());
+                gtk4::prelude::EditableExt::set_text(&core.searches[i], &text);
+                core.searches[i].clone().upcast::<gtk4::Widget>()
             } else {
                 let i = crate::harness::resolve(t.index, core.entries.len());
                 core.entries[i].set_text(&text);
@@ -12675,6 +12897,12 @@ impl crate::harness::Stage for GtkStage {
                 };
                 let b = core.textareas[i].buffer();
                 return lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
+            }
+            if t.kind == crate::harness::TargetKind::Search {
+                let Some(i) = crate::harness::try_resolve(t.index, core.searches.len()) else {
+                    return "<no such target>".to_string();
+                };
+                return lf(gtk4::prelude::EditableExt::text(&core.searches[i]).to_string());
             }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return "<no such target>".to_string();
@@ -12720,6 +12948,13 @@ impl crate::harness::Stage for GtkStage {
                         return false;
                     };
                     widget_focused(&core.textareas[i])
+                }
+                crate::harness::TargetKind::Search => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.searches.len())
+                    else {
+                        return false;
+                    };
+                    widget_focused(&core.searches[i])
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on gtk"),
             }
@@ -14894,6 +15129,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Checkbox => nth!(core.checkboxes),
         K::Label => nth!(core.labels),
         K::Entry => nth!(core.entries),
+        K::Search => nth!(core.searches),
         K::Textarea => nth!(core.textareas),
         K::DatePicker => try_resolve(target.index, core.date_pickers.len())
             .map(|i| core.date_pickers[i].button.clone().upcast()),
@@ -14944,6 +15180,12 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     if w.accessible_role() == gtk4::AccessibleRole::Heading {
         return Some(atspi::Role::Heading);
     }
+    // A textarea's drawn prompt is HIDDEN to GTK's accessible tree, so the
+    // bus publishes no node for it and this walk must not count one either
+    // (docs/search-plan.md S3). BEFORE the Label check: it is a GtkLabel.
+    if is_prompt_overlay(w) {
+        return None;
+    }
     if w.is::<gtk4::Label>() {
         // Kaya's labels AND the captions inside buttons and check
         // boxes: all of them are Label nodes on the bus.
@@ -14970,6 +15212,13 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // that made `textarea#0` read the entry's name.
     if w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>() {
         return Some(atspi::Role::Text);
+    }
+    // THE SEARCH BOX IS ITS OWN ROLE, and not the entry's: GtkSearchEntry
+    // declares GTK_ACCESSIBLE_ROLE_SEARCH_BOX, which the bus publishes as
+    // `entry` while a GtkEntry publishes `text` (both measured 2026-09-06 on
+    // GTK 4.18 in the image). So the two never share an ordinal family.
+    if w.is::<gtk4::SearchEntry>() {
+        return Some(atspi::Role::Entry);
     }
     if w.is::<gtk4::Scale>() {
         return Some(atspi::Role::Slider);

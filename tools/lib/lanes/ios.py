@@ -22,7 +22,7 @@ body's IOS_*_SCENES assignments.
 # naming a different one where two scenes share an app: a scene selects a
 # SCRIPT, never an app (`listdetail:split` is the only such pair).
 SWIFT_ENTRIES = [
-    "milestone2", "stall", "entry", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail:split", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",
@@ -37,7 +37,7 @@ SWIFT_ENTRIES = [
 # rust-only canvas scenes, plus `editor` off-list below — a Go app with
 # no swift guest to mirror (docs/editor-plan.md).
 GO_SCENES = [
-    "milestone2", "stall", "entry", "gallery", "todos",
+    "milestone2", "stall", "entry", "search", "gallery", "todos",
     "reorder", "feed", "grow", "align", "layout",
     "confirm", "nav", "listdetail", "scroll", "progress",
     "select", "radio", "grid", "textarea", "sections",

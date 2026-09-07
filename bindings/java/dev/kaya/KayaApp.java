@@ -2519,6 +2519,26 @@ public final class KayaApp {
             return this;
         }
 
+        public Widget placeholder(String text) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: placeholder on a widget outside its build transaction"
+                    + " — use Tx.setPlaceholder inside a live transaction");
+            }
+            tx.setPlaceholder(this, text);
+            return this;
+        }
+
+        public Widget placeholder(Signal<String> s) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: placeholder on a widget outside its build transaction"
+                    + " — use Tx.setPlaceholder inside a live transaction");
+            }
+            tx.setPlaceholder(this, s);
+            return this;
+        }
+
         public Widget a11yHint(Signal<String> s) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2943,6 +2963,22 @@ public final class KayaApp {
             return t.textarea(f);
         }
 
+        public Node search() {
+            return t.search();
+        }
+
+        public Node search(String text) {
+            return t.search(text);
+        }
+
+        public Node search(Signal<String> s) {
+            return t.search(s);
+        }
+
+        public Node search(KayaRecords.Field<String> f) {
+            return t.search(f);
+        }
+
         public Node row(Runnable body) {
             return t.row(body);
         }
@@ -3174,6 +3210,24 @@ public final class KayaApp {
 
         public void bindHelpField(Node n, int level, KayaRecords.Field<String> f) {
             t.bindHelpField(n, level, f);
+        }
+
+        /** This row's copy of that field's PROMPT while it is empty
+         * ({@link Tpl#setPlaceholder(Node, String)}). */
+        public void setPlaceholder(Node n, String text) {
+            t.setPlaceholder(n, text);
+        }
+
+        public void setPlaceholder(Node n, Signal<String> s) {
+            t.setPlaceholder(n, s);
+        }
+
+        public void setPlaceholder(Node n, KayaRecords.Field<String> f) {
+            t.setPlaceholder(n, f);
+        }
+
+        public void bindPlaceholderField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindPlaceholderField(n, level, f);
         }
 
         /** What activating this row's copy of that node does —
@@ -3875,6 +3929,20 @@ public final class KayaApp {
             emit(KayaWire.txBindHelp(w.id, s.id));
         }
 
+        /**
+         * The PROMPT a text field shows while it is empty
+         * (docs/search-plan.md S3): the platform's own placeholder,
+         * never part of the text and never emitted. Entry, textarea and
+         * search only, checked at the root.
+         */
+        public void setPlaceholder(Widget w, String text) {
+            emit(KayaWire.txSetPlaceholder(w.id, text));
+        }
+
+        public void setPlaceholder(Widget w, Signal<String> s) {
+            emit(KayaWire.txBindPlaceholder(w.id, s.id));
+        }
+
         public void bindChecked(Widget w, Signal<Boolean> s) {
             emit(KayaWire.txBindChecked(w.id, s.id));
         }
@@ -4286,6 +4354,20 @@ public final class KayaApp {
 
         public Widget entry(BiConsumer<Tx, String> onChange) {
             Widget w = entry();
+            KayaApp.this.onChange(w, onChange);
+            return w;
+        }
+
+        /** A search field: the entry's uncontrolled contract under the
+         * platform's search chrome, filtering on every keystroke
+         * (docs/search-plan.md); the clear affordance arrives as a
+         * change with "". Register its handler with app.onChange. */
+        public Widget search() {
+            return widget(KayaWire.KIND_SEARCH);
+        }
+
+        public Widget search(BiConsumer<Tx, String> onChange) {
+            Widget w = search();
             KayaApp.this.onChange(w, onChange);
             return w;
         }
@@ -5298,6 +5380,24 @@ public final class KayaApp {
             tx.emit(KayaWire.txBindHelpElement(n.id, level, f.index));
         }
 
+        /** A stamped field's PROMPT while it is empty, the blueprint
+         * twin of {@link Tx#setPlaceholder(Widget, String)}. */
+        public void setPlaceholder(Node n, String text) {
+            tx.emit(KayaWire.txSetPlaceholder(n.id, text));
+        }
+
+        public void setPlaceholder(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindPlaceholder(n.id, s.id));
+        }
+
+        public void setPlaceholder(Node n, KayaRecords.Field<String> f) {
+            bindPlaceholderField(n, 0, f);
+        }
+
+        public void bindPlaceholderField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindPlaceholderElement(n.id, level, f.index));
+        }
+
         /**
          * What ACTIVATING a stamped copy does — a verb phrase, the
          * blueprint twin of {@link Tx#setA11yHint(Widget, String)}. THE
@@ -5744,6 +5844,32 @@ public final class KayaApp {
          * {@link #entry(KayaRecords.Field)}'s fold warning in full. */
         public Node textarea(KayaRecords.Field<String> f) {
             Node n = widget(KayaWire.KIND_TEXTAREA);
+            bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A search field per stamped copy: {@link #entry()}'s
+         * uncontrolled contract under the platform's search chrome
+         * (docs/search-plan.md), with the same three seeding overloads
+         * for the same reason. */
+        public Node search() {
+            return widget(KayaWire.KIND_SEARCH);
+        }
+
+        public Node search(String text) {
+            Node n = widget(KayaWire.KIND_SEARCH);
+            setText(n, text);
+            return n;
+        }
+
+        public Node search(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_SEARCH);
+            tx.emit(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        public Node search(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_SEARCH);
             bindTextField(n, 0, f);
             return n;
         }

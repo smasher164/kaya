@@ -45,6 +45,7 @@ with app.window():
             kaya.slider(value=pos, min=0.0, max=1.0, on_change=on_volume)
             kaya.label(bind=volume)
             kaya.button("quarter", on_click=on_quarter)
+        kaya.search(placeholder="Search").a11y_id("find")
         with kaya.row():
             # A decode failure is the placeholder class, never a crash.
             kaya.image(TEST_PNG)

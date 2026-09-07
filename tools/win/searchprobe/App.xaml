@@ -1,0 +1,20 @@
+<!-- THE APP'S ONE PIECE OF MARKUP, and the reason it exists: a WinUI 3 app
+     with no XAML at all gets no generated IXamlMetadataProvider, and the
+     framework's deferred theme dictionaries then cannot be parsed —
+     `new XamlControlsResources()` throws "Cannot find a resource with the
+     given key: AcrylicBackgroundFillColorDefaultBrush" and the window dies
+     on Activate. Measured on this VM 2026-09-06 (the dragprobe recorded the
+     same failure and worked around it by using only Borders). kaya's own
+     backend composes a metadata provider in Rust; this is the C# spelling. -->
+<Application
+    x:Class="KayaSearchProbe.ProbeApp"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

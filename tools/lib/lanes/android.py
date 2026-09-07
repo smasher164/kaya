@@ -59,6 +59,7 @@ LEGS = {
         # The task manager: a RUST app by design (docs/tasks-plan.md §0).
         "tasks-compose",
         "tooltips-compose",
+        "search-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -67,7 +68,7 @@ LEGS = {
         "align-jvm", "layout-jvm", "stall-jvm",
         "confirm-jvm", "nav-jvm", "scroll-jvm",
         "progress-jvm", "select-jvm", "radio-jvm",
-        "grid-jvm", "textarea-jvm", "sections-jvm",
+        "grid-jvm", "textarea-jvm", "search-jvm", "sections-jvm",
         "menus-jvm", "toolbar-jvm", "identity-jvm",
         "listdetail-jvm", "commands-jvm", "clipboard-jvm",
         "background-jvm", "undo-jvm", "filedialog-jvm",
@@ -84,7 +85,7 @@ LEGS = {
         "layout-go", "stall-go", "confirm-go",
         "nav-go", "scroll-go", "progress-go",
         "select-go", "radio-go", "grid-go",
-        "textarea-go", "sections-go", "menus-go",
+        "textarea-go", "search-go", "sections-go", "menus-go",
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",

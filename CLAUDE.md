@@ -416,6 +416,22 @@ in docs/deferred.md.
    counts printed — per backend the per-movement commit, the missing end
    and an end that is not final, WinUI's pointer read renamed away, and
    the withheld row),
+   `tools/check-search.py` (THE SEARCH FIELD CLEARS ONE WAY AND SAYS WHAT
+   IT IS (docs/search-plan.md S5, S7). Clearing is one act: the field's
+   affordance, Escape on a desktop and the harness's clear_search empty
+   the text through ONE path and reach the app as text_changed("") with
+   the focus kept — and no scene can see an Escape arm that stopped
+   clearing, because the shared scene drives clear_search, which takes
+   the affordance's door or Escape's on each backend; nor a verb that
+   started writing the text itself and stopped exercising the key's
+   path. Each backend also gives its reader the identity its platform
+   has (AXSearchField and the isSearchField trait, GTK's SEARCH_BOX,
+   Compose's prompt as the field's name) while the shared verdict stays
+   `field`, so a dropped identity reads like a kept one. GTK is held to
+   `changed` rather than the 150 ms `search-changed` (S6). The table
+   grows by itself, check-slider-commit's shape: a backend whose
+   `depth_stub("search")` goes must take a row. Eight watched negatives,
+   counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

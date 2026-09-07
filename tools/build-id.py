@@ -73,6 +73,9 @@ GATES = {
     # The slider commit rule is a lowering: no binding stands between the
     # occurrence and the four arms.
     "check-slider-commit": ["crates", "android"],
+    # The search field's one clear path and platform identity are lowerings
+    # in three files; swift/ because the Mac and iOS arms live there.
+    "check-search": ["crates", "swift", "android"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

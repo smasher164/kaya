@@ -31,6 +31,7 @@ func App() *kaya.App {
 					tx.Write(pos, 0.25)
 				})
 			})
+			tx.Search(nil).Placeholder("Search").A11yID("find")
 			tx.Row(func() {
 				// A decode failure is the placeholder class, never a crash.
 				tx.Image(testPNG)

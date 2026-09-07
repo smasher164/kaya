@@ -47,6 +47,7 @@ app.window(() => {
       kaya.label({ bind: volume });
       kaya.button("quarter", { onClick: onQuarter });
     });
+    kaya.search({ placeholder: "Search" }).a11yId("find");
     kaya.row(() => {
       // A decode failure is the placeholder class, never a crash.
       kaya.image(TEST_PNG);

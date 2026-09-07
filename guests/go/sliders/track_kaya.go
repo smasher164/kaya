@@ -100,6 +100,10 @@ func (r trackRow) SetHelp(n kaya.Node, text string) { r.t.SetHelp(n, text) }
 
 func (r trackRow) Help(n kaya.Node, f kaya.Field[string]) { r.c.Help(r.t, n, f) }
 
+func (r trackRow) SetPlaceholder(n kaya.Node, text string) { r.t.SetPlaceholder(n, text) }
+
+func (r trackRow) Placeholder(n kaya.Node, f kaya.Field[string]) { r.c.Placeholder(r.t, n, f) }
+
 func (r trackRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
 func (r trackRow) SetFill(n kaya.Node, on bool) { r.t.SetFill(n, on) }

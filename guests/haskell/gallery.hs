@@ -44,6 +44,7 @@ main = kayaMain $ \app -> do
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],
+          search [Placeholder "Search", A11yId "find"],
           {- Deliberately invalid bytes: a decode failure reads 0x0. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")],
           {- The labelled row: the control's accessibility name IS the

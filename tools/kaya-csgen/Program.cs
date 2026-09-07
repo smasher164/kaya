@@ -366,6 +366,10 @@ static class Program
         Fwd("Textarea", ["string text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Textarea", ["Signal text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Textarea", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Search", [$"{onText} onChange = null"], "onChange");
+        Fwd("Search", ["string text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Search", ["Signal text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Search", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
         Fwd("Progress", ["double value"], "value");
         Fwd("Progress", ["Signal value"], "value");
         Fwd("Progress", ["Field<double> value"], "value");
@@ -434,6 +438,9 @@ static class Program
         Set("SetHelp", ["Node n", "string text"], "n, text");
         Set("SetHelp", ["Node n", "Signal s"], "n, s");
         Set("SetHelp", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetPlaceholder", ["Node n", "string text"], "n, text");
+        Set("SetPlaceholder", ["Node n", "Signal s"], "n, s");
+        Set("SetPlaceholder", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetAccepts", ["Node n", "params string[] kinds"], "n, kinds");
         FwdAs("TplDragRef", "Draggable", ["Node n"], "n");
         Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");

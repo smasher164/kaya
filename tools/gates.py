@@ -91,6 +91,7 @@ GATES = [
     # on every movement of a real drag passes sliders.steps byte for
     # byte (measured 2026-09-04).
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
+    ("check-search", ["tools/check-search.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),

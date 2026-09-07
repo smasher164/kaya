@@ -8190,6 +8190,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyUp)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8198,6 +8213,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyDown)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -8842,6 +8872,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -8850,6 +8895,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -10369,10 +10429,18 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub SetTabIndex:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
-                KeyUp: usize,
+                pub KeyUp: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
                 pub RemoveKeyUp:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                KeyDown: usize,
+                pub KeyDown: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
                 pub RemoveKeyDown:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
                 pub GotFocus: unsafe extern "system" fn(
@@ -10559,10 +10627,20 @@ pub mod Microsoft {
                 NoFocusCandidateFound: usize,
                 pub RemoveNoFocusCandidateFound:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PreviewKeyDown: usize,
+                pub PreviewKeyDown: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePreviewKeyDown:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                PreviewKeyUp: usize,
+                pub PreviewKeyUp: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                )
+                    -> windows_core::HRESULT,
                 pub RemovePreviewKeyUp:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
                 BringIntoViewRequested: usize,
@@ -12703,6 +12781,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyUp)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -12711,6 +12804,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyDown)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -13355,6 +13463,21 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -13363,6 +13486,21 @@ pub mod Microsoft {
                             token,
                         )
                         .ok()
+                    }
+                }
+                pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<Input::KeyEventHandler>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -14572,6 +14710,38 @@ pub mod Microsoft {
                             .ok()
                         })
                     }
+                    pub fn GetAccessibilityView<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<Peers::AccessibilityView>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetAccessibilityView)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetAccessibilityView<P0>(
+                        element: P0,
+                        value: Peers::AccessibilityView,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetAccessibilityView)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
                     pub fn GetControlledPeers<P0>(
                         element: P0,
                     ) -> windows_core::Result<windows_collections::IVector<super::UIElement>>
@@ -15175,8 +15345,18 @@ pub mod Microsoft {
                     GetLiveSetting: usize,
                     SetLiveSetting: usize,
                     AccessibilityViewProperty: usize,
-                    GetAccessibilityView: usize,
-                    SetAccessibilityView: usize,
+                    pub GetAccessibilityView: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut Peers::AccessibilityView,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetAccessibilityView: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        Peers::AccessibilityView,
+                    )
+                        -> windows_core::HRESULT,
                     ControlledPeersProperty: usize,
                     pub GetControlledPeers: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
@@ -15382,6 +15562,23 @@ pub mod Microsoft {
                         ) -> windows_core::HRESULT,
                 }
                 pub mod Peers {
+                    #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct AccessibilityView(pub i32);
+                    impl AccessibilityView {
+                        pub const Raw: Self = Self(0i32);
+                        pub const Control: Self = Self(1i32);
+                        pub const Content: Self = Self(2i32);
+                    }
+                    impl windows_core::TypeKind for AccessibilityView {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for AccessibilityView {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::from_slice(
+                                b"enum(Microsoft.UI.Xaml.Automation.Peers.AccessibilityView;i4)",
+                            );
+                    }
                     #[repr(transparent)]
                     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
                     pub struct AutomationControlType(pub i32);
@@ -25383,6 +25580,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -27354,6 +27603,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27362,6 +27626,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -28023,6 +28302,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -28031,6 +28325,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -29048,6 +29357,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -31019,6 +31380,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -31027,6 +31403,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -31688,6 +32079,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -31696,6 +32102,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -32593,6 +33014,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -34564,6 +35037,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34572,6 +35060,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -35233,6 +35736,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -35241,6 +35759,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -36448,6 +36981,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -38419,6 +39004,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -38427,6 +39027,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -39088,6 +39703,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -39096,6 +39726,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -40027,6 +40672,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -42151,6 +42848,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -42159,6 +42871,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -42820,6 +43547,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -42828,6 +43570,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -44266,6 +45023,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -46683,6 +47492,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -46691,6 +47515,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -47352,6 +48191,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -47360,6 +48214,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -48150,6 +49019,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -50150,6 +51071,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -50158,6 +51094,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -50819,6 +51770,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -50827,6 +51793,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -51919,6 +52900,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -53890,6 +54923,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -53898,6 +54946,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -54559,6 +55622,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -54567,6 +55645,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -55365,6 +56458,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -57336,6 +58481,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -57344,6 +58504,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -58005,6 +59180,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -58013,6 +59203,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -59246,6 +60451,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn OnGotFocus<P0>(&self, e: P0) -> windows_core::Result<()>
                     where
                         P0: windows_core::Param<super::RoutedEventArgs>,
@@ -61217,6 +62474,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -61225,6 +62497,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -61886,6 +63173,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -61894,6 +63196,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -62666,6 +63983,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -64703,6 +66072,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -64711,6 +66095,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -65372,6 +66771,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -65380,6 +66794,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -67685,6 +69114,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -67693,6 +69137,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -68354,6 +69813,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -68362,6 +69836,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -70763,6 +72252,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -70771,6 +72275,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -71432,6 +72951,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -71440,6 +72974,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -73570,10 +75119,26 @@ pub mod Microsoft {
                     OnManipulationStarted: usize,
                     OnManipulationDelta: usize,
                     OnManipulationCompleted: usize,
-                    OnKeyUp: usize,
-                    OnKeyDown: usize,
-                    OnPreviewKeyDown: usize,
-                    OnPreviewKeyUp: usize,
+                    pub OnKeyUp: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnKeyDown: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPreviewKeyDown: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OnPreviewKeyUp: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub OnGotFocus: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut core::ffi::c_void,
@@ -81336,6 +82901,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -81344,6 +82924,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -82005,6 +83600,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -82013,6 +83623,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -84320,6 +85945,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -84328,6 +85968,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -84989,6 +86644,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -84997,6 +86667,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -86138,6 +87823,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -88448,6 +90185,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88456,6 +90208,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -89117,6 +90884,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -89125,6 +90907,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -89850,6 +91647,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -91853,6 +93702,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91861,6 +93725,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -92522,6 +94401,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -92530,6 +94424,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -93251,6 +95160,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -95278,6 +97239,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95286,6 +97262,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -95947,6 +97938,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -95955,6 +97961,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -97142,6 +99163,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -99257,6 +101330,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -99265,6 +101353,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -99926,6 +102029,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -99934,6 +102052,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -100660,6 +102793,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -102637,6 +104822,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -102645,6 +104845,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -103306,6 +105521,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -103314,6 +105544,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -104017,6 +106262,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -106006,6 +108303,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -106014,6 +108326,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -106675,6 +109002,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -106683,6 +109025,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -107413,6 +109770,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -109452,6 +111861,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -109460,6 +111884,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -110121,6 +112560,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -110129,6 +112583,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -110899,6 +113368,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -113794,6 +116315,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -113802,6 +116338,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -114463,6 +117014,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -114471,6 +117037,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -115366,6 +117947,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -117541,6 +120174,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -117549,6 +120197,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -118210,6 +120873,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -118218,6 +120896,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -119024,6 +121717,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -121024,6 +123769,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121032,6 +123792,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -121693,6 +124468,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -121701,6 +124491,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -123952,6 +126757,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -123960,6 +126780,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -124621,6 +127456,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -124629,6 +127479,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -125345,6 +128210,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -127578,6 +130495,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -127586,6 +130518,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -128247,6 +131194,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -128255,6 +131217,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -128980,6 +131957,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -131162,6 +134191,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -131170,6 +134214,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -131831,6 +134890,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -131839,6 +134913,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -132566,6 +135655,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -134756,6 +137897,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -134764,6 +137920,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -135425,6 +138596,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -135433,6 +138619,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -136171,6 +139372,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -138829,6 +142082,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -138837,6 +142105,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -139498,6 +142781,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -139506,6 +142804,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -140714,6 +144027,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -144018,6 +147383,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -144026,6 +147406,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -144687,6 +148082,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -144695,6 +148105,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -145654,6 +149079,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -148025,6 +151502,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -148033,6 +151525,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -148694,6 +152201,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -148702,6 +152224,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -151080,6 +154617,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151088,6 +154640,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -151749,6 +155316,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -151757,6 +155339,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -154321,6 +157918,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154329,6 +157941,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -154990,6 +158617,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -154998,6 +158640,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -155711,6 +159368,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -158542,6 +162251,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -158550,6 +162274,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -159211,6 +162950,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -159219,6 +162973,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -160397,6 +164166,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -162560,6 +166381,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -162568,6 +166404,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -163229,6 +167080,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -163237,6 +167103,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -164024,6 +167905,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -166356,6 +170289,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -166364,6 +170312,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -167025,6 +170988,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -167033,6 +171011,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -167768,6 +171761,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -169904,6 +173949,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -169912,6 +173972,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -170573,6 +174648,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -170581,6 +174671,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -171363,6 +175468,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -173523,6 +177680,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -173531,6 +177703,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -174192,6 +178379,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -174200,6 +178402,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -175020,6 +179237,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Input::KeyRoutedEventArgs>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControlOverrides>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                 windows_core::Interface::as_raw(this),
                                 e.param().abi(),
                             )
@@ -177266,6 +181535,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -177274,6 +181558,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).KeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -177935,6 +182234,21 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -177943,6 +182257,21 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<super::Input::KeyEventHandler>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -179465,6 +183794,62 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                     windows_core::Interface::as_raw(this),
                                     e.param().abi(),
                                 )
@@ -181667,6 +186052,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -181676,6 +186077,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -182395,6 +186812,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -182404,6 +186837,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -186643,6 +191092,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -186652,6 +191117,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -187371,6 +191852,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -187380,6 +191877,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -188168,6 +192681,62 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                     windows_core::Interface::as_raw(this),
                                     e.param().abi(),
                                 )
@@ -190557,6 +195126,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -190566,6 +195151,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -191285,6 +195886,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -191294,6 +195911,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -192286,6 +196919,62 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                     windows_core::Interface::as_raw(this),
                                     e.param().abi(),
                                 )
@@ -195009,6 +199698,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -195018,6 +199723,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -195737,6 +200458,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -195746,6 +200483,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -196578,6 +201331,62 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                     windows_core::Interface::as_raw(this),
                                     e.param().abi(),
                                 )
@@ -198813,6 +203622,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -198822,6 +203647,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -199541,6 +204382,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -199550,6 +204407,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -200506,6 +205379,62 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).OnPointerWheelChanged)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyDown<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    e.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn OnPreviewKeyUp<P0>(&self, e: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyRoutedEventArgs>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::IControlOverrides>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).OnPreviewKeyUp)(
                                     windows_core::Interface::as_raw(this),
                                     e.param().abi(),
                                 )
@@ -202860,6 +207789,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemoveKeyUp(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -202869,6 +207814,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn KeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).KeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemoveKeyDown(&self, token: i64) -> windows_core::Result<()> {
@@ -203588,6 +208549,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn PreviewKeyDown<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyDown)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn RemovePreviewKeyDown(&self, token: i64) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -203597,6 +208574,22 @@ pub mod Microsoft {
                                     token,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn PreviewKeyUp<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                        where
+                            P0: windows_core::Param<super::super::Input::KeyEventHandler>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).PreviewKeyUp)(
+                                    windows_core::Interface::as_raw(this),
+                                    handler.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn RemovePreviewKeyUp(&self, token: i64) -> windows_core::Result<()> {
@@ -204072,6 +209065,46 @@ pub mod Microsoft {
                         ) -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
+                    IKeyRoutedEventArgs,
+                    IKeyRoutedEventArgs_Vtbl,
+                    0xee357007_a2d6_5c75_9431_05fd66ec7915
+                );
+                impl windows_core::RuntimeType for IKeyRoutedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IKeyRoutedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Key: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::System::VirtualKey,
+                    )
+                        -> windows_core::HRESULT,
+                    KeyStatus: usize,
+                    pub Handled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHandled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OriginalKey: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::System::VirtualKey,
+                    )
+                        -> windows_core::HRESULT,
+                    pub DeviceId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
                     IKeyboardAccelerator,
                     IKeyboardAccelerator_Vtbl,
                     0x6f8bf1e2_4e91_5cf9_a6be_4770caf3d770
@@ -204207,6 +209240,237 @@ pub mod Microsoft {
                     GetCurrentPoint: usize,
                     GetIntermediatePoints: usize,
                 }
+                windows_core::imp::define_interface!(
+                    KeyEventHandler,
+                    KeyEventHandler_Vtbl,
+                    0xdb68e7cc_9a2b_527d_9989_25284daccc03
+                );
+                impl windows_core::RuntimeType for KeyEventHandler {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                impl KeyEventHandler {
+                    pub fn new<
+                        F: FnMut(
+                                windows_core::Ref<'_, windows_core::IInspectable>,
+                                windows_core::Ref<'_, KeyRoutedEventArgs>,
+                            ) -> windows_core::Result<()>
+                            + Send
+                            + 'static,
+                    >(
+                        invoke: F,
+                    ) -> Self {
+                        let com = KeyEventHandlerBox {
+                            vtable: &KeyEventHandlerBox::<F>::VTABLE,
+                            count: windows_core::imp::RefCount::new(1),
+                            invoke,
+                        };
+                        unsafe { core::mem::transmute(windows_core::imp::Box::new(com)) }
+                    }
+                    pub fn Invoke<P0, P1>(&self, sender: P0, e: P1) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                        P1: windows_core::Param<KeyRoutedEventArgs>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Invoke)(
+                                windows_core::Interface::as_raw(this),
+                                sender.param().abi(),
+                                e.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct KeyEventHandler_Vtbl {
+                    base__: windows_core::IUnknown_Vtbl,
+                    Invoke: unsafe extern "system" fn(
+                        this: *mut core::ffi::c_void,
+                        sender: *mut core::ffi::c_void,
+                        e: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+                }
+                #[repr(C)]
+                struct KeyEventHandlerBox<
+                    F: FnMut(
+                            windows_core::Ref<'_, windows_core::IInspectable>,
+                            windows_core::Ref<'_, KeyRoutedEventArgs>,
+                        ) -> windows_core::Result<()>
+                        + Send
+                        + 'static,
+                > {
+                    vtable: *const KeyEventHandler_Vtbl,
+                    invoke: F,
+                    count: windows_core::imp::RefCount,
+                }
+                impl<
+                        F: FnMut(
+                                windows_core::Ref<'_, windows_core::IInspectable>,
+                                windows_core::Ref<'_, KeyRoutedEventArgs>,
+                            ) -> windows_core::Result<()>
+                            + Send
+                            + 'static,
+                    > KeyEventHandlerBox<F>
+                {
+                    const VTABLE: KeyEventHandler_Vtbl = KeyEventHandler_Vtbl {
+                        base__: windows_core::IUnknown_Vtbl {
+                            QueryInterface: Self::QueryInterface,
+                            AddRef: Self::AddRef,
+                            Release: Self::Release,
+                        },
+                        Invoke: Self::Invoke,
+                    };
+                    unsafe extern "system" fn QueryInterface(
+                        this: *mut core::ffi::c_void,
+                        iid: *const windows_core::GUID,
+                        interface: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            if iid.is_null() || interface.is_null() {
+                                return windows_core::HRESULT(-2147467261);
+                            }
+                            * interface = if * iid == < KeyEventHandler as windows_core::Interface >::IID || * iid == < windows_core::IUnknown as windows_core::Interface >::IID || * iid == < windows_core::imp::IAgileObject as windows_core::Interface >::IID { & mut ( * this ) . vtable as * mut _ as _ } else if * iid == < windows_core::imp::IMarshal as windows_core::Interface >::IID { ( * this ) . count . add_ref ( ) ; return windows_core::imp::marshaler ( core::mem::transmute ( & mut ( * this ) . vtable as * mut _ as * mut core::ffi::c_void ) , interface ) ; } else { core::ptr::null_mut ( ) } ;
+                            if (*interface).is_null() {
+                                windows_core::HRESULT(-2147467262)
+                            } else {
+                                (*this).count.add_ref();
+                                windows_core::HRESULT(0)
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn AddRef(this: *mut core::ffi::c_void) -> u32 {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            (*this).count.add_ref()
+                        }
+                    }
+                    unsafe extern "system" fn Release(this: *mut core::ffi::c_void) -> u32 {
+                        unsafe {
+                            let this = this as *mut *mut core::ffi::c_void as *mut Self;
+                            let remaining = (*this).count.release();
+                            if remaining == 0 {
+                                let _ = windows_core::imp::Box::from_raw(this);
+                            }
+                            remaining
+                        }
+                    }
+                    unsafe extern "system" fn Invoke(
+                        this: *mut core::ffi::c_void,
+                        sender: *mut core::ffi::c_void,
+                        e: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this = &mut *(this as *mut *mut core::ffi::c_void as *mut Self);
+                            (this.invoke)(
+                                core::mem::transmute_copy(&sender),
+                                core::mem::transmute_copy(&e),
+                            )
+                            .into()
+                        }
+                    }
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct KeyRoutedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    KeyRoutedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(KeyRoutedEventArgs, super::RoutedEventArgs);
+                impl KeyRoutedEventArgs {
+                    pub fn Key(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::System::VirtualKey>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Key)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Handled(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Handled)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHandled)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn OriginalKey(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::System::VirtualKey>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).OriginalKey)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn DeviceId(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DeviceId)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn OriginalSource(
+                        &self,
+                    ) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<super::IRoutedEventArgs>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).OriginalSource)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for KeyRoutedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IKeyRoutedEventArgs>();
+                }
+                unsafe impl windows_core::Interface for KeyRoutedEventArgs {
+                    type Vtable = <IKeyRoutedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IKeyRoutedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for KeyRoutedEventArgs {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Input.KeyRoutedEventArgs";
+                }
+                unsafe impl Send for KeyRoutedEventArgs {}
+                unsafe impl Sync for KeyRoutedEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct KeyboardAccelerator(windows_core::IUnknown);

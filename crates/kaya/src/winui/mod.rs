@@ -84,7 +84,9 @@ use bindings::Microsoft::UI::Xaml::Controls::Primitives::Popup;
 use bindings::Microsoft::UI::Xaml::Controls::Primitives::{
     RangeBaseValueChangedEventArgs, RangeBaseValueChangedEventHandler, SliderSnapsTo, TickPlacement,
 };
-use bindings::Microsoft::UI::Xaml::Input::{PointerEventHandler, PointerRoutedEventArgs};
+use bindings::Microsoft::UI::Xaml::Input::{
+    KeyEventHandler, PointerEventHandler, PointerRoutedEventArgs,
+};
 use windows::Win32::System::WinRT::IBufferByteAccess;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -133,6 +135,14 @@ enum NativeWidget {
     /// The labelled row (docs/forms-plan.md §3): a Grid of Auto label,
     /// star control and Auto trailing action.
     Labeled(Grid),
+    /// The search field (docs/search-plan.md §3, ruled for this backend
+    /// 2026-09-06 after the probe in docs/measurements/search-winui-2026-09-06.md):
+    /// a plain `TextBox`, whose template already carries the platform's own
+    /// clear button, under a one-cell Grid that overlays the Fluent Find
+    /// glyph. AutoSuggestBox is refused — its peer reports `Group` where S7
+    /// needs `field`, and it swallows Escape from the only handler a WinRT
+    /// delegate can register.
+    Search { host: Grid, field: TextBox },
 }
 
 impl NativeWidget {
@@ -157,6 +167,22 @@ impl NativeWidget {
             NativeWidget::DatePicker(picker) => picker.cast(),
             NativeWidget::TimePicker(picker) => picker.cast(),
             NativeWidget::Labeled(panel) => panel.cast(),
+            // THE HOST, because this is what a parent lays out. The FIELD is
+            // what carries the identity — see `identity_element`.
+            NativeWidget::Search { host, .. } => host.cast(),
+        }
+    }
+
+    /// The element a widget's IDENTITY lives on — the a11y props, the
+    /// AutomationId the keyed reads match by, and the focus command. One
+    /// widget over: the search field is a Grid wearing a glyph, and an id on
+    /// the Grid would name a group where every read wants the TextBox (the
+    /// SwiftUI arm's `leaf` flag, docs/traps.md).
+    fn identity_element(&self) -> windows_core::Result<UIElement> {
+        use windows_core::Interface;
+        match self {
+            NativeWidget::Search { field, .. } => field.cast(),
+            other => other.element(),
         }
     }
 
@@ -166,6 +192,9 @@ impl NativeWidget {
         match self {
             NativeWidget::Entry(field) => Some(Editable::Entry(field.clone())),
             NativeWidget::Textarea(field) => Some(Editable::Textarea(field.clone())),
+            // The search field IS a TextBox, so it takes the entry's whole
+            // text contract with no third variant (docs/search-plan.md S2).
+            NativeWidget::Search { field, .. } => Some(Editable::Entry(field.clone())),
             _ => None,
         }
     }
@@ -411,6 +440,12 @@ struct CoreState {
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
+    /// The search fields, and their ids beside them — the entries' twins
+    /// (docs/search-plan.md S2). A separate registry because `search#index`
+    /// is its own address; the widget behind each slot is the TextBox the
+    /// glyph sits over, so every entry-shaped read serves it unchanged.
+    searches: Vec<TextBox>,
+    search_ids: Vec<u64>,
     /// Grid layout state: ordered children + column count; both the adds and
     /// the columns prop re-flow the attach positions (docs/traps.md: Sugar
     /// construction order differs per language).
@@ -2403,7 +2438,13 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         let crossing = crossing || matches!(widget, NativeWidget::Scroll(_));
         // A TEXT FIELD FILLS ITS COLUMN'S WIDTH (docs/tasks-plan.md §4, R10).
         let crossing = crossing
-            || (vertical && matches!(widget, NativeWidget::Entry(_) | NativeWidget::Textarea(_)));
+            || (vertical
+                && matches!(
+                    widget,
+                    NativeWidget::Entry(_)
+                        | NativeWidget::Textarea(_)
+                        | NativeWidget::Search { .. }
+                ));
         // An auto grid is width-driven, so it takes its column's width
         // (docs/layout-knobs-plan.md §3).
         let crossing = crossing
@@ -9120,6 +9161,11 @@ fn focused_editable_id(core: &CoreState) -> Option<u64> {
             return Some(core.entry_ids[i]);
         }
     }
+    for (i, field) in core.searches.iter().enumerate() {
+        if focused(&Editable::Entry(field.clone())) {
+            return Some(core.search_ids[i]);
+        }
+    }
     for (i, field) in core.textareas.iter().enumerate() {
         if focused(&Editable::Textarea(field.clone())) {
             return Some(core.textarea_ids[i]);
@@ -9132,10 +9178,62 @@ fn editable_by_id(core: &CoreState, id: u64) -> Option<Editable> {
     if let Some(i) = core.entry_ids.iter().position(|&e| e == id) {
         return Some(Editable::Entry(core.entries[i].clone()));
     }
+    if let Some(i) = core.search_ids.iter().position(|&s| s == id) {
+        return Some(Editable::Entry(core.searches[i].clone()));
+    }
     core.textarea_ids
         .iter()
         .position(|&t| t == id)
         .map(|i| Editable::Textarea(core.textareas[i].clone()))
+}
+
+/// The search field's OWN clear button, out of the TextBox template: WinUI's
+/// TextBox draws one itself (`DeleteButton`, shown while the box has focus
+/// and text), which is the affordance S5 says to drive where the platform
+/// draws one. Read out of the live visual tree, never remembered: the
+/// template is applied lazily and re-applied on a theme change.
+fn search_delete_button(field: &TextBox) -> windows_core::Result<Option<Button>> {
+    use bindings::Microsoft::UI::Xaml::{FrameworkElement, Media::VisualTreeHelper};
+    fn walk(
+        node: &bindings::Microsoft::UI::Xaml::DependencyObject,
+        depth: u32,
+    ) -> windows_core::Result<Option<Button>> {
+        if depth > 8 {
+            return Ok(None);
+        }
+        for i in 0..VisualTreeHelper::GetChildrenCount(node)? {
+            let child = VisualTreeHelper::GetChild(node, i)?;
+            if let Ok(frame) = child.cast::<FrameworkElement>() {
+                if frame.Name()? == HSTRING::from("DeleteButton") {
+                    if let Ok(button) = child.cast::<Button>() {
+                        return Ok(Some(button));
+                    }
+                }
+            }
+            if let Some(hit) = walk(&child, depth + 1)? {
+                return Ok(Some(hit));
+            }
+        }
+        Ok(None)
+    }
+    walk(&field.cast()?, 0)
+}
+
+/// ONE CLEAR PATH for the search field (docs/search-plan.md S5): the clear
+/// button, Escape and the harness's clear_search all come here, so the app
+/// sees the same text_changed("") for each and the focus stays. Answers
+/// whether the button was there to operate — the caller says what it saw.
+fn search_clear(field: &TextBox) -> windows_core::Result<bool> {
+    use bindings::Microsoft::UI::Xaml::Automation::{
+        Peers::ButtonAutomationPeer, Provider::IInvokeProvider,
+    };
+    let Some(button) = search_delete_button(field)? else {
+        return Ok(false);
+    };
+    let peer = ButtonAutomationPeer::CreateInstanceWithOwner(&button)?;
+    let invoke: IInvokeProvider = peer.cast()?;
+    invoke.Invoke()?;
+    Ok(true)
 }
 
 /// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT — the pins, in one place, with
@@ -11184,9 +11282,121 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
+                // THE SEARCH FIELD (docs/search-plan.md §3, the WinUI row): a
+                // plain TextBox under a one-cell Grid carrying the Fluent Find
+                // glyph in the leading slot. The clear affordance is the
+                // platform's own — the TextBox template's `DeleteButton` —
+                // and AutoSuggestBox is refused, both measured
+                // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::Search => {
+                    let field = TextBox::new()?;
+                    // 30 on the left because the glyph sits INSIDE the box:
+                    // the text and the template's placeholder both start
+                    // inside the padded content area.
+                    field.SetPadding(Thickness {
+                        Left: 30.0,
+                        Top: 5.0,
+                        Right: 6.0,
+                        Bottom: 6.0,
+                    })?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("search fields carry a tag");
+                    let handler_tag = tag.clone();
+                    let bank_id = id.0;
+                    let field_for_handler = field.clone();
+                    let swallow =
+                        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let handler_swallow = swallow.clone();
+                    let handler = TextChangedEventHandler::new(move |_, _| {
+                        if handler_swallow
+                            .fetch_update(
+                                std::sync::atomic::Ordering::Relaxed,
+                                std::sync::atomic::Ordering::Relaxed,
+                                |n| n.checked_sub(1),
+                            )
+                            .is_ok()
+                        {
+                            return Ok(());
+                        }
+                        let text = lf(field_for_handler.Text()?.to_string());
+                        if bank_text_changed(bank_id, &text) {
+                            sink.send_text_tag(&handler_tag, &text);
+                        }
+                        Ok(())
+                    });
+                    field.TextChanged(&handler)?;
+                    // ESCAPE IS THE CLEAR ACT ON A DESKTOP (S5), and it takes
+                    // THE SAME PATH the clear button does: it operates that
+                    // button, so the app sees one text_changed("") either way
+                    // and the focus stays where the platform leaves it. The
+                    // ORDINARY KeyDown and not AddHandler's handled-events-too
+                    // overload, which wants an IInspectable a WinRT delegate
+                    // is not (docs/slider-plan.md §6) — measured firing for
+                    // Escape on a TextBox, and never on an AutoSuggestBox.
+                    let escape_field = field.clone();
+                    field.KeyDown(&KeyEventHandler::new(move |_, args| {
+                        let Some(args) = args.as_ref() else { return Ok(()) };
+                        if args.Key()? != VirtualKey::Escape {
+                            return Ok(());
+                        }
+                        // An empty field does nothing on Escape (S5).
+                        if escape_field.Text()?.is_empty() {
+                            return Ok(());
+                        }
+                        if search_clear(&escape_field)? {
+                            args.SetHandled(true)?;
+                        }
+                        Ok(())
+                    }))?;
+                    let focus_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.GotFocus(&focus_handler)?;
+                    let blur_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.LostFocus(&blur_handler)?;
+                    let host = Grid::new()?;
+                    let children = host.Children()?;
+                    children.Append(&field.cast::<UIElement>()?)?;
+                    let glyph = FontIcon::new()?;
+                    // Segoe Fluent's Search glyph. NO FontFamily, for
+                    // `symbol_icon`'s reason: unset resolves through
+                    // SymbolThemeFontFamily.
+                    glyph.SetGlyph(&HSTRING::from("\u{E721}"))?;
+                    glyph.SetFontSize(14.0)?;
+                    glyph.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+                    glyph.SetVerticalAlignment(
+                        bindings::Microsoft::UI::Xaml::VerticalAlignment::Center,
+                    )?;
+                    glyph.SetMargin(Thickness {
+                        Left: 10.0,
+                        Top: 0.0,
+                        Right: 0.0,
+                        Bottom: 0.0,
+                    })?;
+                    glyph.SetIsHitTestVisible(false)?;
+                    glyph.SetForeground(&theme_resource::<Brush>(
+                        "TextFillColorSecondaryBrush",
+                    )?)?;
+                    // OUT OF THE ASSISTIVE TREE, the twin of the SwiftUI
+                    // arm's accessibilityHidden: the field carries the
+                    // identity, and a nameless icon beside it is noise.
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAccessibilityView(
+                        &glyph,
+                        bindings::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView::Raw,
+                    )?;
+                    children.Append(&glyph.cast::<UIElement>()?)?;
+                    core.searches.push(field.clone());
+                    core.search_ids.push(id.0);
+                    core.entry_swallow.insert(id.0, swallow);
+                    core.entry_tags.insert(id.0, tag);
+                    NativeWidget::Search { host, field }
+                }
                 // docs/forms-plan.md §3: the row's three tracks are stamped
                 // by `reindex_labeled`, which also carries the shared pin.
-                WidgetKind::Search => crate::depth_stub("search"),
                 WidgetKind::Labeled => {
                     let grid = Grid::new()?;
                     grid.SetColumnSpacing(8.0)?;
@@ -11657,6 +11867,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Canvas(image) => {
                         windows_core::Interface::cast(image).expect("canvas is a UIElement")
+                    }
+                    NativeWidget::Search { host, .. } => {
+                        windows_core::Interface::cast(host).expect("search host is a UIElement")
                     }
                 }
             };
@@ -12416,7 +12629,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                 }
                 (NativeWidget::Entry(_), Prop::Text, Value::Str(s))
-                | (NativeWidget::Textarea(_), Prop::Text, Value::Str(s)) => {
+                | (NativeWidget::Textarea(_), Prop::Text, Value::Str(s))
+                | (NativeWidget::Search { .. }, Prop::Text, Value::Str(s)) => {
                     let field = widget.editable().expect("the arm matched a text widget");
                     // Quiet: a property write is configuration, not a
                     // user edit — and TextChanged is raised async, so the
@@ -12441,6 +12655,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
+                }
+                // The prompt an empty field shows (docs/search-plan.md S3),
+                // on all three text kinds: WinUI keeps it in a template slot
+                // of its own, so it is never part of the text.
+                (NativeWidget::Entry(field), Prop::Placeholder, Value::Str(s)) => {
+                    field.SetPlaceholderText(&HSTRING::from(&s))?;
+                }
+                (NativeWidget::Textarea(field), Prop::Placeholder, Value::Str(s)) => {
+                    field.SetPlaceholderText(&HSTRING::from(&s))?;
+                }
+                (NativeWidget::Search { field, .. }, Prop::Placeholder, Value::Str(s)) => {
+                    field.SetPlaceholderText(&HSTRING::from(&s))?;
                 }
                 (NativeWidget::Checkbox { check, .. }, Prop::Checked, Value::Bool(b)) => {
                     let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
@@ -12481,7 +12707,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // they match the prop alone. WinUI publishes a settable
                 // AutomationId, so the harness read matches by identity.
                 (w, Prop::A11yId, Value::Str(id)) => {
-                    let element = w.element()?;
+                    let element = w.identity_element()?;
                     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAutomationId(
                         &element,
                         &windows_core::HSTRING::from(id.as_str()),
@@ -12495,7 +12721,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // to the catch-all panic (docs/deferred.md a11y-empty-label).
                 (w, Prop::A11yLabel, Value::Str(label)) => {
                     if !label.is_empty() {
-                        let element = w.element()?;
+                        let element = w.identity_element()?;
                         bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
                             &element,
                             &windows_core::HSTRING::from(label.as_str()),
@@ -12506,7 +12732,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // name, and inside the arm for the name's reason.
                 (w, Prop::A11yHint, Value::Str(hint)) => {
                     if !hint.is_empty() {
-                        let element = w.element()?;
+                        let element = w.identity_element()?;
                         bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHelpText(
                             &element,
                             &windows_core::HSTRING::from(hint.as_str()),
@@ -12519,7 +12745,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // above.
                 (w, Prop::Help, Value::Str(text)) => {
                     if !text.is_empty() {
-                        let element = w.element()?;
+                        // The IDENTITY element, because `help_text` reads the
+                        // tooltip back off the element a target resolves to.
+                        let element = w.identity_element()?;
                         bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
                             &element,
                             &PropertyValue::CreateString(&HSTRING::from(text.as_str()))?,
@@ -12952,6 +13180,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Canvas(image) => children.Append(image)?,
                 NativeWidget::DatePicker(picker) => children.Append(picker)?,
                 NativeWidget::TimePicker(picker) => children.Append(picker)?,
+                // THE HOST, which is what a parent lays out (see element()).
+                NativeWidget::Search { host, .. } => children.Append(host)?,
             }
             core.parents.insert(child, panel);
             // A new child means a new track and a shifted set of indices —
@@ -13207,7 +13437,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // and the call's bool would be discarded, so a
                     // mount-tx focus would silently drop. Not loaded yet:
                     // one-shot re-run from the element's own Loaded.
-                    let element = widget.element()?;
+                    let element = widget.identity_element()?;
                     let fe: FrameworkElement = windows_core::Interface::cast(&element)?;
                     if fe.IsLoaded()? {
                         let _ = element.Focus(FocusState::Programmatic)?;
@@ -14432,6 +14662,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             grids: Vec::new(),
             textareas: Vec::new(),
             textarea_ids: Vec::new(),
+            searches: Vec::new(),
+            search_ids: Vec::new(),
             grid_children: HashMap::new(),
             stamps_rows: std::collections::HashSet::new(),
             fills: HashMap::new(),
@@ -14996,7 +15228,10 @@ fn target_element(
         K::Checkbox => nth!(core.checkboxes),
         K::Entry => nth!(core.entries),
         K::Textarea => nth!(core.textareas),
-        K::Search => crate::depth_stub("search"),
+        // THE FIELD, not the Grid it wears its glyph in: every read a search
+        // target answers — the text, the focus, the a11y peer — is the
+        // TextBox's (docs/search-plan.md S7).
+        K::Search => nth!(core.searches),
         K::DatePicker => nth!(core.date_pickers),
         K::TimePicker => nth!(core.time_pickers),
         K::Label => nth!(core.labels),
@@ -15073,7 +15308,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Radio => ids!(core.radios, NativeWidget::Radio(group), group),
         K::Grid => ids!(core.grids, NativeWidget::Grid2D(grid), grid),
         K::Textarea => core.textarea_ids.clone(),
-        K::Search => crate::depth_stub("search"),
+        K::Search => core.search_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
         K::DatePicker => core.date_picker_ids.clone(),
         K::TimePicker => core.time_picker_ids.clone(),
@@ -15086,7 +15321,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
 fn automation_id_of(core: &CoreState, id: u64) -> Option<windows_core::HSTRING> {
     use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
     use bindings::Microsoft::UI::Xaml::DependencyObject;
-    let element = core.widgets.get(&WidgetId(id))?.element().ok()?;
+    let element = core.widgets.get(&WidgetId(id))?.identity_element().ok()?;
     let object: DependencyObject = windows_core::Interface::cast(&element).ok()?;
     AutomationProperties::GetAutomationId(&object).ok()
 }
@@ -15460,11 +15695,16 @@ impl crate::harness::Stage for WinUiStage {
             // measured), which does not matter: kaya asks the CONTROL, whose
             // TYPE is `Edit` for both.
             let name = if name.is_empty()
-                && matches!(target.kind, K::Entry | K::Textarea)
+                && matches!(target.kind, K::Entry | K::Textarea | K::Search)
             {
                 match target.kind {
                     K::Entry => try_resolve(target.index, core.entries.len())
                         .map(|i| lf(core.entries[i].Text().map(|t| t.to_string()).unwrap_or_default()))
+                        .unwrap_or_default(),
+                    K::Search => try_resolve(target.index, core.searches.len())
+                        .map(|i| {
+                            lf(core.searches[i].Text().map(|t| t.to_string()).unwrap_or_default())
+                        })
                         .unwrap_or_default(),
                     _ => try_resolve(target.index, core.textareas.len())
                         .map(|i| {
@@ -15602,11 +15842,93 @@ impl crate::harness::Stage for WinUiStage {
         );
     }
 
-    fn clear_search(&self, _: crate::harness::Target) {
-        crate::depth_stub("search")
+    /// THE PLATFORM'S OWN CLEAR AFFORDANCE (docs/search-plan.md S5): WinUI's
+    /// TextBox template draws a `DeleteButton` while the box has focus and
+    /// text, and this operates it through its automation peer — the same call
+    /// the Escape handler makes, so both paths reach the app as one
+    /// text_changed("") with the focus kept.
+    fn clear_search(&self, t: crate::harness::Target) {
+        // on_ui_BARE, and that is the whole point of the hop: `Invoke` raises
+        // the button's Click synchronously, the TextBox clears itself, and the
+        // TextChanged that follows banks through `CORE` — under `on_ui`'s
+        // borrow that re-entry aborts the process (see on_ui_bare). So the
+        // borrow that resolves the target ENDS before the invoke.
+        let told = Self::on_ui_bare(move || {
+            let field = CORE.with_borrow(|core| {
+                let core = core.as_ref()?;
+                crate::harness::try_resolve(t.index, core.searches.len())
+                    .map(|i| core.searches[i].clone())
+            });
+            let Some(field) = field else {
+                let held =
+                    CORE.with_borrow(|core| core.as_ref().map_or(0, |c| c.searches.len()));
+                return Ok(format!(
+                    "no such target — the registry holds {held} search field(s)"
+                ));
+            };
+            // THE BUTTON EXISTS WHILE THE BOX HAS FOCUS: the template part is
+            // deferred until then, so a field written by set_text and never
+            // focused has none to operate (matrix #20's tasks leg read "oat"
+            // after the clear). A user reaches the button by focusing the
+            // field, and so does this.
+            if field.FocusState()? == FocusState::Unfocused {
+                let _ = field.Focus(FocusState::Programmatic)?;
+                field.UpdateLayout()?;
+            }
+            if search_clear(&field)? {
+                return Ok(String::new());
+            }
+            // A why-not that prints only what it measured: the button is a
+            // TEMPLATE PART, so the two things that can be wrong are that the
+            // template has not been applied and that the part is not there —
+            // and the control publishes the state the part keys on.
+            Ok(format!(
+                "the TextBox template published no DeleteButton to operate \
+                 (text {:?}, focus {:?}, template applied: {})",
+                field.Text()?.to_string(),
+                field.FocusState()?,
+                bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper::GetChildrenCount(
+                    &field.cast::<bindings::Microsoft::UI::Xaml::DependencyObject>()?
+                )? > 0,
+            ))
+        })
+        .unwrap_or_else(|e| format!("the clear hop failed: {e}"));
+        if !told.is_empty() {
+            eprintln!("kaya: clear_search {t:?}: {told}");
+        }
     }
-    fn placeholder_text(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("search")
+    /// The prompt READ OFF THE CONTROL, never kaya's model
+    /// (docs/search-plan.md S3): WinUI keeps it in the template's own
+    /// PlaceholderTextContentPresenter, and this is the property behind it.
+    fn placeholder_text(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let field: TextBox = match t.kind {
+                crate::harness::TargetKind::Search => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.searches.len())
+                    else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    core.searches[i].clone()
+                }
+                crate::harness::TargetKind::Entry => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.entries.len())
+                    else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    core.entries[i].clone()
+                }
+                crate::harness::TargetKind::Textarea => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len())
+                    else {
+                        return Ok("<no such target>".to_owned());
+                    };
+                    return Ok(core.textareas[i].PlaceholderText()?.to_string());
+                }
+                other => return Ok(format!("<{other:?} carries no placeholder>")),
+            };
+            Ok(field.PlaceholderText()?.to_string())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     /// The control's tooltip as ToolTipService holds it (docs/tooltip-plan.md T5).
     fn help_text(&self, target: crate::harness::Target) -> String {
@@ -16096,6 +16418,10 @@ impl crate::harness::Stage for WinUiStage {
                     let i = crate::harness::resolve(t.index, core.textareas.len());
                     let _ = core.textareas[i].Focus(FocusState::Programmatic)?;
                 }
+                crate::harness::TargetKind::Search => {
+                    let i = crate::harness::resolve(t.index, core.searches.len());
+                    let _ = core.searches[i].Focus(FocusState::Programmatic)?;
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.occurrences.send_click_tag(&core.buttons[i]);
@@ -16278,15 +16604,25 @@ impl crate::harness::Stage for WinUiStage {
             // swallowed (see entry_swallow). The handles are CLONED out of the
             // core — a refcount bump — because the banking below borrows the
             // core mutably.
-            let (field, id) = if t.kind == crate::harness::TargetKind::Textarea {
-                let i = crate::harness::resolve(t.index, core.textareas.len());
-                (
-                    Editable::Textarea(core.textareas[i].clone()),
-                    core.textarea_ids[i],
-                )
-            } else {
-                let i = crate::harness::resolve(t.index, core.entries.len());
-                (Editable::Entry(core.entries[i].clone()), core.entry_ids[i])
+            let (field, id) = match t.kind {
+                crate::harness::TargetKind::Textarea => {
+                    let i = crate::harness::resolve(t.index, core.textareas.len());
+                    (
+                        Editable::Textarea(core.textareas[i].clone()),
+                        core.textarea_ids[i],
+                    )
+                }
+                crate::harness::TargetKind::Search => {
+                    let i = crate::harness::resolve(t.index, core.searches.len());
+                    (
+                        Editable::Entry(core.searches[i].clone()),
+                        core.search_ids[i],
+                    )
+                }
+                _ => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    (Editable::Entry(core.entries[i].clone()), core.entry_ids[i])
+                }
             };
             if lf(field.text()?) != text {
                 if let Some(swallow) = core.entry_swallow.get(&id) {
@@ -16326,6 +16662,13 @@ impl crate::harness::Stage for WinUiStage {
                     return Ok("<no such target>".to_string());
                 };
                 return Ok(lf(Editable::Textarea(core.textareas[i].clone()).text()?));
+            }
+            if t.kind == crate::harness::TargetKind::Search {
+                let Some(i) = crate::harness::try_resolve(t.index, core.searches.len())
+                else {
+                    return Ok("<no such target>".to_string());
+                };
+                return Ok(lf(core.searches[i].Text()?.to_string()));
             }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return Ok("<no such target>".to_string());
@@ -16375,6 +16718,13 @@ impl crate::harness::Stage for WinUiStage {
                         return Ok(false);
                     };
                     Ok(core.textareas[i].FocusState()? != FocusState::Unfocused)
+                }
+                crate::harness::TargetKind::Search => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.searches.len())
+                    else {
+                        return Ok(false);
+                    };
+                    Ok(core.searches[i].FocusState()? != FocusState::Unfocused)
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on winui"),
             }
@@ -16961,7 +17311,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Radio => find(&core.radios, &id),
                 K::Grid => find(&core.grids, &id),
                 K::Textarea => find(&core.textareas, &id),
-                K::Search => crate::depth_stub("search"),
+                K::Search => find(&core.searches, &id),
                 K::Canvas => find(&core.canvases, &id),
                 K::DatePicker => find(&core.date_pickers, &id),
                 K::TimePicker => find(&core.time_pickers, &id),

@@ -2700,6 +2700,18 @@ final class KayaAppTx {
         tx.bindHelp(w.id, s.id)
     }
 
+    /// The PROMPT a text field shows while it is empty
+    /// (docs/search-plan.md S3): the platform's own placeholder, never
+    /// part of the text and never emitted. Entry, textarea and search
+    /// only, checked at the root.
+    func setPlaceholder(_ w: KayaWidget, _ text: String) {
+        tx.setPlaceholder(w.id, text)
+    }
+
+    func setPlaceholder(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindPlaceholder(w.id, s.id)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }
@@ -2831,6 +2843,19 @@ final class KayaAppTx {
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_TEXTAREA))
+        if let onChange { app.onChange(w, onChange) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A search field, on the entry's uncontrolled contract under the
+    /// platform's search chrome (docs/search-plan.md): it filters on
+    /// every keystroke and the clear affordance arrives as a change
+    /// with "".
+    func search(
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SEARCH))
         if let onChange { app.onChange(w, onChange) }
         if let grow { setGrow(w, grow) }
         return w
@@ -4145,6 +4170,19 @@ final class KayaTpl {
         tx.tx.bindHelpElement(n.id, level: level, field: f.index)
     }
 
+    /// A stamped field's PROMPT while it is empty (KayaTx.setPlaceholder).
+    func setPlaceholder(_ n: KayaNodeHandle, _ text: String) {
+        tx.tx.setPlaceholder(n.id, text)
+    }
+
+    func setPlaceholder(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindPlaceholder(n.id, s.id)
+    }
+
+    func setPlaceholder(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindPlaceholderElement(n.id, level: level, field: f.index)
+    }
+
     /// A stamped copy's cross-axis stretch (KayaTx.setFill).
     func setFill(_ n: KayaNodeHandle, _ on: Bool) {
         tx.tx.setFill(n.id, on)
@@ -4485,7 +4523,43 @@ final class KayaTpl {
         return n
     }
 
-    /// The unsourced half of both text kinds: the widget and its handler.
+    /// A search field per stamped copy, on the entry's uncontrolled
+    /// contract under the platform's search chrome, with the same four
+    /// spellings (docs/search-plan.md).
+    func search(
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+    }
+
+    func search(
+        _ text: String,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        setText(n, text)
+        return n
+    }
+
+    func search(
+        _ s: KayaSignal,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    func search(
+        _ f: KayaField<String>,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_SEARCH), onChange)
+        bindTextField(n, f)
+        return n
+    }
+
+    /// The unsourced half of the text kinds: the widget and its handler.
     private func textFieldOf(
         _ kind: UInt32, _ onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)?
     ) -> KayaNodeHandle {

@@ -36,6 +36,9 @@ app.build { tx in
                 t.write(pos, .f64(0.25))
             }
         }
+        let find = tx.search()
+        tx.setPlaceholder(find, "Search")
+        tx.setA11yId(find, "find")
         tx.row {
             // Invalid bytes read 0x0: decode failure is the placeholder
             // class, never a crash, on every backend.

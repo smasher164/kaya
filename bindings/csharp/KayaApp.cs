@@ -1739,6 +1739,16 @@ sealed class Tx
     public void SetHelp(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindHelp(w.Id, s.Id));
 
+    /// The PROMPT a text field shows while it is empty
+    /// (docs/search-plan.md S3): the platform's own placeholder, never
+    /// part of the text and never emitted. Entry, textarea and search
+    /// only, checked at the root.
+    public void SetPlaceholder(Widget w, string text) =>
+        Records.Add(KayaWire.TxSetPlaceholder(w.Id, text));
+
+    public void SetPlaceholder(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindPlaceholder(w.Id, s.Id));
+
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
     /// looks. Destructive, Prominent and Plain are button emphasis, Heading
     /// and Caption are label hierarchy, and the root refuses a role on a kind
@@ -1842,6 +1852,18 @@ sealed class Tx
     public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindTextarea);
+        if (onChange != null) App.OnChange(w, onChange);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A search field: the entry's uncontrolled contract under the
+    /// platform's search chrome, filtering on every keystroke
+    /// (docs/search-plan.md). The clear affordance arrives at onChange
+    /// with "".
+    public Widget Search(Action<Tx, string> onChange = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindSearch);
         if (onChange != null) App.OnChange(w, onChange);
         if (grow is double g) SetGrow(w, g);
         return w;
@@ -3344,6 +3366,16 @@ sealed class Tpl
     public void SetHelp(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindHelpElement(n.Id, level, f.Index));
 
+    /// A stamped field's PROMPT while it is empty (Tx.SetPlaceholder).
+    public void SetPlaceholder(Node n, string text) =>
+        tx.Records.Add(KayaWire.TxSetPlaceholder(n.Id, text));
+
+    public void SetPlaceholder(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindPlaceholder(n.Id, s.Id));
+
+    public void SetPlaceholder(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindPlaceholderElement(n.Id, level, f.Index));
+
     /// A stamped copy's cross-axis stretch (Tx.SetFill).
     public void SetFill(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
@@ -3648,6 +3680,37 @@ sealed class Tpl
     public Node Textarea(Field<string> text, Action<Tx, List<object>, string> onChange = null)
     {
         var n = Textarea(onChange);
+        BindTextField(n, 0, text);
+        return n;
+    }
+
+    /// A search field in the blueprint: Entry's contract under the
+    /// platform's search chrome, with the same four arms for the same
+    /// reason (docs/search-plan.md).
+    public Node Search(Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Widget(KayaWire.KindSearch);
+        if (onChange != null) tx.App.OnChange(n, onChange);
+        return n;
+    }
+
+    public Node Search(string text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Search(onChange);
+        SetText(n, text);
+        return n;
+    }
+
+    public Node Search(Signal text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Search(onChange);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
+        return n;
+    }
+
+    public Node Search(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Search(onChange);
         BindTextField(n, 0, text);
         return n;
     }

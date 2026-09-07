@@ -123,6 +123,9 @@ mod sliders;
 #[path = "tooltips.rs"]
 mod tooltips;
 
+#[path = "search.rs"]
+mod search;
+
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
 mod tasks;
@@ -178,6 +181,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("pickers") => pickers::app(ctx),
         Ok("sliders") => sliders::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
+        Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.

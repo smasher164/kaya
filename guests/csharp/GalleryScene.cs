@@ -29,6 +29,9 @@ static class GalleryScene
                     tx.Label(bind: volume);
                     tx.Button("quarter", onClick: t => t.Write(pos, 0.25));
                 });
+                var find = tx.Search();
+                tx.SetPlaceholder(find, "Search");
+                tx.SetA11yId(find, "find");
                 tx.Row(() =>
                 {
                     // Invalid bytes: a decode failure is a placeholder, never a crash.

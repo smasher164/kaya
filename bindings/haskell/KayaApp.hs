@@ -116,6 +116,7 @@ module KayaApp
     bindA11yLabel,
     bindA11yHint,
     bindHelp,
+    bindPlaceholder,
     LiveStrSource (..),
     bindChecked,
     bindValue,
@@ -130,6 +131,7 @@ module KayaApp
     setA11yLabel,
     setA11yHint,
     setHelp,
+    setPlaceholder,
     setRole,
     Align (..),
     Axis (..),
@@ -177,6 +179,8 @@ module KayaApp
     entryOn,
     textarea,
     textareaOn,
+    search,
+    searchOn,
     labelText,
     labelBound,
     headingText,
@@ -250,6 +254,7 @@ module KayaApp
     buttonBound,
     entryBound,
     textareaBound,
+    searchBound,
     progressBound,
     slider,
     select,
@@ -2160,6 +2165,16 @@ setHelp (Widget w) h = emitB (W.txSetHelp w h)
 bindHelp :: Widget -> Signal -> Build ()
 bindHelp (Widget w) (Signal s) = emitB (W.txBindHelp w s)
 
+-- | The PROMPT a text field shows while it is empty
+-- (docs/search-plan.md S3): the platform's own placeholder, never part
+-- of the text and never emitted. Entry, textarea and search only,
+-- checked at the root.
+setPlaceholder :: Widget -> String -> Build ()
+setPlaceholder (Widget w) v = emitB (W.txSetPlaceholder w v)
+
+bindPlaceholder :: Widget -> Signal -> Build ()
+bindPlaceholder (Widget w) (Signal s) = emitB (W.txBindPlaceholder w s)
+
 -- | What a LIVE widget's Str a11y prop can take: a constant or a signal —
 -- the attr picks the setter by the argument's type, as the template
 -- zone's 'TplStrSource' does with the row field arm left out.
@@ -2218,6 +2233,10 @@ data Attr (c :: WClass) where
   -- are: one short sentence saying what the control is or does. A
   -- 'String' or a 'Signal'.
   Help :: LiveStrSource s => s -> Attr c
+  -- | The PROMPT this field shows while its text is empty
+  -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
+  -- refuses it elsewhere, and an empty one by name.
+  Placeholder :: LiveStrSource s => s -> Attr 'LeafW
   -- | A date picker's inclusive lower bound (docs/datetime-plan.md D4);
   -- a pick past it lands on the bound.
   MinDate :: Day -> Attr 'LeafW
@@ -2258,6 +2277,7 @@ applyAttr (A11yId i) w = liveStr setA11yId bindA11yId w i
 applyAttr (A11yLabel l) w = liveStr setA11yLabel bindA11yLabel w l
 applyAttr (A11yHint h) w = liveStr setA11yHint bindA11yHint w h
 applyAttr (Help h) w = liveStr setHelp bindHelp w h
+applyAttr (Placeholder p) w = liveStr setPlaceholder bindPlaceholder w p
 applyAttr (MinDate d) (Widget n) =
   let (y, m, dd) = toGregorian d
    in emitB (W.txSetMinDate n (fromIntegral y) m dd)
@@ -2443,6 +2463,19 @@ textarea = bothish (widget W.kindTextarea)
 textareaOn :: (LeafArgs r) => (String -> IO ()) -> r
 textareaOn handler = leafish $ do
   w@(Widget n) <- widget W.kindTextarea
+  pendB (PChange n handler)
+  return w
+
+-- | A search field, in either zone: the entry's uncontrolled contract
+-- under the platform's search chrome (docs/search-plan.md), filtering on
+-- every keystroke. The clear affordance arrives as a change with @""@.
+search :: (BothZones r) => r
+search = bothish (widget W.kindSearch)
+
+-- | A search field with its change handler co-located.
+searchOn :: (LeafArgs r) => (String -> IO ()) -> r
+searchOn handler = leafish $ do
+  w@(Widget n) <- widget W.kindSearch
   pendB (PChange n handler)
   return w
 
@@ -2817,12 +2850,13 @@ data StrProp = StrProp
     strElement :: Word64 -> Word32 -> Word32 -> Builder
   }
 
-textProp, a11yIdProp, a11yLabelProp, a11yHintProp, helpProp :: StrProp
+textProp, a11yIdProp, a11yLabelProp, a11yHintProp, helpProp, placeholderProp :: StrProp
 textProp = StrProp W.txSetText W.txBindText W.txBindTextElement
 a11yIdProp = StrProp W.txSetA11yId W.txBindA11yId W.txBindA11yIdElement
 a11yLabelProp = StrProp W.txSetA11yLabel W.txBindA11yLabel W.txBindA11yLabelElement
 a11yHintProp = StrProp W.txSetA11yHint W.txBindA11yHint W.txBindA11yHintElement
 helpProp = StrProp W.txSetHelp W.txBindHelp W.txBindHelpElement
+placeholderProp = StrProp W.txSetPlaceholder W.txBindPlaceholder W.txBindPlaceholderElement
 
 -- | What a template Str prop can bind to: a constant, a signal, or the
 -- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
@@ -2958,6 +2992,9 @@ data TplAttr where
   -- REACHES THE ZONE: @TplHelp (field \@"note" \@Account)@ explains every
   -- copy in its own words.
   TplHelp :: TplStrSource s => s -> TplAttr
+  -- | The PROMPT this stamped field shows while its text is empty
+  -- (docs\/search-plan.md S3). Entry, textarea and search only.
+  TplPlaceholder :: TplStrSource s => s -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
   -- appearance. A CONSTANT; which role fits which kind is the ROOT'S
   -- call.
@@ -2995,6 +3032,7 @@ applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
 applyTplAttr (TplHelp src) n = bindStrSource helpProp n src
+applyTplAttr (TplPlaceholder src) n = bindStrSource placeholderProp n src
 applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplTickSpacing spacing) (Node n) = emitT (W.txSetTickSpacing n spacing)
@@ -3109,6 +3147,14 @@ entryBound src = do
 textareaBound :: TplStrSource s => s -> Tpl Node
 textareaBound src = do
   n <- widget W.kindTextarea
+  bindTextSource n src
+  return n
+
+-- | A stamped search field seeded from an addressable source;
+-- 'entryBound''s contract under the platform's search chrome.
+searchBound :: TplStrSource s => s -> Tpl Node
+searchBound src = do
+  n <- widget W.kindSearch
   bindTextSource n src
   return n
 

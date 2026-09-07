@@ -951,6 +951,38 @@ func (w Widget) BindHelp(s Signal[string]) Widget {
 	return w
 }
 
+// SetPlaceholder sets the PROMPT a text field shows while it is empty
+// (docs/search-plan.md S3): the platform's own placeholder, never part
+// of the text and never emitted. Entry, textarea and search only,
+// checked at the root.
+func (tx *Tx) SetPlaceholder(w Widget, text string) {
+	tx.emit(TxSetPlaceholder(w.id, text))
+}
+
+// BindPlaceholder binds a widget's placeholder to a signal.
+func (tx *Tx) BindPlaceholder(w Widget, s Signal[string]) {
+	tx.emit(TxBindPlaceholder(w.id, s.id))
+}
+
+// Placeholder sets this field's prompt at construction. Same
+// transaction discipline as Grow.
+func (w Widget) Placeholder(text string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Placeholder on a widget outside its build transaction — use Tx.SetPlaceholder inside a live transaction")
+	}
+	w.tx.SetPlaceholder(w, text)
+	return w
+}
+
+// BindPlaceholder binds this field's prompt to a signal at construction.
+func (w Widget) BindPlaceholder(s Signal[string]) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: BindPlaceholder on a widget outside its build transaction — use Tx.BindPlaceholder inside a live transaction")
+	}
+	w.tx.BindPlaceholder(w, s)
+	return w
+}
+
 // SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
 // it looks (docs/styling-plan.md D4). The vocabulary is closed and the
 // root refuses a misfit at declare time. (The Role* STRING constants
@@ -1243,6 +1275,18 @@ func (tx *Tx) Caption(s Signal[string]) Widget {
 // Entry creates a text field with its change handler (nil for none).
 func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindEntry)
+	if onChange != nil {
+		tx.app.OnChange(w, onChange)
+	}
+	return w
+}
+
+// Search creates a search field with its change handler (nil for none):
+// Entry's uncontrolled contract under the platform's search chrome,
+// filtering on every keystroke (docs/search-plan.md). The clear
+// affordance arrives as a change with "".
+func (tx *Tx) Search(onChange func(*Tx, string)) Widget {
+	w := tx.Widget(KindSearch)
 	if onChange != nil {
 		tx.app.OnChange(w, onChange)
 	}
@@ -3625,6 +3669,20 @@ func (t *Tpl) BindHelp[S interface {
 	t.applyStrProp(n, src, TxBindHelp, TxBindHelpElement)
 }
 
+// SetPlaceholder gives every stamped field the same prompt while it is
+// empty (Tx.SetPlaceholder).
+func (t *Tpl) SetPlaceholder(n Node, text string) {
+	t.tx.emit(TxSetPlaceholder(n.id, text))
+}
+
+// BindPlaceholder sources each stamped field's prompt from a varying
+// source — the row's own field being the case it exists for.
+func (t *Tpl) BindPlaceholder[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindPlaceholder, TxBindPlaceholderElement)
+}
+
 // SetFill spans every stamped copy across its container's cross axis, or
 // opts it out (Tx.SetFill).
 func (t *Tpl) SetFill(n Node, on bool) {
@@ -3932,6 +3990,23 @@ func (t *Tpl) TextareaBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
 	n := t.Widget(KindTextarea)
+	t.applyText(n, src)
+	return n
+}
+
+// Search creates an empty search field in the blueprint: the template
+// twin of Tx.Search, with Tpl.Entry's uncontrolled contract under the
+// platform's search chrome.
+func (t *Tpl) Search() Node {
+	return t.Widget(KindSearch)
+}
+
+// SearchBound seeds each stamped copy's search field from a varying
+// source — Tpl.EntryBound's reasoning, one kind over.
+func (t *Tpl) SearchBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindSearch)
 	t.applyText(n, src)
 	return n
 }

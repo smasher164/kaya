@@ -29,6 +29,7 @@ public final class Gallery {
                     // A programmatic write must NOT come back as an occurrence.
                     tx.button("quarter", t -> t.write(pos, 0.25));
                 });
+                tx.search().placeholder("Search").a11yId("find");
                 tx.row(() -> {
                     // Invalid bytes on purpose: a decode failure reads 0x0.
                     tx.image(TEST_PNG);

@@ -3075,7 +3075,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 6")
+        if n == 1 else src, n, "typed-row reader found only 7")
     return "\n".join(lines)
 
 
@@ -3418,7 +3418,7 @@ def prop_probe():
          "    draw(...args: [...Key[], (d: Draw) => void]): void {"),
         ("  accepts(...kinds: string[]): this {",
          "    accepts(...kinds: string[]): this {"),
-    ], "js's prop reader found only 17 members")
+    ], "js's prop reader found only 18 members")
     return "\n".join(lines)
 
 
@@ -3895,7 +3895,7 @@ check("js", "bindings/js/kaya/index.ts", "a11y_label", r"^  a11yLabel\(label:")
 # WRITTEN AS A FUNCTION so the fake name below can be driven through the
 # same nine patterns: a pattern loose enough to match a prop no binding
 # has is a clause that can only pass.
-def check_help_prop(snake, pascal, camel, findings=None):
+def check_str_prop(snake, pascal, camel, findings=None):
     check("rust", "crates/kaya/src/app.rs", snake,
           rf"fn {snake}\(self", findings)
     check("python", "bindings/python/kaya/__init__.py", snake,
@@ -3916,17 +3916,26 @@ def check_help_prop(snake, pascal, camel, findings=None):
           rf"^  {camel}\(text:", findings)
 
 
-check_help_prop("help", "Help", "help")
+check_str_prop("help", "Help", "help")
+
+# PLACEHOLDER, the prompt an empty text field shows
+# (docs/search-plan.md S3). Not universal — the root admits it on entry,
+# textarea and search alone — but the SPELLING is help's in every
+# binding, so it rides the same nine patterns. A binding that shipped it
+# wire-only would leave apps unable to author a prompt at all, which is
+# what every search field on five platforms opens with.
+check_str_prop("placeholder", "Placeholder", "placeholder")
 
 fake = []
-check_help_prop("kaya_fake_help", "KayaFakeHelp", "kayaFakeHelp",
-                findings=fake)
+check_str_prop("kaya_fake_help", "KayaFakeHelp", "kayaFakeHelp",
+               findings=fake)
 help_fake = sum(1 for m in fake if "has no live-zone constructor" in m)
 if help_fake != 9:
     selftest_exit(f"check-sugar-surface: self-test failed "
                   f"({help_fake}/9 help patterns fired for a prop no "
                   f"binding has)")
-print(f"check-sugar-surface: help fake-name negatives {help_fake}/9")
+print(f"check-sugar-surface: chained-str-prop fake-name negatives "
+      f"{help_fake}/9")
 
 # The HINT prop, same rule as the two universal ones — but note it is
 # ACTIVATION-KINDS-ONLY by the root's own check (a hint needs
@@ -3965,7 +3974,10 @@ for prop, rust, go, cs, java, swift, hs, ml in (
         ("a11y_hint", "a11y_hint", "BindA11yHint", "SetA11yHint",
          "setA11yHint", "setA11yHint", "bindA11yHint", "bind_a11y_hint"),
         ("help", "help", "BindHelp", "SetHelp",
-         "setHelp", "setHelp", "bindHelp", "bind_help")):
+         "setHelp", "setHelp", "bindHelp", "bind_help"),
+        ("placeholder", "placeholder", "BindPlaceholder", "SetPlaceholder",
+         "setPlaceholder", "setPlaceholder", "bindPlaceholder",
+         "bind_placeholder")):
     check("rust", "crates/kaya/src/app.rs", f"live {prop} (sourced)",
           rf"pub fn {rust}\(self, \w+: impl Into<LiveSource<StrKind>>\)")
     check("go", "bindings/go/app.go", f"live {prop} (sourced)",

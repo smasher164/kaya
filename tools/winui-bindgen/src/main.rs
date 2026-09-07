@@ -181,6 +181,18 @@ fn main() {
         // args type comes with the handler.
         "Microsoft.UI.Xaml.Input.PointerEventHandler".to_string(),
         "Microsoft.UI.Xaml.Input.PointerRoutedEventArgs".to_string(),
+        // THE SEARCH FIELD'S ESCAPE (docs/search-plan.md S5): the `KeyDown`
+        // slot and the args carrying the key. The ordinary event is the only
+        // registration a WinRT delegate can make here — AddHandler's
+        // handled-events-too overload wants an IInspectable (the slider's
+        // note above) — and a TextBox raises it for Escape unhandled, which
+        // an AutoSuggestBox does not (docs/measurements/search-winui-2026-09-06.md).
+        "Microsoft.UI.Xaml.Input.KeyEventHandler".to_string(),
+        "Microsoft.UI.Xaml.Input.KeyRoutedEventArgs".to_string(),
+        // And the search field's GLYPH out of the assistive tree, the twin of
+        // the SwiftUI arm's `accessibilityHidden`: without the enum
+        // `AutomationProperties.SetAccessibilityView` is a `usize` vtable pad.
+        "Microsoft.UI.Xaml.Automation.Peers.AccessibilityView".to_string(),
         // THE PICKERS (docs/datetime-plan.md §0's WinUI row, P3).
         // CalendarDatePicker, NOT DatePicker: the three-spinner control
         // bounds by MinYear/MaxYear alone and D4's range is a DATE at each
