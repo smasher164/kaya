@@ -12058,3 +12058,14 @@ is the framework's async hop under a starved host, which the 15s bound now
 turns into a cancel, and no app in the tree would act differently on
 "lost" than on "cancelled". A reason field is the honest shape if that
 changes, since it keeps one result record and one callback per binding.
+AND NO PLATFORM HAS THE CONCEPT (the maintainer asked, 2026-09-06): every
+dialog API kaya lowers to has exactly two outcomes — Android's RESULT_OK
+and RESULT_CANCELED (a picker that dies delivers the cancel; a caller
+killed mid-dialog gets the result on restart through the restored
+registry), AppKit's and SwiftUI's response or cancel, GTK's response or
+destroy, WinUI's file or null, Qt's accept or reject, Flutter's and React
+Native's null or throw. "Lost" is the harness's name for "no answer inside
+kaya's own bound", and the 15s net is a hang guard kaya needs because a
+live dialog holds the slot the next one needs, where those frameworks
+would simply never call back. Putting "lost" on the wire would be a
+concept no platform can produce.
