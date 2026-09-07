@@ -139,6 +139,16 @@ ruling of its own if the maintainer wants it.
 | WinUI 3 | `SetRequestedTheme` on every window's root element; `Default` for `system` — AND THE GROUND AND THE CAPTION, found by the first dark capture (2026-09-07): element-scope theming recolours the controls but a root that paints nothing shows the XAML host's white, which is where the caption buttons seemed to lose their contrast. The menu shell carries `ApplicationPageBackgroundThemeBrush` as a `{ThemeResource}` so the ground follows the root; with the ground dark, WinUI recolours the system-drawn caption buttons from the root's theme by itself (measured on the second capture — no AppWindowTitleBar colours needed, which is fortunate since the bindings cannot box an IReference<Color> without windows-implement). A window with no menu shell still paints the host's white under a dark theme — the themed host for every window's content is a follow-up on the ledger. AND THE SECONDARY TEXT, the maintainer's second finding on the review page: `theme_resource::<Brush>("TextFillColorSecondaryBrush")` hands back the CURRENT theme's SolidColorBrush, a static object, so caption-role labels and the settings footer kept the light theme's grey on the dark window (dark on dark); a role's colour is applied as a Style whose setter says `{ThemeResource …}`, which re-resolves against the element's ActualTheme — the same mechanism the shell background uses | immediate |
 | Compose | THE COMPOSE-STATE ROUTE (ruled 2026-09-07: "if android users are okay with the compose route, i'm alright with that" — the route Compose-first apps and Google's Now in Android sample take): the choice is composition state, `LocalConfiguration`'s night bits are re-provided from it and the window background repainted, no configuration change and no activity recreation; surfaces other processes own (the document picker, toasts, the share sheet) follow the SYSTEM's mode, as they do for every Android app | immediate; the re-provision measured in the depth build (§7) |
 
+THE REVIEW'S TWO CHROME FINDINGS, taken the same evening: GTK's sidebar
+pane read as one sheet with the content — the S2 rewrite carried
+libadwaita's row class alone — so the pane wears `sidebar-pane` (the tint
+the split views give it) and a vertical separator stands between it and
+the content; and WinUI's NavigationView opened at its 320 default,
+Settings' width for a pane with a search box, a third of the window
+where the mac declares an ideal of 220 and GTK sizes to content — the
+pane opens at 240 now, the mac's ideal plus this platform's row padding
+(the maintainer's call, offered as the default).
+
 ## §4 — The wire
 
 - WINDOW_PROPS gains `("appearance", <next id>, PropKind::Enum("appearance"))`

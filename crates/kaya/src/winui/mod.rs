@@ -4487,6 +4487,12 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
             },
         );
         nav.SelectionChanged(&handler)?;
+        // THE PANE'S WIDTH: NavigationView opens at 320 by default, Settings'
+        // width for a pane with a search box; kaya's sidebars declare an
+        // ideal of 220 on the mac and size to content on GTK, so the Windows
+        // pane takes the mac's ideal plus this platform's row padding (the
+        // maintainer's S2b review, 2026-09-07).
+        nav.SetOpenPaneLength(240.0)?;
         core.section_navs.insert(window, nav.clone());
         let nav_el: UIElement = windows_core::Interface::cast(&nav)?;
         set_window_content(core, window, &nav_el)?;

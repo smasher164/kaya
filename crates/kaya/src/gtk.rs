@@ -4757,7 +4757,13 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
             scroller.set_propagate_natural_width(true);
             scroller.set_vexpand(true);
             scroller.set_child(Some(&list));
+            // THE PANE, NOT ONLY ITS ROWS: libadwaita's split views tint the
+            // sidebar pane and draw a hairline where it meets the content;
+            // the S2 rewrite carried the row class alone, so the two areas
+            // read as one sheet (the maintainer's S2b review, 2026-09-07).
+            scroller.add_css_class("sidebar-pane");
             container.append(&scroller);
+            container.append(&gtk4::Separator::new(gtk4::Orientation::Vertical));
             container.append(&stack);
             core.section_lists
                 .entry(window)
