@@ -36,6 +36,11 @@ SUITE_APPS = {
 
 SUITES = ("compose", "jvm", "go", "python")
 
+# THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
+# quiet.py): the emulator drags, twenty-five sightings under a matrix and
+# green alone (docs/deferred.md, the dnd-compose WATCH).
+QUIET = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose"}
+
 # The roster, per suite and in queue order. Leg names are the census
 # surface every gate reads; the exceptions ride FLAGS below.
 LEGS = {

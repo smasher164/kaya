@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
+import quiet
 
 dev_shell_or_die()
 
@@ -92,6 +93,7 @@ GATES = [
     # byte (measured 2026-09-04).
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     ("check-search", ["tools/check-search.py"], True, ""),
+    ("check-quiet", ["tools/check-quiet.py"], True, ""),
     # A why-not that can print only one sentence prints it for every
     # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.py"], True, ""),
@@ -302,6 +304,9 @@ def sweep(gates, label="gates"):
     ran = 0
     failed = []
     for name, cmd, keyed, _why in gates:
+        # The sweep is the host's biggest consumer and holds nothing: it
+        # yields while a lane runs an input-driving leg (tools/lib/quiet.py).
+        quiet.wait("gates", name)
         argv = ["tools/keyed.py", name, "--"] + cmd if keyed else list(cmd)
         print(f"[{ran + 1:02d}/{declared:02d}] {name}", flush=True)
         t0 = time.monotonic()

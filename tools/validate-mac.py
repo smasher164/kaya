@@ -24,6 +24,7 @@ import threading
 import time
 
 from lanes import mac as lane
+import quiet
 import flightrec_lane
 
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -533,6 +534,16 @@ def _leg_worker(name, argv, env):
 
 def queue_leg(name, argv, env):
     global status
+    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py): start nothing while
+    # another lane holds it; hold it, alone, for this lane's quiet legs.
+    quiet.wait("mac", name)
+    if name in lane.QUIET:
+        for t in _leg_threads:
+            t.join()
+        _leg_names.append(name)
+        with quiet.hold("mac", name):
+            _leg_worker(name, argv, env)
+        return
     if JOBS == 1 and not os.environ.get("KAYA_RECORD"):
         # STILL STREAMED — serial mode exists to watch a leg live —
         # but teed to the same log file the pooled path keeps, so the
@@ -743,6 +754,7 @@ if os.environ.get("KAYA_RECORD"):
 
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
+quiet.summary("mac")
 if status == 0:
     print("validate-mac: ALL PASS")
 else:

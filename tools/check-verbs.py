@@ -1631,6 +1631,21 @@ ACTION_VERBS = (
     # The search field's clear affordance (docs/search-plan.md S5): the
     # text becoming empty is the app's answer.
     "clear_search",
+    # The twelve the rule reached third (docs/deferred.md's dialog,
+    # clipboard and gesture entry). Several answer through a PLATFORM
+    # SURFACE rather than a widget — a dialog's own presentation, the
+    # drag session, the input method's composition — so each was read
+    # against the occurrence table before its half was decided:
+    # `alert_choose` is answered by alert_result, `file_choose` and
+    # `file_save` by file_dialog_result, `drag` and `drag_file` by
+    # dropped/drag_ended, `shortcut` by the same menu_activated an item's
+    # own activation emits, and `compose` by the text_changed the
+    # composition lands. The other five ask the guest nothing and are in
+    # QUIET_ONLY below.
+    "alert_choose", "file_choose", "file_save", "drag", "drag_file",
+    "shortcut", "compose",
+    "file_dialog_goto", "file_dialog_name", "clipboard_seed",
+    "context_open", "scroll_to_row",
 )
 
 # A VERB THE GUEST IS NEVER ASKED ABOUT HAS NO ANSWER TO WAIT FOR.
@@ -1646,7 +1661,16 @@ ACTION_VERBS = (
 # the half that works: the previous step's answer has to be on the
 # widgets before a container is driven to its end or a window is resized
 # under it.
-QUIET_ONLY = ("scroll_end", "resize_window")
+# AND FIVE MORE JOINED THEM with the twelve: what follows each is a
+# BACKEND-ORIGINATED state the next verb reads, not an answer from the
+# app — the panel's own navigation and name field (`file_dialog_goto`,
+# `file_dialog_name`), the pasteboard (`clipboard_seed`), a menu that
+# opened for the `menu_activate` after it (`context_open`), and the row
+# window a virtualized tier reports, whose ops never go through
+# Scene::apply (`scroll_to_row`).
+QUIET_ONLY = ("scroll_end", "resize_window", "file_dialog_goto",
+              "file_dialog_name", "clipboard_seed", "context_open",
+              "scroll_to_row")
 
 # A RUNNER THAT REFUSES A VERB OUTRIGHT PERFORMS NO ACTION, so neither
 # half applies — Android owns neither chrome close nor window size
@@ -1657,6 +1681,9 @@ REFUSALS = {
     (KOTLIN, "close_window"): "close_window: this host has no chrome close",
     (KOTLIN, "resize_window"):
         "resize_window: this host does not command window size",
+    # No foreign source reaches a phone's app (docs/dnd-plan.md D9), so
+    # the arm refuses rather than fake a drop.
+    (KOTLIN, "drag_file"): "drag_file is a depth slice on android",
 }
 # A DEPTH STUB on an action verb is a refusal too, for as long as it stands:
 # its row here reads `(KOTLIN, "<verb>"): 'depthStub("<scene>")'` and the
@@ -1796,6 +1823,18 @@ ANSWER_NEGATIVES = (
     (SWIFT, "resize_window", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
     (KOTLIN, "back", r"\n\s*kayaAwaitAnswer\(answered\)", "kayaAwaitAnswer("),
     (KOTLIN, "type", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    # ... and one of the TWELVE on each runner, a quiet-only verb among
+    # them for the reason above.
+    (HARNESS, "alert_choose", r"\n\s*await_answer\(answered\);",
+     "await_answer("),
+    (HARNESS, "clipboard_seed", r"\n\s*await_quiet\(\);", "await_quiet()"),
+    (SWIFT, "file_save", r"\n\s*kayaAwaitAnswer\(answered\)",
+     "kayaAwaitAnswer("),
+    (SWIFT, "scroll_to_row", r"\n\s*kayaAwaitQuiet\(\)", "kayaAwaitQuiet()"),
+    (KOTLIN, "compose", r"\n\s*else kayaAwaitAnswer\(answered\)",
+     "kayaAwaitAnswer("),
+    (KOTLIN, "context_open", r"\n\s*kayaAwaitQuiet\(\)",
+     "kayaAwaitQuiet()"),
 )
 for rel, verb, pattern, call in ANSWER_NEGATIVES:
     reader = dict((r, fn) for r, fn, _ in ANSWER_RUNNERS)[rel]

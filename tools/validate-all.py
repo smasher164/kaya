@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
+import quiet
 
 dev_shell_or_die()
 
@@ -133,6 +134,19 @@ def top_consumers(n=4):
 print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
       f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); top consumers: "
       f"{top_consumers()}", flush=True)
+# THE MATRIX-WIDE QUIET TOKEN (tools/lib/quiet.py): one directory every
+# lane reaches, the container through its flight-recorder mount.
+QUIET_DIR = pathlib.Path(
+    os.environ.get("XDG_STATE_HOME", "") or str(pathlib.Path.home() / ".local/state")
+) / "kaya" / "quiet"
+QUIET_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["KAYA_QUIET_DIR"] = str(QUIET_DIR)
+print(f"quiet: the token lives at {QUIET_DIR}", flush=True)
+# The protocol watched before the lanes trust it: the mkdir race, the
+# stale break both sides of its ceiling, an expired wait, the holder.
+if not quiet.selftest():
+    print("quiet: the self-test failed — the lanes run WITHOUT the token", flush=True)
+    del os.environ["KAYA_QUIET_DIR"]
 if MODE == "parallel":
     # ALL FIVE PLATFORM LANES START TOGETHER; the gate sweep waits for
     # Android's process, then runs niced. THE WALL IS ANDROID PLUS THE
@@ -194,7 +208,11 @@ BUDGETS = {
     # 620 since 2026-09-01: the ninth binding took the roster 349 -> 391
     # legs; quiet-contended matrices sit near 500 and this keeps the
     # ~1.25x headroom the other lanes have.
-    "mac": 620,
+    # 760 since 2026-09-06: the quiet token (tools/lib/quiet.py) has this lane
+    # hold still while android drags and linux pastes hold it — eight waits,
+    # 226s, on matrix #22 (675s against 620); 485s without them the same day.
+    # Re-read on the next quiet matrices.
+    "mac": 760,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
     # contended matrix after read 459s. 700 since 2026-09-04: the roster
@@ -233,7 +251,10 @@ BUDGETS = {
     # 640 since 2026-09-06: the roster grew 128 -> 131 legs with the search
     # scene; 538s quiet at 128 (matrix #19), 608s at 131 under a five-minute
     # load of 84 (matrix #21) with no leg slowed in kind.
-    "ios": 640,
+    # 840 since 2026-09-06: the four quiet legs empty the pool and run alone
+    # (93s held, 89s waiting to hold, 24s admitting on matrix #22, 749s
+    # against 640); 608s without them the same day. Re-read likewise.
+    "ios": 840,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot

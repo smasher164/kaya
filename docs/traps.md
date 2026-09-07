@@ -9619,3 +9619,13 @@ with the driver "never asked for anything" (matrix #20). The same class
 tools/lib/scene-features.py was built to kill, one runner over: the rule is
 keyed on the script's VERBS now (`needs_bridge`), self-checked both ways
 before any leg runs. A list of names is right until the next scene.
+
+## A bare `wait` in a sourced shell helper reaps the caller's background jobs (2026-09-06)
+
+tools/linux/quiet.sh's self-test raced two background `mkdir`s and then
+called `wait` with no pids. In run-suites.sh that shell already had the
+guest builds running in the background: the bare `wait` reaped them, and
+the builds' own `wait $pid` then failed with `pid 28 is not a child of
+this shell` and printed `guest build FAILED: csharp` / `java` for builds
+that had succeeded. A helper that starts children waits on THEIR pids and
+nothing else; run-suites.sh's drain says the same of the compositor.

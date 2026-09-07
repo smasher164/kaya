@@ -7950,10 +7950,15 @@ asked to have read was an unnamed mkdtemp nobody kept, which is why
 neither sighting could be read. Four watched negatives on the real pool
 (drivers killed, the typing signal made impossible, the slow-flow
 injection, the host timeout cut to 1s); the lane ALL PASS twice on 128
-legs with four drivers alive at the verdict. OPEN, for a ruling: nothing
-restarts a dead driver, so one death still costs the rest of that
-device's legs — a between-legs restart is a few lines and would make a
-red lane green with one leg lost.
+legs with four drivers alive at the verdict. RESOLVED 2026-09-06 (the third
+robustness pass, under the maintainer's "address the flakes" grant): a
+dead driver is started again BEFORE the next leg on its device
+(tools/ios/run-sim.py `xcuidrive_revive`, printed with its count; the leg
+it died under keeps its verdict and its last words), and the census at
+the verdict counts the restarts. Watched through
+`KAYA_IOS_KILL_DRIVER_TEST=<udid>`, which kills that device's driver
+after its first leg so the next leg's restart prints rather than being
+trusted.
 
 MATRIX #18 THE SAME EVENING was red on this leg again with the driver
 ALIVE — a different shape, held by the save-press WATCH below (the
@@ -7961,6 +7966,11 @@ driver's own retry loop, one press long after this round's edit).
 
 
 ## WATCH — `save-swiftui` under a matrix: the save sheet's Save was pressed once and the sheet stayed up (first sighting 2026-09-06)
+QUIET SINCE 2026-09-06: `save-swift`, `save-go`, `save-swiftui` and
+`filedialog-go` run holding the matrix-wide quiet token (tools/lib/quiet.py,
+tools/lib/lanes/ios.py QUIET) with the iOS pool emptied first, so the
+starved-host premise is gone from under them; the per-press reading stays
+the instrument for a sighting under the token.
 KEY: save-swiftui, savepress, still up after 1 presses, savePressWindow, swallowed press, xcuidrive, matrix contention
 
 Matrix #18 (the robustness day's second round, five-minute load 77 by the
@@ -10822,6 +10832,19 @@ each a stub the runner reads (tools/check-stubs.py):
     windows reading is not the cause; GTK's own drag under a contended
     host is (the android dnd class one lane over). Green standalone the
     same hour on the GTK agent's lane run (739 legs).
+    REMEDY TAKEN 2026-09-06 (the third robustness pass), the android
+    remedy's mechanism one lane over: on x11 the harness's drag is TWO
+    xdotool processes — the press and the walk past GTK's threshold, then
+    the release — and the release waits for GTK's own `drag-begin`
+    (`DRAG_BEGAN`, set in both drag-source hooks) up to 5s, printing
+    `drag began Nms after the press` or `no drag began within 5000ms —
+    releasing anyway` (tools/linux/dragdrive.py `--phase`, gtk.rs `fn
+    drag`); XTEST's pointer state outlives the process, which is what
+    makes the split possible, and wayland stays one process because its
+    virtual pointer dies with it. Quiet: `drag began 0ms after the press`
+    on every x11 drag leg. AND the four witness legs run holding the
+    matrix-wide quiet token (tools/lib/quiet.py, KAYA_QUIET_LEGS), so the
+    contended host this entry names is no longer the host they run on.
     The `KAYA_DIAG dragdrive` read the first sighting asked for is still
     owed.
   - ~~**DEPTH STUB: dnd on winui**~~ — LANDED 2026-09-03: BOTH routes, as
@@ -10954,6 +10977,13 @@ arm lands, and the lanes carry no pickers legs until then:
   green.
 
 ## WATCH — android `dnd-compose` under a matrix: the drag started and was acked, and the destination answered none (first sighting 2026-09-04)
+QUIET SINCE 2026-09-06: `dnd-compose`, `dnd-jvm`, `dnd-go` and
+`tasks-compose` run holding the matrix-wide quiet token (tools/lib/quiet.py,
+tools/lib/lanes/android.py QUIET), so no other lane starts a leg while an
+emulator drag runs; the load-scaled schedule stays, since the lane's own
+four emulators are still there. The seventeenth sighting failed with two
+lanes running, so the token narrows this class rather than closing it: a
+sighting under the token is a different premise and is read as such.
 KEY: dnd-compose, drag ended none, KAYA_DRAG_STARTED, KAYA_ACK, matrix contention, android drag
 
 On the first matrix of the pickers breadth tree (five lanes, host load 4.7
@@ -11357,7 +11387,7 @@ pre-existing dialog flake and not this rule's; the other 400 legs sum
 to 208s before and 207s after; the android compose and python suites and the iOS
 rust-swiftui suite ALL PASS.
 
-The verbs still outside the rule are their own entry, below.
+The verbs that were still outside the rule took it the same day (the struck twelve-verb entry below).
 
 ## ~~GAP — ten action verbs still return before the app has answered: `set_date`, `set_time`, `select_range`, `set_text`, `type`, `scroll_end`, `menu_activate`, `back`, `close_window`, `resize_window` (2026-09-06)~~
 KEY: ACTION_VERBS, await_answer, kayaAwaitAnswer, set_date, set_time, select_range, set_text, type, scroll_end, menu_activate, back, close_window, resize_window
@@ -11393,13 +11423,44 @@ tables in tools/check-verbs.py with their mechanism written down and four
 watched negatives of their own — a refusal that stops saying what it
 refuses, and a refusal that starts acting. The census reads 45 arms with
 16 watched negatives, including one of the ten on each runner and both
-quiet-only verbs' one half. Still outside the rule, their own entry below:
-the dialog and clipboard family (`alert_choose`, `file_dialog_goto`,
-`file_dialog_name`, `file_choose`, `file_save`, `clipboard_seed`),
-`drag`, `drag_file`, `context_open`, `shortcut`, `compose`,
-`scroll_to_row`.
+quiet-only verbs' one half. The twelve then still outside the rule took it the same evening (the struck entry below).
 
-## GAP — the dialog, clipboard and gesture verbs still return before the app has answered: `alert_choose`, `file_dialog_goto`, `file_dialog_name`, `file_choose`, `file_save`, `clipboard_seed`, `drag`, `drag_file`, `context_open`, `shortcut`, `compose`, `scroll_to_row` (2026-09-06)
+## ~~GAP — the dialog, clipboard and gesture verbs still return before the app has answered: `alert_choose`, `file_dialog_goto`, `file_dialog_name`, `file_choose`, `file_save`, `clipboard_seed`, `drag`, `drag_file`, `context_open`, `shortcut`, `compose`, `scroll_to_row` (2026-09-06)~~ — RESOLVED 2026-09-06: all twelve take the rule in all three runners, from the
+same two helpers the fifteen before them call, and `ACTION_VERBS` is
+twenty-eight (`clear_search` had joined from the search slice since this
+entry was written).
+RESOLVED 2026-09-06: all twelve take the rule in all three runners, from the
+same two helpers the fifteen before them call, and `ACTION_VERBS` is
+twenty-eight (`clear_search` had joined from the search slice since this
+entry was written). SEVEN CARRY BOTH HALVES, each read off spec.rs's
+occurrence table before its verdict: `alert_choose` (alert_result),
+`file_choose` and `file_save` (file_dialog_result), `drag` and `drag_file`
+(dropped, then drag_ended), `shortcut` (the same menu_activated an item's own
+activation emits) and `compose` (the text_changed the composition lands).
+FIVE CARRY THE WAIT BEFORE ALONE and join QUIET_ONLY, because what follows
+each is a BACKEND-ORIGINATED state the next verb reads rather than an answer:
+the panel's own navigation and name field (`file_dialog_goto`,
+`file_dialog_name`), the pasteboard (`clipboard_seed`), a menu that opened for
+the `menu_activate` after it (`context_open`), and the row window a
+virtualized tier reports, whose ops never go through `Scene::apply` —
+`scroll_end`'s own reason one verb over (`scroll_to_row`). AND ONE MORE ARM
+REFUSES: Compose's `drag_file` says so outright (no foreign source reaches a
+phone's app, docs/dnd-plan.md D9), so it performs no action and takes neither
+half; `REFUSALS` is three. WHERE AN ARM REFUSES BEFORE IT ACTS THE WAITS WRAP
+THE ACT: the Compose runner's `file_dialog_name` and `file_save` `when`
+chains had CONDITIONS that acted, so each grew an `else ->` branch holding
+the wait and the act with the refusals above it left bare, and its
+`file_choose` `?.let` became an explicit `if (why != null)` so the answer wait
+has an else to sit in. `compose` is the one verb whose answer may not come at
+all — spec.rs says composition state is on no kaya channel and the app hears
+of it only through the commit's text_changed — so on a backend whose preedit
+emits nothing the bounded after-wait expires at its second and the leg is
+still green; measured on macOS it did NOT, the ranges leg's compose step
+running 413ms all in. tools/check-verbs.py reads 84 action arms across the
+three runners with 24 watched negatives (one of the twelve per runner per
+half, plus both ways on each of the three refusals). NOTHING IS LEFT OUTSIDE:
+the parser's non-expect vocabulary is exactly these twenty-eight plus
+`settle`, which drives nothing and only waits.
 KEY: ACTION_VERBS, await_answer, kayaAwaitAnswer, alert_choose, file_choose, file_save, clipboard_seed, drag, drag_file, context_open, shortcut, compose, scroll_to_row
 
 Named the day the fifteen took the rule (the struck entry above). Each
@@ -11447,7 +11508,11 @@ seconds with a one-second floor, the miss sentence byte-identical to the
 other two harnesses, and `KAYA_HARNESS: scene ready after <n>ms` on the way
 through. tools/check-harness-ceiling.py holds all three. The android python suite standalone the same day: varied-python 3s, green.
 
-## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty" (first sighting 2026-09-04)
+## WATCH — `clipboard-python-wayland` under a contended matrix: every paste read "empty"
+QUIET SINCE 2026-09-06: the three wayland clipboard legs run holding the
+matrix-wide quiet token (tools/linux/run-suites.sh KAYA_QUIET_LEGS); the
+x11 leg does not, its one sighting being the first paste's, so a second
+x11 reading decides whether it joins. (first sighting 2026-09-04)
 KEY: clipboard-python-wayland, reads "empty", wl-copy, clipboard_seed, wayland focus, matrix contention, gtk_window_active, CLIP_GENERATION, clip_note, vtrace clipboard records, app_formats, foreign_targets
 
 Second matrix of the pickers breadth tree (five lanes; 5-minute load 33 at

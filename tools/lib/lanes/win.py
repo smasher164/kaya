@@ -29,6 +29,11 @@ SCENES = [
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
 ]
 
+# Nothing on this lane is in the quiet class yet (tools/lib/quiet.py): its
+# drag legs read green at 31-34s across every recorded run. The set grows
+# on a sighting, with its reason.
+QUIET = set()
+
 # Depth-slice scenes: a rust example + steps exist, the language
 # sweep has not landed. Built, shipped and run RUST-ONLY — the
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read

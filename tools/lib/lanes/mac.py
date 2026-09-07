@@ -69,6 +69,11 @@ GUEST_STEM = {"listdetail": "split"}
 # script and binary under KAYA_APPEARANCE=dark.
 DARK_LEG = ("canvasdark-rust-swiftui", "canvas", "rust")
 
+# Nothing on this lane is in the quiet class (tools/lib/quiet.py): its
+# input-driving legs are already alone between drains and its drags cost
+# 1-3s. The set grows on a sighting, with its reason.
+QUIET = set()
+
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
 # editor is a GO app by design, portfolio and varied are PYTHON alone.

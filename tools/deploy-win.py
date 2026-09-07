@@ -45,6 +45,7 @@ import time
 import os
 
 from lanes import win as lane
+import quiet
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -1631,8 +1632,17 @@ def _leg_worker(name):
 
 
 def run_suite(name):
+    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py), taken on the host for a
+    # leg that runs on the VM.
+    quiet.wait("windows", name)
     SUITES_RUN.append(name)
     _leg_names.append(name)
+    if name in lane.QUIET:
+        for t in _leg_threads:
+            t.join()
+        with quiet.hold("windows", name):
+            _leg_worker(name)
+        return
     t = threading.Thread(target=_leg_worker, args=(name,))
     t.start()
     _leg_threads.append(t)
@@ -1805,6 +1815,7 @@ if os.environ.get("KAYA_RECORD"):
 # complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
+quiet.summary("windows")
 if status == 0:
     print("deploy-win: ALL PASS")
 else:

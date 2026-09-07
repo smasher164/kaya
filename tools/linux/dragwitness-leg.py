@@ -63,7 +63,11 @@ LANDING_DEADLINE_S = 40.0
 # output both pools run at (tools/linux/run-suites.sh pins both servers).
 GAP = 40
 SCREEN = (1600, 1000)
-DIAG = re.compile(r"pressed \((-?\d+), (-?\d+)\), released \((-?\d+), (-?\d+)\)")
+# One line on wayland; on x11 the release is its own line, since the
+# harness holds the button until GTK has begun the drag (tools/linux/
+# dragdrive.py, the phases).
+PRESSED = re.compile(r"pressed \((-?\d+), (-?\d+)\)")
+RELEASED = re.compile(r"released \((-?\d+), (-?\d+)\)")
 
 
 def out(line):
@@ -82,11 +86,13 @@ class Pump:
         for line in self._stream:
             self.lines.append(line.rstrip("\n"))
 
-    def wait_for(self, needle, deadline_s, what):
+    def wait_for(self, needle, deadline_s, what, after=-1):
+        """The FIRST line carrying `needle` past index `after` — the next
+        one, not the first ever, when a caller is reading a sequence."""
         end = time.monotonic() + deadline_s
         while time.monotonic() < end:
-            for line in list(self.lines):
-                if needle in line:
+            for i, line in enumerate(list(self.lines)):
+                if i > after and needle in line:
                     return line
             time.sleep(0.05)
         raise DragDriveError(
@@ -288,12 +294,19 @@ def drive(proto, direction, witness, witness_said, kaya, kaya_said):
     # kaya's own instrument, waited for rather than raced.
     diag = kaya_said.wait_for("KAYA_DIAG dragdrive", READY_DEADLINE_S,
                               "kaya's drag verb")
-    hit = DIAG.search(diag)
-    if hit is None:
+    pressed = PRESSED.search(diag)
+    if pressed is None:
         raise DragDriveError(
             f"kaya's drag verb printed a line this leg cannot read: {diag!r}")
-    kaya_source = (int(hit.group(1)), int(hit.group(2)))
-    kaya_files = (int(hit.group(3)), int(hit.group(4)))
+    released = RELEASED.search(diag)
+    if released is None:
+        # The x11 shape: the press line, the drag-begin wait's own line,
+        # then the release — read PAST the press line, not from the top.
+        released = RELEASED.search(kaya_said.wait_for(
+            "released (", READY_DEADLINE_S, "kaya's drag verb's release",
+            after=kaya_said.lines.index(diag)))
+    kaya_source = (int(pressed.group(1)), int(pressed.group(2)))
+    kaya_files = (int(released.group(1)), int(released.group(2)))
 
     def centre(rect):
         return (origin[0] + rect[0] + rect[2] // 2,

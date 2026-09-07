@@ -424,3 +424,33 @@ expected verbatim output, and the constraint list of files it must not
 touch. The gate layer catches what an agent misses — that is what it is
 for. After parallel work lands, one consolidation pass re-runs all
 gates against the final tree (each agent verified against a moving one).
+
+## Quiet legs: one input-driving leg on the host at a time
+
+The legs that drive a platform's own input, dialog, drag or clipboard
+machinery from outside the process (an emulator drag, the iOS save sheet,
+kaya's own x11 drag in the witness legs, a wayland paste) fail only under a
+matrix and pass alone. tools/lib/quiet.py is the matrix-wide token they run
+under: one `mkdir` lock in `$XDG_STATE_HOME/kaya/quiet`, which the linux
+container already sees at `/flightrec-state/kaya/quiet`.
+
+- Every runner asks the token at its one leg funnel (`quiet.wait(<lane>,
+  name)`) before starting ANY leg: while another lane holds it, the lane
+  starts nothing and its legs in flight finish.
+- Each lane's `QUIET` set (tools/lib/lanes/*.py; `KAYA_QUIET_LEGS` in
+  tools/linux/run-suites.sh) names the legs it runs holding the token: the
+  pool is emptied first, the leg runs inline, the token is released.
+- Every wait and hold prints (`quiet: ios waits to admit save-swift —
+  lane=android leg=dnd-go … holds`, `quiet: android holds for dnd-go`,
+  `quiet: android released after dnd-go (48.2s held)`), and each lane ends
+  with `quiet: <lane> held N legs for Xs; waited M times for Ys`, so the
+  wall cost of quiet stands beside the lane's duration.
+- A lock older than 300s is broken with a sentence (a dead lane, not a slow
+  leg); a wait longer than 360s proceeds with a sentence. Quiet never costs
+  a lane a leg.
+- To add a leg: put its lane-spelled name in the lane's `QUIET` set with
+  the sighting that earned it. tools/check-quiet.py holds every name to a
+  leg the lane runs, every funnel to the wait and the hold, and the python
+  and shell spellings to one set of sentences.
+- A lane run by hand takes the token too, in the state home's directory;
+  alone on the host it never waits.

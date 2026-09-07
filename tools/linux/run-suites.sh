@@ -251,6 +251,13 @@ FLIGHTREC_SCRATCH="$(mktemp -d)"
 # shellcheck source=tools/lib/flightrec.sh
 source /work/tools/lib/flightrec.sh
 flightrec_start linux
+# shellcheck source=tools/linux/quiet.sh
+source /work/tools/linux/quiet.sh
+kaya_quiet_selftest linux
+# THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
+# quiet.py): kaya's own x11 drag in the witness legs, three sightings
+# under a matrix (docs/deferred.md), and the wayland pastes.
+KAYA_QUIET_LEGS=" dndwitness-in-x11 dndwitness-out-x11 dndwitness-in-wayland dndwitness-out-wayland clipboard-python-wayland clipboard-js-wayland clipboard-rust-wayland "
 # A lane that dies mid-run is exactly when the journal matters, and this
 # runner has no other EXIT trap to share.
 trap 'flightrec_flush; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
@@ -302,6 +309,29 @@ run() {
     local proto="$1" name="$2"
     shift 2
     kaya_wanted "$name" "$proto" || return 0
+    # THE MATRIX-WIDE TOKEN (tools/linux/quiet.sh): start nothing while
+    # another lane holds it; for this lane's quiet legs, let the pool empty,
+    # then hold it and run the pooled body in the foreground.
+    kaya_quiet_wait linux "$name-$proto"
+    case "$KAYA_QUIET_LEGS" in *" $name-$proto "*)
+        if [ ${#leg_pids[@]} -gt 0 ]; then
+            wait "${leg_pids[@]}" 2>/dev/null || true
+        fi
+        kaya_quiet_hold_begin linux "$name-$proto"
+        (
+            local t0=$SECONDS
+            if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
+                echo PASS >"$LEGS_DIR/$name-$proto.verdict"
+            else
+                echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
+            fi
+            echo $((SECONDS - t0)) >"$LEGS_DIR/$name-$proto.secs"
+        )
+        leg_names+=("$name-$proto")
+        kaya_quiet_hold_end linux "$name-$proto"
+        return
+        ;;
+    esac
     if [ "$JOBS" = 1 ]; then
         echo "== $name ($proto) =="
         local t0=$SECONDS
@@ -1418,5 +1448,6 @@ xvfb-run -a bash -c "
 flightrec_flush
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer.
+kaya_quiet_summary linux
 if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi
 exit "$status"

@@ -76,6 +76,8 @@ GATES = {
     # The search field's one clear path and platform identity are lowerings
     # in three files; swift/ because the Mac and iOS arms live there.
     "check-search": ["crates", "swift", "android"],
+    # The quiet token is wired in tools/ alone, which every key already carries.
+    "check-quiet": [],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

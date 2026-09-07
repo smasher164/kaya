@@ -3041,6 +3041,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                          location and the scene would compare against that"
                     )))
                 } else {
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY):
+                    // the panel's own navigation asks the guest nothing.
+                    await_quiet();
                     vtrace::note(
                         "file_dialog_goto",
                         format_args!("-> stage.goto_directory {resolved} (scene wrote {path})"),
@@ -3085,6 +3088,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                         "clipboard_seed {kind} {arg}: there is no file at {resolved}"
                     )))
                 } else {
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY):
+                    // the pasteboard is not the app, and nothing answers a
+                    // seed.
+                    await_quiet();
                     stage.clipboard_seed(kind, &resolved);
                     None
                 }
@@ -3109,6 +3116,8 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // whatever was already selected (docs/traps.md, "Pressing Open
                 // with nothing selected still returns a file"). Checked here,
                 // so no backend checks its own work.
+                await_quiet();
+                let answered = crate::scene::answers();
                 match name {
                     Some(want) => match traced_file_dialog_state("file_choose", &stage) {
                         Some((_, rows)) if rows.iter().any(|r| r == want) => {
@@ -3133,7 +3142,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                                      nothing returns an error for it"
                                 )),
                             }) {
-                                Ok(_) => None,
+                                Ok(_) => {
+                                    await_answer(answered);
+                                    None
+                                }
                                 Err(why) => Some(Err(why)),
                             }
                         }
@@ -3174,7 +3186,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                                  (listing {rows:?}) — the press was swallowed"
                             )),
                         }) {
-                            Ok(_) => None,
+                            Ok(_) => {
+                                await_answer(answered);
+                                None
+                            }
                             Err(why) => Some(Err(why)),
                         }
                     }
@@ -3199,6 +3214,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                                  already names {was:?})"
                             ),
                         );
+                        // QUIET-WAIT ONLY (tools/check-verbs.py's
+                        // QUIET_ONLY): the panel's name field is not the
+                        // app, and nothing answers the typing.
+                        await_quiet();
                         stage.set_save_name(name);
                         vtrace::note("file_dialog_name", format_args!("<- stage.set_save_name"));
                         None
@@ -3216,6 +3235,8 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 if traced_save_dialog_state("file_save", &stage).is_none() {
                     Some(Err("file_save: no save dialog is live".to_string()))
                 } else {
+                    await_quiet();
+                    let answered = crate::scene::answers();
                     vtrace::note("file_save", format_args!("-> stage.confirm_save({save})"));
                     stage.confirm_save(*save);
                     vtrace::note("file_save", format_args!("<- stage.confirm_save"));
@@ -3227,7 +3248,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                              because nothing returns an error for it"
                         )),
                     }) {
-                        Ok(_) => None,
+                        Ok(_) => {
+                            await_answer(answered);
+                            None
+                        }
                         Err(why) => Some(Err(why)),
                     }
                 }
@@ -3292,8 +3316,12 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             })),
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
-                // guest's reaction to the result.
+                // guest's reaction to the result — the alert_result
+                // occurrence and the transaction the guest writes from it.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.choose_alert(*choice);
+                await_answer(answered);
                 None
             }
             Step::Back(window) => {
@@ -3457,6 +3485,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // An action, silent like click — the expect_window after
                 // it is the observable — but a backend that cannot do it
                 // says so HERE, where the sentence still names the verb.
+                //
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): the
+                // row window a virtualized tier reports never goes through
+                // Scene::apply, so there is no answer to wait for, while
+                // the previous step's answer has to be on the rows before
+                // one of them is parked.
+                await_quiet();
                 let off = stage.scroll_to_row(*t, key);
                 if off.is_empty() {
                     None
@@ -3469,16 +3504,22 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // `drag_ended` are the observables. A refused drop is not
                 // a failure here: the source learns `none` through
                 // drag_ended and the scene reads that.
+                await_quiet();
+                let answered = crate::scene::answers();
                 let off = stage.drag(*source, *destination, *reorder);
                 if off.is_empty() {
+                    await_answer(answered);
                     None
                 } else {
                     Some(Err(format!("drag: {off}")))
                 }
             }
             Step::DragFile(path, destination) => {
+                await_quiet();
+                let answered = crate::scene::answers();
                 let off = stage.drag_file(&expand_path(path), *destination);
                 if off.is_empty() {
+                    await_answer(answered);
                     None
                 } else {
                     Some(Err(format!("drag_file: {off}")))
@@ -3953,6 +3994,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 } else {
                     // An action, silent like click: the following
                     // menu_activate's effect is the observable.
+                    //
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY):
+                    // opening a menu asks the guest nothing.
+                    await_quiet();
                     stage.context_open(*t);
                     None
                 }
@@ -3961,7 +4006,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // An action, silent like click: the SAME
                 // menu_activated the item's direct activation emits
                 // is the observable, read back through the fold.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.shortcut(spelling);
+                await_answer(answered);
                 None
             }
             Step::ExpectHighlights(target, want) => Some(poll(|| {
@@ -3994,7 +4042,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             Step::Compose(target, text) => {
                 // An action, silent like type: what the composition does
                 // to the next step is the observable.
+                await_quiet();
+                let answered = crate::scene::answers();
                 stage.compose(*target, text);
+                await_answer(answered);
                 None
             }
             Step::ExpectAx(target, want) => Some(poll(|| {

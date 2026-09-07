@@ -6501,6 +6501,7 @@ object KayaCompose {
                             failures.add(
                                 "drag wants `<source> to <destination> [before|onto]`")
                         } else {
+                            kayaAwaitQuiet()
                             kayaAwaitFrames(activity, 2)
                             // THE BOX MUST HAVE SETTLED (docs/deferred.md's
                             // android drag WATCH, sightings four and five):
@@ -6519,13 +6520,17 @@ object KayaCompose {
                                 failures.add("drag: ${plan.error}")
                             } else {
                                 val endings = kayaDragEndings
+                                val answered = kayaBatches
                                 Log.i("kaya", plan.line)
                                 val off = kayaAwaitDragEnd(plan.sourceId, endings)
                                 if (off != null) {
                                     failures.add("drag: $off")
                                 } else {
-                                    // THE ACK the runner stops re-injecting on.
+                                    // THE ACK the runner stops re-injecting on,
+                                    // sent BEFORE the answer wait so a slow
+                                    // guest cannot buy another injection.
                                     Log.i("kaya", "KAYA_ACK: draganddrop ${plan.seq}")
+                                    kayaAwaitAnswer(answered)
                                 }
                             }
                         }
@@ -6545,6 +6550,11 @@ object KayaCompose {
                         // moves first, the park follows the correction.
                         val rawKey = parts.drop(2).joinToString(" ")
                         val key = if (rawKey.startsWith("\"")) quoted(parts.drop(2)) else rawKey
+                        // QUIET-WAIT ONLY (tools/check-verbs.py's
+                        // QUIET_ONLY): the row window is the tier's own
+                        // report and answers nothing, while the previous
+                        // step's answer has to be on the rows first.
+                        kayaAwaitQuiet()
                         val off = onUi(activity) {
                             val node = target(parts[1], "column", KayaSceneModel.columns)
                             val window = node?.let { kayaTableWindows[it.id] }
@@ -6805,11 +6815,18 @@ object KayaCompose {
                                 failures.add("file_dialog_name wants a file name")
                             kayaAwaitSaveDialogState() == null ->
                                 failures.add("file_dialog_name $saveName: no save dialog is live")
-                            KayaHarnessAccessibility.live?.setSaveName(saveName) != true ->
-                                failures.add(
-                                    "file_dialog_name $saveName: the panel's name field " +
-                                        "refused the text"
-                                )
+                            else -> {
+                                // QUIET-WAIT ONLY (tools/check-verbs.py's
+                                // QUIET_ONLY): the panel's name field is
+                                // not the app, and nothing answers it.
+                                kayaAwaitQuiet()
+                                if (KayaHarnessAccessibility.live?.setSaveName(saveName) != true) {
+                                    failures.add(
+                                        "file_dialog_name $saveName: the panel's name field " +
+                                            "refused the text"
+                                    )
+                                }
+                            }
                         }
                     }
                     "file_save" -> {
@@ -6831,35 +6848,49 @@ object KayaCompose {
                                 )
                             kayaAwaitSaveDialogState() == null ->
                                 failures.add("file_save: no save dialog is live")
-                            // CANCEL IS BACK on this platform — there is
-                            // no Cancel button in either dialog.
-                            saveArg == "cancel" ->
-                                svc.dismiss()?.let { failures.add("file_save cancel: $it") }
-                            !svc.confirmSave() ->
-                                failures.add("file_save: the panel's SAVE button refused the press")
-                            // AND THE PANEL MUST BE GONE: a press that
-                            // lands before the panel is interactive is
-                            // swallowed with no error anywhere, and the
-                            // leg then fails three steps later on an
-                            // assertion about the GUEST.
-                            !svc.waitForPickerGone() -> {
-                                // A null name here is not an empty name
-                                // field: it is a panel nobody could read,
-                                // and printing it as `naming "null"` sends
-                                // the next reader after the wrong thing.
-                                val naming = kayaSaveDialogState()?.second
-                                failures.add(
-                                    "file_save: the panel is still up " +
-                                        (if (naming != null) "(naming \"$naming\")"
-                                        else "(${kayaDialogReport()})") +
-                                        " — the press was swallowed, which the panel " +
-                                        "cannot tell you"
-                                )
-                                // Dismissed so the scene's continuation
-                                // cannot trip the one-per-process abort
-                                // and destroy this failure list
-                                // (file_choose's 2026-08-20 lesson).
-                                svc.dismiss()
+                            else -> {
+                                kayaAwaitQuiet()
+                                val answered = kayaBatches
+                                when {
+                                    // CANCEL IS BACK on this platform —
+                                    // there is no Cancel button in either
+                                    // dialog.
+                                    saveArg == "cancel" ->
+                                        svc.dismiss()?.let {
+                                            failures.add("file_save cancel: $it")
+                                        }
+                                    !svc.confirmSave() ->
+                                        failures.add(
+                                            "file_save: the panel's SAVE button refused the press")
+                                    // AND THE PANEL MUST BE GONE: a press
+                                    // that lands before the panel is
+                                    // interactive is swallowed with no
+                                    // error anywhere, and the leg then
+                                    // fails three steps later on an
+                                    // assertion about the GUEST.
+                                    !svc.waitForPickerGone() -> {
+                                        // A null name here is not an empty
+                                        // name field: it is a panel nobody
+                                        // could read, and printing it as
+                                        // `naming "null"` sends the next
+                                        // reader after the wrong thing.
+                                        val naming = kayaSaveDialogState()?.second
+                                        failures.add(
+                                            "file_save: the panel is still up " +
+                                                (if (naming != null) "(naming \"$naming\")"
+                                                else "(${kayaDialogReport()})") +
+                                                " — the press was swallowed, which the panel " +
+                                                "cannot tell you"
+                                        )
+                                        // Dismissed so the scene's
+                                        // continuation cannot trip the
+                                        // one-per-process abort and
+                                        // destroy this failure list
+                                        // (file_choose's 2026-08-20 lesson).
+                                        svc.dismiss()
+                                    }
+                                }
+                                kayaAwaitAnswer(answered)
                             }
                         }
                     }
@@ -6869,6 +6900,9 @@ object KayaCompose {
                         // blocks on another process, and the ordered
                         // broadcast's result lands on main.
                         if (parts.size > 2) {
+                            // QUIET-WAIT ONLY (tools/check-verbs.py's
+                            // QUIET_ONLY): the clipboard is not the app.
+                            kayaAwaitQuiet()
                             kayaClipboardSeed(parts[1], quoted(parts.drop(2)))
                         } else {
                             failures.add("clipboard_seed wants a kind and its content")
@@ -6896,6 +6930,10 @@ object KayaCompose {
                         // Silent like click: the observable is where the
                         // NEXT picker opens, which expect_file_dialog
                         // reads back off the platform.
+                        // QUIET-WAIT ONLY (tools/check-verbs.py's
+                        // QUIET_ONLY): the picker's own navigation asks
+                        // the guest nothing.
+                        kayaAwaitQuiet()
                         kayaFileDialogGoto(parts.getOrNull(1) ?: "")
                     }
                     "file_choose" -> {
@@ -6921,8 +6959,11 @@ object KayaCompose {
                             // this failure list with it.
                             kayaFileDialogDrive("cancel")
                         } else {
-                            kayaFileDialogDrive(want)?.let {
-                                failures.add("file_choose $want: $it")
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val why = kayaFileDialogDrive(want)
+                            if (why != null) {
+                                failures.add("file_choose $want: $why")
                                 // Dismiss here too, the wrong-name arm's
                                 // rule: a picker left up turns the next
                                 // show into the one-per-process abort,
@@ -6930,6 +6971,8 @@ object KayaCompose {
                                 // measured 2026-08-20, filedialog-jvm's
                                 // SIGABRT ate exactly this evidence.
                                 kayaFileDialogDrive("cancel")
+                            } else {
+                                kayaAwaitAnswer(answered)
                             }
                         }
                     }
@@ -6938,6 +6981,8 @@ object KayaCompose {
                         // buttons run — the runner drives the model
                         // exactly as click does here. Silent.
                         val arg = parts.getOrNull(1) ?: ""
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         onUi(activity) {
                             val alert = KayaSceneModel.alertId
                             if (alert != null) {
@@ -6952,6 +6997,7 @@ object KayaCompose {
                                 }
                             }
                         }
+                        kayaAwaitAnswer(answered)
                     }
                     "expect_alerts" -> {
                         val want = parts[1].toIntOrNull() ?: -1
@@ -7143,8 +7189,12 @@ object KayaCompose {
                         // the field's own InputConnection, so the text is
                         // DISPLAYED, UNCOMMITTED and invisible to the
                         // app — the state select_range must refuse.
-                        kayaComposeMarkedText(activity, parts[1], quoted(parts.drop(2)))
-                            ?.let { failures.add("compose: $it") }
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val trouble =
+                            kayaComposeMarkedText(activity, parts[1], quoted(parts.drop(2)))
+                        if (trouble != null) failures.add("compose: $trouble")
+                        else kayaAwaitAnswer(answered)
                     }
                     "expect_title" -> {
                         // BOTH REAL MATERIALIZATIONS, never the model's
@@ -8147,6 +8197,10 @@ object KayaCompose {
                                 "$spec is editable text — its context menu is dress, " +
                                     "not a context_open target")
                         } else {
+                            // QUIET-WAIT ONLY (tools/check-verbs.py's
+                            // QUIET_ONLY): opening a menu asks the guest
+                            // nothing; the menu_activate after it acts.
+                            kayaAwaitQuiet()
                             val miss = onUi(activity) {
                                 val node = kayaWidgetTarget(spec)
                                     ?: return@onUi "no such target $spec"
@@ -8177,10 +8231,14 @@ object KayaCompose {
                             // error said out loud: a silent pass makes
                             // a never-pressed key look like a platform
                             // that ignored it (docs/traps.md).
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
                             val owned = onUi(activity) { kayaDispatchShortcut(spelling) }
                             if (!owned) {
                                 failures.add(
                                     "shortcut $spelling: no catalog item owns this chord")
+                            } else {
+                                kayaAwaitAnswer(answered)
                             }
                         }
                     }

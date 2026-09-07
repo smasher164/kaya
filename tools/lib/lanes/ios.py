@@ -140,6 +140,11 @@ MODS = {
 
 SUITES = ("swift", "go", "python", "rust-swiftui")
 
+# THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
+# quiet.py): the save sheet under a matrix (docs/deferred.md, the two
+# save-swiftui WATCHes) and the picker leg whose bridge starved.
+QUIET = {"save-swift", "save-go", "save-swiftui", "filedialog-go"}
+
 
 def swift_scene(entry):
     """(scene, guest source) for a swift roster entry."""

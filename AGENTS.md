@@ -432,6 +432,23 @@ in docs/deferred.md.
    grows by itself, check-slider-commit's shape: a backend whose
    `depth_stub("search")` goes must take a row. Eight watched negatives,
    counts printed),
+   `tools/check-quiet.py` (THE MATRIX-WIDE QUIET TOKEN IS WIRED WHERE IT
+   CANNOT BE FORGOTTEN (tools/lib/quiet.py, the third robustness pass,
+   2026-09-06): the legs that drive a platform's own input, dialog, drag
+   or clipboard machinery from outside the process fail only under a
+   matrix and pass alone — twenty-four such legs across the five lanes on
+   that day's ledger — and each lane already ran them alone inside its
+   own pool while nothing isolated them from the other four. One
+   directory lock in the state home every lane writes to, which the
+   container already mounts: a lane asks the token at its ONE leg funnel
+   before starting any leg, and holds it, its pool emptied, around the
+   legs in its `QUIET` set. A runner that stopped asking would flake
+   again and no lane could see it, so the gate reads each funnel by name
+   for the wait and the hold, holds every QUIET name to a leg its lane
+   runs, holds the python and shell spellings to ONE set of sentences,
+   and holds validate-all to handing the directory, the container launch
+   to naming its path, and the sweep to yielding. Six watched negatives,
+   counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

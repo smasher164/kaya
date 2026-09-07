@@ -40,6 +40,7 @@ import tomllib
 import urllib.parse
 
 from lanes import ios as lane
+import quiet
 import flightrec_lane
 
 SELF = pathlib.Path(__file__).resolve()
@@ -1763,7 +1764,8 @@ def xcuidrive_census():
     dead = [udid for udid, proc in _drive_procs.items()
             if proc.poll() is not None]
     print(f"run-sim: xcui drivers at the verdict: {len(_drive_procs)} "
-          f"started, {len(dead)} dead", flush=True)
+          f"started, {len(dead)} dead, {sum(_drive_restarts.values())} "
+          f"restarted between legs", flush=True)
     for udid in dead:
         print(f"run-sim: the xcui driver on {udid} exited "
               f"{_drive_procs[udid].returncode} before the verdict — "
@@ -1968,6 +1970,37 @@ def prep_join():
         sys.exit(1)
 
 
+_drive_restarts = {}
+_drive_killed = set()
+
+
+def xcuidrive_revive(udid, log):
+    """A driver that died is started again BEFORE the next leg on its
+    device, so one death costs the leg it died under and not the rest of
+    the device's roster (docs/deferred.md, the save-swiftui entry's open
+    note, ruled 2026-09-06). The dead one's exit and last words stay on
+    the record; the restart is printed with its count."""
+    proc = _drive_procs.get(udid)
+    if proc is None or proc.poll() is None:
+        return
+    with _drive_lock:
+        _drive_restarts[udid] = _drive_restarts.get(udid, 0) + 1
+        count = _drive_restarts[udid]
+        _drive_told.discard(udid)
+    note = (f"run-sim: the xcui driver on {udid} exited {proc.returncode} "
+            f"before this leg — restarting it (restart #{count} on this "
+            f"device; the leg it died under keeps its verdict)")
+    print(note, file=sys.stderr, flush=True)
+    print(note, file=log, flush=True)
+    xcuidrive_start(udid)
+    result = _drive_results.get(udid, "no result recorded")
+    print(f"run-sim: the xcui driver on {udid} after restart #{count}: {result}",
+          file=log, flush=True)
+    if not result.startswith("ready"):
+        print(f"run-sim: the xcui driver on {udid} did not come back: {result}",
+              file=sys.stderr, flush=True)
+
+
 def _leg_worker(name, args, kwargs, pad):
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
@@ -1977,9 +2010,24 @@ def _leg_worker(name, args, kwargs, pad):
         else:
             slot = _claim_device()
             udid = UDIDS[slot]
+        xcuidrive_revive(udid, log)
         t0 = time.monotonic()
         try:
             ok = run_swiftui_on(udid, slot, *args, log=log, **kwargs)
+            # THE REVIVAL WATCHED: with this device named, its driver is
+            # killed after the first leg, so the next leg's restart prints
+            # rather than being trusted (the slow-probe hook's shape).
+            if os.environ.get("KAYA_IOS_KILL_DRIVER_TEST") == udid:
+                with _drive_lock:
+                    first = udid not in _drive_killed
+                    _drive_killed.add(udid)
+                proc = _drive_procs.get(udid)
+                if first and proc is not None and proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                    print(f"run-sim: KAYA_IOS_KILL_DRIVER_TEST — killed the "
+                          f"xcui driver on {udid} after {name}", file=log,
+                          flush=True)
         finally:
             if pad:
                 _pad_lock.release()
@@ -2109,8 +2157,18 @@ def queue_xcuidrive_proof(app, bundle_id):
 
 
 def queue_leg(name, *args, pad=False, **kwargs):
+    # THE MATRIX-WIDE TOKEN (tools/lib/quiet.py): start nothing while
+    # another lane holds it; for this lane's quiet legs, empty the pool
+    # first, then hold it and run the leg inline.
+    quiet.wait("ios", name)
     prep_join()
     _leg_names.append(name)
+    if name in lane.QUIET:
+        for t in [*_leg_threads, *_pad_threads]:
+            t.join()
+        with quiet.hold("ios", name):
+            _leg_worker(name, args, kwargs, pad)
+        return
     # Recording is suppressed on the pad: the fiducial scheme indexes
     # films by phone-pool slot and the pad has none.
     if pad:
@@ -2552,6 +2610,7 @@ if not xcuidrive_census():
 # a complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
+quiet.summary("ios")
 if status == 0:
     print("run-sim: ALL PASS")
 else:

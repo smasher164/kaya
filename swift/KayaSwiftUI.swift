@@ -7130,8 +7130,12 @@ private func kayaRunScript(_ script: String) {
                 // The destination's surface materializes a frame after its node
                 // (kayaAwaitOnMain); the drive itself stays one shot.
                 _ = kayaAwaitOnMain { kayaDragSurfaces[dst.id] != nil ? true : nil }
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 if let off = DispatchQueue.main.sync(execute: { kayaDriveDrag(source: src, destination: dst, reorder: reorder) }) {
                     failures.append("drag: \(off)")
+                } else {
+                    kayaAwaitAnswer(answered)
                 }
             case "drag_file":
                 // drag_file "<path>" to <destination> — a foreign file drop
@@ -7151,13 +7155,19 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 let path = kayaExpandPath(rawPath)
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let off = DispatchQueue.main.sync { () -> String? in
                     guard let dst = kayaAnyTarget(Substring(tail[1])) else {
                         return "no such destination \(tail[1])"
                     }
                     return kayaDriveFileDrop(path: path, destination: dst)
                 }
-                if let off { failures.append("drag_file: \(off)") }
+                if let off {
+                    failures.append("drag_file: \(off)")
+                } else {
+                    kayaAwaitAnswer(answered)
+                }
             case "scroll_to_row":
                 // The core maps the KEY to an index in the collection's current
                 // order and the tier scrolls that row to the viewport's TOP. An
@@ -7165,6 +7175,10 @@ private func kayaRunScript(_ script: String) {
                 // when it needs to be (harness.rs's parse is the norm).
                 let rawKey = parts[2...].joined(separator: " ")
                 let key = rawKey.hasPrefix("\"") ? kayaQuoted(Array(parts[2...])) : rawKey
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): the row
+                // window is the tier's own report and answers nothing, while the
+                // previous step's answer has to be on the rows before one is parked.
+                kayaAwaitQuiet()
                 // THE TIER'S WINDOW REGISTERS AT ITS FIRST PLACEMENT: a scroll
                 // before that read "not a windowed tier" on a table that was one
                 // 800ms later (2026-09-01, docs/traps.md), so an action on a
@@ -7683,6 +7697,9 @@ private func kayaRunScript(_ script: String) {
                 // Silent like click: expect_clipboard, or the guest's
                 // own read, is what says whether it landed.
                 if parts.count > 2 {
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): the
+                    // pasteboard is not the app, and nothing answers a seed.
+                    kayaAwaitQuiet()
                     kayaClipboardSeed(
                         kind: String(parts[1]),
                         argument: kayaQuoted(Array(parts[2...])))
@@ -7744,6 +7761,9 @@ private func kayaRunScript(_ script: String) {
                                 + "last-used location and the scene would compare "
                                 + "against that")
                     } else {
+                        // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY):
+                        // the panel's own navigation asks the guest nothing.
+                        kayaAwaitQuiet()
                         DispatchQueue.main.sync { kayaOpenPanelGoto(dir) }
                     }
                 #else
@@ -7762,6 +7782,7 @@ private func kayaRunScript(_ script: String) {
                                 + "the picker would silently open somewhere else and "
                                 + "the scene would compare against that")
                     } else {
+                        kayaAwaitQuiet()
                         kayaPendingPanelDirectory = resolved
                     }
                 #endif
@@ -7771,6 +7792,8 @@ private func kayaRunScript(_ script: String) {
                 // (harness.rs's rule): a name matching nothing presses Open
                 // anyway and completes with a silent wrong file.
                 let arg = parts.count > 1 ? String(parts[1]) : ""
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 if arg != "cancel", !arg.isEmpty {
                     #if os(macOS)
                         // THE SAME WAIT, and here the only one there is:
@@ -7840,6 +7863,7 @@ private func kayaRunScript(_ script: String) {
                                 + "which the panel cannot tell you; \(delivery)")
                     }
                 #endif
+                kayaAwaitAnswer(answered)
             case "expect_save_dialog":
                 // The REAL save panel, read over accessibility: its directory
                 // AND its name field. The name half catches a backend that
@@ -7888,6 +7912,9 @@ private func kayaRunScript(_ script: String) {
                 if saveName.isEmpty {
                     failures.append("file_dialog_name wants a file name")
                 } else {
+                    // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): the
+                    // panel's name field is not the app, and nothing answers it.
+                    kayaAwaitQuiet()
                     #if os(macOS)
                         if kayaAwaitSavePanelState() == nil {
                             failures.append(
@@ -7912,6 +7939,8 @@ private func kayaRunScript(_ script: String) {
                 if saveArg != "" && saveArg != "cancel" {
                     failures.append("file_save takes nothing or `cancel`, got \(saveArg)")
                 } else {
+                    kayaAwaitQuiet()
+                    let answered = kayaAnswers()
                     #if os(macOS)
                         if kayaAwaitSavePanelState() == nil {
                             failures.append("file_save: save dialog state unavailable")
@@ -7944,6 +7973,7 @@ private func kayaRunScript(_ script: String) {
                             failures.append("file_save \(saveArg): \(why)")
                         }
                     #endif
+                    kayaAwaitAnswer(answered)
                 }
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's messageText /
@@ -7973,6 +8003,8 @@ private func kayaRunScript(_ script: String) {
                 // real dismissal plus the SAME closure the pressed action runs
                 // (UIKit exposes no public press).
                 let arg = parts.count > 1 ? String(parts[1]) : ""
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 DispatchQueue.main.sync {
                     guard let live = kayaLiveAlert else { return }
                     #if os(macOS)
@@ -7993,6 +8025,7 @@ private func kayaRunScript(_ script: String) {
                         }
                     #endif
                 }
+                kayaAwaitAnswer(answered)
             case "expect_alerts":
                 // The REAL screen truth on macOS: an attached sheet
                 // counts even if bookkeeping already cleared.
@@ -8642,6 +8675,8 @@ private func kayaRunScript(_ script: String) {
                 // the view's own `setMarkedText`, so the text is DISPLAYED,
                 // UNCOMMITTED and invisible to the app.
                 let marked = kayaQuoted(Array(parts[2...]))
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 #if os(macOS)
                     let composed = DispatchQueue.main.sync { () -> String? in
                         guard let node = kayaAnyTarget(parts[1]) else {
@@ -8664,6 +8699,8 @@ private func kayaRunScript(_ script: String) {
                     }
                     if let trouble = composed {
                         failures.append("compose: \(trouble)")
+                    } else {
+                        kayaAwaitAnswer(answered)
                     }
                 #else
                     let composedOnPhone = DispatchQueue.main.sync { () -> String? in
@@ -8681,6 +8718,8 @@ private func kayaRunScript(_ script: String) {
                     }
                     if let trouble = composedOnPhone {
                         failures.append("compose: \(trouble)")
+                    } else {
+                        kayaAwaitAnswer(answered)
                     }
                 #endif
             case "expect_help":
@@ -9088,6 +9127,9 @@ private func kayaRunScript(_ script: String) {
                 // An action, silent like click: opens the anchor's context
                 // catalog for the following menu_activate. Editable text is
                 // rejected up front — its native menu is dress.
+                // QUIET-WAIT ONLY (tools/check-verbs.py's QUIET_ONLY): opening
+                // a menu asks the guest nothing.
+                kayaAwaitQuiet()
                 let failure = DispatchQueue.main.sync { () -> String? in
                     if parts[1].hasPrefix("entry") || parts[1].hasPrefix("textarea")
                         || parts[1].hasPrefix("search")
@@ -9120,6 +9162,8 @@ private func kayaRunScript(_ script: String) {
                     failures.append("shortcut wants a quoted spelling: \(line)")
                     break
                 }
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
                 let unowned: Bool = DispatchQueue.main.sync {
                     // A CHORD REACHES THE SAME COMMANDS, so it reaches the
                     // same silence: no scene pastes by chord today, and the
@@ -9143,6 +9187,8 @@ private func kayaRunScript(_ script: String) {
                     // not a silent pass (docs/traps.md).
                     failures.append(
                         "shortcut \(spelling): no catalog item owns this chord")
+                } else {
+                    kayaAwaitAnswer(answered)
                 }
             default:
                 failures.append("unknown step \(line)")

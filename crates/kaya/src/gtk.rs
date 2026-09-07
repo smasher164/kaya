@@ -7112,6 +7112,10 @@ fn show_insertion(rows: &gtk4::Widget, x: f64, y: f64) {
 /// because a drag that silently does not happen reads as a refused drop.
 #[cfg(feature = "harness")]
 const DRAG_DRIVER_VAR: &str = "KAYA_DRAG_DRIVER";
+/// GTK began a drag since the harness last asked: the x11 release is held
+/// for it (docs/deferred.md, the dndwitness-in-x11 sightings), since a
+/// release reaching the server before GDK begins leaves no drag at all.
+static DRAG_BEGAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn drag_actions(mask: u32) -> gdk::DragAction {
     let mut actions = gdk::DragAction::empty();
@@ -7485,7 +7489,10 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
     // in `selected_action`.
     let cancelled = Rc::new(std::cell::Cell::new(false));
     let began = cancelled.clone();
-    source.connect_drag_begin(move |_source, _drag| began.set(false));
+    source.connect_drag_begin(move |_source, _drag| {
+        began.set(false);
+        DRAG_BEGAN.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
     let refused = cancelled.clone();
     source.connect_drag_cancel(move |_source, _drag, _reason| {
         refused.set(true);
@@ -7637,6 +7644,7 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     });
     let begin_hub = hub.clone();
     source.connect_drag_begin(move |_source, drag| {
+        DRAG_BEGAN.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(row) = begin_hub.row_drag.borrow_mut().as_mut() {
             row.drag = Some(drag.clone());
         }
@@ -13269,34 +13277,67 @@ impl crate::harness::Stage for GtkStage {
         // docs/traps.md: The x11 lane's toplevel X window is BIGGER than its content
         let transform =
             Self::on_main(|core| gtk4::prelude::NativeExt::surface_transform(&core.window));
-        let out = std::process::Command::new("python3")
-            .arg(&driver)
-            .args([
-                proto,
-                &std::process::id().to_string(),
-                &format!("{}", transform.0.round() as i64),
-                &format!("{}", transform.1.round() as i64),
-                &format!("{}", from.0.round() as i64),
-                &format!("{}", from.1.round() as i64),
-                &format!("{}", to.0.round() as i64),
-                &format!("{}", to.1.round() as i64),
-            ])
-            .output();
-        match out {
-            Ok(out) if out.status.success() => {
-                // The screen points it pressed and released ride the leg log:
-                // a gesture that landed on the wrong pixel and one that never
-                // ran read the same from the model alone.
-                eprint!("KAYA_DIAG {}", String::from_utf8_lossy(&out.stdout));
-                String::new()
+        let points: Vec<String> = [
+            transform.0.round() as i64,
+            transform.1.round() as i64,
+            from.0.round() as i64,
+            from.1.round() as i64,
+            to.0.round() as i64,
+            to.1.round() as i64,
+        ]
+        .iter()
+        .map(|v| v.to_string())
+        .collect();
+        let run = |phase: Option<&str>| {
+            let mut cmd = std::process::Command::new("python3");
+            cmd.arg(&driver).arg(proto).arg(std::process::id().to_string()).args(&points);
+            if let Some(phase) = phase {
+                cmd.args(["--phase", phase]);
             }
-            Ok(out) => format!(
-                "the pointer gesture failed ({}): {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-            Err(e) => format!("{driver} could not be run: {e}"),
+            match cmd.output() {
+                Ok(out) if out.status.success() => {
+                    // The screen points it pressed and released ride the leg
+                    // log: a gesture that landed on the wrong pixel and one
+                    // that never ran read the same from the model alone.
+                    eprint!("KAYA_DIAG {}", String::from_utf8_lossy(&out.stdout));
+                    String::new()
+                }
+                Ok(out) => format!(
+                    "the pointer gesture failed ({}): {}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+                Err(e) => format!("{driver} could not be run: {e}"),
+            }
+        };
+        DRAG_BEGAN.store(false, std::sync::atomic::Ordering::SeqCst);
+        if proto != "x11" {
+            return run(None);
         }
+        // THE RELEASE WAITS FOR GTK'S OWN drag-begin (x11): the pointer is
+        // pressed and walked past the threshold, and the button stays down
+        // until GDK has begun the drag or the wait is spent — a release that
+        // reaches the server first leaves no drag to end (three matrices,
+        // docs/deferred.md). Printed either way, so the reading names it.
+        let pressed = run(Some("press"));
+        if !pressed.is_empty() {
+            return pressed;
+        }
+        let started = std::time::Instant::now();
+        let wait = std::time::Duration::from_millis(5000);
+        while !DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) && started.elapsed() < wait
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) {
+            eprintln!("KAYA_DIAG dragdrive: drag began {}ms after the press", started.elapsed().as_millis());
+        } else {
+            eprintln!(
+                "KAYA_DIAG dragdrive: no drag began within {}ms of the press — releasing anyway",
+                wait.as_millis()
+            );
+        }
+        run(Some("release"))
     }
 
     /// A FOREIGN FILE DROP, IN PROCESS (docs/dnd-plan.md D6). `GdkDrop` is

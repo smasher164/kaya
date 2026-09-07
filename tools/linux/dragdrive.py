@@ -107,8 +107,15 @@ def content_origin(proto, pid, transform):
     return (origin[0] + transform[0], origin[1] + transform[1])
 
 
-def injector_argv(proto, injector, start, end):
-    """One process that presses at `start`, walks to `end` and releases."""
+def injector_argv(proto, injector, start, end, phase="all"):
+    """One process that presses at `start`, walks to `end` and releases —
+    or, on x11, HALF of it: `press` presses and walks past GTK's threshold
+    to the midpoint, `release` walks the rest and releases. XTEST's pointer
+    state outlives the process, so the button stays down between the two
+    and the caller can hold the release until GTK has begun the drag
+    (docs/deferred.md, the dndwitness-in-x11 sightings: under load the
+    release reached the server before GDK began, and no drag ever ran).
+    wayland stays one process: the virtual pointer dies with it."""
     (x0, y0), (x1, y1) = start, end
     path = [(x0 + (x1 - x0) * i // STEPS, y0 + (y1 - y0) * i // STEPS)
             for i in range(1, STEPS + 1)]
@@ -118,14 +125,22 @@ def injector_argv(proto, injector, start, end):
         for x, y in path:
             argv += ["set", str(x), str(y), "sleep", "40"]
         return argv + ["sleep", "300", "release", "left", "sleep", "300"]
-    argv = [injector, "mousemove", str(x0), str(y0), "sleep", "0.2", "mousedown", "1",
-            "sleep", "0.2"]
-    for x, y in path:
-        argv += ["mousemove", str(x), str(y), "sleep", "0.04"]
-    return argv + ["sleep", "0.3", "mouseup", "1"]
+    half = STEPS // 2
+    argv = [injector]
+    if phase in ("all", "press"):
+        argv += ["mousemove", str(x0), str(y0), "sleep", "0.2", "mousedown", "1",
+                 "sleep", "0.2"]
+        for x, y in path[:half]:
+            argv += ["mousemove", str(x), str(y), "sleep", "0.04"]
+    if phase in ("all", "release"):
+        for x, y in path[half:]:
+            argv += ["mousemove", str(x), str(y), "sleep", "0.04"]
+        argv += ["sleep", "0.3", "mouseup", "1"]
+    return argv
 
 
-def drive(proto, pid, transform, start_in_window, end_in_window, injector=None):
+def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
+          phase="all"):
     """Press at one widget point, walk to another, release. The screen
     coordinates actually used come back; a failure raises with what it
     measured."""
@@ -141,7 +156,7 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None):
             f"{ORIGIN_DEADLINE_S:.0f}s, so there is no screen point to press")
     start = (int(origin[0] + start_in_window[0]), int(origin[1] + start_in_window[1]))
     end = (int(origin[0] + end_in_window[0]), int(origin[1] + end_in_window[1]))
-    out = subprocess.run(injector_argv(proto, injector, start, end),
+    out = subprocess.run(injector_argv(proto, injector, start, end, phase),
                          capture_output=True, text=True, encoding="utf-8",
                          check=False)
     if out.returncode != 0:
@@ -152,21 +167,31 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None):
 
 
 def main():
-    if len(sys.argv) not in (9, 10) or sys.argv[1] not in ("wayland", "x11"):
-        print("usage: dragdrive.py (wayland|x11) PID TX TY X0 Y0 X1 Y1 [INJECTOR]",
-              file=sys.stderr)
+    argv = list(sys.argv)
+    phase = "all"
+    if len(argv) >= 3 and argv[-2] == "--phase":
+        phase = argv[-1]
+        argv = argv[:-2]
+    if len(argv) not in (9, 10) or argv[1] not in ("wayland", "x11") \
+            or phase not in ("all", "press", "release") \
+            or (phase != "all" and argv[1] != "x11"):
+        print("usage: dragdrive.py (wayland|x11) PID TX TY X0 Y0 X1 Y1 [INJECTOR] "
+              "[--phase press|release]   (the phases are x11's)", file=sys.stderr)
         return 2
-    proto = sys.argv[1]
-    pid = int(sys.argv[2])
-    tx, ty, x0, y0, x1, y1 = (int(v) for v in sys.argv[3:9])
-    injector = sys.argv[9] if len(sys.argv) == 10 else None
+    proto = argv[1]
+    pid = int(argv[2])
+    tx, ty, x0, y0, x1, y1 = (int(v) for v in argv[3:9])
+    injector = argv[9] if len(argv) == 10 else None
     try:
-        origin, start, end = drive(proto, pid, (tx, ty), (x0, y0), (x1, y1), injector)
+        origin, start, end = drive(proto, pid, (tx, ty), (x0, y0), (x1, y1), injector,
+                                   phase)
     except DragDriveError as e:
         print(f"dragdrive: {e}", file=sys.stderr)
         return 1
+    did = {"all": f"pressed {start}, released {end}",
+           "press": f"pressed {start}, holding", "release": f"released {end}"}[phase]
     print(f"dragdrive: {proto} content at {origin} (surface transform "
-          f"{(tx, ty)}); pressed {start}, released {end}", flush=True)
+          f"{(tx, ty)}); {did}", flush=True)
     return 0
 
 
