@@ -106,6 +106,15 @@
           # split is verified by tools/check-design-generation.py.
           buildInputs = [ pkgs.apple-sdk_26 ];
           packages = with pkgs; [
+            # A bare `swiftc` in this shell is a WALL, not a compiler: the
+            # lanes compile Swift through tools/lib/swift-toolchain.sh's
+            # kaya_swiftc (the Apple toolchain and SDK, found at run time),
+            # and "swiftc: not found" was read as "no Swift here" for the
+            # nth time on 2026-09-07 (docs/HACKING.md, Hand tools).
+            (writeShellScriptBin "swiftc" ''
+              echo "kaya: swiftc is not a compiler in this shell. Source tools/lib/swift-toolchain.sh and use kaya_swiftc (docs/HACKING.md, Hand tools)." >&2
+              exit 64
+            '')
             # LLVM/clang everywhere; Windows builds use the msvc ABI
             # through clang-cl + lld-link via cargo-xwin.
             # The version is EXACT on purpose: `latest` floated with the

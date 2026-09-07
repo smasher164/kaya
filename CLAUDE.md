@@ -65,6 +65,14 @@ in docs/deferred.md.
   measurement costs a session to make again and prose costs nothing.
   The examples are held tightest of all: a guest should read as the
   kaya calls it makes.
+- A "TOOL NOT FOUND" IS A QUESTION, NOT AN ANSWER. Every toolchain the
+  lanes use is wrapped or routed (`kaya_swiftc`, simctl through Xcode's
+  DEVELOPER_DIR, the recorder's window shots, the linux image), and the
+  bare name fails inside the dev shell by design. Before reporting
+  anything unavailable, read docs/HACKING.md's Hand tools table and use
+  the route the lanes use; a bare `swiftc` in the shell is a shim that
+  names the wrapper (ruled 2026-09-07 after the same miss for the nth
+  time).
 - The maintainer approves every commit and its exact message. Do not
   commit or push on your own initiative.
 

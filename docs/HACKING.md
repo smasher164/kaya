@@ -60,6 +60,25 @@ tools/run-leg.py <scene> <lang>` appends the harness's attempt-by-attempt
 record to that file on a failure alone (crates/kaya/src/vtrace.rs; the
 lanes collect it into the flight-recorder bundle themselves).
 
+## Hand tools — how the lanes reach each toolchain, so a hand run does too
+
+Every toolchain the lanes use is wrapped or routed, and the bare name
+fails inside the dev shell. A "not found" is a question about the
+route, not an answer about the tool (the rule cost a session an
+afternoon twice, 2026-09-07). The routes:
+
+| I want to… | the route |
+|---|---|
+| compile Swift | `source tools/lib/swift-toolchain.sh && kaya_swiftc …` — bare `swiftc` is a shim in the dev shell that says so and exits |
+| talk to the simulators | `DEVELOPER_DIR=/Applications/Xcode-*.app/Contents/Developer /usr/bin/xcrun simctl …` with `SDKROOT` unset: the dev shell points both at the nix SDK, which has no simctl (tools/ios/run-sim.py does this itself). The pool is kaya-sim-0..2 and kaya-sim-pad |
+| photograph a guest window on the mac | `flightrec_lane.MacRecorder(ROOT).shot_pid(pid, dest)` — by pid, never the screen; it compiles tools/mac/flightrec-winlist.swift itself |
+| photograph a guest window on the VM | `tools/guest/shot-window.ps1 -Process <exe stem> -Out C:\kaya\…png`, run through a schtasks interactive task (`/it`) via `run-hidden-args.vbs` so no console takes the foreground |
+| probe GTK without a lane | `docker run --rm -i -v "$PWD":/work kaya-linux:latest bash -c 'xvfb-run -a …'` — python3-gi, Xvfb, weston and ImageMagick are in the image; `convert -trim` cuts a root-window grab to the window |
+| run one Rust guest on a warm emulator | `adb -s emulator-5554 shell am start -W -n dev.kaya.rusthost/.MainActivity --es KAYA_SELFTEST <scene> --es KAYA_SELFTEST_SCRIPT '<steps folded with ;>'`; the pool stays booted between runs |
+| run one leg on the VM | `tools/deploy-win.py akhil@192.168.64.2 <leg>` (per-leg names are the grammar; `python` is the milestone2 python leg, not the python suite) |
+| hold a scene still for a capture | give the guest its own steps through `KAYA_SELFTEST_SCRIPT` (the mac lane sets it from tools/scenes in `lanes.mac.leg_env`, so build that env and replace the one key) with `settle 9000` where the photograph goes; the tree stays untouched |
+| read a failed leg | the flight recorder's bundle first: `~/.local/state/kaya/flightrec/runs/<run>/bundles/<lane>-<leg>/` (leg-log, verb-trace, the lane's samplers) |
+
 ## The regeneration workflow (any spec.rs change)
 
 1. Edit `crates/kaya/src/spec.rs` (records, enums, PROPS). The spec
