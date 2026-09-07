@@ -9828,3 +9828,25 @@ runners and by tools/check-steps.py, which runs it over both lane tables
 in the fast sweep with the shipped shape and a stale cut as its watched
 negatives. The assertions themselves moved to tasks.steps, whose sections
 live in window#0 and so run on every lane.
+
+## The host pasteboard under a clipboard leg (2026-09-07)
+
+The mac lane's five clipboard legs went red within ten seconds of each
+other in a plain matrix, every one at `expect_clipboard text "kaya clip"`
+with the leg's own instrument naming the cause: `the pasteboard changed
+under this leg (changeCount N -> N+1) … it now offers []` — a foreign
+writer emptied the host pasteboard the instant kaya wrote it. Probed and
+excluded on the quiet host: the Windows VM's guest-to-host clipboard path
+(UTM does not forward it), the simulators' pasteboard sync (a host write
+bumps the count once, no sync-back), and the mac leg itself (all five
+pass by hand). The writer was the machine's own user, whom the exclusive
+token cannot hold off — the maintainer was using the machine and said
+so. Apple's containers do not help: they run Linux images in
+lightweight VMs, and there is no macOS inside one; only a full macOS
+guest would give the lane a pasteboard of its own, at the cost of a
+second Xcode installation and moving the simulators with it. So
+tools/validate-mac.py allows ONE re-run of a leg whose failure carries
+that exact sentence, keeps the first attempt's bundle under
+`<leg>~foreign-pasteboard`, and prints why; a second failure stays red,
+and the lane refuses to start if the sentence and the interpreter's arm
+ever disagree.

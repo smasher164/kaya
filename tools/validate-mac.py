@@ -490,6 +490,34 @@ _leg_names = []
 _leg_threads = []
 
 
+# THE ONE RETRY THE MAC LANE ALLOWS, and the sentence that earns it: the
+# clipboard legs measure a foreign write to the host pasteboard by name
+# (swift/KayaSwiftUI.swift's expect_clipboard), and that writer is the
+# machine's own user, whom no token holds off — five legs went red in ten
+# seconds on 2026-09-07 while the maintainer used the machine, all five
+# green by hand a minute later. A second failure stays red.
+FOREIGN_PASTEBOARD = "the pasteboard changed under this leg"
+
+
+def foreign_pasteboard_retry(rc, log_text):
+    return rc != 0 and FOREIGN_PASTEBOARD in log_text
+
+
+if not foreign_pasteboard_retry(
+        1, f"KAYA_HARNESS: step-failed {FOREIGN_PASTEBOARD} (changeCount 1 -> 2)"):
+    die("validate-mac: SELF-TEST FAIL (the named foreign-pasteboard failure earned no retry)")
+if foreign_pasteboard_retry(1, "KAYA_HARNESS: step-failed label#0 reads \"x\", wanted \"y\""):
+    die("validate-mac: SELF-TEST FAIL (an unrelated failure earned the pasteboard retry)")
+if foreign_pasteboard_retry(0, f"KAYA_HARNESS: {FOREIGN_PASTEBOARD}"):
+    die("validate-mac: SELF-TEST FAIL (a passing leg earned a retry)")
+# The sentence is the interpreter's: a reworded arm would retry nothing
+# and say nothing, so the lane refuses to start until the two agree.
+if FOREIGN_PASTEBOARD not in (ROOT / "swift/KayaSwiftUI.swift").read_text(encoding="utf-8"):
+    die(f"validate-mac: the retry's sentence {FOREIGN_PASTEBOARD!r} is not in "
+        f"swift/KayaSwiftUI.swift — the expect_clipboard arm was reworded; "
+        f"move FOREIGN_PASTEBOARD with it")
+
+
 def _leg_worker(name, argv, env):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
@@ -514,15 +542,31 @@ def _leg_worker(name, argv, env):
     # bundle by mac_leg, gone with the scratch either way.
     scratch.mkdir(parents=True, exist_ok=True)
     leg_env["KAYA_VERB_TRACE"] = str(scratch / "verb-trace.txt")
-    with open(log, "w", encoding="utf-8", errors="replace") as lf:
-        # The guest runs under `timeout`, which is both the 120s bound
-        # and the sampler's anchor (the guest is timeout's descendant
-        # and nothing else is).
-        proc = subprocess.Popen(["timeout", "120", *argv], env=leg_env,
-                                stdout=lf, stderr=lf)
-        sampler = FR.sampler_start(scratch, proc)
-        rc = proc.wait()
-        FR.sampler_stop(sampler)
+    def attempt(mode):
+        with open(log, mode, encoding="utf-8", errors="replace") as lf:
+            # The guest runs under `timeout`, which is both the 120s bound
+            # and the sampler's anchor (the guest is timeout's descendant
+            # and nothing else is).
+            proc = subprocess.Popen(["timeout", "120", *argv], env=leg_env,
+                                    stdout=lf, stderr=lf)
+            sampler = FR.sampler_start(scratch, proc)
+            rc = proc.wait()
+            FR.sampler_stop(sampler)
+        return rc
+
+    rc = attempt("w")
+    if foreign_pasteboard_retry(rc, log.read_text(encoding="utf-8",
+                                                  errors="replace")):
+        # The host pasteboard is the one resource no token can hold
+        # against the machine's own user (docs/traps.md, "The host
+        # pasteboard under a clipboard leg"). The first attempt's bundle
+        # is kept under its own name; the leg's verdict is the second's.
+        FR.mac_leg(f"{name}~foreign-pasteboard", "FAIL",
+                   int(time.monotonic() - t0), log, scratch)
+        with open(log, "a", encoding="utf-8") as lf:
+            lf.write(f"{name}: {FOREIGN_PASTEBOARD} — a writer outside "
+                     f"the matrix; re-running the leg once\n")
+        rc = attempt("a")
     verdict = "PASS" if rc == 0 else "FAIL"
     secs = int(time.monotonic() - t0)
     (LEGS_DIR / f"{name}.verdict").write_text(verdict + "\n",
