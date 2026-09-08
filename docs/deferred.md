@@ -11931,6 +11931,22 @@ there, so their cause is unread: the next sighting on either lane is
 to be read through that arm's own drag lines before anyone assumes
 this one.
 
+WAYLAND READ 2026-09-07 (the S2c commit gate, matrix s2c-1,
+`dnd-python-wayland`): a DIFFERENT step — the leg's FIRST drag, from
+the full-width "hello" label, `no drop yet` — and then `drag ended none`
+on every drag after, eight in all; the driver's lines show each press
+walked and released and GTK began no drag in the whole leg; alone the
+leg passes in 15s. Not the seven-pixel class: the wayland injector was
+one process on fixed sleeps with no gate on the app's drag-begin, the
+shape x11 had in three matrices before round three held its release.
+The gate is in the injector now (`wait PATH MS`, the flag touched at
+drag-begin, the reading on the driver's line; docs/traps.md, "The
+wayland release that beat GTK's drag-begin") and dragprobe proves it
+before every lane run. The earlier `dnd-js-wayland` sighting (the
+stamped `y` step) most likely wore the same cause — a release before
+the begin reads as "the earlier payload stayed" — and the next one will
+say so on its driver line. Windows' `dnd_java` stays unread.
+
 ## ~~WATCH — android `portfolio-python` under a matrix: the header sort click did not land (first sighting 2026-09-05)~~
 KEY: portfolio-python, header_click, Total v3, 4698 of 15003, android sort, matrix contention
 

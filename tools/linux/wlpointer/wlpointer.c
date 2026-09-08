@@ -76,7 +76,7 @@ static int button_code(const char *s, uint32_t *code) {
 
 static int usage(const char *why) {
     fprintf(stderr, "wlpointer: %s\n  usage: wlpointer (set X Y | move DX DY | press BTN | "
-            "release BTN | click BTN | sleep MS)...\n", why);
+            "release BTN | click BTN | sleep MS | wait PATH MS)...\n", why);
     return 2;
 }
 
@@ -139,6 +139,26 @@ int main(int argc, char **argv) {
             wl_display_roundtrip(display);
             usleep((useconds_t)atoi(argv[i + 1]) * 1000);
             i += 2;
+        } else if (!strcmp(cmd, "wait") && i + 2 < argc) {
+            /* The drag-begin gate (tools/linux/dragdrive.py): hold here,
+             * button down, until the app has touched PATH or MS have
+             * passed. Printed either way, so a release that beat the
+             * drag-begin is named in the leg log. */
+            const char *path = argv[i + 1];
+            long limit = atol(argv[i + 2]);
+            long waited = 0;
+            wl_display_roundtrip(display);
+            while (access(path, F_OK) != 0 && waited < limit) {
+                usleep(20000);
+                waited += 20;
+            }
+            if (access(path, F_OK) == 0)
+                printf("wlpointer: drag began %ldms after the threshold\n", waited);
+            else
+                printf("wlpointer: no drag began within %ldms of the threshold; releasing anyway\n",
+                       limit);
+            fflush(stdout);
+            i += 3;
         } else {
             return usage(cmd);
         }

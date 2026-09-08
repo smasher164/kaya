@@ -9850,3 +9850,27 @@ that exact sentence, keeps the first attempt's bundle under
 `<leg>~foreign-pasteboard`, and prints why; a second failure stays red,
 and the lane refuses to start if the sentence and the interpreter's arm
 ever disagree.
+
+## The wayland release that beat GTK's drag-begin (2026-09-07)
+
+`dnd-python-wayland` failed a plain matrix at its FIRST drag — a
+full-width source, so not the seven-pixel class the keyed-drag WATCH
+records — and every drag after it in the same leg: `no drop yet`, then
+`drag ended none` eight times, the driver's own line showing each press
+walked and released, and no drag-begin from GTK anywhere in the leg. Alone
+the leg passes in 15s. The wayland injector was ONE process on fixed
+sleeps: press, twelve moves 40ms apart, 300ms, release — and under a
+five-lane matrix GTK had not processed the motion past its threshold
+before the release arrived, so nothing was ever a drag. x11 had the same
+failure in three matrices and got its gate in round three (the release
+held in the harness until the app's drag-begin); wayland could not take
+that shape, because the virtual pointer dies with the injector process.
+So the gate moved INTO the process: tools/linux/wlpointer's `wait PATH MS`
+holds at the walk's midpoint until the app has touched PATH (gtk.rs's
+drag verb hands a per-gesture path to tools/linux/dragdrive.py through
+`KAYA_DRAG_BEGIN_FLAG`; `note_drag_began` touches it), and prints
+`drag began Nms after the threshold` or `no drag began within …` on the
+driver's line, so the leg log names the release that beat the begin.
+tools/linux/dragprobe.py proves the whole chain before the first leg of
+every lane run — the flag, the wait, the reading — and refuses a route
+whose gate never fired, since a quiet host drops fine without it.

@@ -29,6 +29,7 @@ session variables of one pool slot); no prelude, like the other in-container
 python here.
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -107,7 +108,14 @@ def content_origin(proto, pid, transform):
     return (origin[0] + transform[0], origin[1] + transform[1])
 
 
-def injector_argv(proto, injector, start, end, phase="all"):
+# The app touches this file when GTK begins the drag (crates/kaya/src/gtk.rs,
+# the drag verb); the wayland walk waits at its midpoint for it, up to
+# BEGIN_WAIT_MS, before it releases — the x11 two-phase gate in one process.
+BEGIN_FLAG_VAR = "KAYA_DRAG_BEGIN_FLAG"
+BEGIN_WAIT_MS = 5000
+
+
+def injector_argv(proto, injector, start, end, phase="all", begin_flag=None):
     """One process that presses at `start`, walks to `end` and releases —
     or, on x11, HALF of it: `press` presses and walks past GTK's threshold
     to the midpoint, `release` walks the rest and releases. XTEST's pointer
@@ -115,14 +123,22 @@ def injector_argv(proto, injector, start, end, phase="all"):
     and the caller can hold the release until GTK has begun the drag
     (docs/deferred.md, the dndwitness-in-x11 sightings: under load the
     release reached the server before GDK began, and no drag ever ran).
-    wayland stays one process: the virtual pointer dies with it."""
+    wayland stays one process — the virtual pointer dies with it — so its
+    gate is a `wait` step INSIDE the process: past the threshold it waits
+    for the app's drag-begin flag before walking on and releasing
+    (docs/traps.md, the wayland release that beat GTK's drag-begin)."""
     (x0, y0), (x1, y1) = start, end
     path = [(x0 + (x1 - x0) * i // STEPS, y0 + (y1 - y0) * i // STEPS)
             for i in range(1, STEPS + 1)]
     if proto == "wayland":
         argv = [injector, "set", str(x0), str(y0), "sleep", "200", "press", "left",
                 "sleep", "200"]
-        for x, y in path:
+        half = STEPS // 2
+        for x, y in path[:half]:
+            argv += ["set", str(x), str(y), "sleep", "40"]
+        if begin_flag:
+            argv += ["wait", begin_flag, str(BEGIN_WAIT_MS)]
+        for x, y in path[half:]:
             argv += ["set", str(x), str(y), "sleep", "40"]
         return argv + ["sleep", "300", "release", "left", "sleep", "300"]
     half = STEPS // 2
@@ -156,14 +172,18 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
             f"{ORIGIN_DEADLINE_S:.0f}s, so there is no screen point to press")
     start = (int(origin[0] + start_in_window[0]), int(origin[1] + start_in_window[1]))
     end = (int(origin[0] + end_in_window[0]), int(origin[1] + end_in_window[1]))
-    out = subprocess.run(injector_argv(proto, injector, start, end, phase),
+    out = subprocess.run(injector_argv(proto, injector, start, end, phase,
+                                       os.environ.get(BEGIN_FLAG_VAR)),
                          capture_output=True, text=True, encoding="utf-8",
                          check=False)
     if out.returncode != 0:
         raise DragDriveError(
             f"{injector} exited {out.returncode} driving {start} -> {end}: "
             + (out.stderr.strip() or "no stderr"))
-    return origin, start, end
+    # The injector's own reading of the gate ("waited Nms" / "expired") rides
+    # the caller's line, so a release that beat the drag-begin is named.
+    gate = out.stdout.strip().splitlines()
+    return origin, start, end, (gate[-1] if gate else "")
 
 
 def main():
@@ -183,15 +203,15 @@ def main():
     tx, ty, x0, y0, x1, y1 = (int(v) for v in argv[3:9])
     injector = argv[9] if len(argv) == 10 else None
     try:
-        origin, start, end = drive(proto, pid, (tx, ty), (x0, y0), (x1, y1), injector,
-                                   phase)
+        origin, start, end, gate = drive(proto, pid, (tx, ty), (x0, y0), (x1, y1),
+                                         injector, phase)
     except DragDriveError as e:
         print(f"dragdrive: {e}", file=sys.stderr)
         return 1
     did = {"all": f"pressed {start}, released {end}",
            "press": f"pressed {start}, holding", "release": f"released {end}"}[phase]
     print(f"dragdrive: {proto} content at {origin} (surface transform "
-          f"{(tx, ty)}); {did}", flush=True)
+          f"{(tx, ty)}); {did}" + (f"; {gate}" if gate else ""), flush=True)
     return 0
 
 

@@ -57,7 +57,27 @@ def main():
         fail("usage: dragprobe.py (wayland|x11) INJECTOR")
     proto, injector = sys.argv[1], sys.argv[2]
     seen = []
-    state = {"child": None, "origin_tries": 0}
+    # On wayland the probe proves the drag-begin gate end to end: the
+    # injector's `wait` step, the flag the app touches at drag-begin, and
+    # the injector's own reading of it (tools/linux/dragdrive.py). A route
+    # whose gate never fired would still drop on a quiet host, so the
+    # reading is asserted, not just the drop.
+    begin_flag = f"/tmp/kaya-dragprobe-begin-{os.getpid()}" if proto == "wayland" else None
+    if begin_flag and os.path.exists(begin_flag):
+        os.remove(begin_flag)
+    state = {"child": None, "origin_tries": 0, "begin_flag": begin_flag}
+    if begin_flag:
+        # THE GATE'S OTHER BRANCH, made to print (CLAUDE.md invariant 3): a
+        # wait whose flag never comes must say so and release, or a leg
+        # under load would hang on a drag nobody began.
+        expired = subprocess.run([injector, "wait", begin_flag + ".never", "100"],
+                                 capture_output=True, text=True, encoding="utf-8",
+                                 check=False)
+        line = expired.stdout.strip().splitlines()[-1:] or ["nothing"]
+        print("dragprobe: injector's expired wait said " + line[0], flush=True)
+        if expired.returncode != 0 or "no drag began within 100ms" not in line[0]:
+            fail(f"the injector's wait did not expire as it should (exit "
+                 f"{expired.returncode}: {line[0]}; stderr {expired.stderr.strip()!r})")
     app = Gtk.Application(application_id="dev.kaya.dragprobe")
 
     def note(line):
@@ -86,7 +106,15 @@ def main():
             return Gdk.ContentProvider.new_for_value(GObject.Value(str, PAYLOAD))
 
         drag.connect("prepare", prepare)
-        drag.connect("drag-begin", lambda _s, _d: note("drag-begin"))
+
+        def began(_s, _d):
+            note("drag-begin")
+            # THE GATE'S OTHER HALF, as the harness does it: the flag the
+            # wayland injector is waiting for at its walk's midpoint.
+            if state["begin_flag"]:
+                open(state["begin_flag"], "w", encoding="utf-8").close()
+
+        drag.connect("drag-begin", began)
         drag.connect("drag-end", lambda _s, _d, delete: note("drag-end delete=%s" % delete))
         source.add_controller(drag)
 
@@ -131,9 +159,9 @@ def main():
             print(f"dragprobe: {proto} window content at {origin} "
                   f"(surface transform {transform}); "
                   f"drag {start} -> {end}", flush=True)
-            state["child"] = subprocess.Popen(injector_argv(proto, injector, start, end),
-                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                              text=True, encoding="utf-8")
+            state["child"] = subprocess.Popen(
+                injector_argv(proto, injector, start, end, begin_flag=begin_flag),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
             GLib.timeout_add(DROP_DEADLINE_MS, deadline)
             return False
 
@@ -157,6 +185,18 @@ def main():
     rc = app.run([])
     if not any(line.startswith(f"drop {PAYLOAD!r}") for line in seen):
         fail(f"the loop ended without a drop (rc {rc}); saw {seen or 'nothing'}")
+    if begin_flag:
+        child = state["child"]
+        out = child.communicate(timeout=10)[0] if child else ""
+        gate = [line for line in out.splitlines() if line.startswith("wlpointer:")]
+        print("dragprobe: injector said " + (gate[-1] if gate else "nothing about the gate"),
+              flush=True)
+        if not any("drag began" in line and "no drag" not in line for line in gate):
+            fail(f"the wayland drag-begin gate did not fire: the injector's wait step "
+                 f"never saw the flag {begin_flag} ({gate or 'no wait line at all'}) — "
+                 f"a release that beats GTK's drag-begin would go unnamed on every leg")
+        if os.path.exists(begin_flag):
+            os.remove(begin_flag)
     return 0
 
 

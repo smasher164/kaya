@@ -7480,6 +7480,18 @@ const DRAG_DRIVER_VAR: &str = "KAYA_DRAG_DRIVER";
 /// for it (docs/deferred.md, the dndwitness-in-x11 sightings), since a
 /// release reaching the server before GDK begins leaves no drag at all.
 static DRAG_BEGAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The file the wayland injector waits for at its walk's midpoint before it
+/// releases (tools/linux/dragdrive.py's `wait` step): set by the drag verb for
+/// one gesture, touched here when GTK begins the drag. docs/traps.md: the
+/// wayland release that beat GTK's drag-begin.
+static DRAG_BEGIN_FLAG: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+fn note_drag_began() {
+    DRAG_BEGAN.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(flag) = DRAG_BEGIN_FLAG.lock().ok().and_then(|f| f.clone()) {
+        let _ = std::fs::File::create(flag);
+    }
+}
 
 fn drag_actions(mask: u32) -> gdk::DragAction {
     let mut actions = gdk::DragAction::empty();
@@ -7855,7 +7867,7 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
     let began = cancelled.clone();
     source.connect_drag_begin(move |_source, _drag| {
         began.set(false);
-        DRAG_BEGAN.store(true, std::sync::atomic::Ordering::SeqCst);
+        note_drag_began();
     });
     let refused = cancelled.clone();
     source.connect_drag_cancel(move |_source, _drag, _reason| {
@@ -8008,7 +8020,7 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     });
     let begin_hub = hub.clone();
     source.connect_drag_begin(move |_source, drag| {
-        DRAG_BEGAN.store(true, std::sync::atomic::Ordering::SeqCst);
+        note_drag_began();
         if let Some(row) = begin_hub.row_drag.borrow_mut().as_mut() {
             row.drag = Some(drag.clone());
         }
@@ -13805,11 +13817,31 @@ impl crate::harness::Stage for GtkStage {
         .iter()
         .map(|v| v.to_string())
         .collect();
+        // THE WAYLAND GATE: one file per gesture, touched by note_drag_began,
+        // waited for by the injector past the threshold (x11 holds its
+        // release in the harness instead, below).
+        let begin_flag = (proto == "wayland").then(|| {
+            std::env::temp_dir().join(format!(
+                "kaya-drag-begin-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ))
+        });
+        if let Some(flag) = &begin_flag {
+            let _ = std::fs::remove_file(flag);
+            *DRAG_BEGIN_FLAG.lock().unwrap() = Some(flag.clone());
+        }
         let run = |phase: Option<&str>| {
             let mut cmd = std::process::Command::new("python3");
             cmd.arg(&driver).arg(proto).arg(std::process::id().to_string()).args(&points);
             if let Some(phase) = phase {
                 cmd.args(["--phase", phase]);
+            }
+            if let Some(flag) = &begin_flag {
+                cmd.env("KAYA_DRAG_BEGIN_FLAG", flag);
             }
             match cmd.output() {
                 Ok(out) if out.status.success() => {
@@ -13829,7 +13861,18 @@ impl crate::harness::Stage for GtkStage {
         };
         DRAG_BEGAN.store(false, std::sync::atomic::Ordering::SeqCst);
         if proto != "x11" {
-            return run(None);
+            let out = run(None);
+            *DRAG_BEGIN_FLAG.lock().unwrap() = None;
+            if let Some(flag) = &begin_flag {
+                let _ = std::fs::remove_file(flag);
+            }
+            if !DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) {
+                eprintln!(
+                    "KAYA_DIAG dragdrive: no drag began before the wayland release — \
+                     the injector's own wait line above says how long it held"
+                );
+            }
+            return out;
         }
         // THE RELEASE WAITS FOR GTK'S OWN drag-begin (x11): the pointer is
         // pressed and walked past the threshold, and the button stays down
