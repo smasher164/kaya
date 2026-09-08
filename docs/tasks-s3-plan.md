@@ -80,10 +80,10 @@ has exited:
    rule dies with its connection, and the bus activates a program only
    for a METHOD CALL to a well-known name, never for the broadcast signal
    every daemon emits — the two registries that do the remembering are
-   GNOME's interface and the portal, which is why they were built. So the GTK arm posts through
+   GNOME's interface and the portal, which is why they were built, and why they are the floor. So the GTK arm posts through
    the portal whenever `org.freedesktop.portal.Notification` is on the
-   bus and the id could be registered, falls back to GNOME's own
-   interface, then to the plain daemon — kaya calling the portal itself
+   bus and the id could be registered, else through GNOME's own
+   interface, and otherwise not at all — kaya calling the portal itself
    rather than flipping GLib's process-wide `GIO_USE_PORTALS`.
 2. The plain freedesktop service alone (mako, dunst, swaync, Plasma
    without a portal): the click is the `ActionInvoked` signal on the bus,
@@ -94,20 +94,27 @@ has exited:
    invalidated once the notification is closed"). The only way to make
    the click land here is a process alive for the popup's whole life —
    `notify-send --wait`'s reason to exist, hours on mako's default of
-   "until dismissed". RULED 2026-09-07 (maintainer: "stick with option
-   1"): kaya does NOT keep one. The fired command posts and exits once the
-   daemon has answered; the reminder SHOWS on every daemon, and the click
-   opens the task where a session-long process can carry it — the shell
-   on GNOME, the portal on KDE and on sway with one (regime 1) — and is
-   inert on a bare daemon with no portal, the spec's own floor ("clients
-   should not assume the server will generate [ActionInvoked]"), stated
-   once as the Linux carve-out. It shrinks by itself: a portal from 1.19
-   on registers a host app's id, and S11's Flatpak build needs no
-   registration at all.
-3. No daemon, or no session bus at all (a bare X session, an SSH login,
-   the lane's container): the post cannot land. kaya asks the bus for the
-   name's owner before posting, reports the capability false so the
-   reminder UI can say so up front, and answers the post `refused` — the
+   "until dismissed". RULED 2026-09-07, twice (maintainer: "stick with
+   option 1", then "I don't want our process to continuously run and I
+   don't want an inert click, so our floor should account for what is
+   possible with those constraints"): kaya does NOT keep a process, and
+   it does NOT post where the click would be inert. THE FLOOR IS REGIME
+   1: kaya posts only where the desktop itself remembers the notification
+   and relaunches the app on a click — GNOME's own interface, or the
+   portal with a notification backend (KDE's; sway and the other
+   compositors with `xdg-desktop-portal` and its GTK backend, which
+   screen sharing and file dialogs there need anyway). A daemon with no
+   portal is regime 3's answer: the capability reads false, a post comes
+   back `refused`, and the app says what is missing — the Flatpak
+   posture, never a reminder whose click goes nowhere. The plain-daemon
+   route leaves the design with the waiter and the inert click.
+3. No registry to remember the notification — a daemon with no portal
+   (regime 2, by the ruling above), no daemon, or no session bus at all
+   (a bare X session, an SSH login, the lane's container): kaya does not
+   post. It asks the bus before posting — `org.gtk.Notifications` owned,
+   or the portal's Notification interface present with our id known —
+   reports the capability false so the reminder UI can say so up front,
+   and answers the post `refused` — the
    same outcome a denied permission gives on macOS, iOS and Android, so
    the app hears one thing on five platforms. No reason string and no
    log line of kaya's (RULED 2026-09-07, "not generate a signal or log
@@ -205,9 +212,9 @@ need not stay running on Linux any more than on the other four: on GNOME
 and through the portal the poster exits at once and the click
 D-Bus-activates it (the two files — a desktop entry marked
 `DBusActivatable=true` and a D-Bus `.service` naming the id — are S9's
-Linux piece, the way the boot receiver is Android's); on a plain
-freedesktop daemon the post shows and the click is inert, the ruled
-carve-out (§0's regime 2). Where no user manager answers, `at` is the
+Linux piece, the way the boot receiver is Android's); a plain
+freedesktop daemon with no portal gets no post at all (§0's regime 2,
+the ruled floor: the capability false, the post refused). Where no user manager answers, `at` is the
 second route (its command is the same). The codeless `notify-send --wait`
 route is REFUSED with the resident mode it stands for.
 Where no scheduler exists at all — the lane's container has no
@@ -380,14 +387,13 @@ The body's first line is the app's choice; kaya truncates nothing.
   activation files installed in the container's user dirs; and the
   scope-name route measured against a portal below 1.19 (the fired
   command started as `app-kaya-<id>-<n>.scope`, the portal's host app-id
-  read, the relaunch). Beside it a
-  recording `org.freedesktop.Notifications` service over the lane's own
-  session bus receives the plain-daemon post (no portal) — the
-  same service plays mako, dunst or Plasma, since all speak that one
-  protocol; with the service stopped the post must come back `refused`
-  and the capability false; the fired command exits once the daemon has
-  answered the post (a process that exits before the reply never
-  posted); and
+  read, the relaunch). Beside it the
+  refusal: with only a plain `org.freedesktop.Notifications` service on
+  the lane's bus and no portal, the post must come back `refused` and
+  the capability false — the lane's recording service plays mako, dunst
+  or Plasma there, since all speak that one protocol — and the fired
+  command exits once the portal has answered the post (a process that
+  exits before the reply never posted); and
   a recording `systemd-run` on the PATH logs the transient timer the
   arm asks for, since the container runs no systemd user manager. And
   the DEEP LINK as a bonus route: `kaya-tasks://task/<n>` in the body
