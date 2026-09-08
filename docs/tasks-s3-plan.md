@@ -34,28 +34,71 @@ runs `target/rust-guests/<stem>`); the mac probes already build minimal
 Info.plist with a `CFBundleIdentifier`), so the shape exists in the tree.
 
 LINUX COVERAGE, asked by the maintainer ("what if someone is running
-sway?"): a Linux desktop notification is one D-Bus call to the session
-bus name `org.freedesktop.Notifications`, and whatever owns that name —
-the NOTIFICATION DAEMON — draws the popup. GNOME Shell and KDE Plasma own
-it themselves; on a tiling compositor the user runs one as part of the
-setup (mako or swaync on sway and other wlroots compositors, dunst on
-X11 and wayland, fnott, tiramisu), so a sway user sees kaya's
-notification as a mako box in the corner of their output, as they see
-Firefox's. GNotification picks its transport at runtime — the portal in a
-sandbox, GNOME Shell's own richer interface when present, else the plain
-freedesktop service — and that last fallback is what covers sway, KDE,
-XFCE and every desktop with a daemon. A session with NO daemon fails the
-call with no owner for the name: kaya asks the bus (`NameHasOwner`)
-before posting, answers `refused` (N1) and reports the capability false
-(N6), never a silent drop. THE ONE REAL DIFFERENCE IS ACTIVATION WITH
-THE APP CLOSED: GNOME Shell keeps a notification after the poster exits
-and D-Bus-activates the app on a click, while the plain protocol
-delivers the click as a bus signal to whoever is listening — nobody, if
-the poster has exited (which is why `notify-send --wait` exists). So the
-timer's command launches kaya's app in a POST-ONLY mode that posts,
-stays resident until the notification is activated or closed, and
-exits; on GNOME it may exit at once. The user's click opens the task on
-every desktop.
+sway?"), read out of GLib 2.86's own backends (gio/gfdonotificationbackend.c,
+ggtknotificationbackend.c, gportalnotificationbackend.c), the portal's
+documentation and the daemons' manuals, 2026-09-07. A Linux desktop
+notification is one D-Bus call to the session bus name
+`org.freedesktop.Notifications`; whatever owns that name — the
+NOTIFICATION DAEMON — draws the popup. GNOME Shell and KDE Plasma own it
+themselves; on a tiling compositor the user runs one as part of the setup
+(mako or swaync on sway and other wlroots compositors, dunst on X11 and
+wayland), so a sway user sees kaya's notification as a mako box in the
+corner of their output, as they see Firefox's. GNotification picks its
+transport by priority: the PORTAL (110) only inside a Flatpak or Snap or
+with `GIO_USE_PORTALS=1`; GNOME Shell's `org.gtk.Notifications` (100)
+when that name has an owner; else the plain freedesktop service (0),
+which "always succeeds" its support check and prints ONE warning on the
+first failed send ("unable to send notifications through
+org.freedesktop.Notifications: …"). THREE REGIMES FOLLOW, and they differ
+in exactly one thing — what happens to a click after the posting process
+has exited:
+
+1. GNOME Shell's own interface, and the portal: the notification
+   "persist[s] after the application has exited"; a click on a
+   notification "while the application is not running" D-Bus-activates
+   the app with the action (GLib's words), which needs the two files a
+   packaged app carries — a desktop entry with `DBusActivatable=true` and
+   a D-Bus `.service` file naming the id. The poster may exit at once.
+   The portal offers the same persistence and activation to a HOST app
+   only if it registered its id first (`org.freedesktop.host.portal.Registry`,
+   "before any portal method call", one call per process) and opted into
+   the portal (`GIO_USE_PORTALS=1` for GLib's backend, or kaya calling the
+   portal itself) — a route a sway user with `xdg-desktop-portal-gtk` has,
+   with mako's default `default-timeout 0` keeping the popup until
+   dismissed.
+2. The plain freedesktop service alone (mako, dunst, swaync, Plasma
+   without a portal): the click is the `ActionInvoked` signal on the bus,
+   delivered to whoever is listening — GLib's backend answers it by
+   calling the action IN-PROCESS and holds nothing alive, so a poster that
+   has exited hears nothing, and no daemon launches apps (mako and dunst
+   only MATCH on the `desktop-entry` hint; dunst's manual: actions "are
+   invalidated once the notification is closed"). The only way to make
+   the click land here is a process alive for the popup's whole life —
+   `notify-send --wait`'s reason to exist, hours on mako's default of
+   "until dismissed". RULED 2026-09-07 (maintainer: "stick with option
+   1"): kaya does NOT keep one. The fired command posts and exits once the
+   daemon has answered; the reminder SHOWS on every daemon, and the click
+   opens the task where the desktop can carry it (regime 1) and is inert
+   where it cannot — the spec's own floor ("clients should not assume the
+   server will generate [ActionInvoked]"), stated once as the Linux
+   carve-out. It shrinks by itself: S11's Flatpak build puts GLib on the
+   portal, and the click then works on every desktop that runs one, sway
+   with `xdg-desktop-portal-gtk` included.
+3. No daemon, or no session bus at all (a bare X session, an SSH login,
+   the lane's container): the post cannot land. kaya asks the bus for the
+   name's owner before posting, reports the capability false so the
+   reminder UI can say so up front, and answers the post `refused` — the
+   same outcome a denied permission gives on macOS, iOS and Android, so
+   the app hears one thing on five platforms. No reason string and no
+   log line of kaya's (RULED 2026-09-07, "not generate a signal or log
+   in other cases", the outcome kept for uniformity with the permission
+   platforms): GLib already warns once on its own, and the lane asserts
+   the outcome, not a log.
+
+The spec itself says "clients should not assume the server will generate
+[ActionInvoked]; some servers may not support user interaction at all",
+which is regime 2's floor stated by the standard: the post lands
+everywhere, the click's reach is the desktop's.
 
 What the apps people use do: Things and Reminders post at the reminder's
 time with the task's title as the notification's title and the notes'
@@ -97,8 +140,9 @@ reminder's time and opening the task on activation.
 is one atomic record like `show_alert`; the answer is ONE occurrence,
 `notification_result { notification, outcome }`, delivered when the
 user ACTIVATES it (outcome `activated`) or when the platform REFUSES to
-post it (outcome `refused` — permission denied, or no identity to post
-under). A `cancel_notification { notification }` retires a pending or
+post it (outcome `refused` — permission denied, no identity to post
+under, no notification service on the session; the app learns which, if
+it needs to, from the capability bit it can read beforehand). A `cancel_notification { notification }` retires a pending or
 delivered one, the way a task whose reminder is cleared should stop
 being announced. Dismissal is deliberately NOT an outcome: iOS and macOS
 never tell the app a banner was swiped away, so a grammar with
@@ -137,16 +181,16 @@ delivered to the primary, and WHEN THE APP IS NOT RUNNING, D-Bus
 activation launches it to post — GNOME keeps the notification in its
 tray after the app exits, and clicking it D-Bus-activates the app with
 the notification's action, the route GNOME's own apps take. So the app
-need not stay running on Linux any more than on the other four; what
-the closed case needs is the two files a packaged Linux app carries
-anyway, a desktop entry marked `DBusActivatable=true` and a D-Bus
-`.service` file naming the id and the executable — S9's Linux piece,
-the way the boot receiver is Android's. Where no user manager answers,
-`at` is the second route (its command is the same); a desktop with
-neither GNOME's shell nor a portal can take the codeless third,
-`notify-send --wait --action=open=Open … && <app> --task <n>`, which
-spells the launch outside kaya and is kept as a fallback for that
-reason. Where no scheduler exists at all — the lane's container has no
+need not stay running on Linux any more than on the other four: on GNOME
+and through the portal the poster exits at once and the click
+D-Bus-activates it (the two files — a desktop entry marked
+`DBusActivatable=true` and a D-Bus `.service` naming the id — are S9's
+Linux piece, the way the boot receiver is Android's); on a plain
+freedesktop daemon the post shows and the click is inert, the ruled
+carve-out (§0's regime 2). Where no user manager answers, `at` is the
+second route (its command is the same). The codeless `notify-send --wait`
+route is REFUSED with the resident mode it stands for.
+Where no scheduler exists at all — the lane's container has no
 systemd and no `atd` — an in-process timer is the last, and the lane
 proves the systemd route by putting a RECORDING `systemd-run` on the
 PATH that logs the unit it was asked for. Tauri and Electron post
@@ -292,8 +336,9 @@ The body's first line is the app's choice; kaya truncates nothing.
   portal-or-daemon fallback inside the container (no portal there) — the
   same service plays mako, dunst or Plasma, since all speak that one
   protocol; with the service stopped the post must come back `refused`
-  and the capability false; the post-only resident mode exits on the
-  service's `NotificationClosed` and on `ActionInvoked`; and
+  and the capability false; the fired command exits once the daemon has
+  answered the post (a process that exits before the reply never
+  posted); and
   a recording `systemd-run` on the PATH logs the transient timer the
   arm asks for, since the container runs no systemd user manager.
   On a real GNOME session: `gapplication action` from the fired timer
