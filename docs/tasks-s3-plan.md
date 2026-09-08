@@ -59,13 +59,23 @@ has exited:
    the app with the action (GLib's words), which needs the two files a
    packaged app carries — a desktop entry with `DBusActivatable=true` and
    a D-Bus `.service` file naming the id. The poster may exit at once.
-   The portal offers the same persistence and activation to a HOST app
-   only if it registered its id first (`org.freedesktop.host.portal.Registry`,
-   "before any portal method call", one call per process) and opted into
-   the portal (`GIO_USE_PORTALS=1` for GLib's backend, or kaya calling the
-   portal itself) — a route a sway user with `xdg-desktop-portal-gtk` has,
-   with mako's default `default-timeout 0` keeping the popup until
-   dismissed.
+   THE PORTAL IS WHAT MAKES THE CLICK WORK BEYOND GNOME, and it is the
+   maintainer's question answered ("nothing remembers the task id?"):
+   the portal daemon is a session-long process the desktop already runs
+   — on KDE its own, on sway `xdg-desktop-portal` with the GTK backend
+   users install for screen sharing and file dialogs — and when kaya
+   posts THROUGH it, IT is the listener: it keeps the record after our
+   process has exited, hears the daemon's click signal (mako, dunst,
+   Plasma all still draw the popup), and answers it by calling our app
+   over D-Bus, which launches us with the action and the task id. A HOST
+   app gets that only after one registration call telling the portal its
+   id (`org.freedesktop.host.portal.Registry`, "before any portal method
+   call", xdg-desktop-portal 1.19 of 2024 and later — Ubuntu 24.04's 1.18
+   lacks it); a Flatpak gets it by itself. So the GTK arm posts through
+   the portal whenever `org.freedesktop.portal.Notification` is on the
+   bus and the id could be registered, falls back to GNOME's own
+   interface, then to the plain daemon — kaya calling the portal itself
+   rather than flipping GLib's process-wide `GIO_USE_PORTALS`.
 2. The plain freedesktop service alone (mako, dunst, swaync, Plasma
    without a portal): the click is the `ActionInvoked` signal on the bus,
    delivered to whoever is listening — GLib's backend answers it by
@@ -78,12 +88,13 @@ has exited:
    "until dismissed". RULED 2026-09-07 (maintainer: "stick with option
    1"): kaya does NOT keep one. The fired command posts and exits once the
    daemon has answered; the reminder SHOWS on every daemon, and the click
-   opens the task where the desktop can carry it (regime 1) and is inert
-   where it cannot — the spec's own floor ("clients should not assume the
-   server will generate [ActionInvoked]"), stated once as the Linux
-   carve-out. It shrinks by itself: S11's Flatpak build puts GLib on the
-   portal, and the click then works on every desktop that runs one, sway
-   with `xdg-desktop-portal-gtk` included.
+   opens the task where a session-long process can carry it — the shell
+   on GNOME, the portal on KDE and on sway with one (regime 1) — and is
+   inert on a bare daemon with no portal, the spec's own floor ("clients
+   should not assume the server will generate [ActionInvoked]"), stated
+   once as the Linux carve-out. It shrinks by itself: a portal from 1.19
+   on registers a host app's id, and S11's Flatpak build needs no
+   registration at all.
 3. No daemon, or no session bus at all (a bare X session, an SSH login,
    the lane's container): the post cannot land. kaya asks the bus for the
    name's owner before posting, reports the capability false so the
@@ -216,7 +227,7 @@ extra. An app that wants to know beforehand has the capability query
 with its own occurrence — a second surface for a state the post already
 reports.
 
-### N4 — Identity: identity.toml gains `id`, the reverse-DNS name every platform wants (RECOMMEND)
+### N4 — Identity: identity.toml gains `id`, the reverse-DNS name every platform wants — and NO GUEST SPELLS IT (RECOMMEND)
 
 macOS needs a bundle identifier to post at all, GNOME attributes the
 notification to the `GApplication` id, Windows registers an AUMID for
@@ -224,12 +235,33 @@ an unpackaged exe, Android and iOS have theirs in their packages. One
 `id = "dev.kaya.tasks"` in identity.toml, read by: the mac lane, which
 wraps a notification-capable guest in a minimal `.app` the way the
 probes already do (Info.plist from the declaration, the executable
-inside), the GTK backend's application id, the WinUI registration, and
-check-app-identity, which holds every hand-written copy (the iOS bundle
-ids, the Android `applicationId`s) to it. This is the first pull of S11
-(packaging) into the present; it is taken here because posting is
-impossible without it, and it retires the hand-spelled
-`dev.kaya.Milestone2`.
+inside), the iOS bundle and the Android `applicationId` (build-time,
+as the name and mark already are), and check-app-identity, which holds
+every hand-written copy to it. AT RUNTIME LIBKAYA READS IT ITSELF: the
+manifest sits under the asset root the core already resolves
+(crates/kaya/src/assets.rs lists `identity.toml` in its census), so the
+GTK backend's `Application::builder().application_id(…)` and WinUI's
+registration take the toml's `id` at startup, and the hand-spelled
+`dev.kaya.Milestone2` in gtk.rs goes. The maintainer's question
+(2026-09-07, "do we still need it in the app source?"): no — the id
+appears in no guest, in no binding's sugar, and in no backend's source.
+
+AND THE NAME AND MARK CAN FOLLOW (proposed with it): today every
+identity guest spells `tx.app_identity("Aurora Notes", &icon)` and
+check-app-identity's C4 holds those nine strings equal to the manifest —
+a duplication the manifest exists to remove. With the core reading the
+manifest, `tx.app_identity()` takes NO arguments: the declaration stays
+an explicit act, because declaring an identity is a policy on macOS
+(docs/app-identity-plan.md ruling 1: a declared app is a Dock app), but
+its values come from the one file. The nine guests lose the string,
+C4 becomes "every identity guest CALLS the declaration" (the scene's
+`expect_title window#1 "Aurora Notes"` still reads the name back off a
+real window), and the argument forms are retired rather than kept
+beside the new one. Nine bindings' sugar move — the sweep is small and
+mechanical.
+
+This is the first pull of S11 (packaging) into the present; it is taken
+here because posting is impossible without it.
 
 ### N5 — What the harness fakes and what it drives (RECOMMEND: posting real everywhere, activation real where a test can reach the shade)
 
@@ -331,9 +363,14 @@ The body's first line is the app's choice; kaya truncates nothing.
   receives activation under the lane (the process runs `.accessory`,
   which is not a bundle question — but the delegate must be set before
   the first post, and the prompt appears once per bundle id per user).
-- Linux: a recording `org.freedesktop.Notifications` service over the
-  lane's own session bus receives GNotification's post through GTK's
-  portal-or-daemon fallback inside the container (no portal there) — the
+- Linux: the lane's image gains `xdg-desktop-portal` and its GTK backend
+  (versions read and recorded; the Registry needs ≥ 1.19), and the
+  measurement is the whole click with the app CLOSED: post through the
+  portal, exit, the recording daemon's `ActionInvoked` fed back, and our
+  app D-Bus-activated with the task's id by the portal — the two
+  activation files installed in the container's user dirs. Beside it a
+  recording `org.freedesktop.Notifications` service over the lane's own
+  session bus receives the plain-daemon post (no portal) — the
   same service plays mako, dunst or Plasma, since all speak that one
   protocol; with the service stopped the post must come back `refused`
   and the capability false; the fired command exits once the daemon has
