@@ -68,10 +68,19 @@ has exited:
    process has exited, hears the daemon's click signal (mako, dunst,
    Plasma all still draw the popup), and answers it by calling our app
    over D-Bus, which launches us with the action and the task id. A HOST
-   app gets that only after one registration call telling the portal its
-   id (`org.freedesktop.host.portal.Registry`, "before any portal method
-   call", xdg-desktop-portal 1.19 of 2024 and later — Ubuntu 24.04's 1.18
-   lacks it); a Flatpak gets it by itself. So the GTK arm posts through
+   app gets that only once the portal knows its id: through the Registry
+   portal (`org.freedesktop.host.portal.Registry`, "before any portal
+   method call", xdg-desktop-portal 1.19 of 2024 and later — Ubuntu
+   24.04's 1.18 lacks it), or — the maintainer's search for the thing
+   nobody ships, 2026-09-07 — through the SYSTEMD SCOPE the portal reads
+   a host caller's id from (`app-<launcher>-<AppID>-<n>.scope`, the unit
+   naming launchers use), which the fired command can put itself in, so
+   older portals identify us too; a Flatpak gets it by itself. The plain
+   daemon's click cannot be caught by anything spawned later: a match
+   rule dies with its connection, and the bus activates a program only
+   for a METHOD CALL to a well-known name, never for the broadcast signal
+   every daemon emits — the two registries that do the remembering are
+   GNOME's interface and the portal, which is why they were built. So the GTK arm posts through
    the portal whenever `org.freedesktop.portal.Notification` is on the
    bus and the id could be registered, falls back to GNOME's own
    interface, then to the plain daemon — kaya calling the portal itself
@@ -368,7 +377,10 @@ The body's first line is the app's choice; kaya truncates nothing.
   measurement is the whole click with the app CLOSED: post through the
   portal, exit, the recording daemon's `ActionInvoked` fed back, and our
   app D-Bus-activated with the task's id by the portal — the two
-  activation files installed in the container's user dirs. Beside it a
+  activation files installed in the container's user dirs; and the
+  scope-name route measured against a portal below 1.19 (the fired
+  command started as `app-kaya-<id>-<n>.scope`, the portal's host app-id
+  read, the relaunch). Beside it a
   recording `org.freedesktop.Notifications` service over the lane's own
   session bus receives the plain-daemon post (no portal) — the
   same service plays mako, dunst or Plasma, since all speak that one
@@ -377,7 +389,10 @@ The body's first line is the app's choice; kaya truncates nothing.
   answered the post (a process that exits before the reply never
   posted); and
   a recording `systemd-run` on the PATH logs the transient timer the
-  arm asks for, since the container runs no systemd user manager.
+  arm asks for, since the container runs no systemd user manager. And
+  the DEEP LINK as a bonus route: `kaya-tasks://task/<n>` in the body
+  with the scheme in the desktop entry, opened through `xdg-open` by a
+  daemon that opens URLs (dunst) — no listener at all where it works.
   On a real GNOME session: `gapplication action` from the fired timer
   reaches the running primary instance and the post lands.
 - Windows: `AppNotificationManager.Register()` from an unpackaged exe
