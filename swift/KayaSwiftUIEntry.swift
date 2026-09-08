@@ -4,6 +4,7 @@
 // relying on dynamic-linker symbol resolution.
 
 import SwiftUI
+import UserNotifications
 
 struct KayaApp: App {
     #if os(macOS)
@@ -45,6 +46,11 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // BEFORE ANY WINDOW EXISTS, so every one of them inherits it and no
         // first frame is drawn in the host's mode (tools/check-appearance.py).
         kayaApplyAppearance()
+        // The notification centre's delegate, before launching finishes, so
+        // a launch caused by a tap is delivered (docs/tasks-s3-plan.md §3).
+        if kayaCanPostNotifications() {
+            UNUserNotificationCenter.current().delegate = kayaNotificationDelegate
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -62,6 +68,14 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
 /// method, and a delegate that only conforms to UIApplicationDelegate is never
 /// asked to build menus.
 final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = kayaNotificationDelegate
+        return true
+    }
+
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
         // Only the main system carries a bar; context menu systems reach this
@@ -75,6 +89,8 @@ final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
 @_cdecl("kaya_swiftui_run")
 public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
     KayaHost.api = api.pointee
+    // The runtime capability this host measured (docs/tasks-s3-plan.md N6),
+    // granted before the guest's first read.
     let host = KayaHost.api.spec_hash()
     if host != kayaSpecHash {
         fatalError(

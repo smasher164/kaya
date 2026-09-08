@@ -347,8 +347,7 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         '!path.contains(where: { $0.isEmpty })',
         '!authored.contains(where: { $0 == "]" || $0 == "@" })',
         'guard !id.isEmpty else { return nil }',
-        'registry.first(where: { kayaScene.nodes[$0.id] === $0 && '
-        '$0.a11yId == id })',
+        'registry.first(where: { isLive($0) && $0.a11yId == id })',
     ]):
         fail("swift/KayaSwiftUI.swift target grammar is not "
              "kind@id[key.path] with bare @ preserved")
@@ -378,11 +377,22 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         fail("swift/KayaSwiftUI.swift keyed targets do not resolve "
              "through the table sortTag")
 
-    if starget is not None and \
-            "let live = registry.filter { kayaScene.nodes[$0.id] " \
-            "=== $0 }" not in starget:
+    # A TARGET IS A LIVE WIDGET (docs/traps.md, "A keyed target answers
+    # from a popped screen"): destroyed entries out, AND only nodes
+    # reachable from a presented root — a popped entry's subtree stays in
+    # `nodes`, so the first half alone answered from the dead screen.
+    if starget is not None and (
+            "kayaScene.nodes[$0.id] === $0 && presented.contains($0.id)"
+            not in starget
+            or "let live = registry.filter(isLive)" not in starget):
         fail("swift/KayaSwiftUI.swift keyed targets do not filter "
              "destroyed registry entries")
+    if starget is not None and (
+            "let presented = kayaLiveIds()" not in starget
+            or "registry.first(where: { isLive($0) && $0.a11yId == id })"
+            not in starget):
+        fail("swift/KayaSwiftUI.swift keyed targets answer from an "
+             "unpresented root")
 
     sany = section(swift, "private func kayaAnyTarget(",
                    "/// Cut one script LINE", TARGET_SWIFT)
@@ -566,7 +576,15 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         "keyText.isEmpty() || keys.any { it.isEmpty() }",
         "authored.any { it == ']' || it == '@' }",
         "if (id.isEmpty()) return null",
-        "KayaSceneModel.nodes[it.id] === it && it.a11yId == id",
+        # A TARGET IS A LIVE WIDGET, and liveness has TWO halves since
+        # 2026-09-07: not destroyed (`nodes`) and not POPPED (reachable
+        # from a presented root). A popped entry's subtree stays in
+        # `nodes` — APPLY_POP_ENTRY drops the entry alone — so the
+        # registries, which are append-only and creation-ordered,
+        # answered a re-pushed screen's keyed target from the popped
+        # copy (tools/scenes/tasks.steps' expect_no_target).
+        "KayaSceneModel.nodes[n.id] === n && n.id in presented",
+        "registry.firstOrNull { isLive(it) && it.a11yId == id }",
     ]):
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt "
              "target grammar is not kind@id[key.path] with bare @ "
@@ -605,11 +623,13 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt "
              "keyed targets do not resolve through the table sortTag")
 
-    if ktarget is not None and \
-            "val live = registry.filter { KayaSceneModel.nodes[it.id] "\
-            "=== it }" not in ktarget:
+    if ktarget is not None and not has_all(ktarget, [
+        "val presented = kayaLivePresentedIds()",
+        "val live = registry.filter(isLive)",
+    ]):
         fail("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt "
-             "keyed targets do not filter destroyed registry entries")
+             "keyed targets do not filter destroyed or popped registry "
+             "entries")
 
     kwidget = section(kotlin, "private fun kayaWidgetTarget(",
                       "private fun kayaAxRole(", TARGET_KOTLIN)
@@ -749,10 +769,22 @@ if not target_out:
         "resolve through the table sortTag")
     target_watch(
         "Swift live-node filter", 1, "swift", S,
-        "let live = registry.filter { kayaScene.nodes[$0.id] === $0 }",
+        "let live = registry.filter(isLive)",
         "let live = registry",
         "check-steps: swift/KayaSwiftUI.swift keyed targets do not "
         "filter destroyed registry entries")
+    target_watch(
+        "Swift presence half of the liveness predicate", 1, "swift", S,
+        "kayaScene.nodes[$0.id] === $0 && presented.contains($0.id)",
+        "presented.contains($0.id)",
+        "check-steps: swift/KayaSwiftUI.swift keyed targets do not "
+        "filter destroyed registry entries")
+    target_watch(
+        "Swift reachability half of the liveness predicate", 1, "swift", S,
+        "let presented = kayaLiveIds()",
+        "let presented = Set(kayaScene.nodes.keys)",
+        "check-steps: swift/KayaSwiftUI.swift keyed targets answer from an "
+        "unpresented root")
     target_watch(
         "Swift earliest delimiter", 1, "swift", S,
         'switch String(spec.prefix { $0 != "#" && $0 != "@" })',
@@ -873,11 +905,10 @@ if not target_out:
         "KayaCompose.kt table stamp keys are not strict UTF-8")
     target_watch(
         "Compose live-node filter", 1, "kotlin", K,
-        "val live = registry.filter { KayaSceneModel.nodes[it.id] "
-        "=== it }",
+        "val live = registry.filter(isLive)",
         "val live = registry",
         "check-steps: android/kaya/src/main/kotlin/dev/kaya/"
-        "KayaCompose.kt keyed targets do not filter destroyed "
+        "KayaCompose.kt keyed targets do not filter destroyed or popped "
         "registry entries")
     target_watch(
         "Compose earliest delimiter", 1, "kotlin", K,

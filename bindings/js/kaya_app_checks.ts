@@ -749,6 +749,54 @@ if (isMainThread) {
   check("addSection({badge: signal}) binds the section prop instead", badgeRecords.includes(JSON.stringify([...wire.tx_bind_section_badge(5151, badgeSignal.id)])) && !badgeRecords.includes(JSON.stringify([...wire.tx_set_section_badge(5151, 0)])));
   check("zero is a badge value and not an absent one (it CLEARS)", JSON.stringify([...wire.tx_set_section_badge(5150, 0)]) !== JSON.stringify([...wire.tx_set_section_badge(5150, 3)]));
 
+  // ------------------------------------------------ notifications (N1)
+  // The alert's grammar without a window: the handler binds AT THE SHOW,
+  // fires once and RETIRES; the id is the guest's, so it may be posted
+  // again afterwards. And the DECODE, from bytes: notification_result is
+  // byte-for-byte alert_result, and every binding read it as click-shaped
+  // until 2026-09-07 — the outcome taken for a key-path length.
+  const notificationBytes = (ident: number, outcome: number): Uint8Array => {
+    const b = new Uint8Array(24);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, 24, true);
+    v.setUint16(4, wire.OCC_NOTIFICATION_RESULT, true);
+    v.setBigUint64(8, BigInt(ident), true);
+    v.setUint32(16, outcome, true);
+    return b;
+  };
+  const activated = wire.parse_occurrence(notificationBytes(12, 0));
+  const refused = wire.parse_occurrence(notificationBytes(99, 1));
+  check("a packed notification_result decodes to its id and outcome", activated.kind === wire.OCC_NOTIFICATION_RESULT && activated.id === 12 && activated.keys.length === 0 && activated.payload === kaya.NOTIFICATION_ACTIVATED);
+  check("a REFUSED outcome decodes too (the click tail read past here)", refused.id === 99 && refused.payload === kaya.NOTIFICATION_REFUSED);
+
+  const notifySeen: Array<[string, number]> = [];
+  shipped.length = 0;
+  app.build(() => {
+    kaya.showNotification({ notification: 12, title: "Call the plumber", body: "a reminder", at: 1757000000, onResult: (o) => notifySeen.push(["a", o]) });
+    kaya.showNotification({ notification: 99, title: "refused one", onResult: (o) => notifySeen.push(["b", o]) });
+    kaya.cancelNotification(77);
+  });
+  const notifyRecords = shipped.flat().map((r) => JSON.stringify([...r]));
+  check("showNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(12, 1757000000, "Call the plumber", "a reminder")])));
+  check("at is absent by default, which posts now", notifyRecords.includes(JSON.stringify([...wire.tx_show_notification(99, 0, "refused one", "")])));
+  check("cancelNotification packs the generated record", notifyRecords.includes(JSON.stringify([...wire.tx_cancel_notification(77)])));
+  check("showNotification refuses an empty title", throws(() => kaya.showNotification({ notification: 5, title: "" }), /needs a title/));
+
+  fire(wire.parse_occurrence(notificationBytes(12, 0)));
+  // The SECOND result for a retired id reaches nobody.
+  fire(wire.parse_occurrence(notificationBytes(12, 0)));
+  fire(wire.parse_occurrence(notificationBytes(99, 1)));
+  check("the handler fires with the activated outcome", notifySeen.some(([w, o]) => w === "a" && o === kaya.NOTIFICATION_ACTIVATED));
+  check("a refused post reaches the same handler slot", notifySeen.some(([w, o]) => w === "b" && o === kaya.NOTIFICATION_REFUSED));
+  check("the registration is ONE-SHOT: the second result reaches nobody", notifySeen.filter(([w]) => w === "a").length === 1);
+  check("the id retires with it", !(app as unknown as { _notificationHandlers: Map<number, unknown> })._notificationHandlers.has(12));
+
+  // AND THE ID IS REUSABLE once it has retired: guests own the numbers.
+  let promisedOutcome: Promise<number> | null = null;
+  app.build(() => { promisedOutcome = kaya.showNotification({ notification: 12, title: "again" }); });
+  fire(wire.parse_occurrence(notificationBytes(12, 1)));
+  check("an id posted again after retirement binds a FRESH handler, and with no onResult it is a PROMISE of the outcome", (await promisedOutcome!) === kaya.NOTIFICATION_REFUSED);
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

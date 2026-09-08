@@ -439,10 +439,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(", ");
     c.line(&format!("    if kind not in ({accepted}):"));
     c.line("        return kind, None, [], None");
-        c.line("    if kind == OCC_ALERT_RESULT:");
-    c.line("        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
-    c.line("        alert, choice = struct.unpack_from(\"<QI\", buf, 8)");
-    c.line("        return kind, alert, [], choice");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
+        c.line("        # A request's one answer: id + the u32 code.");
+        c.line("        request, code = struct.unpack_from(\"<QI\", buf, 8)");
+        c.line("        return kind, request, [], code");
+    }
     // The picker's answer is the one occurrence whose payload is a LIST
     // OF RECORDS rather than a scalar, so it needs its own arm: the
     // generic tail below would take the count for a key-path length and

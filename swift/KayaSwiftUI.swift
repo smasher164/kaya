@@ -3,12 +3,13 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants in
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc80ccf259104a87a
+let kayaSpecHash: UInt64 = 0x21005150bc085070
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -36,6 +37,8 @@ private let applyRevealRange: UInt16 = 30
 private let applyPresentSaveDialog: UInt16 = 31
 private let applySetBrand: UInt16 = 32
 private let applySetTypeface: UInt16 = 33
+private let applyPostNotification: UInt16 = 41
+private let applyCancelNotification: UInt16 = 42
 /// The app's declared identity (docs/app-identity-plan.md). The lowering
 /// is mac-only; see the `expect_app_icon` arm.
 private let applySetAppIdentity: UInt16 = 34
@@ -3753,6 +3756,10 @@ enum KayaHost {
         api.emit_alert_result(alert, choice)
     }
 
+    static func emitNotificationResult(_ notification: UInt64, _ outcome: UInt32) {
+        api.emit_notification_result(notification, outcome)
+    }
+
     /// The user's back affordance popped an entry natively — the
     /// core's stack reconciles inside this call (post-fact).
     static func emitEntryPopped(_ entry: UInt64) {
@@ -4130,6 +4137,7 @@ private func kayaApplyWindowDirty(_ windowId: UInt64) {
 
 private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     kayaInvalidateTableGeometry()
+    kayaApplyGeneration &+= 1
     // Coalesced menu re-assert: any record that touches the command
     // catalog re-syncs the native chrome ONCE at the batch boundary
     // (the macOS NSMenu segment, the shortcut dispatch table).
@@ -4328,6 +4336,26 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let accepting = String(
                     decoding: raw[(body + 16)..<(body + 16 + acceptLen)], as: UTF8.self)
                 kayaReadClipboard(request: request, accepting: accepting)
+            case applyPostNotification:
+                // The platform's own centre (docs/tasks-s3-plan.md §3); the
+                // answer rides kaya_emit_notification_result when the user
+                // activates it, or at once as refused.
+                let nid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let at = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                var at2 = body + 16
+                func nextStr2() -> String {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: at2 + 4, as: UInt32.self))
+                    let bytes = raw[(at2 + 8)..<(at2 + 8 + len)]
+                    at2 += 8 + len
+                    if at2 % 8 != 0 { at2 += 8 - at2 % 8 }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                let title = nextStr2()
+                let bodyText = nextStr2()
+                kayaPostNotification(nid, at: at, title: title, body: bodyText)
+            case applyCancelNotification:
+                let nid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaCancelNotification(nid)
             case applyPresentFileDialog:
                 // The platform's REAL picker (NSOpenPanel), answered exactly
                 // once through kaya_emit_file_dialog_result — the chosen
@@ -6021,6 +6049,29 @@ private func kayaTableStamp(_ tag: [UInt8]) -> KayaTableStamp? {
 }
 
 /// Resolves the target grammar against the verb's creation-order registry.
+private var kayaApplyGeneration: UInt64 = 0
+private var kayaLiveCache: (generation: UInt64, ids: Set<UInt64>) = (UInt64.max, [])
+
+/// A TARGET IS A LIVE WIDGET (harness.rs Step::ExpectNoTarget): the nodes
+/// reachable from a presented root — a window's, a section's, a live entry's
+/// — once per apply batch. The registries are append-only and a popped
+/// entry's subtree stays in `nodes`, so a re-pushed screen's keyed target
+/// answered from the popped one (docs/traps.md).
+private func kayaLiveIds() -> Set<UInt64> {
+    if kayaLiveCache.generation == kayaApplyGeneration { return kayaLiveCache.ids }
+    var ids = Set<UInt64>()
+    var stack: [KayaNode] = []
+    for window in kayaScene.windows.values { if let root = window.root { stack.append(root) } }
+    for section in kayaScene.sectionsById.values { if let root = section.root { stack.append(root) } }
+    for entry in kayaScene.navEntries.values { if let root = entry.root { stack.append(root) } }
+    while let node = stack.popLast() {
+        if !ids.insert(node.id).inserted { continue }
+        stack.append(contentsOf: node.children)
+    }
+    kayaLiveCache = (kayaApplyGeneration, ids)
+    return ids
+}
+
 private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode]) -> KayaNode? {
     let text = String(spec)
     if let at = text.firstIndex(of: "@") {
@@ -6053,11 +6104,13 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
         // append-only and `kayaScene.nodes` is the liveness record, so a
         // stamped copy that left the band would answer with the empty children
         // its teardown left behind (docs/virtualization-plan.md §1).
+        let presented = kayaLiveIds()
+        let isLive: (KayaNode) -> Bool = { kayaScene.nodes[$0.id] === $0 && presented.contains($0.id) }
         guard let keys else {
-            if let hit = registry.first(where: { kayaScene.nodes[$0.id] === $0 && $0.a11yId == id }) {
+            if let hit = registry.first(where: { isLive($0) && $0.a11yId == id }) {
                 return hit
             }
-            let liveIds = registry.filter { kayaScene.nodes[$0.id] === $0 }.map { $0.a11yId }
+            let liveIds = registry.filter(isLive).map { $0.a11yId }
             kayaDiag(
                 "target \(text) unresolved: \(liveIds.count) live \(kind)s; ids "
                     + Set(liveIds).sorted().joined(separator: ","))
@@ -6067,7 +6120,7 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
         // sort tag and a widget's occurrence tag carry the same node-and-
         // keys encoding (the keyed-target entry, 2026-09-01).
         let stampOf: (KayaNode) -> KayaTableStamp? = { kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag) }
-        let live = registry.filter { kayaScene.nodes[$0.id] === $0 }
+        let live = registry.filter(isLive)
         // EVERY copy carrying the id is a candidate, whichever template
         // stamped it: the key path names the copy, so five lists' templates
         // may share one id (tools/scenes/tasks.steps). Two answering is a
@@ -8080,6 +8133,41 @@ private func kayaRunScript(_ script: String) {
                     #endif
                     kayaAwaitAnswer(answered)
                 }
+            case "expect_notification":
+                // THE PLATFORM'S DELIVERED LIST, never the request's copy
+                // (docs/tasks-s3-plan.md N5). Off the main thread: the
+                // centre answers asynchronously and the read waits on it.
+                let nid = UInt64(parts[1]) ?? 0
+                let want = kayaQuoted(Array(parts[2...]))
+                if let got = kayaDeliveredNotificationTitle(nid) {
+                    if kayaBytesEqual(got, want) {
+                        observed.append("notification \(nid) \"\(want)\"")
+                    } else {
+                        failures.append("notification \(nid) \"\(got)\", wanted \"\(want)\"")
+                    }
+                } else {
+                    failures.append(
+                        "the platform holds no delivered notification \(nid), wanted \"\(want)\"")
+                }
+            case "expect_no_notification":
+                let nid = UInt64(parts[1]) ?? 0
+                if let got = kayaDeliveredNotificationTitle(nid) {
+                    failures.append(
+                        "the platform still holds notification \(nid) \"\(got)\", wanted none")
+                } else {
+                    observed.append("no notification \(nid)")
+                }
+            case "notification_activate":
+                // N5's carve-out on BOTH platforms: the backend's own activation
+                // path, one step past the tap. macOS has no programmatic tap;
+                // the iOS simulator's shade will not activate one (docs/traps.md,
+                // "The iOS simulator's shade will not activate a notification";
+                // tools/ios/notifyprobe reproduces it).
+                let nid = UInt64(parts[1]) ?? 0
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                DispatchQueue.main.sync { kayaNotificationActivated(nid) }
+                kayaAwaitAnswer(answered)
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's messageText /
                 // the UIAlertController's title), never the request's copy — a
@@ -8487,6 +8575,19 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) spans its breadth")
                 } else {
                     failures.append("\(parts[1]) is short of its breadth (\(short))")
+                }
+            case "expect_no_target":
+                // harness.rs Step::ExpectNoTarget: the pass is a spec that
+                // resolves to nothing, awaited like a control.
+                guard parts[1].contains("@") else {
+                    failures.append("expect_no_target wants an @id target, got \(parts[1])")
+                    break
+                }
+                let gone = kayaAwaitOnMain({ kayaAnyTarget(parts[1]) == nil ? true : nil })
+                if gone == true {
+                    observed.append("\(parts[1]) names no widget")
+                } else {
+                    failures.append("\(parts[1]) still answers after 5000ms")
                 }
             case "expect_lines":
                 // The wrap observation (harness.rs Step::ExpectLines): a run
@@ -8940,10 +9041,21 @@ private func kayaRunScript(_ script: String) {
                 // (docs/tasks-s2b-plan.md R4) — never the declared prop.
                 let wantMode = kayaQuoted(Array(parts[1...]))
                 let gotMode = DispatchQueue.main.sync { kayaCanvasAppearance() }
-                if gotMode == wantMode {
+                // The SOURCE is the toolkit's own override slot: empty is
+                // "system", so a scene that chose System holds on a dark host.
+                let gotSource = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        return NSApp.appearance == nil ? "system" : "override"
+                    #else
+                        let slot = kayaHarnessWindow()?.overrideUserInterfaceStyle ?? .unspecified
+                        return slot == .unspecified ? "system" : "override"
+                    #endif
+                }
+                let got = "\(gotMode) \(gotSource)"
+                if wantMode == "system" ? gotSource == "system" : gotMode == wantMode {
                     observed.append("appearance \(wantMode)")
                 } else {
-                    failures.append("appearance \(gotMode), wanted \(wantMode)")
+                    failures.append("appearance \(got), wanted \(wantMode)")
                 }
             case "expect_sections_presentation":
                 // THE ARM THE SECTIONS RENDER TOOK — "bar" or "sidebar", read
@@ -13363,6 +13475,149 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
     return "\(mode) " + kayaSampleRGB(cg, wanted)
 }
 
+// MARK: - Local notifications (docs/tasks-s3-plan.md)
+
+/// The centre's identifier for kaya notification `id`; the id rides back out
+/// of it on activation.
+func kayaNotificationIdentifier(_ id: UInt64) -> String { "kaya-\(id)" }
+
+func kayaNotificationId(_ identifier: String) -> UInt64? {
+    guard identifier.hasPrefix("kaya-") else { return nil }
+    return UInt64(identifier.dropFirst(5))
+}
+
+/// Can THIS process post? macOS answers only from a BUNDLE with an
+/// identifier — a bare executable's centre is nil and the first call aborts
+/// — and iOS always has one. Read at launch to grant the capability bit, and
+/// read again before every post so a bare run answers `refused`.
+func kayaCanPostNotifications() -> Bool {
+    KayaHost.api.capabilities() & 2 != 0
+}
+
+/// Every activation, from the delegate's real tap or the harness's own call
+/// (N5's macOS carve-out: no programmatic tap exists, so the verb enters
+/// here, one step past it), answers ONCE and clears the delivered copy the
+/// way the system does on a tap.
+func kayaNotificationActivated(_ id: UInt64) {
+    UNUserNotificationCenter.current().removeDeliveredNotifications(
+        withIdentifiers: [kayaNotificationIdentifier(id)])
+    KayaHost.emitNotificationResult(id, kayaNotificationOutcomeActivated)
+}
+
+let kayaNotificationOutcomeActivated: UInt32 = 0
+let kayaNotificationOutcomeRefused: UInt32 = 1
+
+/// Set on the centre BEFORE the app finishes launching (both entry
+/// delegates), so a launch caused by a tap is delivered too.
+final class KayaNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // A foreground app's notification is delivered to NOTHING unless
+        // the delegate asks for a banner (docs/tasks-s3-plan.md §7).
+        completionHandler([.banner, .list])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let id = kayaNotificationId(response.notification.request.identifier) {
+            kayaNotificationActivated(id)
+        }
+        completionHandler()
+    }
+}
+
+let kayaNotificationDelegate = KayaNotificationDelegate()
+
+/// Post through the platform's centre: authorization asked at the FIRST
+/// post (N3), a denial answering that post as refused; `at` 0 posts now and
+/// any other `at` is a calendar trigger the OS fires (N2).
+func kayaPostNotification(_ id: UInt64, at: UInt64, title: String, body: String) {
+    guard kayaCanPostNotifications() else {
+        KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
+        return
+    }
+    let centre = UNUserNotificationCenter.current()
+    // A real app asks for a banner and a sound, in context (docs/tasks-s3-plan.md
+    // N3). UNDER THE HARNESS it asks PROVISIONALLY: a headless accessory lane
+    // has no one to answer the modal prompt, and provisional auth grants
+    // WITHOUT one and still delivers to the centre — which is what
+    // expect_notification reads (measured 2026-09-08, tools/mac/notifyprobe).
+    let opts: UNAuthorizationOptions =
+        ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
+        ? [.alert, .sound, .provisional] : [.alert, .sound]
+    centre.requestAuthorization(options: opts) { granted, error in
+        guard granted else {
+            // The refusal's measurement, under the harness only: what the
+            // centre answered and what it holds for this bundle.
+            if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
+                centre.getNotificationSettings { settings in
+                    FileHandle.standardError.write(Data(
+                        ("KAYA_DIAG notification \(id) refused: granted=\(granted) "
+                            + "error=\(error.map { "\($0)" } ?? "none") "
+                            + "status=\(settings.authorizationStatus.rawValue) "
+                            + "bundle=\(Bundle.main.bundleIdentifier ?? "<nil>")\n").utf8))
+                }
+            }
+            KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        var trigger: UNNotificationTrigger? = nil
+        if at != 0 {
+            let date = Date(timeIntervalSince1970: TimeInterval(at))
+            let parts = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute, .second], from: date)
+            trigger = UNCalendarNotificationTrigger(dateMatching: parts, repeats: false)
+        }
+        let request = UNNotificationRequest(
+            identifier: kayaNotificationIdentifier(id), content: content, trigger: trigger)
+        centre.add(request) { error in
+            if error != nil {
+                KayaHost.emitNotificationResult(id, kayaNotificationOutcomeRefused)
+            }
+        }
+    }
+}
+
+func kayaCancelNotification(_ id: UInt64) {
+    let centre = UNUserNotificationCenter.current()
+    let ids = [kayaNotificationIdentifier(id)]
+    centre.removePendingNotificationRequests(withIdentifiers: ids)
+    centre.removeDeliveredNotifications(withIdentifiers: ids)
+}
+
+/// The harness's read: the PLATFORM's delivered list (N5), never kaya's
+/// record of what it posted — and only while the centre reports the app
+/// authorized, since the list carries a notification the system never
+/// showed when it is not (measured 2026-09-08, tools/mac/notifyprobe).
+func kayaDeliveredNotificationTitle(_ id: UInt64) -> String? {
+    guard kayaCanPostNotifications() else { return nil }
+    let centre = UNUserNotificationCenter.current()
+    let done = DispatchSemaphore(value: 0)
+    var authorized = false
+    centre.getNotificationSettings { settings in
+        authorized = settings.authorizationStatus == .authorized
+            || settings.authorizationStatus == .provisional
+        done.signal()
+    }
+    done.wait()
+    guard authorized else { return nil }
+    var title: String? = nil
+    centre.getDeliveredNotifications { delivered in
+        title = delivered.first { $0.request.identifier == kayaNotificationIdentifier(id) }?
+            .request.content.title
+        done.signal()
+    }
+    done.wait()
+    return title
+}
+
 /// Which palette the core last rastered with. A SECOND READING, and it has to
 /// be: `KayaPresentationReporter` reports SwiftUI's `\.colorScheme`, which only
 /// a view can read, while this runs off the harness thread. MEASURED AGREEING
@@ -14529,6 +14784,8 @@ func kayaUserPops(_ sid: UInt64, to depth: Int) {
         }
         kayaScene.navEntries.removeValue(forKey: top.id)
         kayaScene.entryWindow.removeValue(forKey: top.id)
+        // A user pop is no apply batch, and it changes the live set.
+        kayaApplyGeneration &+= 1
         kayaLastPopAt = Date().timeIntervalSince1970
         KayaHost.emitEntryPopped(top.id)
     }
@@ -18738,6 +18995,7 @@ struct KayaSectionsView: View {
                     .font(kayaBrandFont())
                 } else {
                     tabBody(window)
+                        .navigationTitle(kayaWindowCaption(windowId))
                         .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                         .tint(kayaBrandTint())
                         .font(kayaBrandFont())
@@ -18788,10 +19046,29 @@ struct KayaSectionPane: View {
             // The hosting window's catalog rides each pane's top bar on iOS
             // (sections share the window's command catalog).
             .modifier(KayaMenuChrome(windowId: scene.sectionWindow[sectionId] ?? 0))
+            // THE WINDOW'S CAPTION rides the detail column on macOS, the one
+            // column NavigationSplitView titles the window from: unbound, the
+            // window showed the bundle's display name, which unbundled runs
+            // hid because the process name equals the scene's title
+            // (docs/traps.md, "A sectioned window's title was the process name").
+            .modifier(KayaMacWindowCaption(windowId: scene.sectionWindow[sectionId] ?? 0))
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
         }
+    }
+}
+
+/// macOS only: a section screen on the phones keeps its own bar untitled.
+private struct KayaMacWindowCaption: ViewModifier {
+    let windowId: UInt64
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            content.navigationTitle(kayaWindowCaption(windowId))
+        #else
+            content
+        #endif
     }
 }
 

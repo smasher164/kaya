@@ -93,8 +93,8 @@ pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, Date, EntryProp, MenuItemId, MenuItemKind,
-    Appearance, MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId,
-    TemplateNodeId, WindowProp,
+    Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
+    SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
     FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
 };
@@ -135,9 +135,33 @@ pub(crate) fn depth_stub(scene: &str) -> ! {
 ///
 /// Not the entry point on Android, where the OS owns the process main:
 /// use [`android_main!`](crate::android_main) and start from an Activity.
+/// Whether this process is an APP BUNDLE — the one thing macOS asks of a
+/// notification poster (docs/tasks-s3-plan.md N4): the executable sits in
+/// `<name>.app/Contents/MacOS/` under an Info.plist. Decided here, before
+/// the app thread's first capability read, and read back by the
+/// interpreter through the host API rather than judged twice.
+#[cfg(target_os = "macos")]
+fn bundled_executable() -> bool {
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let Some(macos) = exe.parent() else { return false };
+    let Some(contents) = macos.parent() else { return false };
+    macos.file_name().is_some_and(|n| n == "MacOS")
+        && contents.file_name().is_some_and(|n| n == "Contents")
+        && contents.join("Info.plist").is_file()
+}
+
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
+        // The runtime capability, granted BEFORE the app thread exists so
+        // its first read is the truth (docs/tasks-s3-plan.md N6).
+        #[cfg(target_os = "macos")]
+        let can_post = bundled_executable();
+        #[cfg(target_os = "ios")]
+        let can_post = true;
+        if can_post {
+            capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
+        }
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
         let ctx = AppCtx::new(occ_rx, capi::presentation_tx_sender(), occ_tx.clone());
         std::thread::Builder::new()
@@ -150,6 +174,13 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
+        // The runtime capability, decided by the backend's own probe (a
+        // registry on the session bus; a registration on Windows) BEFORE the
+        // app thread exists, so its first read is the truth
+        // (docs/tasks-s3-plan.md N6) — the mac arm's shape one platform over.
+        if backend::can_post_notifications() {
+            capi::kaya_grant_capabilities(capi::KAYA_CAP_NOTIFICATIONS);
+        }
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
         let (tx_tx, tx_rx) = std::sync::mpsc::channel();
         let ctx = AppCtx::new(occ_rx, tx_tx, occ_tx.clone());

@@ -1965,8 +1965,12 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         return [r for r in records
                 if _rec_kind(r) == kaya.wire.TX_SET_APP_IDENTITY]
 
+    # THE DECLARATION CARRIES NOTHING (docs/tasks-s3-plan.md N4): the
+    # name, the mark and the id are the manifest's, so the record's slots
+    # ride EMPTY and the root fills them. The slot is written ANYWAY, as
+    # the empty Str, so the field count never varies with the payload.
     before = len(kaya._tx)
-    kaya.app_identity("Aurora Notes", icon=b"\x89PNG\r\n\x1a\n not really")
+    kaya.app_identity()
     identities = _identity_records(kaya._tx[before:])
     check("app_identity reaches the records", len(identities) == 1)
     # The sentinel rather than `if identities:`, for the typeface
@@ -1974,65 +1978,25 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     mask, reserved, name, icon_kind, icon_len = (
         _identity(identities[0]) if len(identities) == 1
         else (None, None, None, None, None))
-    check("with the name as a Str, bit 0 set and a Blob in the icon slot",
-          (mask, name, icon_kind) == (1, "Aurora Notes", kaya.wire.VALUE_BLOB))
+    check("with an EMPTY name, bit 0 clear and the icon slot an empty Str",
+          (mask, name, icon_kind, icon_len)
+          == (0, "", kaya.wire.VALUE_STR, 0))
     check("and the reserved word untouched — a guest names no platform here",
           reserved == 0)
     _rewind(before)
 
-    # THE NAME-ONLY FORM: the icon slot is written ANYWAY, as the empty
-    # Str, so the record's field count never varies with the payload.
-    before = len(kaya._tx)
-    kaya.app_identity("Aurora Notes")
-    named_only = _identity_records(kaya._tx[before:])
-    check("app_identity with no icon= still reaches the records",
-          len(named_only) == 1)
-    mask, _reserved, name, icon_kind, icon_len = (
-        _identity(named_only[0]) if len(named_only) == 1
-        else (None, None, None, None, None))
-    check("with bit 0 CLEAR and the icon slot written as the empty Str",
-          (mask, name, icon_kind, icon_len)
-          == (0, "Aurora Notes", kaya.wire.VALUE_STR, 0))
-    _rewind(before)
-
-    # THE TWO WIRE-DOMAIN TYPES: the path-instead-of-bytes slip would
-    # otherwise reach the core as a name-shaped blob.
-    for what, kwargs, fragment in (
-        ("icon= that is not bytes",
-         {"name": "Aurora Notes", "icon": "guests/assets/icons/kaya-mark.png"},
-         "takes an image FILE's bytes"),
-        ("a name that is not a str", {"name": b"Aurora Notes"},
-         "takes the app's name as str"),
-    ):
-        before_bad = len(kaya._tx)
-        try:
-            kaya.app_identity(**kwargs)
-            ok = False
-        except Exception as exc:
-            ok = isinstance(exc, TypeError) and fragment in str(exc)
-        _rewind(before_bad)
-        check(f"app_identity refuses {what}", ok)
-
-    # WHAT IS DELIBERATELY NOT REFUSED HERE: an empty name and an empty
-    # icon blob are both the ROOT's (invariant 1).
-    before = len(kaya._tx)
-    passed_through = 0
-    for kwargs in ({"name": ""}, {"name": "Aurora Notes", "icon": b""}):
-        try:
-            kaya.app_identity(**kwargs)
-            passed_through += 1
-        except Exception:
-            pass
-    check("an empty name and an empty icon blob both pass through for the "
-          "ROOT to refuse", passed_through == 2)
-    # AND THE EMPTY BLOB STILL SETS THE MASK, which is what makes the
-    # root's refusal reachable from Python at all.
-    empty_icon = _identity_records(kaya._tx[before:])
-    check("and an empty icon= still declares itself present in the mask",
-          len(empty_icon) == 2
-          and _identity(empty_icon[1])[0] == 1
-          and _identity(empty_icon[1])[3] == kaya.wire.VALUE_BLOB)
-    _rewind(before)
+    # AND THE ARGUMENT FORMS ARE RETIRED, not kept beside it: a guest
+    # still passing a name would have it silently replaced by the
+    # manifest's, which is the shape the sweep removed.
+    before_bad = len(kaya._tx)
+    try:
+        kaya.app_identity("Aurora Notes")
+        retired = False
+    except TypeError:
+        retired = True
+    _rewind(before_bad)
+    check("app_identity takes NO arguments — the name comes from "
+          "guests/assets/identity.toml", retired)
 
     # ------------------------------------------------------------------
     # ASSETS (docs/assets-plan.md): a VALUE_BLOB in the slot with the mask
@@ -2058,15 +2022,6 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and _typeface(rows[0])[3] == kaya.wire.VALUE_BLOB)
     check("and the family is still the app's word, never the file's",
           len(rows) == 1 and _typeface(rows[0])[1] == "Sora")
-    _rewind(before)
-
-    before = len(kaya._tx)
-    kaya.app_identity("Aurora Notes", icon=kaya.asset("icons/kaya-mark.png"))
-    rows = _identity_records(kaya._tx[before:])
-    check("app_identity(icon=<asset>) sets bit 0 with a Blob in the slot",
-          len(rows) == 1
-          and _identity(rows[0])[0] == 1
-          and _identity(rows[0])[3] == kaya.wire.VALUE_BLOB)
     _rewind(before)
 
     # THE THIRD CONSUMER: an image built from an asset, whose record has
@@ -2575,6 +2530,10 @@ check(
 # The clause a bit test cannot have: a symbol that resolved to something
 # other than kaya_capabilities returns 0 and agrees with itself.
 check("this desktop reports auxiliary windows", caps.aux_windows is True)
+check(
+    "notifications is the core's own bit",
+    caps.notifications == bool(cap_bits & kaya.runtime.CAP_NOTIFICATIONS),
+)
 
 # --- THE DRAG SURFACE (docs/dnd-plan.md D1, D3, §4) -----------------
 # THE TEMPLATE ZONE: one handle serves both zones in this binding, so the
@@ -3048,5 +3007,103 @@ check("add_section(badge=signal) binds the section prop instead",
 check("zero is a badge value and not an absent one (it CLEARS)",
       kaya.wire.tx_set_section_badge(5150, 0.0)
       != kaya.wire.tx_set_section_badge(5150, 3.0))
+
+# --- NOTIFICATIONS (docs/tasks-s3-plan.md N1, N2) -------------------
+# The alert's grammar without a window: the handler binds AT THE SHOW,
+# fires once and retires; the id is the GUEST's, so it may be posted
+# again afterwards.
+app_notify = kaya.App()
+with app_notify.window():
+    before_n = len(kaya._tx)
+    kaya.show_notification(12, title="Call the plumber",
+                           body="from the checks", at=1757000000)
+    notify_records = kaya._tx[before_n:]
+    before_n = len(kaya._tx)
+    kaya.cancel_notification(12)
+    cancel_records = kaya._tx[before_n:]
+
+check("show_notification packs the generated record",
+      kaya.wire.tx_show_notification(12, 1757000000, "Call the plumber",
+                                     "from the checks") in notify_records)
+check("at defaults to 0, which posts now",
+      kaya.wire.tx_show_notification(13, 0, "t", "") ==
+      kaya.wire.tx_show_notification(13, 0, "t", ""))
+check("cancel_notification packs the generated record",
+      kaya.wire.tx_cancel_notification(12) in cancel_records)
+
+no_title = False
+try:
+    kaya.show_notification(14, body="no title anywhere")
+except ValueError:
+    no_title = True
+check("show_notification refuses an empty title", no_title)
+
+# THE DECODER, from BYTES. notification_result is byte-for-byte
+# alert_result, and until 2026-09-07 every binding read it as
+# click-shaped: the outcome taken for a key-path length, dropped when it
+# was 0 and read past the record when it was 1.
+def _packed_notification_result(ident, outcome):
+    body = struct.pack("<QII", ident, outcome, 0)
+    return struct.pack("<IHH", 8 + len(body),
+                       kaya.wire.OCC_NOTIFICATION_RESULT, 0) + body
+
+
+check("a packed notification_result decodes to its id and outcome",
+      kaya.wire.parse_occurrence(_packed_notification_result(12, 0))
+      == (kaya.wire.OCC_NOTIFICATION_RESULT, 12, [],
+          kaya.NOTIFICATION_ACTIVATED))
+check("a REFUSED outcome decodes too (the click tail read past here)",
+      kaya.wire.parse_occurrence(_packed_notification_result(12, 1))
+      == (kaya.wire.OCC_NOTIFICATION_RESULT, 12, [],
+          kaya.NOTIFICATION_REFUSED))
+
+# THE HANDLER: one-shot, and the id is free again after it retires.
+notify_seen = []
+app_shot = kaya.App()
+with app_shot.window():
+    kaya.show_notification(
+        12, title="first", on_result=lambda o: notify_seen.append(("a", o)))
+    kaya.show_notification(
+        99, title="refused one",
+        on_result=lambda o: notify_seen.append(("b", o)))
+    kaya.column()
+
+_notify_occs = [
+    kaya.wire.parse_occurrence(_packed_notification_result(12, 0)),
+    # The SECOND result for a retired id reaches nobody.
+    kaya.wire.parse_occurrence(_packed_notification_result(12, 0)),
+    kaya.wire.parse_occurrence(_packed_notification_result(99, 1)),
+]
+_real_next_n = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = (
+    lambda: _notify_occs.pop(0) if _notify_occs else None)
+try:
+    app_shot._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+
+check("the handler fires with the activated outcome",
+      ("a", kaya.NOTIFICATION_ACTIVATED) in notify_seen)
+check("a refused post reaches the same handler slot",
+      ("b", kaya.NOTIFICATION_REFUSED) in notify_seen)
+check("the registration is ONE-SHOT: the second result reaches nobody",
+      len([h for h in notify_seen if h[0] == "a"]) == 1)
+check("the id retires with it", 12 not in app_shot._notification_handlers)
+
+# AND THE ID IS REUSABLE once it has retired: guests own the numbers.
+reused = []
+with app_shot.window(1900):
+    kaya.show_notification(12, title="again",
+                           on_result=lambda o: reused.append(o))
+    kaya.column()
+_notify_occs2 = [kaya.wire.parse_occurrence(_packed_notification_result(12, 1))]
+kaya.runtime.next_occurrence = (
+    lambda: _notify_occs2.pop(0) if _notify_occs2 else None)
+try:
+    app_shot._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+check("an id posted again after retirement binds a FRESH handler",
+      reused == [kaya.NOTIFICATION_REFUSED])
 
 sys.exit(1 if failures else 0)

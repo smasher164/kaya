@@ -1079,6 +1079,21 @@ def stage_suite_apk(label, apk, package, targets):
                 pkgs = adb_out(serial, "shell", "pm", "list",
                                "packages").replace("\r", "")
                 if f"package:{package}" in pkgs.splitlines():
+                    # THE NOTIFICATION PERMISSION, PRE-GRANTED (docs/
+                    # tasks-s3-plan.md N5): on API 33+ the first post
+                    # asks, and a modal prompt in front of the scene is
+                    # a leg nobody can drive. Granted per install rather
+                    # than per leg — it survives every force-stop, and a
+                    # package that has just been replaced starts denied.
+                    grant = out_of(
+                        ["adb", "-s", serial, "shell", "pm", "grant",
+                         package, "android.permission.POST_NOTIFICATIONS"],
+                        stderr=subprocess.STDOUT)
+                    if grant.strip():
+                        print(f"run-emulator: pm grant POST_NOTIFICATIONS "
+                              f"on {package} said {grant.strip()!r} — the "
+                              f"notify legs would meet the runtime prompt",
+                              file=slog)
                     target_verdict = "OK"
                 else:
                     print(f"run-emulator: {package} is not on {serial} "
@@ -1266,6 +1281,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # ENDED, refused or taken; drags are serial, so the start count at a
     # seq's first injection dates every later start to that seq.
     served = {}
+    # The shade taps this leg has served, keyed by the app's own sequence
+    # number — the drag's bookkeeping, one verb over.
+    tapped = {}
     # 240 ROUNDS, roughly 0.7s each: the budget has to outlast a leg that
     # is FAILING, and a failing step costs this backend up to 15s now
     # (KayaCompose.kt's stepDeadline, the core's own POLL_DEADLINE). At
@@ -1280,6 +1298,24 @@ def run_apk_on(serial, name, apk, component, script, extras,
             break
         acked = set(re.findall(r"KAYA_ACK: draganddrop (\d+)", dump))
         starts = kaya_starts(dump)
+        # THE SHADE TAP the `notification_activate` verb asks for. Re-tried
+        # only while the app has not acked: the tap lands on SystemUI, and
+        # a second one after the app answered would open the shade over the
+        # next step.
+        tap_acked = set(re.findall(r"KAYA_ACK: notify_tap (\d+)", dump))
+        for seq, title in re.findall(r"KAYA_REQUEST: notify_tap (\d+) (.*)",
+                                     dump):
+            title = title.rstrip("\r")
+            tries, last = tapped.get(seq, (0, 0.0))
+            if seq in tap_acked or tries >= NOTIFY_TAP_TRIES:
+                continue
+            if tries and time.monotonic() - last < NOTIFY_TAP_RETRY_S:
+                continue
+            began = time.monotonic()
+            told = tap_notification(serial, title, log)
+            tapped[seq] = (tries + 1, time.monotonic())
+            print(f"{name}: notify_tap #{seq} try {tries + 1} -> {told} in "
+                  f"{int((time.monotonic() - began) * 1000)}ms", file=log)
         for seq, *point in re.findall(
                 r"KAYA_REQUEST: draganddrop (\d+) (-?\d+) (-?\d+) (-?\d+) "
                 r"(-?\d+) (\d+)", dump):
@@ -1758,6 +1794,65 @@ def motionevent(serial, kind, x, y, log):
     return run(["timeout", "30", "adb", "-s", serial, "shell", "input",
                 "motionevent", kind, str(int(x)), str(int(y))],
                stdout=log, stderr=log).returncode
+
+
+# The notification shade's row, found by TEXT: uiautomator's dump is the
+# only reader of another app's window this host has, and SystemUI's shade
+# is another app's window. The title is what the scene asserted, so the
+# row it names is the row it posted.
+NOTIFY_TAP_TRIES = 3
+NOTIFY_TAP_RETRY_S = 4.0
+
+
+def shade_row_centre(dump, title):
+    """The centre of the node whose text is exactly `title`, or None. The
+    dump is XML, and a title is free text, so the attribute is compared
+    after unescaping rather than matched inside the pattern."""
+    import html
+    for m in re.finditer(r'text="([^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+                         dump):
+        if html.unescape(m.group(1)) != title:
+            continue
+        x1, y1, x2, y2 = (int(v) for v in m.groups()[1:])
+        return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
+
+
+def tap_notification(serial, title, log):
+    """THE `notification_activate` VERB'S ONE HAND (docs/tasks-s3-plan.md
+    N5): expand the shade, find the row by its title, tap it, collapse.
+    An app may not open SystemUI's shade or read its window, so this is
+    the drag verb's shape one feature over — the app prints what it
+    wants and the host drives the device.
+
+    Returns the clause the injection line prints. The shade is collapsed
+    on every path: left open it covers the next leg's first frame."""
+    expanded = run(["adb", "-s", serial, "shell", "cmd", "statusbar",
+                    "expand-notifications"], stdout=log, stderr=log)
+    if expanded.returncode != 0:
+        return "the shade refused to expand"
+    try:
+        # The dump lands on the device and is read back: `uiautomator
+        # dump /dev/tty` interleaves with the tool's own chatter.
+        for attempt in range(1, 4):
+            time.sleep(0.5)
+            run(["adb", "-s", serial, "shell", "uiautomator", "dump",
+                 "/sdcard/kaya-shade.xml"], stdout=log, stderr=log)
+            dump = adb_out(serial, "shell", "cat",
+                           "/sdcard/kaya-shade.xml").replace("\r", "")
+            centre = shade_row_centre(dump, title)
+            if centre is not None:
+                adb(serial, "shell", "input", "tap", str(centre[0]),
+                    str(centre[1]), stdout=log, stderr=log)
+                return (f"tapped {title!r} at {centre[0]},{centre[1]} "
+                        f"on dump {attempt}")
+            texts = sorted({m for m in re.findall(r'text="([^"]+)"', dump)})
+            print(f"run-emulator: the shade dump {attempt} on {serial} "
+                  f"carries no row {title!r}; it reads {texts}", file=log)
+        return f"no row reading {title!r} in three shade dumps"
+    finally:
+        adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log,
+            stderr=log)
 
 
 def inject_drag(serial, aim, ms, started_before, log):

@@ -90,6 +90,7 @@ pub const KAYA_OCCURRENCE_DRAG_ENDED: u16 = 23;
 pub const KAYA_OCCURRENCE_DATE_CHANGED: u16 = 24;
 pub const KAYA_OCCURRENCE_TIME_CHANGED: u16 = 25;
 pub const KAYA_OCCURRENCE_VALUE_COMMITTED: u16 = 26;
+pub const KAYA_OCCURRENCE_NOTIFICATION_RESULT: u16 = 27;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -118,6 +119,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_DATE_CHANGED == ring::REC_DATE_CHANGED
         && KAYA_OCCURRENCE_TIME_CHANGED == ring::REC_TIME_CHANGED
         && KAYA_OCCURRENCE_VALUE_COMMITTED == ring::REC_VALUE_COMMITTED
+        && KAYA_OCCURRENCE_NOTIFICATION_RESULT == ring::REC_NOTIFICATION_RESULT
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -277,6 +279,11 @@ pub const KAYA_TX_SET_REORDERABLE: u16 = 51;
 const _: () = assert!(KAYA_TX_SET_DRAG_SOURCE == wire::TX_SET_DRAG_SOURCE);
 const _: () = assert!(KAYA_TX_SET_DROP_TARGET == wire::TX_SET_DROP_TARGET);
 const _: () = assert!(KAYA_TX_SET_REORDERABLE == wire::TX_SET_REORDERABLE);
+/// Local notifications (docs/tasks-s3-plan.md N1).
+pub const KAYA_TX_SHOW_NOTIFICATION: u16 = 52;
+pub const KAYA_TX_CANCEL_NOTIFICATION: u16 = 53;
+const _: () = assert!(KAYA_TX_SHOW_NOTIFICATION == wire::TX_SHOW_NOTIFICATION);
+const _: () = assert!(KAYA_TX_CANCEL_NOTIFICATION == wire::TX_CANCEL_NOTIFICATION);
 /// The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
 /// `size_class` value and kaya_window_metrics' `size_class` argument
 /// speak. COMPACT is the only class a breakpoint may name today; NONE is
@@ -378,18 +385,38 @@ pub static KAYA_BUILD_ID_MARKER: [u8; 30] = {
 /// the header's `#define` and one naming a Rust path is unreadable C; the
 /// static assert under `kaya_capabilities` keeps it honest.
 pub const KAYA_CAP_AUX_WINDOWS: u64 = 1;
+/// Local notifications: this process can post one the desktop will show and
+/// remember — a RUNTIME fact the presentation layer grants at startup
+/// (docs/tasks-s3-plan.md N6), never part of the static word.
+pub const KAYA_CAP_NOTIFICATIONS: u64 = 2;
 
 /// The capability word, which is the SCENE CORE'S const and not a second
 /// copy of its predicate: the wall that refuses `create_window` tests the
-/// same bits this hands out (crates/kaya/src/scene.rs).
+/// same bits this hands out (crates/kaya/src/scene.rs) — plus the runtime
+/// bits the presentation layer granted.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_capabilities() -> u64 {
     crate::scene::CAPABILITIES
+        | crate::scene::RUNTIME_CAPABILITIES.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Presentation side: grant the runtime capability bits this host has
+/// measured — before the guest's first read, so the interpreter calls it
+/// at startup. Only KAYA_CAP_NOTIFICATIONS is grantable; a static bit
+/// offered here is a programming error.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_grant_capabilities(bits: u64) {
+    assert!(
+        bits & !KAYA_CAP_NOTIFICATIONS == 0,
+        "kaya: kaya_grant_capabilities({bits:#x}) names a bit that is not runtime-grantable"
+    );
+    crate::scene::RUNTIME_CAPABILITIES.fetch_or(bits, std::sync::atomic::Ordering::AcqRel);
 }
 
 const _: () = assert!(
-    KAYA_CAP_AUX_WINDOWS == crate::scene::CAP_AUX_WINDOWS,
-    "kaya: the header's KAYA_CAP_AUX_WINDOWS and the scene core's bit are different numbers"
+    KAYA_CAP_AUX_WINDOWS == crate::scene::CAP_AUX_WINDOWS
+        && KAYA_CAP_NOTIFICATIONS == crate::scene::CAP_NOTIFICATIONS,
+    "kaya: the header's KAYA_CAP_* and the scene core's bits are different numbers"
 );
 
 const _: () = assert!(
@@ -880,7 +907,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 26,
+    crate::spec::SPEC.occurrence.len() == 27,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -896,6 +923,13 @@ const _: () = assert!(
 pub const KAYA_ALERT_CHOICE_ACTION0: u32 = 0;
 pub const KAYA_ALERT_CHOICE_ACTION1: u32 = 1;
 pub const KAYA_ALERT_CHOICE_CANCEL: u32 = u32::MAX;
+/// The notification_outcome enum (spec enum "notification_outcome").
+pub const KAYA_NOTIFICATION_OUTCOME_ACTIVATED: u32 = 0;
+pub const KAYA_NOTIFICATION_OUTCOME_REFUSED: u32 = 1;
+const _: () = assert!(
+    KAYA_NOTIFICATION_OUTCOME_ACTIVATED == wire::NOTIFICATION_OUTCOME_ACTIVATED
+        && KAYA_NOTIFICATION_OUTCOME_REFUSED == wire::NOTIFICATION_OUTCOME_REFUSED
+);
 const _: () = assert!(
     KAYA_ALERT_CHOICE_ACTION0 == wire::ALERT_CHOICE_ACTION0
         && KAYA_ALERT_CHOICE_ACTION1 == wire::ALERT_CHOICE_ACTION1
@@ -2305,6 +2339,33 @@ pub(crate) fn alert_resolved(alert: u64, choice: crate::protocol::AlertChoice) {
     );
 }
 
+/// Presentation side (interpreter platforms ONLY): a notification's one
+/// answer, on the presentation sink — the alert_resolved shape, without a
+/// live slot to retire (many notifications may be live; the id is the
+/// guest's). cfg'd OUT on the rust-native platforms for alert_resolved's
+/// reason.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+pub(crate) fn notification_resolved(
+    notification: u64,
+    outcome: crate::protocol::NotificationOutcome,
+) {
+    let occurrence = crate::protocol::Occurrence::NotificationResult {
+        notification: crate::protocol::NotificationId(notification),
+        outcome,
+    };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(occurrence);
+        return;
+    }
+    state().ring.push_record(
+        ring::REC_NOTIFICATION_RESULT,
+        &crate::wire::notification_result_body(
+            crate::protocol::NotificationId(notification),
+            outcome,
+        ),
+    );
+}
+
 /// Turn a backend's parallel locator/name arrays into registered picked
 /// files. THE ONE PLACE THE PLATFORM SOURCE IS CHOSEN — a second copy of
 /// this decision is a second place for a platform to be forgotten.
@@ -2824,6 +2885,26 @@ pub extern "C" fn kaya_emit_alert_result(alert: u64, choice: u32) {
         );
     }
 }
+/// Presentation side: a notification's one answer — a NOTIFICATION_OUTCOME
+/// value (activated by the user, or refused by the platform). Exported on
+/// every platform; answerable only on the interpreter platforms, the
+/// kaya_emit_alert_result rule.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_notification_result(notification: u64, outcome: u32) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        notification_resolved(notification, crate::wire::notification_outcome(outcome));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (notification, outcome);
+        panic!(
+            "kaya: kaya_emit_notification_result is the interpreter platforms' entry — \
+             this host's backend answers on its own sink"
+        );
+    }
+}
+
 /// Presentation side: emit a click, exactly as a backend's action handler
 /// would — `tag` is the click tag bytes delivered with the widget's
 /// CREATE record, handed back verbatim. Do not combine with kaya_run.
@@ -3997,6 +4078,8 @@ mod tests {
             ("set_drag_source", KAYA_TX_SET_DRAG_SOURCE),
             ("set_drop_target", KAYA_TX_SET_DROP_TARGET),
             ("set_reorderable", KAYA_TX_SET_REORDERABLE),
+            ("show_notification", KAYA_TX_SHOW_NOTIFICATION),
+            ("cancel_notification", KAYA_TX_CANCEL_NOTIFICATION),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

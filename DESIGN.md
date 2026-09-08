@@ -2565,6 +2565,49 @@ the picked table lives.
 - **The X11/Wayland PRIMARY selection.** No analogue on the other four
   targets, so it would be a Linux-only verb.
 
+## Notifications (docs/tasks-s3-plan.md, landed 2026-09-08)
+
+One grammar in all nine bindings, spelled as each binding spells its
+alert: `show_notification(id)` with a title, a body and an `at`, bound at
+the show to ONE result handler that retires when the result arrives —
+`activated` when the user opened it, `refused` when the platform would
+not take it — and `cancel_notification(id)`. The id is the app's own
+(a task's, a message's), reused to replace and to cancel; no dismissal is
+reported, because no platform reports one reliably. `at` is a UNIX time
+handed to the OS scheduler where one exists — Apple's calendar trigger,
+Android's exact alarm into a manifest receiver, Windows' scheduled toast,
+a systemd user timer on Linux — so the post fires with the app closed;
+0 posts now, and the core rewrites a past instant to now, since the
+schedulers disagree about one. The app's identity — name, mark and
+reverse-DNS id — is declared once in the asset root's manifest and read
+by the core and by each build (the mac wrapper bundle, GTK's application
+id, Windows' AUMID), spelled in no guest.
+
+Whether THIS process can post is a runtime bit in `capabilities`, granted
+before the app thread's first read: a bundled process on macOS, always on
+iOS, `areNotificationsEnabled` at attach on Android, a registration on
+Windows, and on Linux only where the desktop will remember the post and
+relaunch the app for its click — GNOME's own registry or the notification
+portal served by any backend. Where nothing will, the bit is false and a
+post is `refused`: the floor is no resident process and no inert click,
+not a banner that leads nowhere.
+
+**The harness reads the platform's record and drives the platform's tap
+where a test can reach it.** `expect_notification <id> "<title>"` reads
+what the platform says it DELIVERED — the centre's delivered list, the
+active notifications, the toast history by tag, the session daemon's
+record — never kaya's memory of what it posted, and `expect_no_target`'s
+rule (a target is a live widget) is what a reminder that opens a screen
+leans on. `notification_activate <id>` is a real tap on Android (the
+runner opens the shade and taps the row by title) and on Linux (the lane's
+daemon invokes the default action over the bus). On macOS, iOS and
+Windows it enters the backend's own activation path one step past the
+tap, and that carve-out is stated here once: macOS and Windows have no
+programmatic tap, and the iOS simulator's shade will not activate a
+notification by any route (docs/traps.md). A scheduled post is not in
+any delivered list, so the scenes exercise the post-now route; the
+scheduled routes are measured by hand and named on the ledger.
+
 ## Accessibility (the universal props, landed 2026-07-25)
 
 Native widgets ARE the accessibility tree (see the Accessibility case

@@ -13,10 +13,10 @@ func App() *kaya.App {
 	draft := ""
 
 	app.Build(func(tx *kaya.Tx) {
-		// BEFORE THE FIRST MOUNT, per the declared-once wall.
-		icon := tx.Asset("icons/kaya-mark.png")
-		defer icon.Close()
-		tx.AppIdentityAsset("Aurora Notes", icon)
+		// BEFORE THE FIRST MOUNT, per the declared-once wall. NO
+		// ARGUMENTS: the name, the mark and the id are the manifest's
+		// (docs/tasks-s3-plan.md N4).
+		tx.AppIdentity()
 		tx.Window(0).Title("identity").Size(480, 360)
 		// ONE PROMOTED COMMAND, AND NOT ABOUT COMMANDS: Windows mints its
 		// custom caption from it, replacing the system-drawn icon.

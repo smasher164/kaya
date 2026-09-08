@@ -8,6 +8,15 @@
              one is INSTALL_FAILED_CONFLICTING_PROVIDER on the second
              install, and KayaClipProvider.authority(context) must keep
              computing this same string. -->
+        <!-- THE SCHEDULED POST'S OWN PROCESS (docs/tasks-s3-plan.md
+             N2): AlarmManager fires this, and it posts — in a cold
+             process too, since the OS fires an alarm whether or not the
+             app is running. In the LIBRARY's manifest for the clip
+             provider's reason: every kaya app that schedules a reminder
+             needs this one receiver, and not one of its own. -->
+        <receiver
+            android:name="dev.kaya.KayaNotificationAlarm"
+            android:exported="false" />
         <provider
             android:name="dev.kaya.KayaClipProvider"
             android:authorities="${applicationId}.clip"

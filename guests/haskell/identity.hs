@@ -10,13 +10,12 @@ import KayaWire (Value (..))
 main :: IO ()
 main = kayaMain $ \app -> do
   draftRef <- newIORef ""
-  -- Out here: Build is a pure state monad, so the one IO the declaration
-  -- needs happens before the transaction opens.
-  icon <- asset "icons/kaya-mark.png"
   caps <- capabilities
   buildTx app $ do
-    -- BEFORE THE FIRST MOUNT, per the declared-once wall.
-    appIdentityAsset "Aurora Notes" icon
+    -- BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS:
+    -- the name, the mark and the id are the manifest's
+    -- (docs/tasks-s3-plan.md N4).
+    appIdentity
     -- ONE PROMOTED COMMAND, and not about commands: Windows mints its custom
     -- caption from the first promotion, taking the system icon with it.
     window
@@ -51,4 +50,3 @@ main = kayaMain $ \app -> do
       caption <- signal (VStr "no title of its own")
       aux <- column [] [labelBound caption] -- label#2
       mountIn 1 aux
-  assetClose icon

@@ -92,6 +92,8 @@ pub(crate) const TX_CREATE_BREAKPOINT: u16 = 48;
 pub(crate) const TX_SET_DRAG_SOURCE: u16 = 49;
 pub(crate) const TX_SET_DROP_TARGET: u16 = 50;
 pub(crate) const TX_SET_REORDERABLE: u16 = 51;
+pub(crate) const TX_SHOW_NOTIFICATION: u16 = 52;
+pub(crate) const TX_CANCEL_NOTIFICATION: u16 = 53;
 /// The size-class vocabulary a breakpoint speaks (ruled 2026-08-31,
 /// docs/adaptive-layout-plan.md D3): the guest names the CLASS, never a
 /// width. `compact` is the only class a binding can spell today.
@@ -175,6 +177,8 @@ pub(crate) const APPLY_FOLD: u16 = 37;
 pub(crate) const APPLY_SET_DRAG_SOURCE: u16 = 38;
 pub(crate) const APPLY_SET_DROP_TARGET: u16 = 39;
 pub(crate) const APPLY_SET_REORDERABLE: u16 = 40;
+pub(crate) const APPLY_POST_NOTIFICATION: u16 = 41;
+pub(crate) const APPLY_CANCEL_NOTIFICATION: u16 = 42;
 
 // Value types.
 pub(crate) const VALUE_BOOL: u32 = 1;
@@ -429,6 +433,26 @@ pub(crate) const EPROP_INTERCEPT_BACK: u32 = 2;
 pub(crate) const ALERT_CHOICE_ACTION0: u32 = 0;
 pub(crate) const ALERT_CHOICE_ACTION1: u32 = 1;
 pub(crate) const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
+
+/// The notification_outcome enum's wire values (spec enum
+/// "notification_outcome"; docs/tasks-s3-plan.md N1).
+pub(crate) const NOTIFICATION_OUTCOME_ACTIVATED: u32 = 0;
+pub(crate) const NOTIFICATION_OUTCOME_REFUSED: u32 = 1;
+
+pub(crate) fn notification_outcome(raw: u32) -> crate::protocol::NotificationOutcome {
+    match raw {
+        NOTIFICATION_OUTCOME_ACTIVATED => crate::protocol::NotificationOutcome::Activated,
+        NOTIFICATION_OUTCOME_REFUSED => crate::protocol::NotificationOutcome::Refused,
+        other => panic!("kaya: {other} is not a notification outcome (activated 0, refused 1)"),
+    }
+}
+
+pub(crate) fn notification_outcome_raw(outcome: crate::protocol::NotificationOutcome) -> u32 {
+    match outcome {
+        crate::protocol::NotificationOutcome::Activated => NOTIFICATION_OUTCOME_ACTIVATED,
+        crate::protocol::NotificationOutcome::Refused => NOTIFICATION_OUTCOME_REFUSED,
+    }
+}
 
 /// What kaya_open_picked opens a handle for (spec enum "file_mode").
 /// Three modes cover every platform; writability is DISCOVERABLE but
@@ -1468,6 +1492,21 @@ pub fn decode_transaction_with_blobs(
                     filters,
                 })
             }
+            TX_SHOW_NOTIFICATION => {
+                let notification = crate::protocol::NotificationId(r.u64());
+                let at = r.u64();
+                let title = alert_str(r.value(), "title");
+                let body = alert_str(r.value(), "body");
+                TxOp::ShowNotification(crate::protocol::NotificationSpec {
+                    notification,
+                    at,
+                    title,
+                    body,
+                })
+            }
+            TX_CANCEL_NOTIFICATION => {
+                TxOp::CancelNotification(crate::protocol::NotificationId(r.u64()))
+            }
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1648,6 +1687,17 @@ pub(crate) fn alert_result_body(alert: AlertId, choice: AlertChoice) -> [u8; 16]
     let mut b = [0u8; 16];
     b[..8].copy_from_slice(&alert.0.to_le_bytes());
     b[8..12].copy_from_slice(&alert_choice_raw(choice).to_le_bytes());
+    b
+}
+
+/// A notification's answer on the wire: id, outcome, reserved.
+pub(crate) fn notification_result_body(
+    notification: crate::protocol::NotificationId,
+    outcome: crate::protocol::NotificationOutcome,
+) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&notification.0.to_le_bytes());
+    b[8..12].copy_from_slice(&notification_outcome_raw(outcome).to_le_bytes());
     b
 }
 
@@ -2525,6 +2575,17 @@ impl Writer {
                     write_value(b, &Value::Str(s), blobs);
                 }
             }),
+            ApplyOp::PostNotification(spec) => self.record(APPLY_POST_NOTIFICATION, |b, blobs| {
+                b.extend_from_slice(&spec.notification.0.to_le_bytes());
+                b.extend_from_slice(&spec.at.to_le_bytes());
+                write_value(b, &Value::Str(spec.title.clone()), blobs);
+                write_value(b, &Value::Str(spec.body.clone()), blobs);
+            }),
+            ApplyOp::CancelNotification(id) => {
+                self.record(APPLY_CANCEL_NOTIFICATION, |b, _blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                })
+            }
             ApplyOp::PresentFileDialog(spec) => {
                 self.record(APPLY_PRESENT_FILE_DIALOG, |b, blobs| {
                     b.extend_from_slice(&spec.window.0.to_le_bytes());
@@ -2973,6 +3034,15 @@ impl Writer {
                 for s in alert_value_slots(spec) {
                     write_value(b, &Value::Str(s), blobs);
                 }
+            }),
+            TxOp::ShowNotification(spec) => self.record(TX_SHOW_NOTIFICATION, |b, blobs| {
+                b.extend_from_slice(&spec.notification.0.to_le_bytes());
+                b.extend_from_slice(&spec.at.to_le_bytes());
+                write_value(b, &Value::Str(spec.title.clone()), blobs);
+                write_value(b, &Value::Str(spec.body.clone()), blobs);
+            }),
+            TxOp::CancelNotification(id) => self.record(TX_CANCEL_NOTIFICATION, |b, _blobs| {
+                b.extend_from_slice(&id.0.to_le_bytes());
             }),
             TxOp::ShowFileDialog(spec) => self.record(TX_SHOW_FILE_DIALOG, |b, blobs| {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
@@ -4088,6 +4158,15 @@ mod tests {
     fn dialog_requests_round_trip() {
         use crate::protocol::{FileDialogId, FileDialogSpec, SaveDialogSpec};
         let ops = vec![
+            TxOp::ShowNotification(crate::protocol::NotificationSpec {
+                notification: crate::protocol::NotificationId(12),
+                at: 1_788_800_000,
+                title: "Call the plumber".into(),
+                // A body whose length is not a multiple of 8, so the padding
+                // after the Str has to be right rather than accidentally so.
+                body: "Aim for twelve pages.".into(),
+            }),
+            TxOp::CancelNotification(crate::protocol::NotificationId(12)),
             TxOp::ShowFileDialog(FileDialogSpec {
                 window: WindowId(0),
                 dialog: FileDialogId(7),

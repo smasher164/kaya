@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc80ccf259104a87a
+	SpecHash uint64 = 0x21005150bc085070
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -143,6 +143,8 @@ const (
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
+	NotificationOutcomeActivated = 0
+	NotificationOutcomeRefused = 1
 	FileModeRead = 0
 	FileModeWrite = 1
 	FileModeReadWrite = 2
@@ -249,6 +251,8 @@ const (
 	txSetDragSource = 49
 	txSetDropTarget = 50
 	txSetReorderable = 51
+	txShowNotification = 52
+	txCancelNotification = 53
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -315,6 +319,7 @@ const (
 	occDateChanged = 24
 	occTimeChanged = 25
 	occValueCommitted = 26
+	occNotificationResult = 27
 )
 
 func pad8(b []byte) []byte {
@@ -860,6 +865,23 @@ func TxSetReorderable(container uint64, enabled uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, container)
 	b = binary.LittleEndian.AppendUint32(b, enabled)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxShowNotification: Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
+func TxShowNotification(notification uint64, at uint64, title any, body any) []byte {
+	b := beginRecord(txShowNotification)
+	b = binary.LittleEndian.AppendUint64(b, notification)
+	b = binary.LittleEndian.AppendUint64(b, at)
+	b = encodeValue(b, title)
+	b = encodeValue(b, body)
+	return endRecord(b)
+}
+
+// TxCancelNotification: Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
+func TxCancelNotification(notification uint64) []byte {
+	b := beginRecord(txCancelNotification)
+	b = binary.LittleEndian.AppendUint64(b, notification)
 	return endRecord(b)
 }
 
@@ -2451,12 +2473,16 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
 	if kind == occAlertResult {
-		// The alert's one answer: id + u32 choice (AlertChoice*).
+		// A request's one answer: id + the u32 code.
+		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
+	}
+	if kind == occNotificationResult {
+		// A request's one answer: id + the u32 code.
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}
 	if kind == occFileDialogResult {

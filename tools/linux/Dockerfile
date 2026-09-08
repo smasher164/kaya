@@ -194,6 +194,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && test "$(fc-match --format='%{family[0]}|%{style[0]}' 'IBM Plex Sans:style=Bold')" = "IBM Plex Sans|Bold" \
     && rm -rf /tmp/ibm-plex-sans /tmp/ibm-plex-sans.zip
 
+# NOTIFICATIONS (docs/tasks-s3-plan.md §0, §7): the desktop half of the
+# ruled Linux floor. `xdg-desktop-portal` is the session-long process that
+# REMEMBERS a notification after the posting app exits and activates it
+# again on a click, and `xdg-desktop-portal-gtk` is the backend that
+# implements the Notification interface for it; without a backend the
+# frontend answers the interface and every AddNotification fails, which is
+# regime 3 (the post refused). The Registry portal kaya registers its id
+# through arrived in 1.19, so the version is the thing to read after any
+# base-image move: trixie ships 1.20.3 (frontend) and 1.15.3 (gtk backend),
+# recorded here so a regression in either is a diff.
+#
+# A trailing layer on purpose, per the note above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xdg-desktop-portal xdg-desktop-portal-gtk \
+    && rm -rf /var/lib/apt/lists/* \
+    && test "$(dpkg-query -W -f='${Version}' xdg-desktop-portal | cut -d. -f1-2)" = "1.20" \
+# INSTALLED, AND NOT ON THE DEFAULT BUS: the portal's two D-Bus service
+# files move to a directory only a notify leg puts on XDG_DATA_DIRS, so no
+# other leg's session can activate it. MEASURED 2026-09-08, which is why:
+# with them where apt puts them, GTK's own file chooser routes through the
+# portal the moment one is activatable, the dialog opens in the PORTAL's
+# process, and every filedialog and save leg fails with "no file dialog
+# live" — 24 legs, one apt package.
+    && mkdir -p /opt/kaya-portal/dbus-1/services \
+    && mv /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service \
+          /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.gtk.service \
+          /opt/kaya-portal/dbus-1/services/ \
+    && test ! -e /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service
+
 COPY gtk-settings.ini /etc/gtk-4.0/settings.ini
 COPY 99-kaya-font.gschema.override \
     /usr/share/glib-2.0/schemas/99-kaya-font.gschema.override

@@ -69,6 +69,7 @@ if (lib.specHash() !== wire.SPEC_HASH) {
 // to read it out of; tools/check-sugar-surface.py holds it to
 // crates/kaya/src/scene.rs.
 export const CAP_AUX_WINDOWS = 1;
+export const CAP_NOTIFICATIONS = 2;
 
 /** The raw capability word. */
 export function capabilityBits(): number {

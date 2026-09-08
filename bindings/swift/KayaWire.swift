@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xc80ccf259104a87a
+let kayaSpecHash: UInt64 = 0x21005150bc085070
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -575,6 +575,23 @@ struct KayaTx {
         self.u64(container)
         self.u32(enabled)
         self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
+    mutating func showNotification(_ notification: UInt64, _ at: UInt64, _ title: KayaValue, _ body: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_NOTIFICATION))
+        self.u64(notification)
+        self.u64(at)
+        self.value(title)
+        self.value(body)
+        self.end(kayaAt)
+    }
+
+    /// Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
+    mutating func cancelNotification(_ notification: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CANCEL_NOTIFICATION))
+        self.u64(notification)
         self.end(kayaAt)
     }
 
@@ -2173,12 +2190,18 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_DATE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TIME_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_COMMITTED)
+            || kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
-            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
-            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
-            return (kind, id, [], .i64(Int64(choice)), [], nil, nil, [])
+            // A request's one answer: id + the u32 code.
+            let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
+            return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT) {
+            // A request's one answer: id + the u32 code.
+            let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
+            return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

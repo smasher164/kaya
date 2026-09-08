@@ -10,11 +10,10 @@ let () =
   let draft = ref "" in
 
   build app (fun () ->
-      (* BEFORE THE FIRST MOUNT, per the declared-once wall. [~icon_asset]
-         rather than [~icon]: one icon slot on the wire. *)
-     let icon = asset "icons/kaya-mark.png" in
-     app_identity ~icon_asset:icon "Aurora Notes";
-     asset_close icon;
+      (* BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS:
+         the name, the mark and the id are the manifest's
+         (docs/tasks-s3-plan.md N4). *)
+     app_identity ();
      (* ONE PROMOTED COMMAND, and not about commands: Windows mints its
         custom caption from the first promotion, taking the system icon. *)
      window ~title:"identity" ~width:480.0 ~height:360.0

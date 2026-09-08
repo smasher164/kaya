@@ -1554,6 +1554,12 @@ APPEARANCE_DARK = wire.APPEARANCE_DARK
 CANCEL = wire.ALERT_CHOICE_CANCEL
 
 
+# A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
+# not one of them: two platforms never report it.
+NOTIFICATION_ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED
+NOTIFICATION_REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED
+
+
 def show_alert(title="", message="", actions=(), cancel=None,
                on_result=None, window=0):
     """Request a modal alert: up to two action labels (the platform
@@ -1578,6 +1584,33 @@ def show_alert(title="", message="", actions=(), cancel=None,
         int(window), alert_id, len(actions), title, message,
         action0, action1, cancel))
     return alert_id
+
+
+def show_notification(notification, title="", body="", at=0,
+                      on_result=None):
+    """Post a local notification (docs/tasks-s3-plan.md N1, N2): the
+    alert's grammar without a window — the platform shows it outside
+    the app. on_result(outcome) fires exactly once and retires, with
+    NOTIFICATION_ACTIVATED when the user opened it and
+    NOTIFICATION_REFUSED when the platform would not post it. `at` is a
+    UNIX time in seconds handed to the OS scheduler where one exists;
+    0 posts now. Ids are the GUEST's, and many may be live at once."""
+    if not title:
+        raise ValueError(
+            "a notification needs a title — pass title=")
+    notification = int(notification)
+    app = _app
+    if on_result is not None:
+        app._notification_handlers[notification] = on_result
+    _records().append(
+        wire.tx_show_notification(notification, int(at), title, body))
+    return notification
+
+
+def cancel_notification(notification):
+    """Withdraw a pending or delivered notification (a reminder that was
+    cleared). No answer follows; an unknown id is ignored."""
+    _records().append(wire.tx_cancel_notification(int(notification)))
 
 
 class _ColumnsTrace:
@@ -2655,36 +2688,21 @@ def brand_typeface(family, platforms=None, font=None):
     ))
 
 
-def app_identity(name, icon=None):
-    """DECLARE the app's identity (docs/app-identity-plan.md): the name
-    it goes by and the picture that stands for it. `icon=None` leaves
-    every platform's own mark in place.
+def app_identity():
+    """DECLARE the app's identity (docs/app-identity-plan.md,
+docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+picture that stands for it and the reverse-DNS id it registers under
+are the asset root's own identity.toml, which the BUILD already reads,
+and the core reads the same file. Set ONCE, before the first mount.
 
-    ONE PICTURE, FIVE PLATFORMS — send a PNG, each lowering converts.
-    SET ONCE, BEFORE THE FIRST MOUNT. THE BYTES ARE NEVER INSPECTED
-    between here and the platform's decoder, so bytes that are not an
-    image leave every platform's default in place.
+STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+declared app is a Dock app on macOS (ruling 1), so an app that wants
+the platform's own identity declares none at all.
     """
-    if icon is not None and not isinstance(icon, (Asset, bytes, bytearray,
-                                                  memoryview)):
-        raise TypeError(
-            f"kaya: app_identity icon= takes an image FILE's bytes, not "
-            f"{type(icon).__name__} — the NAME is the first argument, and a "
-            "mark the app's BUILD shipped is kaya.asset('icons/...')"
-        )
-    if not isinstance(name, str):
-        raise TypeError(
-            f"kaya: app_identity takes the app's name as str ('Aurora "
-            f"Notes'), not {type(name).__name__} — an image FILE's bytes ride "
-            "the icon= slot, which is a different thing"
-        )
-    _records().append(wire.tx_set_app_identity(
-        # Bit 0 says a blob rides; the slot is written either way, as an
-        # empty Str when it does not (the record's shape is fixed).
-        1 if icon is not None else 0,
-        name,
-        wire.BlobHandle(_blob_of(icon)) if icon is not None else "",
-    ))
+    # THE SLOTS RIDE EMPTY and the root fills them: mask 0, no name, no
+    # blob. The record's shape is fixed, so the icon slot is written
+    # either way, as an empty Str.
+    _records().append(wire.tx_set_app_identity(0, "", ""))
 
 
 #: The undo-group record's kind, in the two header bytes `record()`
@@ -2730,11 +2748,17 @@ class Capabilities:
     #: on iOS and Android, where `create_window` aborts at the root.
     aux_windows: bool
 
+    #: This process can post a local notification the desktop will show
+    #: (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it.
+    notifications: bool
+
 
 def capabilities():
     """This host's capabilities, constant for the life of the process."""
     bits = runtime.capability_bits()
-    return Capabilities(aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS))
+    return Capabilities(
+        aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS),
+        notifications=bool(bits & runtime.CAP_NOTIFICATIONS))
 
 
 def signal(initial):
@@ -3936,6 +3960,9 @@ class App:
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
+        # One-shot, keyed by the GUEST's notification id (the alert's
+        # grammar; many may be live at once).
+        self._notification_handlers = {}
         self._file_dialog_handlers = {}
         # One-shot, keyed by request id (the alert's grammar).
         self._clipboard_handlers = {}
@@ -4330,6 +4357,13 @@ class App:
                 handler = self._alert_handlers.pop(ident, None)
                 if handler is not None:
                     # payload is the parsed u32 choice.
+                    self._dispatch(handler, payload)
+                continue
+            if kind == wire.OCC_NOTIFICATION_RESULT:
+                # One-shot: the registration retires with the result.
+                handler = self._notification_handlers.pop(ident, None)
+                if handler is not None:
+                    # payload is the parsed u32 outcome.
                     self._dispatch(handler, payload)
                 continue
             if kind == wire.OCC_FILE_DIALOG_RESULT:

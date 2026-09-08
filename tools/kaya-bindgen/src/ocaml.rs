@@ -476,10 +476,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  else begin");
     c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
     c.line("    let id = u32_at byte 8 in");
-    c.line("    if kind = occ_kind_alert_result");
-    c.line("    then");
-    c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
-    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length. FIRST IN THE
+    // CHAIN, so the head is `if` and the rest `else if`.
+    for (i, name) in crate::code_answer_occurrence_names(spec).iter().enumerate() {
+        let head = if i == 0 { "if" } else { "else if" };
+        c.line(&format!("    {head} kind = occ_kind_{name}"));
+        c.line("    then");
+        c.line("      (* A request's one answer: id + the u32 code. *)");
+        c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])");
+    }
     // The picker's answer is a LIST OF RECORDS and no single `value`
     // can carry one, so the three values per file ride the VALUES slot
     // flattened and kaya_app regroups them in threes. Its own arm: the

@@ -479,11 +479,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
-    c.line("      if kind == occKindAlertResult");
-    c.line("        then do");
-    c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
-    c.line("          choice <- peekByteOff rec 16 :: IO Word32");
-    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, Nothing, []))");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length. FIRST IN THE
+    // CHAIN, so the head is `if` and the rest `else if`.
+    for (i, name) in crate::code_answer_occurrence_names(spec).iter().enumerate() {
+        let head = if i == 0 { "if" } else { "else if" };
+        c.line(&format!("      {head} kind == occKind{}", pascal(name)));
+        c.line("        then do");
+        c.line("          -- A request's one answer: id + the u32 code.");
+        c.line("          code <- peekByteOff rec 16 :: IO Word32");
+        c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))");
+    }
     // The picker's answer is a LIST OF RECORDS and no single Value can
     // carry one, so the three values per file ride the VALUES slot
     // flattened and KayaApp regroups them in threes. Its own arm: the

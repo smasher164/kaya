@@ -451,8 +451,10 @@ sealed class KayaInstance
 /// REFUSE: a false here is not what makes a call illegal, it lets a guest
 /// ask before it walks into the wall. AuxWindows: false on iOS and
 /// Android, whose systems own surface geometry; there CreateWindow aborts
-/// at the root.
-readonly record struct Caps(bool AuxWindows);
+/// at the root. Notifications: a RUNTIME bit the host measures — this
+/// process can post a local notification the desktop will show
+/// (docs/tasks-s3-plan.md N3).
+readonly record struct Caps(bool AuxWindows, bool Notifications);
 
 /// <summary>The header bar's sort indicator (docs/tables-plan.md):
 /// which column shows it, in which direction — the GUEST's
@@ -601,8 +603,13 @@ sealed class KayaApp
 {
     /// This host's capabilities. Constant for the life of the process,
     /// so asking once and remembering is fine.
-    public static Caps Capabilities() =>
-        new Caps((Kaya.CapabilityBits() & Kaya.CAP_AUX_WINDOWS) != 0);
+    public static Caps Capabilities()
+    {
+        ulong bits = Kaya.CapabilityBits();
+        return new Caps(
+            (bits & Kaya.CAP_AUX_WINDOWS) != 0,
+            (bits & Kaya.CAP_NOTIFICATIONS) != 0);
+    }
 
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD,
@@ -670,6 +677,10 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
+
+    // One-shot, keyed by the GUEST's notification id (the alert's
+    // grammar; many may be live at once).
+    internal readonly Dictionary<ulong, Action<Tx, uint>> notifications = new();
     // BOTH DIALOG KINDS LIVE HERE: a save request answers on the
     // picker's grammar out of the picker's id space (docs/save-plan.md
     // D2), narrowed to "one or none" at Tx.SaveFile.
@@ -1245,6 +1256,13 @@ sealed class KayaApp
                 // payload is the parsed u32 choice.
                 if (alerts.Remove(id, out var fn))
                     Dispatch(tx => fn(tx, payload is uint c ? c : 0));
+            }
+            else if (kind == KayaWire.OccKindNotificationResult)
+            {
+                // One-shot like the alert, and the id retires with it;
+                // payload is the parsed u32 outcome.
+                if (notifications.Remove(id, out var fn))
+                    Dispatch(tx => fn(tx, payload is uint o ? o : 0));
             }
             else if (kind == KayaWire.OccKindFileDialogResult)
             {
@@ -2644,35 +2662,22 @@ sealed class Tx
             new KayaWire.BlobHandle(font.Blob())));
     }
 
-    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
-    /// goes by and the picture that stands for it, as one image file's
-    /// bytes. Send a PNG; each lowering converts. SET ONCE, BEFORE THE
-    /// FIRST MOUNT — the root refuses a second write, a late one, and an
-    /// empty name. THE BYTES ARE NEVER INSPECTED, so bytes that are not an
-    /// image leave every platform's own default mark in place.
-    public void AppIdentity(string name, byte[]? icon = null)
+    /// DECLARE the app's identity (docs/app-identity-plan.md,
+    /// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+    /// picture that stands for it and the reverse-DNS id it registers
+    /// under are the asset root's own identity.toml, which the BUILD
+    /// already reads, and the core reads the same file. SET ONCE, BEFORE
+    /// THE FIRST MOUNT.
+    ///
+    /// STILL AN EXPLICIT CALL, because declaring an identity is a POLICY:
+    /// a declared app is a Dock app on macOS (ruling 1), so an app that
+    /// wants the platform's own identity declares none at all.
+    public void AppIdentity()
     {
-        // The mask says whether the icon slot means anything; the slot
-        // is written EITHER WAY (an empty Str when it does not), so the
-        // record's field count never varies with the payload.
-        Records.Add(KayaWire.TxSetAppIdentity(
-            icon is null ? 0u : 1u, name,
-            // The record carries the handle, never the picture itself.
-            icon is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(icon))));
-    }
-
-    /// The MARK-FILE overload: the same declaration, with the picture THE
-    /// APP'S OWN BUILD PUT BESIDE IT. The picture never enters .NET, and
-    /// the asset is REQUIRED so this is not ambiguous with the name-only
-    /// call above.
-    public void AppIdentity(string name, Asset icon)
-    {
-        if (icon is null)
-            throw new ArgumentNullException(nameof(icon),
-                "kaya: AppIdentity got no asset — open one with " +
-                "tx.Asset(\"icons/...\"), or declare the name alone");
-        Records.Add(KayaWire.TxSetAppIdentity(
-            1u, name, new KayaWire.BlobHandle(icon.Blob())));
+        // THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+        // identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+        // the icon slot is written either way, as an empty Str.
+        Records.Add(KayaWire.TxSetAppIdentity(0u, "", ""));
     }
 
     /// Set the window's attributes in one construct — the attribute set is
@@ -2770,6 +2775,32 @@ sealed class Tx
             action0 ?? "", action1 ?? "", cancel));
         return id;
     }
+
+    /// Post a local notification with a GUEST-CHOSEN id
+    /// (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a
+    /// window — the platform shows it outside the app. onResult fires
+    /// exactly once and retires, with
+    /// KayaWire.NotificationOutcomeActivated when the user opened it and
+    /// KayaWire.NotificationOutcomeRefused when the platform would not
+    /// post it. `at` is a UNIX time in seconds handed to the OS scheduler
+    /// where one exists; 0 posts now. Many may be live at once.
+    public ulong ShowNotification(
+        ulong notification, string title = "", string body = "",
+        ulong at = 0, Action<Tx, uint>? onResult = null)
+    {
+        if (string.IsNullOrEmpty(title))
+            throw new ArgumentException(
+                "kaya: a notification needs a title — pass title:");
+        if (onResult != null)
+            App.notifications[notification] = onResult;
+        Records.Add(KayaWire.TxShowNotification(notification, at, title, body));
+        return notification;
+    }
+
+    /// Withdraw a pending or delivered notification (a reminder that was
+    /// cleared). No answer follows; an unknown id is ignored.
+    public void CancelNotification(ulong notification)
+        => Records.Add(KayaWire.TxCancelNotification(notification));
 
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
     /// carries handles you redeem later (DESIGN.md, File dialogs).

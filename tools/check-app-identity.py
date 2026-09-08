@@ -238,6 +238,32 @@ def check(root):
     if not isinstance(icon_rel, str) or not icon_rel.strip():
         bad.append(f"{MANIFEST}: declares no non-empty `icon`")
 
+    # C8 — THE REVERSE-DNS ID (docs/tasks-s3-plan.md N4), the third value
+    # the declaration carries and the one every platform needs to POST a
+    # notification under: the mac wrapper's CFBundleIdentifier, GTK's
+    # application id, WinUI's registration. The core reads it out of this
+    # file at startup, so a manifest without it is an app that cannot
+    # post — and the failure is a REFUSAL at the declaration rather than
+    # a silence at the first reminder, which is why it is required here
+    # too and not merely allowed.
+    app_id = manifest.get("id")
+    if not isinstance(app_id, str) or not app_id.strip():
+        bad.append(f"{MANIFEST}: declares no non-empty `id` — the "
+                   f"reverse-DNS name the app registers under, and the "
+                   f"one value a notification cannot be posted without "
+                   f"(docs/tasks-s3-plan.md N4)")
+        app_id = ""
+    elif not re.fullmatch(r"[a-z][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*){1,}",
+                          app_id):
+        bad.append(f"{MANIFEST}: declares id \"{app_id}\", which is not "
+                   f"a reverse-DNS name — two or more dot-separated "
+                   f"lowercase labels (\"dev.kaya.aurora\"). Apple "
+                   f"refuses a bundle identifier outside that shape and "
+                   f"GNOME attributes a notification to nothing it does "
+                   f"not recognise, so the post fails on two platforms "
+                   f"and nowhere else")
+        app_id = ""
+
     icon_bytes = b""
     if isinstance(icon_rel, str) and icon_rel.strip():
         icon_path = root / icon_rel
@@ -401,17 +427,70 @@ def check(root):
                    "manifest")
 
     # ------------------------------------------------------------- C4
-    guests = sorted((root / "guests").glob("*/identity.*"))
-    if not guests:
-        bad.append("guests/*/identity.*: no identity guest exists, so "
-                   "the name half of the declaration has no writer and "
-                   "C4 reads nothing")
+    # THE DECLARATION IS A CALL AND CARRIES NOTHING (docs/tasks-s3-plan.md
+    # N4). It used to be `app_identity("Aurora Notes", icon)` in nine
+    # guests and this clause held those nine strings to the manifest; the
+    # values moved into the core, so what is left to hold is that each
+    # guest still MAKES the declaration — a policy on macOS, where a
+    # declared app is a Dock app (ruling 1) — and that none of them
+    # retypes a value. The name is still read back off a real window by
+    # tools/scenes/identity.steps, below.
+    #
+    # PER LANGUAGE AND NOT ONE LOOSE PATTERN: a bare name matches the
+    # prose beside the call, and Haskell's `appIdentity` is an action
+    # with no argument list at all.
+    DECLARATION_CALL = {
+        ".rs": r"\btx\.app_identity\(\)",
+        ".py": r"\bkaya\.app_identity\(\)",
+        ".go": r"\btx\.AppIdentity\(\)",
+        ".cs": r"\btx\.AppIdentity\(\)",
+        ".java": r"\btx\.appIdentity\(\)",
+        ".swift": r"\btx\.appIdentity\(\)",
+        ".ml": r"\bapp_identity \(\)",
+        ".hs": r"(?m)^\s*appIdentity\s*$",
+        ".ts": r"\bkaya\.appIdentity\(\)",
+    }
+    # FOUND BY WALKING, not by one glob: the identity guest is
+    # `guests/<lang>/identity.<ext>` in seven languages,
+    # `guests/go/identity/identity.go` in Go, `IdentityScene.cs` in C#
+    # and `dev/kaya/guests/Identity.java` in Java — so
+    # `guests/*/identity.*` had been reading SEVEN of the nine (and the
+    # manifest, which is not a guest) since this clause was written.
+    guests = sorted(
+        f for f in tree_walk(root / "guests")
+        if f.is_file()
+        and f.suffix in DECLARATION_CALL
+        and f.stem.lower().startswith("identity"))
+    if len(guests) != 9:
+        bad.append(f"guests/: {len(guests)} identity guests found "
+                   f"({', '.join(g.name for g in guests)}) and kaya has "
+                   f"nine bindings — the declaration has fewer writers "
+                   f"than languages, and C4 would agree with a binding "
+                   f"that lost it")
     for gp in guests:
         rel = gp.relative_to(root).as_posix()
-        if name not in gp.read_text(encoding="utf-8"):
-            bad.append(f"{rel}: does not declare the identity name "
-                       f"\"{name}\" that {MANIFEST} declares — one "
-                       f"app, one name")
+        pattern = DECLARATION_CALL.get(gp.suffix)
+        if pattern is None:
+            bad.append(f"{rel}: C4 has no declaration-call pattern for "
+                       f"{gp.suffix} — a language it cannot read is a "
+                       f"guest it would pass without looking")
+            continue
+        text = gp.read_text(encoding="utf-8")
+        if not re.search(pattern, text):
+            bad.append(f"{rel}: never CALLS the identity declaration "
+                       f"(wanted /{pattern}/) — the values come from "
+                       f"{MANIFEST} now, but the call is still the act, "
+                       f"and an app that makes it is a Dock app on "
+                       f"macOS (docs/app-identity-plan.md ruling 1)")
+        # AND RETYPES NONE OF THEM: a guest still passing the name would
+        # have it silently replaced by the manifest's at the root.
+        for what, value in (("name", name), ("id", app_id)):
+            if value and value in text:
+                bad.append(f"{rel}: spells the declared {what} "
+                           f"\"{value}\" — {MANIFEST} is the one place "
+                           f"it is written, and app_identity() takes no "
+                           f"arguments in any of the nine "
+                           f"(docs/tasks-s3-plan.md N4)")
 
     steps = root / "tools/scenes/identity.steps"
     if steps.is_file():
@@ -805,12 +884,57 @@ doctor_pixel("the repainted-quadrant perturbation", s, mark_rel, 16, 16)
 g.negative("a mark whose pixels left the scene's expectation behind",
            lambda p=s: check(p), want="quadrant centres")
 
-# N2 — the name changed in the manifest and nowhere else.
+# N2 — the name changed in the manifest and nowhere else. Since
+# docs/tasks-s3-plan.md N4 the guests carry no name at all, so the wall
+# is the SCENE: the name half of the declaration is read back off a real
+# window, and a manifest nobody observes is a name that ships unwatched.
 s = fresh("renamed")
 doctor_shadow("the manifest rename", s, MANIFEST,
               r'name = "Aurora Notes"', 'name = "Borealis Notes"')
-g.negative("a manifest name no guest declares", lambda p=s: check(p),
-           want="one app, one name")
+g.negative("a manifest name no scene reads back", lambda p=s: check(p),
+           want="never reads the declared name")
+
+# N2a — C4'S OWN NEGATIVE: a guest that stops CALLING the declaration.
+# The call is the act — a declared app is a Dock app on macOS — and it
+# is all that is left in a guest now that the values moved to the core,
+# so a guest that dropped it would ship unidentified with every other
+# clause green.
+s = fresh("uncalled")
+doctor_shadow("the uncalled-declaration perturbation", s,
+              "guests/python/identity.py",
+              r"kaya\.app_identity\(\)", "pass  # declared nowhere")
+g.negative("a guest that never calls the declaration",
+           lambda p=s: check(p),
+           want="never CALLS the identity declaration")
+
+# N2b — THE RETYPED VALUE, the duplication N4 removed: a guest that
+# spells the name again would have it silently replaced by the
+# manifest's at the root, so nothing at run time could tell the two
+# apart.
+s = fresh("retypedname")
+doctor_shadow("the retyped-name perturbation", s,
+              "guests/js/identity.ts",
+              r"kaya\.appIdentity\(\)",
+              'kaya.appIdentity(); // Aurora Notes')
+g.negative("a guest that retypes the declared name",
+           lambda p=s: check(p), want="spells the declared name")
+
+# N2c — C8: the manifest without its reverse-DNS id, which is the one
+# value a notification cannot be posted without.
+s = fresh("noid")
+doctor_shadow("the missing-id perturbation", s, MANIFEST,
+              r'(?m)^id = "[^"]+"$', "# no id declared")
+g.negative("a manifest with no reverse-DNS id", lambda p=s: check(p),
+           want="declares no non-empty `id`")
+
+# N2d — and an id that is not reverse-DNS at all: Apple refuses the
+# bundle identifier and GNOME attributes the notification to nothing,
+# so the post fails on two platforms and nowhere else.
+s = fresh("flatid")
+doctor_shadow("the flat-id perturbation", s, MANIFEST,
+              r'(?m)^id = "[^"]+"$', 'id = "AuroraNotes"')
+g.negative("an id that is not a reverse-DNS name",
+           lambda p=s: check(p), want="is not a reverse-DNS name")
 
 # N3 — the icon path changed in the manifest and nowhere else.
 s = fresh("repathed")
@@ -866,25 +990,33 @@ g.negative("a tree where no scene reads the icon",
 # source of truth the clause is about.
 mark_re = declared("pattern")
 s = fresh("envreader")
+# THE HOST IS THE ASSETS GUEST since docs/tasks-s3-plan.md N4: the
+# identity guests stopped opening the mark when app_identity() stopped
+# taking one, and this clause needs a file that still does.
 doctor_shadow("the environment-reader perturbation", s,
-              "guests/rust/identity.rs",
-              r'tx\.asset\("' + mark_re + r'"\)',
-              'std::env::var("KAYA_ICON_FILE").unwrap()')
+              "guests/rust/assets.rs",
+              r'const MARK: &str = "' + mark_re + r'";',
+              'const MARK: &str = "unused"; // std::env::var("KAYA_ICON_FILE")')
 g.negative("a guest that names the override with no declaration "
            "behind it", lambda p=s: check(p),
            want="names the declaration in none of C3's three ways")
 
-# N9 — THE ASSET ARM'S OWN NEGATIVE: a guest that opens a DIFFERENT
-# file out of the mark's family. Nothing checks an asset name at
-# compile time. The SWIFT guest is doctored on purpose — its spelling
-# is the constructor `KayaAsset(`, with no word boundary in front, so a
-# pattern written for the Rust spelling alone would find nothing in it.
+# N9 — THE ASSET ARM'S OWN NEGATIVE: a site that opens a DIFFERENT file
+# out of the mark's family. Nothing checks an asset name at compile
+# time, and a name nothing answers to fails SILENTLY.
+#
+# THE HOST MOVED WITH N4: the identity guests were the asset-call sites
+# and they open nothing now, so what is left in the tree that spells the
+# mark inside an `asset(...)` call is the Go binding's own asset test.
+# The clause is also less needed than it was — the core DERIVES the
+# asset name from the manifest, so the guests have no name left to
+# mistype — but a live site keeps it from passing vacuously.
 other_mark = declared("other")
 s = fresh("othermark")
 doctor_shadow("the other-mark perturbation", s,
-              "guests/swift/identity.swift",
-              r'KayaAsset\("' + mark_re + r'"\)',
-              f'KayaAsset("{other_mark}")')
+              "bindings/go/asset_test.go",
+              r'tx\.Asset\("' + mark_re + r'"\)',
+              f'tx.Asset("{other_mark}")')
 g.negative("a guest opening an asset the manifest does not declare",
            lambda p=s: check(p),
            want="in the declared mark's own family but is not it")
@@ -956,7 +1088,7 @@ doctor_shadow("the uncalled apk_launch_verify", s,
 g.negative("a lane that packages the slot and never checks it",
            lambda p=s: check(p), want="define and CALL apk_launch_verify")
 
-g.negatives_ran(16)
+g.negatives_ran(20)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

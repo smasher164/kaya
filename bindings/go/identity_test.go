@@ -69,67 +69,25 @@ func identityRecord(t *testing.T, build func(tx *Tx)) []byte {
 	return found
 }
 
-// The core never inspects these bytes, so all this can prove is that the
-// CHANNEL carries every one of them; whether a real picture decodes is each
-// backend's own probe.
-var identityIconBytes = func() []byte {
-	b := make([]byte, 512)
-	for i := range b {
-		b[i] = byte(i * 11)
+// THE DECLARATION CARRIES NOTHING (docs/tasks-s3-plan.md N4): the name, the
+// mark and the id are the manifest's, so the tx record's slots ride EMPTY and
+// the root fills them. A binding that went on sending values would have them
+// silently replaced, which is what the root refuses by name.
+func TestAppIdentityShipsAnEmptyDeclaration(t *testing.T) {
+	body := decodeIdentity(identityRecord(t, func(tx *Tx) { tx.AppIdentity() }))
+	if body.mask != 0 {
+		t.Errorf("mask shipped as %d, want 0 — no blob rides a declaration that carries no picture", body.mask)
 	}
-	return b
-}()
-
-// The mask and the slot are the pair that goes silently wrong.
-func TestAppIdentityPacksOneRecord(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		build func(tx *Tx)
-		mask  uint32
-		blob  bool
-	}{
-		{"name and icon", func(tx *Tx) {
-			tx.AppIdentity("Aurora Notes", identityIconBytes)
-		}, 1, true},
-		{"name only", func(tx *Tx) {
-			tx.AppIdentityNamed("Aurora Notes")
-		}, 0, false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			body := decodeIdentity(identityRecord(t, c.build))
-			if body.mask != c.mask {
-				t.Errorf("mask shipped as %d, want %d — bit 0 is the whole of \"an icon blob rides\"", body.mask, c.mask)
-			}
-			if body.reserved != 0 {
-				t.Errorf("the reserved word is %d, want 0 — a guest names no platform here, and unlike the typeface the core stamps none on the way out either", body.reserved)
-			}
-			if body.name != "Aurora Notes" {
-				t.Errorf("the name shipped as %q, want \"Aurora Notes\"", body.name)
-			}
-			// The slot is ALWAYS written, so the field count never varies:
-			// an absent icon rides as an empty string and the mask alone says
-			// which it is.
-			if c.blob {
-				if body.icon.tag != ValueBlob || body.icon.i64 == 0 {
-					t.Errorf("icon slot shipped as tag %d handle %d, want a live blob handle", body.icon.tag, body.icon.i64)
-				}
-			} else if body.icon.tag != ValueStr || body.icon.str != "" {
-				t.Errorf("icon slot shipped as tag %d %q, want an empty string", body.icon.tag, body.icon.str)
-			}
-		})
+	if body.reserved != 0 {
+		t.Errorf("the reserved word is %d, want 0", body.reserved)
 	}
-}
-
-// An empty slice is not the name-only form: `AppIdentity(name, nil)` sets the
-// mask and ships zero bytes, and the ROOT refuses that. A binding that
-// demoted it to AppIdentityNamed would make the wall unreachable from Go.
-func TestAppIdentityDoesNotDemoteEmptyBytes(t *testing.T) {
-	body := decodeIdentity(identityRecord(t, func(tx *Tx) {
-		tx.AppIdentity("Aurora Notes", nil)
-	}))
-	if body.mask != 1 || body.icon.tag != ValueBlob {
-		t.Fatalf("nil bytes shipped as mask %d tag %d — Go turned an author error into the name-only form, and the root's empty-blob wall became unreachable here",
-			body.mask, body.icon.tag)
+	if body.name != "" {
+		t.Errorf("the name shipped as %q, want the empty string — the manifest's name is the root's to fill", body.name)
+	}
+	// The slot is ALWAYS written, so the field count never varies with the
+	// payload: an absent icon rides as an empty string.
+	if body.icon.tag != ValueStr || body.icon.str != "" {
+		t.Errorf("icon slot shipped as tag %d %q, want an empty string", body.icon.tag, body.icon.str)
 	}
 }
 
@@ -140,20 +98,15 @@ func identityTrap(trap string) {
 	app := NewApp()
 	mount := func(tx *Tx) { tx.Mount(tx.Column(func() { tx.LabelText("identity") })) }
 	switch trap {
-	case "plain":
-		app.Build(func(tx *Tx) {
-			tx.AppIdentityNamed("Aurora Notes")
-			mount(tx)
-		})
 	case "full":
 		app.Build(func(tx *Tx) {
-			tx.AppIdentity("Aurora Notes", identityIconBytes)
+			tx.AppIdentity()
 			mount(tx)
 		})
 	case "twice":
 		app.Build(func(tx *Tx) {
-			tx.AppIdentity("Aurora Notes", identityIconBytes)
-			tx.AppIdentityNamed("Something Else")
+			tx.AppIdentity()
+			tx.AppIdentity()
 			mount(tx)
 		})
 	case "after-mount":
@@ -162,17 +115,15 @@ func identityTrap(trap string) {
 		// between these two Builds does.
 		app.Build(mount)
 		rootprobe.Pump()
-		app.Build(func(tx *Tx) { tx.AppIdentityNamed("Aurora Notes") })
-	case "empty-name":
+		app.Build(func(tx *Tx) { tx.AppIdentity() })
+	case "half-manifest":
+		// THE MANIFEST IS THE DECLARATION NOW, so a manifest missing one
+		// of its three keys is the refusal an empty name used to be — and
+		// the sentence has to send the reader to the FILE, since the call
+		// carries nothing to blame. The root that runs this was pointed at
+		// a doctored asset root by runIdentityTrap's own environment.
 		app.Build(func(tx *Tx) {
-			tx.AppIdentityNamed("")
-			mount(tx)
-		})
-	case "empty-icon":
-		// The mask says a picture rides and no bytes do, which would read
-		// exactly like an icon that applied.
-		app.Build(func(tx *Tx) {
-			tx.AppIdentity("Aurora Notes", nil)
+			tx.AppIdentity()
 			mount(tx)
 		})
 	default:
@@ -233,6 +184,21 @@ func runIdentityTrap(t *testing.T, trap string) (string, error) {
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTheRootIsTheIdentityWall$")
 	// cmd.Environ() rather than os.Environ(): tools/check-go-env.py.
 	cmd.Env = append(cmd.Environ(), "KAYA_IDENTITY_TRAP="+trap)
+	if trap == "half-manifest" {
+		// A DOCTORED ASSET ROOT, handed to the child through the
+		// environment rather than set in-process: the core resolves the
+		// root once, and an in-process write races its own read.
+		dir := t.TempDir()
+		// A STAND-IN PATH: this manifest is doctored to be missing its `id`,
+		// and the reader refuses before it opens any picture, so naming the
+		// real mark here would be a second copy of the declared path for
+		// nothing (tools/check-assets.py, tools/check-app-identity.py C3).
+		manifest := "name = \"Aurora Notes\"\nicon = \"bundle/assets/icons/a-mark.png\"\n"
+		if err := os.WriteFile(dir+"/identity.toml", []byte(manifest), 0o644); err != nil {
+			t.Fatalf("the doctored manifest could not be written: %v", err)
+		}
+		cmd.Env = append(cmd.Env, "KAYA_ASSET_DIR="+dir)
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("identity trap %q never finished: the pump blocked, so the root applied nothing", trap)
@@ -248,9 +214,17 @@ func TestTheRootIsTheIdentityWall(t *testing.T) {
 		identityTrap(trap)
 		return
 	}
+	// THE EXPECTED BYTES ARE THE MANIFEST'S MARK, opened through the
+	// binding's OWN asset call rather than by path: the resolution rule
+	// lives once, in crates/kaya/src/assets.rs (tools/check-assets.py).
+	// The declaration carries no picture, so what comes back out of the
+	// blob table is whatever identity.toml named.
+	markAsset := openMark(t)
+	defer markAsset.Close()
+	mark := markAsset.Bytes()
 	full := fmt.Sprintf(
 		"kaya identity applied: name=Aurora Notes mask=1 stamp=0 icon=%d bytes sha=%x order=before-mount",
-		len(identityIconBytes), sha256.Sum256(identityIconBytes))
+		len(mark), sha256.Sum256(mark))
 	for _, c := range []struct {
 		trap    string
 		refused bool
@@ -258,9 +232,7 @@ func TestTheRootIsTheIdentityWall(t *testing.T) {
 	}{
 		{"twice", true, "set_app_identity called twice"},
 		{"after-mount", true, "set_app_identity after a mount"},
-		{"empty-name", true, "set_app_identity has an empty name"},
-		{"empty-icon", true, "set_app_identity carries an EMPTY icon blob"},
-		{"plain", false, "THE ROOT ACCEPTED IT"},
+		{"half-manifest", true, "declares no `id`"},
 		{"full", false, full},
 	} {
 		t.Run(c.trap, func(t *testing.T) {

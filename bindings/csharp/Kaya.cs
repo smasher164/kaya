@@ -351,6 +351,7 @@ static class Kaya
     /// read `KAYA_CAP_AUX_WINDOWS` out of. tools/check-sugar-surface.py
     /// holds it against crates/kaya/src/scene.rs.
     internal const ulong CAP_AUX_WINDOWS = 1;
+    internal const ulong CAP_NOTIFICATIONS = 2;
 
     internal static ulong CapabilityBits() => kaya_capabilities();
 

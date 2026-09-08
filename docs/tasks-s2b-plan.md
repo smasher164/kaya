@@ -88,7 +88,12 @@ none — and every install site is dominated by it; check-appearance's
 "inert unless asked for" clause moves from the variable to that
 function, and its negatives with it.
 
-### R4 — The observable: `expect_appearance light|dark` reads the toolkit (RECOMMEND)
+### R4 — The observable: `expect_appearance light|dark|system` reads the toolkit (RECOMMEND)
+
+AMENDED 2026-09-08: the reporter answers `<mode> <source>`, the source being the
+toolkit's override slot read back (`system` when empty, `override` when filled),
+and a scene that chose System asks for `system` — the lane host is not always
+light (docs/traps.md, "The lane host is dark at night").
 
 A harness verb whose observation is the platform's OWN answer, never
 the prop: `NSApp.effectiveAppearance` on the mac, the window's

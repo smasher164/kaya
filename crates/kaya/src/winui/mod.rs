@@ -550,6 +550,20 @@ struct CoreState {
     /// bits), and the panes reading folds both views' Modes.
     inner_splits: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
+    /// WHO THE SCENE SAID IS WHOSE PARENT, child -> parent. NOT `child_order`,
+    /// which is the LAYOUT structure and records only the panel case: the
+    /// AddChild arm returns early for a ScrollViewer's one content child and
+    /// for a Grid2D's cells, so a walk of `child_order` runs out at a scroll's
+    /// content and `widget_is_live` would call a popped screen's controls live
+    /// (measured on the windows lane 2026-09-07: a picker's chain ended one
+    /// link below the entry's mounted root).
+    tree_parent: HashMap<u64, u64>,
+    /// THE MOUNTED ROOTS WHOSE SURFACE HAS GONE: a popped entry's root widget,
+    /// a destroyed window's. `resolve_id` refuses a target under one — see
+    /// `widget_is_live` for why the test names what is DEAD rather than
+    /// what is live, and why it walks kaya's own child order rather than the
+    /// visual tree.
+    dead_roots: std::collections::HashSet<u64>,
     /// The WIDGET ID of each mounted surface root, by surface (window, pushed
     /// navigation entry or section pane): it tells `container_padding` which
     /// containers carry the window inset in their own Padding.
@@ -3982,6 +3996,14 @@ fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     }
     core.nav_stacks.get_mut(&window).unwrap().pop();
     core.nav_entries.remove(&top);
+    // THE USER'S BACK POPS NATIVELY and never reaches `ApplyOp::PopEntry`
+    // (the core is TOLD, post-fact, by the EntryPopped below), so the dead
+    // root is recorded on this path too — `widget_is_live` is what keeps a
+    // popped screen's controls from answering a target, and the back
+    // affordance is the route every scene actually takes.
+    if let Some(root) = core.mounted_roots.remove(&top) {
+        core.dead_roots.insert(root.0);
+    }
     core.scene.user_popped(WindowId(top));
     refresh_nav(core, window)?;
     core.occurrences.send(Occurrence::EntryPopped {
@@ -12259,6 +12281,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
+            core.tree_parent.remove(&id.0);
             core.grow.remove(&id);
             core.child_order.forget(id);
             // A destroyed table takes its header chrome with it: the
@@ -12361,16 +12384,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 let _ = aux.Close();
             }
             core.tearing_down.remove(&window.0);
+            if let Some(root) = core.mounted_roots.remove(&window.0) {
+                core.dead_roots.insert(root.0);
+            }
             for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
                 core.nav_entries.remove(&entry);
+                if let Some(root) = core.mounted_roots.remove(&entry) {
+                    core.dead_roots.insert(root.0);
+                }
             }
             // Its sections go too, each with ITS stack — the one way a
             // section dies.
             for sid in core.sections.remove(&window.0).unwrap_or_default() {
                 core.section_panes.remove(&sid);
                 core.section_items.remove(&sid);
+                if let Some(root) = core.mounted_roots.remove(&sid) {
+                    core.dead_roots.insert(root.0);
+                }
                 for entry in core.nav_stacks.remove(&sid).unwrap_or_default() {
                     core.nav_entries.remove(&entry);
+                    if let Some(root) = core.mounted_roots.remove(&entry) {
+                        core.dead_roots.insert(root.0);
+                    }
                 }
             }
             core.section_navs.remove(&window.0);
@@ -12418,6 +12453,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .and_then(|s| s.pop())
                 .expect("scene validated the pop");
             core.nav_entries.remove(&top);
+            // A POPPED ENTRY'S WIDGETS OUTLIVE IT: the core never prunes its
+            // widget map and every registry here is append-only, so the
+            // entry's mounted root is remembered as dead and `resolve_id`
+            // refuses anything under it.
+            if let Some(root) = core.mounted_roots.remove(&top) {
+                core.dead_roots.insert(root.0);
+            }
             refresh_nav(core, window.0)?;
         }
         ApplyOp::SetEntryProp { entry, prop, value } => {
@@ -12833,6 +12875,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             DIALOG_QUEUE.lock().unwrap().push(request);
             dialog_apartment();
             unsafe { SetEvent(dialog_doorbell()) };
+        }
+        ApplyOp::PostNotification(spec) => {
+            // ON THE NOTIFICATION APARTMENT, waited for: `Show` is synchronous
+            // and the refusal has to be this batch's answer, not a later one.
+            let notification = spec.notification;
+            let sink = core.occurrences.clone();
+            let posted = on_notify(move || notification_post(&spec)).unwrap_or_else(|| {
+                Err("the notification platform did not answer within 15s".to_owned())
+            });
+            if let Err(why) = posted {
+                eprintln!("kaya: winui refused notification {} — {why}", notification.0);
+                sink.send(Occurrence::NotificationResult {
+                    notification,
+                    outcome: crate::protocol::NotificationOutcome::Refused,
+                });
+            }
+        }
+        ApplyOp::CancelNotification(notification) => {
+            on_notify(move || notification_forget(notification.0));
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
@@ -13480,6 +13541,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         ApplyOp::AddChild { parent, child } => {
+            // BEFORE THE BRANCHES, every one of which returns early for a
+            // container this backend does not lower to a panel.
+            core.tree_parent.insert(child.0, parent.0);
             // The viewport's one child (the scene rejects a second):
             // ScrollViewer is a ContentControl, not a panel.
             if let NativeWidget::Scroll(viewer) =
@@ -15017,7 +15081,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
                 scene.declare_windowing();
                 scene
             },
-            occurrences: occ_tx,
+            occurrences: occ_tx.clone(),
             pending_dialog_dir: RefCell::new(None),
             widgets: HashMap::new(),
             parents: HashMap::new(),
@@ -15092,6 +15156,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             split_presentation: HashMap::new(),
             split_views: HashMap::new(),
             window_roots: HashMap::new(),
+            tree_parent: HashMap::new(),
+            dead_roots: std::collections::HashSet::new(),
             mounted_roots: HashMap::new(),
             window_titles: HashMap::new(),
             window_dirty: HashMap::new(),
@@ -15127,6 +15193,11 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             ole_targets: Vec::new(),
         });
     });
+
+    // A notification's activation arrives on a platform thread that can never
+    // take the UI thread's CORE, so it answers on a sink held beside it; one
+    // that arrived before this line is drained here.
+    notification_sink_install(occ_tx);
 
     // The first transaction may already be queued; drain now.
     drain_transactions();
@@ -15348,6 +15419,89 @@ impl WinUiStage {
         });
         let _ = dispatcher.0.TryEnqueue(&handler);
         rx.recv().expect("the dispatcher applied the step")
+    }
+}
+
+/// A TARGET IS A LIVE WIDGET (2026-09-08). Every registry `resolve_id` reads is
+/// APPEND-ONLY and the core never prunes a POPPED entry's widgets
+/// (crates/kaya/src/scene.rs says so), so `find`-by-AutomationId answered with
+/// the dead copy the moment a screen was pushed, popped and pushed again — the
+/// tasks scene's `time_picker@reminder` resolving to the FIRST push's control.
+///
+/// THE TEST NAMES WHAT IS DEAD, NOT WHAT IS LIVE, and the polarity is the whole
+/// design. "Is it under a live window's Content?" was tried and is WRONG here,
+/// measured on the windows lane 2026-09-07: this backend legitimately keeps
+/// live subtrees out of the window's Content — a non-selected section's pane
+/// (`nav.SetContent` shows one), a covered entry's wrapper, an aux window's
+/// root before it is presented — and `release_split` detaches the base root
+/// while it rebuilds the TwoPaneView, so the portfolio's fold steps and the
+/// tasks scene's sections both lost targets that were perfectly alive.
+///
+/// AND IT WALKS KAYA'S OWN PARENT RECORD, not the visual tree, for the same
+/// reason one step further in: a detached subtree's XAML visual links are the
+/// toolkit's business and a walk through them answered nothing for a popped
+/// entry's pickers (measured, same lane). `tree_parent` is what the SCENE
+/// said, written in the AddChild arm before any of its early returns, and a
+/// pop does not touch it, while
+/// `ApplyOp::PopEntry` and `ApplyOp::DestroyWindow` do record the mounted root
+/// each surface took with it. Everything under one of those is refused;
+/// everything else answers as it always did.
+#[cfg(feature = "harness")]
+fn widget_is_live(core: &CoreState, widget: u64) -> bool {
+    if core.dead_roots.is_empty() {
+        return true;
+    }
+    let mut id = widget;
+    // The cap is a wall against a cycle, not a depth a real tree reaches.
+    for _ in 0..256 {
+        if core.dead_roots.contains(&id) {
+            return false;
+        }
+        match core.tree_parent.get(&id) {
+            Some(parent) => id = *parent,
+            None => return true,
+        }
+    }
+    true
+}
+
+/// The registry entry at `i` as a kaya widget id. `registry_ids` answers the
+/// WHOLE registry and scans the widget table per entry, which is quadratic on
+/// a scene with fifteen thousand labels; this answers the ONE position a
+/// resolve actually landed on.
+#[cfg(feature = "harness")]
+fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usize) -> Option<u64> {
+    use crate::harness::TargetKind as K;
+    macro_rules! id_of {
+        ($reg:expr, $pat:pat, $ctrl:ident) => {
+            $reg.get(i).and_then(|want| {
+                core.widgets
+                    .iter()
+                    .find(|(_, native)| matches!(native, $pat if $ctrl == want))
+                    .map(|(id, _)| id.0)
+            })
+        };
+    }
+    match kind {
+        K::Button => id_of!(core.button_controls, NativeWidget::Button { button, .. }, button),
+        K::Checkbox => id_of!(core.checkboxes, NativeWidget::Checkbox { check, .. }, check),
+        K::Slider => id_of!(core.sliders, NativeWidget::Slider(slider), slider),
+        K::Entry => core.entry_ids.get(i).copied(),
+        K::Label => id_of!(core.labels, NativeWidget::Label { block, .. }, block),
+        K::Column => core.column_ids.get(i).map(|id| id.0),
+        K::Row => id_of!(core.rows, NativeWidget::Row(panel), panel),
+        K::Labeled => id_of!(core.labeleds, NativeWidget::Labeled(panel), panel),
+        K::Image => id_of!(core.images, NativeWidget::Image(image), image),
+        K::Scroll => id_of!(core.scrolls, NativeWidget::Scroll(viewer), viewer),
+        K::Progress => id_of!(core.progresses, NativeWidget::Progress(bar), bar),
+        K::Select => id_of!(core.selects, NativeWidget::Select(combo), combo),
+        K::Radio => id_of!(core.radios, NativeWidget::Radio(group), group),
+        K::Grid => id_of!(core.grids, NativeWidget::Grid2D(grid), grid),
+        K::Textarea => core.textarea_ids.get(i).copied(),
+        K::Search => core.search_ids.get(i).copied(),
+        K::Canvas => core.canvas_ids.get(i).copied(),
+        K::DatePicker => core.date_picker_ids.get(i).copied(),
+        K::TimePicker => core.time_picker_ids.get(i).copied(),
     }
 }
 
@@ -17741,13 +17895,24 @@ impl crate::harness::Stage for WinUiStage {
                     .map(|got| &got == id)
                     .unwrap_or(false)
             }
+            // A DEAD COPY MAY NOT ANSWER: the registry is append-only, so the
+            // position is the registry's and the filter is `widget_is_live`.
+            // The id lookup runs only for a candidate that CARRIES the
+            // authored id, which is why it may scan the widget table.
             fn find<T: windows_core::Interface>(
+                core: &CoreState,
+                kind: crate::harness::TargetKind,
                 v: &[T],
                 id: &windows_core::HSTRING,
             ) -> Option<isize> {
                 v.iter()
-                    .position(|widget| carries_id(widget, id))
-                    .map(|i| i as isize)
+                    .enumerate()
+                    .find(|(i, widget)| {
+                        carries_id(*widget, id)
+                            && registry_widget_at(core, kind, *i)
+                                .is_none_or(|w| widget_is_live(core, w))
+                    })
+                    .map(|(i, _)| i as isize)
             }
             if let Some(keys) = keys.as_deref() {
                 if kind != K::Column {
@@ -17760,6 +17925,7 @@ impl crate::harness::Stage for WinUiStage {
                     let tag_of = |widget: &u64| core.widget_tags.get(widget);
                     let carries = |widget: &u64| {
                         automation_id_of(core, *widget).is_some_and(|got| got == id)
+                            && widget_is_live(core, *widget)
                     };
                     // EVERY copy carrying the id is a candidate, whichever
                     // template stamped it (harness::table_tag_keys_match).
@@ -17799,6 +17965,7 @@ impl crate::harness::Stage for WinUiStage {
                         .filter(|(_, (column, widget))| {
                             core.widgets.contains_key(*widget)
                                 && carries_id(*column, &id)
+                                && widget_is_live(core, widget.0)
                                 && tables.get(&widget.0).is_some_and(|table| {
                                     crate::harness::table_tag_keys_match(&table.tag, keys)
                                 })
@@ -17818,7 +17985,9 @@ impl crate::harness::Stage for WinUiStage {
                     .iter()
                     .zip(&core.column_ids)
                     .position(|(column, widget)| {
-                        core.widgets.contains_key(widget) && carries_id(column, &id)
+                        core.widgets.contains_key(widget)
+                            && carries_id(column, &id)
+                            && widget_is_live(core, widget.0)
                     })
                     .map(|i| i as isize));
             }
@@ -17836,6 +18005,7 @@ impl crate::harness::Stage for WinUiStage {
                     .position(|widget| {
                         widget != 0
                             && automation_id_of(core, widget).is_some_and(|got| got == id)
+                            && widget_is_live(core, widget)
                     })
                     .map(|i| i as isize)
             };
@@ -17844,27 +18014,27 @@ impl crate::harness::Stage for WinUiStage {
                 // click path emits them directly), so there is no control to
                 // read an AutomationId off: button@id resolves None HERE
                 // ALONE, the dirty read-table's documented-divergence shape.
-                K::Button => find(&core.button_controls, &id),
+                K::Button => find(core, K::Button, &core.button_controls, &id),
                 K::Checkbox => {
-                    find(&core.checkboxes, &id).or_else(|| by_identity(K::Checkbox))
+                    find(core, K::Checkbox, &core.checkboxes, &id).or_else(|| by_identity(K::Checkbox))
                 }
-                K::Slider => find(&core.sliders, &id),
-                K::Entry => find(&core.entries, &id),
-                K::Label => find(&core.labels, &id).or_else(|| by_identity(K::Label)),
-                K::Column => find(&core.columns, &id),
-                K::Row => find(&core.rows, &id),
-                K::Labeled => find(&core.labeleds, &id),
-                K::Image => find(&core.images, &id),
-                K::Scroll => find(&core.scrolls, &id),
-                K::Progress => find(&core.progresses, &id),
-                K::Select => find(&core.selects, &id),
-                K::Radio => find(&core.radios, &id),
-                K::Grid => find(&core.grids, &id),
-                K::Textarea => find(&core.textareas, &id),
-                K::Search => find(&core.searches, &id),
-                K::Canvas => find(&core.canvases, &id),
-                K::DatePicker => find(&core.date_pickers, &id),
-                K::TimePicker => find(&core.time_pickers, &id),
+                K::Slider => find(core, K::Slider, &core.sliders, &id),
+                K::Entry => find(core, K::Entry, &core.entries, &id),
+                K::Label => find(core, K::Label, &core.labels, &id).or_else(|| by_identity(K::Label)),
+                K::Column => find(core, K::Column, &core.columns, &id),
+                K::Row => find(core, K::Row, &core.rows, &id),
+                K::Labeled => find(core, K::Labeled, &core.labeleds, &id),
+                K::Image => find(core, K::Image, &core.images, &id),
+                K::Scroll => find(core, K::Scroll, &core.scrolls, &id),
+                K::Progress => find(core, K::Progress, &core.progresses, &id),
+                K::Select => find(core, K::Select, &core.selects, &id),
+                K::Radio => find(core, K::Radio, &core.radios, &id),
+                K::Grid => find(core, K::Grid, &core.grids, &id),
+                K::Textarea => find(core, K::Textarea, &core.textareas, &id),
+                K::Search => find(core, K::Search, &core.searches, &id),
+                K::Canvas => find(core, K::Canvas, &core.canvases, &id),
+                K::DatePicker => find(core, K::DatePicker, &core.date_pickers, &id),
+                K::TimePicker => find(core, K::TimePicker, &core.time_pickers, &id),
             })
         })
         .ok()
@@ -18441,6 +18611,22 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(1 + core.aux_windows.len()))
     }
 
+    /// NOT `on_ui_read`, which every other observation here takes: this read
+    /// wants nothing from the core and everything from a platform call that
+    /// BLOCKS on an `IAsyncOperation`, which the XAML thread's ASTA may not do
+    /// (`on_async`'s note). The notification apartment is where blocking is
+    /// legal.
+    fn notification_title(&self, notification: u64) -> Option<String> {
+        on_notify(move || delivered_notification_title(notification)).flatten()
+    }
+
+    /// N5's Windows carve-out: Windows offers no programmatic tap, so the verb
+    /// enters the backend's OWN activation path one step past it — the same
+    /// function `NotificationInvoked` calls, clearing the history entry the way
+    /// the system does and emitting through the same sink.
+    fn activate_notification(&self, notification: u64) {
+        on_notify(move || notification_activated(notification));
+    }
     fn alert_title(&self, window: u64) -> Option<String> {
         Self::on_ui_read(move |core| {
             let Some(live) = core.live_alert.as_ref() else {
@@ -19407,14 +19593,31 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn appearance(&self) -> String {
-        // The root's ActualTheme, the reading presentation_report sends.
+        // TWO WORDS: the mode the root really wears, and where it came from.
+        // Both are the TOOLKIT's own readings and neither is kaya's record of
+        // what it asked for (tools/check-appearance.py's B3 bans that in this
+        // body) — `ActualTheme` is what the tree resolved to, and
+        // `RequestedTheme` IS the override slot: `Default` means nothing is in
+        // it and the system decides, Light/Dark means something is.
         Self::on_ui_read(|core| {
-            let Ok(root) = core.window.Content() else { return Ok("light".to_string()) };
+            let Ok(root) = core.window.Content() else {
+                return Ok("light system".to_string());
+            };
             let element: FrameworkElement = windows_core::Interface::cast(&root)?;
+            // Spelled with its own `dark` binding rather than reusing
+            // presentation_report's `let mode = if element.ActualTheme()`:
+            // that phrasing is what tools/check-appearance.py's N7 negative
+            // perturbs, and it must match ONE site.
             let dark = element.ActualTheme()? == ElementTheme::Dark;
-            Ok(if dark { "dark".to_string() } else { "light".to_string() })
+            let mode = if dark { "dark" } else { "light" };
+            let source = if element.RequestedTheme()? == ElementTheme::Default {
+                "system"
+            } else {
+                "override"
+            };
+            Ok(format!("{mode} {source}"))
         })
-        .unwrap_or_else(|_| "light".to_string())
+        .unwrap_or_else(|_| "light system".to_string())
     }
     fn sections_presentation(&self, window: u64) -> String {
             // THE CONTROL'S OWN ANSWER, the way split_presentation asks
@@ -20230,6 +20433,460 @@ fn winui_picker_reading(core: &CoreState, t: crate::harness::Target) -> String {
         Err(e) => format!("<unreadable: {e}>"),
     }
 }
+
+// --- Local notifications (docs/tasks-s3-plan.md N1/N2/N5/N6, §3's WinUI row) --
+//
+// THE OLDER WinRT TOAST API AND NOT THE APP SDK'S `AppNotificationManager`,
+// measured on the VM 2026-09-07 (docs/traps.md-shaped finding, in the report):
+// the App SDK's manager answers `IsSupported() == false` and `Setting ==
+// Unsupported` for an UNPACKAGED exe whose Windows App Runtime SINGLETON msix
+// package is not deployed — which is the state the bootstrap leaves, since
+// `MddBootstrapInitialize2` stages the FRAMEWORK packages only. `Register()`
+// and `Show()` both return Ok there and deliver nothing, and `GetAllAsync()`
+// answers a null vector. `ToastNotificationManager` under the declared AUMID
+// posts, lands in the platform's own history, schedules and removes, with no
+// provisioning of any kind — measured for an AUMID with no registry key at
+// all. The App SDK route is what §3's row names and what would give a click
+// on a CLOSED app somewhere to land (S9); taking it needs
+// `DeploymentManager.Initialize()` or the Main+Singleton packages shipped, and
+// that is a ruling, not a backend's decision.
+
+use bindings::Windows::Data::Xml::Dom::XmlDocument;
+use bindings::Windows::Foundation::DateTime;
+use bindings::Windows::UI::Notifications::{
+    ScheduledToastNotification, ToastNotification, ToastNotificationManager, ToastNotifier,
+};
+
+/// The tag every kaya notification wears in the platform's own history, and
+/// the argument key the activation carries the id back in. ONE PAIR, so the
+/// two spellings cannot drift apart.
+fn notification_tag(id: u64) -> String {
+    format!("kaya-{id}")
+}
+
+const NOTIFICATION_ARG_KEY: &str = "kaya";
+/// Every kaya notification is one group, which is what the history's removal
+/// takes: `RemoveGroupedTagWithId` is the only remove-by-tag that also takes
+/// an application id, and an unpackaged app has to name its own.
+const NOTIFICATION_GROUP: &str = "kaya";
+
+/// The id out of an activation's launch string, `kaya=12`. A real app's own
+/// arguments ride beside it separated by `;`.
+fn notification_id_in_argument(argument: &str) -> Option<u64> {
+    argument.split(';').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key.trim() == NOTIFICATION_ARG_KEY).then(|| value.trim().parse().ok())?
+    })
+}
+
+/// The FIRST `<text>` of a notification's stored payload — its title, read
+/// back off the platform's own copy of the toast (N5) rather than out of a
+/// record kaya keeps.
+fn notification_payload_title(payload: &str) -> Option<String> {
+    let open = payload.find("<text")?;
+    let body = &payload[open + 5..];
+    let start = body.find('>')? + 1;
+    let end = body[start..].find("</text>")? + start;
+    Some(xml_unescape(&body[start..end]))
+}
+
+fn xml_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn xml_unescape(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+type NotifyJob = Box<dyn FnOnce() + Send>;
+
+/// THE ONE APARTMENT EVERY NOTIFICATION CALL RUNS IN, and it is its own — an
+/// MTA, unlike the file dialog's STA — for two reasons:
+///
+/// `can_post_notifications` runs on the process main thread BEFORE `run_core`
+/// has initialized COM at all (crates/kaya/src/lib.rs grants the capability
+/// bit before the app thread starts, so the guest's first `capabilities()`
+/// read is already the truth), and a notification call may not run on the XAML
+/// thread, which is an ASTA (`on_async`'s note).
+static NOTIFY_APARTMENT: OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<NotifyJob>>> =
+    OnceLock::new();
+
+fn notify_apartment() -> &'static std::sync::Mutex<std::sync::mpsc::Sender<NotifyJob>> {
+    NOTIFY_APARTMENT.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<NotifyJob>();
+        std::thread::Builder::new()
+            .name("kaya-notify".into())
+            .spawn(move || {
+                const COINIT_MULTITHREADED: u32 = 0x0;
+                unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED) };
+                // NO CoUninitialize, the dialog apartment's rule: this
+                // apartment ends with the process.
+                while let Ok(job) = rx.recv() {
+                    job();
+                }
+            })
+            .expect("failed to spawn the notification thread");
+        std::sync::Mutex::new(tx)
+    })
+}
+
+/// Run `f` on the notification apartment and wait for its answer. Never call
+/// this FROM the apartment — everything already running there calls the inner
+/// functions directly.
+///
+/// `None` IS A FINDING, NOT A SILENT SKIP: a notification platform that never
+/// answers would otherwise wedge whichever thread asked — the UI thread inside
+/// an apply, or the harness inside a poll — with nothing printed. The deadline
+/// turns that into one sentence and a refusal.
+fn on_notify<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let job: NotifyJob = Box::new(move || {
+        let _ = tx.send(f());
+    });
+    notify_apartment()
+        .lock()
+        .unwrap()
+        .send(job)
+        .expect("the notification apartment lives with the process");
+    match rx.recv_timeout(std::time::Duration::from_secs(15)) {
+        Ok(answer) => Some(answer),
+        Err(_) => {
+            eprintln!(
+                "kaya: the notification platform did not answer within 15s — the call is still \
+                 outstanding on the kaya-notify thread"
+            );
+            None
+        }
+    }
+}
+
+/// Where an activation is answered. The toast's own `Activated` handler fires
+/// on a platform thread that can never touch the UI thread's `CORE`, so the
+/// sink is held here rather than read off the core.
+static NOTIFY_SINK: std::sync::Mutex<Option<OccSink>> = std::sync::Mutex::new(None);
+/// Activations that arrived before the sink was installed.
+static NOTIFY_PENDING: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+/// The live toast objects, kept because the platform's `Activated` handler is
+/// the only real activation path and a dropped `ToastNotification` takes its
+/// event registration with it. Cleared when the id is answered or cancelled.
+static NOTIFY_LIVE: std::sync::Mutex<Vec<(u64, ToastNotification)>> =
+    std::sync::Mutex::new(Vec::new());
+/// Whether this process can post: one decision, made once, shared by the
+/// capability bit and by every post, so the two cannot disagree.
+static NOTIFY_READY: OnceLock<bool> = OnceLock::new();
+
+fn notification_sink_install(sink: OccSink) {
+    let pending = {
+        let mut slot = NOTIFY_SINK.lock().unwrap();
+        *slot = Some(sink);
+        std::mem::take(&mut *NOTIFY_PENDING.lock().unwrap())
+    };
+    for id in pending {
+        notification_answer(id, crate::protocol::NotificationOutcome::Activated);
+    }
+}
+
+fn notification_answer(id: u64, outcome: crate::protocol::NotificationOutcome) {
+    let sink = NOTIFY_SINK.lock().unwrap().clone();
+    match sink {
+        Some(sink) => sink.send(Occurrence::NotificationResult {
+            notification: crate::protocol::NotificationId(id),
+            outcome,
+        }),
+        None => NOTIFY_PENDING.lock().unwrap().push(id),
+    }
+}
+
+/// ONE ACTIVATION PATH. The platform's own `Activated` callback and the
+/// harness's `notification_activate` both enter here — N5's Windows carve-out
+/// is that no programmatic tap exists, so the verb calls this, one step past
+/// the tap, and never the emission below it.
+///
+/// Runs on a COM-initialized thread: the toast's platform thread, or the
+/// notification apartment.
+fn notification_activated(id: u64) {
+    // The system clears a tapped notification out of the shade, so the
+    // PLATFORM's list — which is what `expect_no_notification` reads — has to
+    // lose it here too.
+    notification_forget(id);
+    notification_answer(id, crate::protocol::NotificationOutcome::Activated);
+}
+
+/// The declared reverse-DNS id (docs/tasks-s3-plan.md N4), through the CORE's
+/// reader — the manifest is parsed in one place and the name is spelled in no
+/// guest and in no backend source. It is also the AUMID every call below
+/// names: the toast platform files a notification under an application id, and
+/// an unpackaged exe has to say which.
+fn declared_app_id() -> Result<String, String> {
+    crate::scene::declared_identity().map(|declaration| declaration.id)
+}
+
+fn app_aumid() -> windows_core::Result<HSTRING> {
+    declared_app_id().map(|id| HSTRING::from(id.as_str())).map_err(|why| {
+        windows_core::Error::new(windows_core::HRESULT(0x8000_4005u32 as i32), why)
+    })
+}
+
+fn toast_notifier() -> windows_core::Result<ToastNotifier> {
+    ToastNotificationManager::CreateToastNotifierWithId(&app_aumid()?)
+}
+
+/// ON THE APARTMENT: can this process post, and take the declared identity
+/// while deciding. MEASURED on the VM: `CreateToastNotifierWithId` succeeds for
+/// a declared id with no registry key of its own, and the toast it posts is in
+/// the platform's history a moment later.
+fn notification_ready() -> bool {
+    let id = match declared_app_id() {
+        Ok(id) => id,
+        Err(why) => {
+            // The core's own sentence, which names the file and the key: a
+            // Windows notification is filed under an application id and there
+            // is nothing to file this one under.
+            eprintln!("kaya: winui cannot post notifications — {why}");
+            return false;
+        }
+    };
+    // THE PROCESS WEARS THE DECLARED IDENTITY TOO (N4): the toast is filed
+    // under this id, so the taskbar grouping and the activation callback have
+    // to agree with it.
+    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+    if let Err(e) = unsafe {
+        windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+            windows_core::PCWSTR(wide.as_ptr()),
+        )
+    } {
+        eprintln!(
+            "kaya: winui could not take the declared app id {id:?} for this process: {}",
+            e.message()
+        );
+    }
+    match toast_notifier() {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!(
+                "kaya: winui cannot post notifications — no toast notifier for {id:?}: {}",
+                e.message()
+            );
+            false
+        }
+    }
+}
+
+/// Whether THIS process can post a local notification (docs/tasks-s3-plan.md
+/// N6). Called from crates/kaya/src/lib.rs before the app thread starts, so
+/// the guest's first `capabilities()` read is already the truth.
+pub(crate) fn can_post_notifications() -> bool {
+    on_notify(|| *NOTIFY_READY.get_or_init(notification_ready)).unwrap_or(false)
+}
+
+/// The toast payload. ToastGeneric with the title and the body, `launch`
+/// carrying the kaya id — every guest string escaped, since the older API has
+/// no builder and this markup is written by hand.
+fn toast_payload(spec: &crate::protocol::NotificationSpec) -> windows_core::Result<XmlDocument> {
+    let payload = format!(
+        "<toast launch=\"{}={}\"><visual><binding template=\"ToastGeneric\">\
+         <text>{}</text><text>{}</text></binding></visual></toast>",
+        NOTIFICATION_ARG_KEY,
+        spec.notification.0,
+        xml_escape(&spec.title),
+        xml_escape(&spec.body),
+    );
+    let document = XmlDocument::new()?;
+    document.LoadXml(&HSTRING::from(payload))?;
+    Ok(document)
+}
+
+/// Post now. ON THE APARTMENT.
+fn notification_show(spec: &crate::protocol::NotificationSpec) -> windows_core::Result<()> {
+    let id = spec.notification.0;
+    let toast = ToastNotification::CreateToastNotification(&toast_payload(spec)?)?;
+    toast.SetTag(&HSTRING::from(notification_tag(id)))?;
+    toast.SetGroup(&HSTRING::from(NOTIFICATION_GROUP))?;
+    // THE REAL TAP'S PATH, which no test on Windows can drive (N5): the
+    // platform calls this when the user clicks the banner or the shade row,
+    // and it enters the same funnel the harness verb does.
+    let activated = TypedEventHandler::<ToastNotification, windows_core::IInspectable>::new(
+        move |_, _| {
+            notification_activated(id);
+            Ok(())
+        },
+    );
+    toast.Activated(&activated)?;
+    toast_notifier()?.Show(&toast)?;
+    let mut live = NOTIFY_LIVE.lock().unwrap();
+    live.retain(|(held, _)| *held != id);
+    live.push((id, toast));
+    Ok(())
+}
+
+/// Post at a time (N2): the OS fires it, and this is the only scheduler
+/// Windows has.
+fn notification_schedule(spec: &crate::protocol::NotificationSpec) -> windows_core::Result<()> {
+    let when = DateTime { UniversalTime: filetime_of_unix_seconds(spec.at) };
+    let toast =
+        ScheduledToastNotification::CreateScheduledToastNotification(&toast_payload(spec)?, when)?;
+    toast.SetTag(&HSTRING::from(notification_tag(spec.notification.0)))?;
+    toast.SetGroup(&HSTRING::from(NOTIFICATION_GROUP))?;
+    toast_notifier()?.AddToSchedule(&toast)
+}
+
+/// `at`'s UNIX seconds as a `Windows.Foundation.DateTime`, which counts 100ns
+/// ticks from 1601-01-01 UTC. NO LANE CAN SEE THIS: every scene posts with
+/// `at` 0, so a wrong epoch would schedule a toast for 1601 or 2415 with every
+/// leg still green — hence the unit test, which runs on the guest.
+fn filetime_of_unix_seconds(at: u64) -> i64 {
+    const UNIX_EPOCH_IN_FILETIME_SECONDS: u64 = 11_644_473_600;
+    ((at + UNIX_EPOCH_IN_FILETIME_SECONDS) * 10_000_000) as i64
+}
+
+/// Withdraw a notification from BOTH platform stores: the history the shade
+/// reads, and the schedule (a cancel before the delivery time has nothing in
+/// history to remove). ON THE APARTMENT or on a platform callback thread.
+fn notification_forget(id: u64) {
+    let tag = notification_tag(id);
+    NOTIFY_LIVE.lock().unwrap().retain(|(held, _)| *held != id);
+    if let Ok(aumid) = app_aumid() {
+        if let Ok(history) = ToastNotificationManager::History() {
+            let _ = history.RemoveGroupedTagWithId(
+                &HSTRING::from(tag.as_str()),
+                &HSTRING::from(NOTIFICATION_GROUP),
+                &aumid,
+            );
+        }
+    }
+    let Ok(notifier) = toast_notifier() else { return };
+    let Ok(scheduled) = notifier.GetScheduledToastNotifications() else {
+        return;
+    };
+    for i in 0..scheduled.Size().unwrap_or(0) {
+        let Ok(toast) = scheduled.GetAt(i) else { continue };
+        if toast.Tag().map(|t| t.to_string()).ok().as_deref() == Some(tag.as_str()) {
+            let _ = notifier.RemoveFromSchedule(&toast);
+        }
+    }
+}
+
+/// The apply arm's whole body, ON THE APARTMENT: `Ok` is a post the platform
+/// took (nothing fires until the user activates it, N1), `Err` is the ruled
+/// `refused` outcome with the sentence naming what was actually measured.
+fn notification_post(spec: &crate::protocol::NotificationSpec) -> Result<(), String> {
+    if !*NOTIFY_READY.get_or_init(notification_ready) {
+        return Err("this process has no application id to post under".to_owned());
+    }
+    let posted = if spec.at == 0 {
+        notification_show(spec)
+    } else {
+        notification_schedule(spec)
+    };
+    posted.map_err(|e| {
+        format!(
+            "{} failed: {:#010x} {}",
+            if spec.at == 0 { "Show" } else { "AddToSchedule" },
+            e.code().0 as u32,
+            e.message()
+        )
+    })
+}
+
+/// The harness's platform read (N5): the title the PLATFORM holds under this
+/// id, out of the shade's own history for this app's id, never kaya's record
+/// of what it posted.
+fn delivered_notification_title(id: u64) -> Option<String> {
+    if !*NOTIFY_READY.get_or_init(notification_ready) {
+        return None;
+    }
+    let delivered = ToastNotificationManager::History()
+        .and_then(|history| history.GetHistoryWithId(&app_aumid()?))
+        .ok()?;
+    let tag = notification_tag(id);
+    let mut seen = Vec::new();
+    for i in 0..delivered.Size().ok()? {
+        let Ok(toast) = delivered.GetAt(i) else { continue };
+        let got = toast.Tag().map(|t| t.to_string()).unwrap_or_default();
+        if got != tag {
+            seen.push(got);
+            continue;
+        }
+        notification_miss_forget(id);
+        let payload = toast.Content().and_then(|xml| xml.GetXml()).ok()?.to_string();
+        return notification_payload_title(&payload);
+    }
+    notification_miss_census(id, &seen);
+    None
+}
+
+/// Misses waiting to be explained: the id, when it first missed, and whether
+/// its census has been printed.
+static NOTIFY_MISSES: std::sync::Mutex<Vec<(u64, std::time::Instant, bool)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn notification_miss_forget(id: u64) {
+    NOTIFY_MISSES.lock().unwrap().retain(|(held, _, _)| *held != id);
+}
+
+/// WHAT THE PLATFORM ACTUALLY HELD when the read missed. `expect_notification`
+/// can only say "the platform holds no delivered notification 12", which is
+/// the same sentence for an empty history, a tag that did not round-trip and
+/// an app id nothing was ever filed under — and the notify scene's first
+/// Windows run was exactly that question, costing a round trip to the VM
+/// (2026-09-07). ONCE per id and only after two seconds of missing, because
+/// the harness polls many times a second and the first miss is the normal
+/// case; it prints the id it asked under, the tag it wanted and every tag the
+/// history did hold, and nothing it did not measure.
+fn notification_miss_census(id: u64, seen: &[String]) {
+    let due = {
+        let mut misses = NOTIFY_MISSES.lock().unwrap();
+        match misses.iter_mut().find(|(held, _, _)| *held == id) {
+            Some((_, first, printed)) => {
+                let due = !*printed && first.elapsed() >= std::time::Duration::from_secs(2);
+                if due {
+                    *printed = true;
+                }
+                due
+            }
+            None => {
+                misses.push((id, std::time::Instant::now(), false));
+                false
+            }
+        }
+    };
+    if !due {
+        return;
+    }
+    eprintln!(
+        "KAYA_DIAG notification {id} not in the shade after 2s: app id {:?}, wanted tag {:?}, \
+         history holds {} notification(s) {seen:?}",
+        declared_app_id().unwrap_or_else(|why| why),
+        notification_tag(id),
+        seen.len(),
+    );
+}
+
+
+
+
+
+
+
+
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -21216,6 +21873,38 @@ mod tests {
             "bare, absent (note): {}",
             typeface_fallback_note("Segoe UI", TYPEFACE_ABSENT, &nobodys, "Segoe UI")
         );
+    }
+
+    /// The scheduled post's epoch, which NO LANE CAN SEE: every scene posts
+    /// with `at` 0, so a wrong epoch would file a toast for 1601 or 2415 and
+    /// every leg would stay green. 2001-09-09T01:46:40Z is UNIX 1_000_000_000
+    /// and 12644473600 seconds after 1601-01-01.
+    #[test]
+    fn a_scheduled_delivery_time_is_the_filetime_of_its_unix_second() {
+        assert_eq!(filetime_of_unix_seconds(0), 116_444_736_000_000_000);
+        assert_eq!(filetime_of_unix_seconds(1), 116_444_736_010_000_000);
+        assert_eq!(filetime_of_unix_seconds(1_000_000_000), 126_444_736_000_000_000);
+    }
+
+    /// The title goes into the platform's payload and comes back out of it
+    /// (N5's read is of the toast's own XML). The scene's title is plain
+    /// words, so nothing on any lane exercises the escaping this markup needs
+    /// — the older toast API has no builder and kaya writes the XML itself.
+    #[test]
+    fn a_notification_title_comes_back_out_of_the_payload_it_went_in_as() {
+        for title in ["Call the plumber", "Tom & Jerry <b>", "a \"quoted\" one", "it's here"] {
+            let payload = format!(
+                "<toast launch=\"kaya=1\"><visual><binding template=\"ToastGeneric\">\
+                 <text>{}</text><text>{}</text></binding></visual></toast>",
+                xml_escape(title),
+                xml_escape("body"),
+            );
+            assert_eq!(
+                notification_payload_title(&payload).as_deref(),
+                Some(title),
+                "payload {payload}"
+            );
+        }
     }
 
     /// The two keys this lowering must NEVER write (tools/check-accent.py holds

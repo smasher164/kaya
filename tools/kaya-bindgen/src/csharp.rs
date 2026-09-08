@@ -575,12 +575,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("        if ({accepted})"));
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
-    c.line("        if (kind == OccKindAlertResult)");
-    c.line("        {");
-    c.line("            // The alert's one answer: id + u32 choice (AlertChoice*).");
-    c.line("            payload = BitConverter.ToUInt32(rec, 16);");
-    c.line("            return true;");
-    c.line("        }");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!("        if (kind == OccKind{})", pascal(name)));
+        c.line("        {");
+        c.line("            // A request's one answer: id + the u32 code.");
+        c.line("            payload = BitConverter.ToUInt32(rec, 16);");
+        c.line("            return true;");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

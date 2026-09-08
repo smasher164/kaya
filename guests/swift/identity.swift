@@ -10,11 +10,9 @@ var status: KayaSignal!
 var draft = ""
 
 try app.build { tx in
-    // BEFORE THE FIRST MOUNT, per the declared-once wall; the close is safe
-    // once appIdentity has registered the bytes. `try` and no `catch`.
-    let icon = try KayaAsset("icons/kaya-mark.png")
-    tx.appIdentity("Aurora Notes", icon: icon)
-    icon.close()
+    // BEFORE THE FIRST MOUNT, per the declared-once wall. NO ARGUMENTS: the
+    // name, the mark and the id are the manifest's (docs/tasks-s3-plan.md N4).
+    tx.appIdentity()
 
     // ONE PROMOTED COMMAND, and not about commands: Windows mints its custom
     // caption from the first promotion, taking the system icon with it.

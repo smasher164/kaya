@@ -137,6 +137,17 @@ pub struct KayaHostApi {
     /// The alert's one answer (an ALERT_CHOICE value: an action index
     /// or the cancel sentinel). Retires the live alert id.
     pub emit_alert_result: extern "C" fn(u64, u32),
+    /// A notification's one answer (a NOTIFICATION_OUTCOME value):
+    /// activated by the user, or refused by the platform.
+    pub emit_notification_result: extern "C" fn(u64, u32),
+    /// The runtime capability bits this host measured (KAYA_CAP_NOTIFICATIONS
+    /// when the process is a bundle that can post), granted before the
+    /// guest's first read.
+    pub grant_capabilities: extern "C" fn(u64),
+    /// The capability word as the core holds it (static bits plus the
+    /// runtime ones it granted at startup) — the interpreter's ONE reading
+    /// of whether this process can post a notification.
+    pub capabilities: extern "C" fn() -> u64,
     /// The picker's answer: parallel arrays of `count` NUL-terminated
     /// paths and names, or count 0 for cancel.
     pub emit_file_dialog_result: unsafe extern "C" fn(
@@ -353,6 +364,9 @@ pub(crate) fn run() -> i32 {
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,
         emit_alert_result: crate::capi::kaya_emit_alert_result,
+        emit_notification_result: crate::capi::kaya_emit_notification_result,
+        grant_capabilities: crate::capi::kaya_grant_capabilities,
+        capabilities: crate::capi::kaya_capabilities,
         emit_file_dialog_result: crate::capi::kaya_emit_file_dialog_result,
         emit_save_dialog_result: crate::capi::kaya_emit_save_dialog_result,
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,

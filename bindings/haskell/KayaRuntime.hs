@@ -19,6 +19,7 @@ module KayaRuntime
     openPicked,
     capabilityBits,
     capAuxWindows,
+    capNotifications,
     UndoDelta (..),
     UndoText (..),
     UndoEntry (..),
@@ -92,6 +93,10 @@ capabilityBits = c_kaya_capabilities
 -- disagrees with crates/kaya/src/scene.rs.
 capAuxWindows :: Word64
 capAuxWindows = 1
+
+-- | The core's @KAYA_CAP_NOTIFICATIONS@, the same way.
+capNotifications :: Word64
+capNotifications = 2
 
 foreign import ccall unsafe "kaya_submit"
   c_kaya_submit :: Ptr Word8 -> CSize -> IO ()

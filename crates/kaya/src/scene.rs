@@ -44,6 +44,18 @@ pub(crate) fn answers() -> u64 {
 /// primary one. Clear on the phones, whose systems own surface geometry.
 pub(crate) const CAP_AUX_WINDOWS: u64 = 1;
 
+/// Local notifications: THIS process can post one the desktop will show
+/// and remember (docs/tasks-s3-plan.md N6). A RUNTIME fact — a bundle on
+/// macOS, a registry on Linux, a permission on the phones — so the
+/// presentation layer grants it through `kaya_grant_capabilities` before
+/// the guest's first read; the static word never carries it.
+pub(crate) const CAP_NOTIFICATIONS: u64 = 2;
+
+/// The bits the presentation layer granted at startup (CAP_NOTIFICATIONS is
+/// the only grantable one; `kaya_grant_capabilities` refuses others).
+pub(crate) static RUNTIME_CAPABILITIES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// THE HOST'S CAPABILITY WORD, AND THE ONLY PLACE THE PREDICATE IS WRITTEN:
 /// `kaya_capabilities()` returns this const and the walls below test it, so
 /// what a guest is told and what it walks into cannot disagree. `cfg!` rather
@@ -55,6 +67,104 @@ pub(crate) const CAPABILITIES: u64 = if cfg!(any(target_os = "ios", target_os = 
 } else {
     CAP_AUX_WINDOWS
 };
+
+/// The app's declaration, under the asset root the core already resolves
+/// (docs/tasks-s3-plan.md N4). The BUILD reads this file too — the APK's
+/// mipmap, the iOS bundle's icon, the mac wrapper's Info.plist — so one
+/// file says what the app is called, what stands for it and what it is
+/// registered as, and no guest spells any of the three.
+const IDENTITY_MANIFEST: &str = "identity.toml";
+
+/// The asset root's own directory COMPONENT, not its path: the
+/// manifest's `icon` is repo-relative because the build reads it as a
+/// path before any program has started, and the asset name is what
+/// follows that component. Spelled as a component on purpose — a second
+/// copy of the root's PATH is what tools/check-assets.py refuses, and
+/// there is one resolver (crates/kaya/src/assets.rs).
+const IDENTITY_ASSET_COMPONENT: &str = "/assets/";
+
+pub(crate) struct Declaration {
+    pub(crate) name: String,
+    pub(crate) icon: Vec<u8>,
+    /// The reverse-DNS id. Read and REQUIRED here so a manifest without
+    /// one is refused at the declaration rather than at the first post;
+    /// its consumers are the backends' own registration arms (GTK's
+    /// application id, WinUI's registration, the mac wrapper's bundle
+    /// identifier), which is why nothing in this crate reads it yet.
+    #[allow(dead_code)]
+    pub(crate) id: String,
+}
+
+/// One `key = "value"` per line, and a table header ends the top-level
+/// block — the whole grammar this file needs, so the core takes no TOML
+/// dependency for three strings. `[launch]`'s keys are that table's and
+/// are not answered here.
+fn manifest_value(text: &str, key: &str) -> Option<String> {
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            return None;
+        }
+        let Some((lhs, rhs)) = line.split_once('=') else { continue };
+        if lhs.trim() != key {
+            continue;
+        }
+        let rest = rhs.trim_start();
+        let quoted = rest.strip_prefix('"')?;
+        let end = quoted.find('"')?;
+        return Some(quoted[..end].to_owned());
+    }
+    None
+}
+
+/// The declared icon's ASSET NAME: what follows the asset root's own
+/// directory component in the repo-relative path the manifest declares.
+fn asset_name_of(declared: &str) -> Option<&str> {
+    if let Some((_, tail)) = declared.rsplit_once(IDENTITY_ASSET_COMPONENT) {
+        return Some(tail);
+    }
+    declared.strip_prefix(IDENTITY_ASSET_COMPONENT.trim_start_matches('/'))
+}
+
+/// What `app_identity()` sends, read HERE rather than passed in
+/// (docs/tasks-s3-plan.md N4). `Err` carries the whole sentence, which
+/// names the file: the caller does not compose prose.
+pub(crate) fn declared_identity() -> Result<Declaration, String> {
+    let bytes = crate::assets::read(IDENTITY_MANIFEST)?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "kaya: the asset \"{IDENTITY_MANIFEST}\" is not UTF-8, so the app's \
+             declaration cannot be read — it is `name`, `icon` and `id`, one \
+             `key = \"value\"` line each (docs/app-identity-plan.md ruling 4)"
+        )
+    })?;
+    let want = |key: &str| {
+        manifest_value(&text, key).filter(|v| !v.is_empty()).ok_or_else(|| {
+            format!(
+                "kaya: the asset \"{IDENTITY_MANIFEST}\" declares no `{key}` — an \
+                 app's identity is `name`, `icon` and `id` together, declared once \
+                 in that file and spelled in no guest, and app_identity() has \
+                 nothing to send without all three (docs/tasks-s3-plan.md N4)"
+            )
+        })
+    };
+    let name = want("name")?;
+    let icon_path = want("icon")?;
+    let id = want("id")?;
+    let icon_name = asset_name_of(&icon_path).ok_or_else(|| {
+        format!(
+            "kaya: the asset \"{IDENTITY_MANIFEST}\" declares icon \"{icon_path}\", \
+             which is not under an asset root — the build reads that path and this \
+             reads the same picture as an asset, so a mark outside the root has no \
+             asset name to open"
+        )
+    })?;
+    let icon = crate::assets::read(icon_name)?;
+    Ok(Declaration { name, icon, id })
+}
 
 /// A copy's key path, in hashable form (wire paths are Vec<Value>).
 type PathKey = Vec<Key>;
@@ -415,6 +525,8 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::CreateWindow { .. } => UndoVerdict::Refused("create_window"),
         TxOp::DestroyWindow { .. } => UndoVerdict::Refused("destroy_window"),
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
+        TxOp::ShowNotification(_) => UndoVerdict::Refused("show_notification"),
+        TxOp::CancelNotification(_) => UndoVerdict::Refused("cancel_notification"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
         TxOp::SetBrandAccent { .. } => UndoVerdict::Refused("set_brand_accent"),
@@ -2245,6 +2357,27 @@ impl Scene {
                         out.push(ApplyOp::PresentAlert(spec));
                     }
                 }
+                TxOp::ShowNotification(mut spec) => {
+                    // The shape alone is the core's; whether THIS host can post
+                    // (a bundle, a registry, a permission) is the presentation
+                    // layer's, answered with `refused` (docs/tasks-s3-plan.md).
+                    assert!(
+                        !spec.title.is_empty(),
+                        "kaya: show_notification {} has an empty title — the title is \
+                         what the platform shows",
+                        spec.notification.0
+                    );
+                    // An instant already past posts now: the schedulers disagree
+                    // about a past time (docs/tasks-s3-plan.md N2), so the core
+                    // decides it once.
+                    if spec.at != 0 && spec.at <= unix_now() {
+                        spec.at = 0;
+                    }
+                    out.push(ApplyOp::PostNotification(spec));
+                }
+                TxOp::CancelNotification(id) => {
+                    out.push(ApplyOp::CancelNotification(id));
+                }
                 TxOp::ShowFileDialog(spec) => {
                     assert!(
                         spec.window == crate::protocol::DEFAULT_WINDOW
@@ -2374,7 +2507,7 @@ impl Scene {
                     self.brand_typeface = Some(req.clone());
                     out.push(ApplyOp::SetTypeface(req));
                 }
-                TxOp::SetAppIdentity(identity) => {
+                TxOp::SetAppIdentity(sent) => {
                     // THE BRAND'S TWO WALLS, VERBATIM, and for the
                     // brand's reasons (docs/app-identity-plan.md I5).
                     assert!(
@@ -2391,33 +2524,39 @@ impl Scene {
                          once, BEFORE the first mount, so no backend ever shows an \
                          unidentified frame it must repaint"
                     );
-                    // A NAME IS HALF THE DECLARATION, so an empty one is
-                    // an author who filled no field: it would sail through
-                    // five lowerings and land as the launcher binary's
-                    // name, indistinguishable from an identity that
-                    // applied.
+                    // THE VALUES ARE THE MANIFEST'S, NEVER THE RECORD'S
+                    // (docs/tasks-s3-plan.md N4): `app_identity()` takes
+                    // no arguments in any of the nine, so a record
+                    // carrying values is a caller that never stopped
+                    // sending them — and one whose values would be
+                    // silently replaced here.
                     assert!(
-                        !identity.name.is_empty(),
-                        "kaya: set_app_identity has an empty name — an app that wants \
-                         the platform's own identity declares none at all \
-                         (docs/app-identity-plan.md)"
+                        sent.name.is_empty() && sent.icon.is_none(),
+                        "kaya: set_app_identity carries values ({:?}, icon {}) — the \
+                         name and the mark come from the asset root's own \
+                         {IDENTITY_MANIFEST}, so the declaration takes no arguments \
+                         and its slots ride empty (docs/tasks-s3-plan.md N4)",
+                        sent.name,
+                        if sent.icon.is_some() { "present" } else { "absent" }
                     );
-                    // AND SO IS THE MARK. An icon slot present but empty
-                    // is the silent fallback with a mask bit set: the
-                    // wire's decoder already refuses a blob the mask
-                    // denies, and this refuses the mirror.
-                    assert!(
-                        identity.icon.as_ref().is_none_or(|icon| !icon.0.is_empty()),
-                        "kaya: set_app_identity carries an EMPTY icon blob — every \
-                         platform's image decoder answers nothing for zero bytes and \
-                         every lowering would leave the platform's default in place, \
-                         which reads exactly like an icon that applied. Send the \
-                         picture's bytes or declare no icon"
-                    );
+                    // A NAME IS HALF THE DECLARATION AND THE MARK IS THE
+                    // OTHER, so the reader refuses a manifest missing
+                    // either: an empty one would sail through five
+                    // lowerings and land as the launcher binary's name,
+                    // and an empty picture reads exactly like an icon
+                    // that applied.
+                    let declared = match declared_identity() {
+                        Ok(declared) => declared,
+                        Err(sentence) => panic!("{sentence}"),
+                    };
                     // THE BYTES ARE NOT INSPECTED HERE, the typeface's
                     // rule verbatim. The observation reads the DECODED
                     // result, so bytes that are not an image fail exactly
                     // like an icon that never applied.
+                    let identity = crate::protocol::AppIdentity {
+                        name: declared.name,
+                        icon: Some(crate::protocol::Blob(declared.icon.into())),
+                    };
                     self.app_identity = Some(identity.clone());
                     out.push(ApplyOp::SetAppIdentity(identity));
                 }
@@ -7020,6 +7159,12 @@ pub(crate) struct WindowGeometry {
     pub(crate) corrected: bool,
 }
 
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8963,8 +9108,11 @@ mod tests {
         );
     }
 
-    fn identity(name: &str) -> crate::protocol::AppIdentity {
-        crate::protocol::AppIdentity { name: name.into(), icon: None }
+    /// What every binding's `app_identity()` sends: an empty record,
+    /// which the root fills from the asset root's own identity.toml
+    /// (docs/tasks-s3-plan.md N4).
+    fn identity() -> crate::protocol::AppIdentity {
+        crate::protocol::AppIdentity { name: String::new(), icon: None }
     }
 
     /// THE IDENTITY'S SET-ONCE WALLS — the brand's, verbatim, because it
@@ -8974,8 +9122,8 @@ mod tests {
     #[should_panic(expected = "set_app_identity called twice")]
     fn a_second_identity_write_dies() {
         let mut scene = Scene::new();
-        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Notes"))]);
-        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Sheets"))]);
+        scene.apply(vec![TxOp::SetAppIdentity(identity())]);
+        scene.apply(vec![TxOp::SetAppIdentity(identity())]);
     }
 
     #[test]
@@ -8986,43 +9134,88 @@ mod tests {
             TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
-        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Notes"))]);
+        scene.apply(vec![TxOp::SetAppIdentity(identity())]);
     }
 
-    /// AN EMPTY NAME IS THE SILENT-FALLBACK BUG SPELLED BY THE APP: it would
-    /// reach five lowerings and land as the launcher binary's own name.
+    /// A DECLARATION THAT CARRIES VALUES is a caller that never stopped
+    /// sending them — and one whose values the root would silently
+    /// replace with the manifest's. Refused by name.
     #[test]
-    #[should_panic(expected = "empty name")]
-    fn an_empty_identity_name_dies() {
-        let mut scene = Scene::new();
-        scene.apply(vec![TxOp::SetAppIdentity(identity(""))]);
-    }
-
-    /// AND THE MIRROR OF THE WIRE'S MASK RULE: a mask that promises a picture
-    /// over zero bytes. Every image decoder answers nothing for an empty
-    /// buffer, so every lowering would leave the platform's own icon in
-    /// place.
-    #[test]
-    #[should_panic(expected = "EMPTY icon blob")]
-    fn an_empty_identity_icon_dies() {
+    #[should_panic(expected = "set_app_identity carries values")]
+    fn an_identity_carrying_values_dies() {
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetAppIdentity(crate::protocol::AppIdentity {
             name: "Aurora Notes".into(),
-            icon: Some(crate::protocol::Blob(Vec::new().into())),
+            icon: None,
         })]);
     }
 
-    /// THE CLEAN PATH: one SetAppIdentity out, carrying the declaration
-    /// UNINSPECTED. The bytes are NOT a PNG on purpose — the platform's
-    /// decoder is the only party entitled to an opinion about them.
+    /// THE THREE KEYS ARE REQUIRED, and the refusal NAMES THE FILE: a
+    /// manifest without `id` is an app that cannot post a notification,
+    /// and the sentence has to send the reader to the declaration rather
+    /// than to the call, which carries nothing.
+    #[test]
+    fn a_manifest_missing_a_key_is_refused_by_name() {
+        for (missing, text) in [
+            ("name", "icon = \"bundle/assets/icons/a-mark.png\"\nid = \"dev.kaya.aurora\"\n"),
+            ("icon", "name = \"Aurora Notes\"\nid = \"dev.kaya.aurora\"\n"),
+            ("id", "name = \"Aurora Notes\"\nicon = \"bundle/assets/icons/a-mark.png\"\n"),
+            // `[launch]`'s keys are that table's; a top-level reader
+            // that fell through into it would answer `id` with a
+            // colour.
+            ("id", "name = \"A\"\nicon = \"bundle/assets/i.png\"\n[launch]\nid = \"no\"\n"),
+        ] {
+            assert!(
+                manifest_value(text, missing).is_none(),
+                "the manifest reader answered `{missing}` out of a file without it"
+            );
+        }
+        // The table's own key is a stand-in: check-app-identity C7 refuses
+        // a second copy of the declared launch colour anywhere in the tree.
+        let whole = "# a comment\nname = \"Aurora Notes\"\n\
+                     icon = \"bundle/assets/icons/a-mark.png\"\n\
+                     id = \"dev.kaya.aurora\"\n[launch]\nbackground = \"a colour\"\n";
+        assert_eq!(manifest_value(whole, "name").as_deref(), Some("Aurora Notes"));
+        assert_eq!(manifest_value(whole, "id").as_deref(), Some("dev.kaya.aurora"));
+        assert_eq!(
+            manifest_value(whole, "icon").as_deref(),
+            Some("bundle/assets/icons/a-mark.png")
+        );
+        assert_eq!(manifest_value(whole, "background"), None, "a table's key is not a top-level one");
+        // THE DERIVATION, not a prefix strip: the asset name is what
+        // follows the root's own directory component, so the manifest's
+        // repo path may live anywhere the build puts it.
+        assert_eq!(
+            asset_name_of("bundle/assets/icons/a-mark.png"),
+            Some("icons/a-mark.png")
+        );
+        assert_eq!(asset_name_of("assets/identity.toml"), Some("identity.toml"));
+        assert_eq!(asset_name_of("icons/a-mark.png"), None, "a path under no root has no asset name");
+    }
+
+    /// THE SHIPPED MANIFEST ANSWERS ALL THREE, read through the asset
+    /// root the lanes stage: the reader above proves the grammar, this
+    /// proves the file every platform actually gets.
+    #[test]
+    fn the_shipped_manifest_declares_all_three() {
+        let _serial = crate::assets::serially();
+        let declared = declared_identity().expect("the shipped identity.toml");
+        assert_eq!(declared.name, "Aurora Notes");
+        assert!(declared.id.contains('.'), "the id is reverse-DNS: {}", declared.id);
+        assert!(
+            declared.icon.starts_with(b"\x89PNG"),
+            "the mark's bytes came back from the asset root"
+        );
+    }
+
+    /// THE CLEAN PATH: one SetAppIdentity out, carrying the MANIFEST's
+    /// declaration. The bytes are not inspected between the file and the
+    /// platform's own decoder.
     #[test]
     fn the_identity_rides_out_uninspected() {
+        let _serial = crate::assets::serially();
         let mut scene = Scene::new();
-        let declared = crate::protocol::AppIdentity {
-            name: "Aurora Notes".into(),
-            icon: Some(crate::protocol::Blob(vec![1u8, 2, 3].into())),
-        };
-        let ops = scene.apply(vec![TxOp::SetAppIdentity(declared.clone())]);
+        let ops = scene.apply(vec![TxOp::SetAppIdentity(identity())]);
         let out: Vec<_> = ops
             .iter()
             .filter_map(|op| match op {
@@ -9031,7 +9224,13 @@ mod tests {
             })
             .collect();
         assert_eq!(out.len(), 1, "one SetAppIdentity out");
-        assert_eq!(out[0], &declared, "carried verbatim — the core inspects nothing");
+        let declared = declared_identity().expect("the shipped identity.toml");
+        assert_eq!(out[0].name, declared.name, "the manifest's name, not the record's");
+        assert_eq!(
+            out[0].icon.as_ref().expect("the mark rode out").0.as_ref(),
+            &declared.icon[..],
+            "the manifest's picture, byte for byte and uninspected"
+        );
     }
 
     #[test]
@@ -14529,5 +14728,30 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
         assert!(scene.grow_in_scroll_message().is_none());
+    }
+
+    fn notification(at: u64) -> TxOp {
+        TxOp::ShowNotification(crate::protocol::NotificationSpec {
+            notification: crate::protocol::NotificationId(7),
+            at,
+            title: "t".into(),
+            body: String::new(),
+        })
+    }
+
+    fn posted_at(ops: Vec<ApplyOp>) -> u64 {
+        match ops.as_slice() {
+            [ApplyOp::PostNotification(spec)] => spec.at,
+            other => panic!("expected one post, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_past_instant_posts_now_and_a_future_one_keeps_its_time() {
+        let mut scene = Scene::new();
+        assert_eq!(posted_at(scene.apply(vec![notification(0)])), 0);
+        assert_eq!(posted_at(scene.apply(vec![notification(1)])), 0);
+        let future = unix_now() + 3_600;
+        assert_eq!(posted_at(scene.apply(vec![notification(future)])), future);
     }
 }

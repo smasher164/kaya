@@ -42,7 +42,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # deploy-win twin of validate-mac's DEPTH_SCENES. The gates read
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
-DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks"]
+DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify"]
 
 
 def depth_scenes():
@@ -128,6 +128,11 @@ ORDER = [
      "windowed_rust",
      # The task manager: a RUST app by design (docs/tasks-plan.md §0).
      "tasks_rust",
+     # The notification conformance scene (docs/tasks-s3-plan.md N5). POOLED:
+     # the platform keys a notification by the AUMID `Register()` derives from
+     # the EXE, so this leg's history is its own, and a toast banner neither
+     # takes the foreground nor lands where a pooled window is tiled.
+     "notify_rust",
      "canvas_rust",
      "canvasdark_rust",
      "sizepolicy_rust",

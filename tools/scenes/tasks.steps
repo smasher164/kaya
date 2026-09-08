@@ -98,7 +98,34 @@ set_date date_picker@when 2026-09-08
 expect_ax date_picker@when "datetime/When: Tue 8 Sep"
 back
 expect_entries 0
+# A popped screen's widgets answer no target (harness.rs ExpectNoTarget).
+expect_no_target date_picker@when
 expect label@inbox_count "2 in inbox"
+
+# A reminder is a notification at its time (S3, N7): the observation is the
+# platform's own delivered list, clearing cancels it, and activating the
+# posted one opens that task's details.
+click button@details[t1]
+expect_entries 1
+# 08:30, not the bound default (09:00): the same value drives nothing.
+set_time time_picker@reminder 08:30
+expect_ax time_picker@reminder "datetime/Reminder: 08:30"
+expect_notification 1 "Buy milk"
+click button@clear_reminder
+expect_no_notification 1
+set_time time_picker@reminder 09:30
+expect_ax time_picker@reminder "datetime/Reminder: 09:30"
+expect_notification 2 "Buy milk"
+back
+expect_entries 0
+notification_activate 2
+expect_entries 1
+expect_href label@reference "https://example.com/tasks/t1"
+expect_no_notification 2
+click button@clear_reminder
+back
+expect_entries 0
+expect_no_target time_picker@reminder
 select_section 2
 expect label@upcoming_count "3 upcoming"
 expect label@caption[t2] "Tue 8 Sep"
@@ -148,12 +175,13 @@ expect_section_badge "Today" 0
 toggle checkbox@keep_done[s] on
 expect label@settings[s] "Week starts Sunday; badge hidden; completed stay in place"
 # The app-wide appearance (S2b): the select writes the window prop, and
-# the observation is the PLATFORM's own reading, never the prop. The lanes
-# are light hosts, so System reads back light.
+# the observation is the PLATFORM's own reading, never the prop. System is
+# the toolkit's override slot read back EMPTY — a host in Dark at night
+# reads dark there, which "light" would have called a failure.
 choose select@appearance[s] 2
 expect_appearance "dark"
 choose select@appearance[s] 0
-expect_appearance "light"
+expect_appearance "system"
 back
 expect_entries 0
 select_section 3

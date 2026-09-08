@@ -228494,6 +228494,1855 @@ pub mod Windows {
             }
         }
     }
+    pub mod Data {
+        pub mod Xml {
+            pub mod Dom {
+                windows_core::imp::define_interface!(
+                    IXmlDocument,
+                    IXmlDocument_Vtbl,
+                    0xf7f3a506_1e87_42d6_bcfb_b8c809fa5494
+                );
+                impl windows_core::RuntimeType for IXmlDocument {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlDocument_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    Doctype: usize,
+                    Implementation: usize,
+                    DocumentElement: usize,
+                    CreateElement: usize,
+                    CreateDocumentFragment: usize,
+                    CreateTextNode: usize,
+                    CreateComment: usize,
+                    CreateProcessingInstruction: usize,
+                    CreateAttribute: usize,
+                    CreateEntityReference: usize,
+                    GetElementsByTagName: usize,
+                    CreateCDataSection: usize,
+                    pub DocumentUri: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    CreateAttributeNS: usize,
+                    CreateElementNS: usize,
+                    GetElementById: usize,
+                    pub ImportNode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlDocumentIO,
+                    IXmlDocumentIO_Vtbl,
+                    0x6cd0e74e_ee65_4489_9ebf_ca43e87ba637
+                );
+                impl windows_core::RuntimeType for IXmlDocumentIO {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlDocumentIO_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub LoadXml: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LoadXmlWithSettings: usize,
+                    pub SaveToFileAsync: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlDocumentIO2,
+                    IXmlDocumentIO2_Vtbl,
+                    0x5d034661_7bd8_4ad5_9ebf_81e6347263b1
+                );
+                impl windows_core::RuntimeType for IXmlDocumentIO2 {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlDocumentIO2_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub LoadXmlFromBuffer: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LoadXmlFromBufferWithSettings: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlDocumentStatics,
+                    IXmlDocumentStatics_Vtbl,
+                    0x5543d254_d757_4b79_9539_232b18f50bf1
+                );
+                impl windows_core::RuntimeType for IXmlDocumentStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlDocumentStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub LoadFromUriAsync: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LoadFromUriWithSettingsAsync: usize,
+                    pub LoadFromFileAsync: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LoadFromFileWithSettingsAsync: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlNode,
+                    IXmlNode_Vtbl,
+                    0x1c741d59_2122_47d5_a856_83f3d4214875
+                );
+                impl windows_core::RuntimeType for IXmlNode {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                windows_core::imp::interface_hierarchy!(
+                    IXmlNode,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    IXmlNode,
+                    IXmlNodeSelector,
+                    IXmlNodeSerializer
+                );
+                impl IXmlNode {
+                    pub fn NodeValue(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NodeValue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetNodeValue<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetNodeValue)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn NodeName(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NodeName)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn ParentNode(&self) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ParentNode)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FirstChild(&self) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FirstChild)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LastChild(&self) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LastChild)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn PreviousSibling(&self) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviousSibling)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn NextSibling(&self) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NextSibling)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn HasChildNodes(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HasChildNodes)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn OwnerDocument(&self) -> windows_core::Result<XmlDocument> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).OwnerDocument)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn InsertBefore<P0, P1>(
+                        &self,
+                        newchild: P0,
+                        referencechild: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                        P1: windows_core::Param<IXmlNode>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InsertBefore)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                referencechild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ReplaceChild<P0, P1>(
+                        &self,
+                        newchild: P0,
+                        referencechild: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                        P1: windows_core::Param<IXmlNode>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ReplaceChild)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                referencechild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn RemoveChild<P0>(&self, childnode: P0) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RemoveChild)(
+                                windows_core::Interface::as_raw(this),
+                                childnode.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn AppendChild<P0>(&self, newchild: P0) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).AppendChild)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn CloneNode(&self, deep: bool) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CloneNode)(
+                                windows_core::Interface::as_raw(this),
+                                deep,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn NamespaceUri(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NamespaceUri)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LocalName(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LocalName)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Prefix(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Prefix)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Normalize(&self) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Normalize)(
+                                windows_core::Interface::as_raw(this),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn SetPrefix<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetPrefix)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn SelectSingleNode(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                    ) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSelector>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNode)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SelectSingleNodeNS<P1>(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                        namespaces: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P1: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSelector>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNodeNS)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                namespaces.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn GetXml(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetXml)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn InnerText(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InnerText)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn SetInnerText(
+                        &self,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInnerText)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                impl windows_core::RuntimeName for IXmlNode {
+                    const NAME: &'static str = "Windows.Data.Xml.Dom.IXmlNode";
+                }
+                pub trait IXmlNode_Impl: IXmlNodeSelector_Impl + IXmlNodeSerializer_Impl {
+                    fn NodeValue(&self) -> windows_core::Result<windows_core::IInspectable>;
+                    fn SetNodeValue(
+                        &self,
+                        value: windows_core::Ref<'_, windows_core::IInspectable>,
+                    ) -> windows_core::Result<()>;
+                    fn NodeName(&self) -> windows_core::Result<windows_core::HSTRING>;
+                    fn ParentNode(&self) -> windows_core::Result<IXmlNode>;
+                    fn FirstChild(&self) -> windows_core::Result<IXmlNode>;
+                    fn LastChild(&self) -> windows_core::Result<IXmlNode>;
+                    fn PreviousSibling(&self) -> windows_core::Result<IXmlNode>;
+                    fn NextSibling(&self) -> windows_core::Result<IXmlNode>;
+                    fn HasChildNodes(&self) -> windows_core::Result<bool>;
+                    fn OwnerDocument(&self) -> windows_core::Result<XmlDocument>;
+                    fn InsertBefore(
+                        &self,
+                        newChild: windows_core::Ref<'_, IXmlNode>,
+                        referenceChild: windows_core::Ref<'_, IXmlNode>,
+                    ) -> windows_core::Result<IXmlNode>;
+                    fn ReplaceChild(
+                        &self,
+                        newChild: windows_core::Ref<'_, IXmlNode>,
+                        referenceChild: windows_core::Ref<'_, IXmlNode>,
+                    ) -> windows_core::Result<IXmlNode>;
+                    fn RemoveChild(
+                        &self,
+                        childNode: windows_core::Ref<'_, IXmlNode>,
+                    ) -> windows_core::Result<IXmlNode>;
+                    fn AppendChild(
+                        &self,
+                        newChild: windows_core::Ref<'_, IXmlNode>,
+                    ) -> windows_core::Result<IXmlNode>;
+                    fn CloneNode(&self, deep: bool) -> windows_core::Result<IXmlNode>;
+                    fn NamespaceUri(&self) -> windows_core::Result<windows_core::IInspectable>;
+                    fn LocalName(&self) -> windows_core::Result<windows_core::IInspectable>;
+                    fn Prefix(&self) -> windows_core::Result<windows_core::IInspectable>;
+                    fn Normalize(&self) -> windows_core::Result<()>;
+                    fn SetPrefix(
+                        &self,
+                        value: windows_core::Ref<'_, windows_core::IInspectable>,
+                    ) -> windows_core::Result<()>;
+                }
+                impl IXmlNode_Vtbl {
+                    pub const fn new<Identity: IXmlNode_Impl, const OFFSET: isize>() -> Self {
+                        unsafe extern "system" fn NodeValue<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::NodeValue(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn SetNodeValue<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            value: *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                IXmlNode_Impl::SetNodeValue(this, core::mem::transmute_copy(&value))
+                                    .into()
+                            }
+                        }
+                        unsafe extern "system" fn NodeName<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::NodeName(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn ParentNode<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::ParentNode(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn FirstChild<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::FirstChild(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn LastChild<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::LastChild(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn PreviousSibling<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::PreviousSibling(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn NextSibling<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::NextSibling(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn HasChildNodes<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut bool,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::HasChildNodes(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn OwnerDocument<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::OwnerDocument(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn InsertBefore<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            newchild: *mut core::ffi::c_void,
+                            referencechild: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::InsertBefore(
+                                    this,
+                                    core::mem::transmute_copy(&newchild),
+                                    core::mem::transmute_copy(&referencechild),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn ReplaceChild<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            newchild: *mut core::ffi::c_void,
+                            referencechild: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::ReplaceChild(
+                                    this,
+                                    core::mem::transmute_copy(&newchild),
+                                    core::mem::transmute_copy(&referencechild),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn RemoveChild<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            childnode: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::RemoveChild(
+                                    this,
+                                    core::mem::transmute_copy(&childnode),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn AppendChild<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            newchild: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::AppendChild(
+                                    this,
+                                    core::mem::transmute_copy(&newchild),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn CloneNode<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            deep: bool,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::CloneNode(this, deep) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn NamespaceUri<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::NamespaceUri(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn LocalName<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::LocalName(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn Prefix<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNode_Impl::Prefix(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn Normalize<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                IXmlNode_Impl::Normalize(this).into()
+                            }
+                        }
+                        unsafe extern "system" fn SetPrefix<
+                            Identity: IXmlNode_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            value: *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                IXmlNode_Impl::SetPrefix(this, core::mem::transmute_copy(&value))
+                                    .into()
+                            }
+                        }
+                        Self {
+                            base__: windows_core::IInspectable_Vtbl::new::<
+                                Identity,
+                                IXmlNode,
+                                OFFSET,
+                            >(),
+                            NodeValue: NodeValue::<Identity, OFFSET>,
+                            SetNodeValue: SetNodeValue::<Identity, OFFSET>,
+                            NodeType: 0,
+                            NodeName: NodeName::<Identity, OFFSET>,
+                            ParentNode: ParentNode::<Identity, OFFSET>,
+                            ChildNodes: 0,
+                            FirstChild: FirstChild::<Identity, OFFSET>,
+                            LastChild: LastChild::<Identity, OFFSET>,
+                            PreviousSibling: PreviousSibling::<Identity, OFFSET>,
+                            NextSibling: NextSibling::<Identity, OFFSET>,
+                            Attributes: 0,
+                            HasChildNodes: HasChildNodes::<Identity, OFFSET>,
+                            OwnerDocument: OwnerDocument::<Identity, OFFSET>,
+                            InsertBefore: InsertBefore::<Identity, OFFSET>,
+                            ReplaceChild: ReplaceChild::<Identity, OFFSET>,
+                            RemoveChild: RemoveChild::<Identity, OFFSET>,
+                            AppendChild: AppendChild::<Identity, OFFSET>,
+                            CloneNode: CloneNode::<Identity, OFFSET>,
+                            NamespaceUri: NamespaceUri::<Identity, OFFSET>,
+                            LocalName: LocalName::<Identity, OFFSET>,
+                            Prefix: Prefix::<Identity, OFFSET>,
+                            Normalize: Normalize::<Identity, OFFSET>,
+                            SetPrefix: SetPrefix::<Identity, OFFSET>,
+                        }
+                    }
+                    pub fn matches(iid: &windows_core::GUID) -> bool {
+                        iid == &<IXmlNode as windows_core::Interface>::IID
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlNode_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub NodeValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetNodeValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    NodeType: usize,
+                    pub NodeName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ParentNode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    ChildNodes: usize,
+                    pub FirstChild: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub LastChild: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub PreviousSibling: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub NextSibling: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    Attributes: usize,
+                    pub HasChildNodes: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub OwnerDocument: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub InsertBefore: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ReplaceChild: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub RemoveChild: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub AppendChild: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub CloneNode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub NamespaceUri: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub LocalName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Prefix: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Normalize:
+                        unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                    pub SetPrefix: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlNodeSelector,
+                    IXmlNodeSelector_Vtbl,
+                    0x63dbba8b_d0db_4fe1_b745_f9433afdc25b
+                );
+                impl windows_core::RuntimeType for IXmlNodeSelector {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                windows_core::imp::interface_hierarchy!(
+                    IXmlNodeSelector,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl IXmlNodeSelector {
+                    pub fn SelectSingleNode(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                    ) -> windows_core::Result<IXmlNode> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNode)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SelectSingleNodeNS<P1>(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                        namespaces: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P1: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNodeNS)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                namespaces.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeName for IXmlNodeSelector {
+                    const NAME: &'static str = "Windows.Data.Xml.Dom.IXmlNodeSelector";
+                }
+                pub trait IXmlNodeSelector_Impl: windows_core::IUnknownImpl {
+                    fn SelectSingleNode(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                    ) -> windows_core::Result<IXmlNode>;
+                    fn SelectSingleNodeNS(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                        namespaces: windows_core::Ref<'_, windows_core::IInspectable>,
+                    ) -> windows_core::Result<IXmlNode>;
+                }
+                impl IXmlNodeSelector_Vtbl {
+                    pub const fn new<Identity: IXmlNodeSelector_Impl, const OFFSET: isize>() -> Self
+                    {
+                        unsafe extern "system" fn SelectSingleNode<
+                            Identity: IXmlNodeSelector_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            xpath: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNodeSelector_Impl::SelectSingleNode(
+                                    this,
+                                    core::mem::transmute(&xpath),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn SelectSingleNodeNS<
+                            Identity: IXmlNodeSelector_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            xpath: *mut core::ffi::c_void,
+                            namespaces: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNodeSelector_Impl::SelectSingleNodeNS(
+                                    this,
+                                    core::mem::transmute(&xpath),
+                                    core::mem::transmute_copy(&namespaces),
+                                ) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        Self {
+                            base__: windows_core::IInspectable_Vtbl::new::<
+                                Identity,
+                                IXmlNodeSelector,
+                                OFFSET,
+                            >(),
+                            SelectSingleNode: SelectSingleNode::<Identity, OFFSET>,
+                            SelectNodes: 0,
+                            SelectSingleNodeNS: SelectSingleNodeNS::<Identity, OFFSET>,
+                            SelectNodesNS: 0,
+                        }
+                    }
+                    pub fn matches(iid: &windows_core::GUID) -> bool {
+                        iid == &<IXmlNodeSelector as windows_core::Interface>::IID
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlNodeSelector_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub SelectSingleNode: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    SelectNodes: usize,
+                    pub SelectSingleNodeNS: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    SelectNodesNS: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IXmlNodeSerializer,
+                    IXmlNodeSerializer_Vtbl,
+                    0x5cc5b382_e6dd_4991_abef_06d8d2e7bd0c
+                );
+                impl windows_core::RuntimeType for IXmlNodeSerializer {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                windows_core::imp::interface_hierarchy!(
+                    IXmlNodeSerializer,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl IXmlNodeSerializer {
+                    pub fn GetXml(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetXml)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn InnerText(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InnerText)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn SetInnerText(
+                        &self,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInnerText)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                impl windows_core::RuntimeName for IXmlNodeSerializer {
+                    const NAME: &'static str = "Windows.Data.Xml.Dom.IXmlNodeSerializer";
+                }
+                pub trait IXmlNodeSerializer_Impl: windows_core::IUnknownImpl {
+                    fn GetXml(&self) -> windows_core::Result<windows_core::HSTRING>;
+                    fn InnerText(&self) -> windows_core::Result<windows_core::HSTRING>;
+                    fn SetInnerText(
+                        &self,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>;
+                }
+                impl IXmlNodeSerializer_Vtbl {
+                    pub const fn new<Identity: IXmlNodeSerializer_Impl, const OFFSET: isize>(
+                    ) -> Self {
+                        unsafe extern "system" fn GetXml<
+                            Identity: IXmlNodeSerializer_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNodeSerializer_Impl::GetXml(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn InnerText<
+                            Identity: IXmlNodeSerializer_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IXmlNodeSerializer_Impl::InnerText(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn SetInnerText<
+                            Identity: IXmlNodeSerializer_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            value: *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                IXmlNodeSerializer_Impl::SetInnerText(
+                                    this,
+                                    core::mem::transmute(&value),
+                                )
+                                .into()
+                            }
+                        }
+                        Self {
+                            base__: windows_core::IInspectable_Vtbl::new::<
+                                Identity,
+                                IXmlNodeSerializer,
+                                OFFSET,
+                            >(),
+                            GetXml: GetXml::<Identity, OFFSET>,
+                            InnerText: InnerText::<Identity, OFFSET>,
+                            SetInnerText: SetInnerText::<Identity, OFFSET>,
+                        }
+                    }
+                    pub fn matches(iid: &windows_core::GUID) -> bool {
+                        iid == &<IXmlNodeSerializer as windows_core::Interface>::IID
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IXmlNodeSerializer_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub GetXml: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub InnerText: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetInnerText: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct XmlDocument(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    XmlDocument,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    XmlDocument,
+                    IXmlNode,
+                    IXmlNodeSelector,
+                    IXmlNodeSerializer
+                );
+                impl XmlDocument {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            XmlDocument,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn DocumentUri(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DocumentUri)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn ImportNode<P0>(
+                        &self,
+                        node: P0,
+                        deep: bool,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ImportNode)(
+                                windows_core::Interface::as_raw(this),
+                                node.param().abi(),
+                                deep,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LoadXml(&self, xml: &windows_core::HSTRING) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IXmlDocumentIO>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).LoadXml)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xml),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn SaveToFileAsync<P0>(
+                        &self,
+                        file: P0,
+                    ) -> windows_core::Result<windows_future::IAsyncAction>
+                    where
+                        P0: windows_core::Param<super::super::super::Storage::IStorageFile>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlDocumentIO>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SaveToFileAsync)(
+                                windows_core::Interface::as_raw(this),
+                                file.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LoadXmlFromBuffer<P0>(&self, buffer: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::super::super::Storage::Streams::IBuffer>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlDocumentIO2>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).LoadXmlFromBuffer)(
+                                windows_core::Interface::as_raw(this),
+                                buffer.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn LoadFromUriAsync<P0>(
+                        uri: P0,
+                    ) -> windows_core::Result<windows_future::IAsyncOperation<XmlDocument>>
+                    where
+                        P0: windows_core::Param<super::super::super::Foundation::Uri>,
+                    {
+                        Self::IXmlDocumentStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LoadFromUriAsync)(
+                                windows_core::Interface::as_raw(this),
+                                uri.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn LoadFromFileAsync<P0>(
+                        file: P0,
+                    ) -> windows_core::Result<windows_future::IAsyncOperation<XmlDocument>>
+                    where
+                        P0: windows_core::Param<super::super::super::Storage::IStorageFile>,
+                    {
+                        Self::IXmlDocumentStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LoadFromFileAsync)(
+                                windows_core::Interface::as_raw(this),
+                                file.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn NodeValue(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NodeValue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetNodeValue<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetNodeValue)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn NodeName(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NodeName)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn ParentNode(&self) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ParentNode)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn FirstChild(&self) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FirstChild)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LastChild(&self) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LastChild)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn PreviousSibling(&self) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).PreviousSibling)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn NextSibling(&self) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NextSibling)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn HasChildNodes(&self) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HasChildNodes)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn OwnerDocument(&self) -> windows_core::Result<XmlDocument> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).OwnerDocument)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn InsertBefore<P0, P1>(
+                        &self,
+                        newchild: P0,
+                        referencechild: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                        P1: windows_core::Param<IXmlNode>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InsertBefore)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                referencechild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ReplaceChild<P0, P1>(
+                        &self,
+                        newchild: P0,
+                        referencechild: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                        P1: windows_core::Param<IXmlNode>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ReplaceChild)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                referencechild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn RemoveChild<P0>(&self, childnode: P0) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RemoveChild)(
+                                windows_core::Interface::as_raw(this),
+                                childnode.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn AppendChild<P0>(&self, newchild: P0) -> windows_core::Result<IXmlNode>
+                    where
+                        P0: windows_core::Param<IXmlNode>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).AppendChild)(
+                                windows_core::Interface::as_raw(this),
+                                newchild.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn CloneNode(&self, deep: bool) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CloneNode)(
+                                windows_core::Interface::as_raw(this),
+                                deep,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn NamespaceUri(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).NamespaceUri)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn LocalName(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).LocalName)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Prefix(&self) -> windows_core::Result<windows_core::IInspectable> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Prefix)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Normalize(&self) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Normalize)(
+                                windows_core::Interface::as_raw(this),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn SetPrefix<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNode>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetPrefix)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn SelectSingleNode(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                    ) -> windows_core::Result<IXmlNode> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSelector>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNode)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SelectSingleNodeNS<P1>(
+                        &self,
+                        xpath: &windows_core::HSTRING,
+                        namespaces: P1,
+                    ) -> windows_core::Result<IXmlNode>
+                    where
+                        P1: windows_core::Param<windows_core::IInspectable>,
+                    {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSelector>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).SelectSingleNodeNS)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(xpath),
+                                namespaces.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn GetXml(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetXml)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn InnerText(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InnerText)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn SetInnerText(
+                        &self,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IXmlNodeSerializer>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetInnerText)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                    fn IXmlDocumentStatics<
+                        R,
+                        F: FnOnce(&IXmlDocumentStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            XmlDocument,
+                            IXmlDocumentStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for XmlDocument {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IXmlDocument>();
+                }
+                unsafe impl windows_core::Interface for XmlDocument {
+                    type Vtable = <IXmlDocument as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IXmlDocument as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for XmlDocument {
+                    const NAME: &'static str = "Windows.Data.Xml.Dom.XmlDocument";
+                }
+                unsafe impl Send for XmlDocument {}
+                unsafe impl Sync for XmlDocument {}
+            }
+        }
+    }
     pub mod Foundation {
         #[repr(C)]
         #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -236990,6 +238839,1456 @@ pub mod Windows {
         impl windows_core::RuntimeType for Color {
             const SIGNATURE: windows_core::imp::ConstBuffer =
                 windows_core::imp::ConstBuffer::from_slice(b"struct(Windows.UI.Color;u1;u1;u1;u1)");
+        }
+        pub mod Notifications {
+            windows_core::imp::define_interface!(
+                IScheduledToastNotification,
+                IScheduledToastNotification_Vtbl,
+                0x79f577f8_0de7_48cd_9740_9b370490c838
+            );
+            impl windows_core::RuntimeType for IScheduledToastNotification {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IScheduledToastNotification_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Content: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub DeliveryTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::Foundation::DateTime,
+                )
+                    -> windows_core::HRESULT,
+                pub SnoozeInterval: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub MaximumSnoozeCount: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u32,
+                )
+                    -> windows_core::HRESULT,
+                pub SetId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Id: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IScheduledToastNotification2,
+                IScheduledToastNotification2_Vtbl,
+                0xa66ea09c_31b4_43b0_b5dd_7a40e85363b1
+            );
+            impl windows_core::RuntimeType for IScheduledToastNotification2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IScheduledToastNotification2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub SetTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Tag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetGroup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Group: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetSuppressPopup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    bool,
+                )
+                    -> windows_core::HRESULT,
+                pub SuppressPopup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IScheduledToastNotification3,
+                IScheduledToastNotification3_Vtbl,
+                0x98429e8b_bd32_4a3b_9d15_22aea49462a1
+            );
+            impl windows_core::RuntimeType for IScheduledToastNotification3 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IScheduledToastNotification3_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                NotificationMirroring: usize,
+                SetNotificationMirroring: usize,
+                pub RemoteId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetRemoteId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IScheduledToastNotification4,
+                IScheduledToastNotification4_Vtbl,
+                0x1d4761fd_bdef_4e4a_96be_0101369b58d2
+            );
+            impl windows_core::RuntimeType for IScheduledToastNotification4 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IScheduledToastNotification4_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub ExpirationTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetExpirationTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IScheduledToastNotificationFactory,
+                IScheduledToastNotificationFactory_Vtbl,
+                0xe7bed191_0bb9_4189_8394_31761b476fd7
+            );
+            impl windows_core::RuntimeType for IScheduledToastNotificationFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IScheduledToastNotificationFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateScheduledToastNotification:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        super::super::Foundation::DateTime,
+                        *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+                pub CreateScheduledToastNotificationRecurring:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        super::super::Foundation::DateTime,
+                        super::super::Foundation::TimeSpan,
+                        u32,
+                        *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotification,
+                IToastNotification_Vtbl,
+                0x997e2675_059e_4e60_8b06_1760917c8b80
+            );
+            impl windows_core::RuntimeType for IToastNotification {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotification_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Content: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetExpirationTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub ExpirationTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                Dismissed: usize,
+                pub RemoveDismissed:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                pub Activated: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
+                pub RemoveActivated:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                Failed: usize,
+                pub RemoveFailed:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotification2,
+                IToastNotification2_Vtbl,
+                0x9dfb9fd1_143a_490e_90bf_b9fba7132de7
+            );
+            impl windows_core::RuntimeType for IToastNotification2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotification2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub SetTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Tag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetGroup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Group: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetSuppressPopup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    bool,
+                )
+                    -> windows_core::HRESULT,
+                pub SuppressPopup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotification3,
+                IToastNotification3_Vtbl,
+                0x31e8aed8_8141_4f99_bc0a_c4ed21297d77
+            );
+            impl windows_core::RuntimeType for IToastNotification3 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotification3_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                NotificationMirroring: usize,
+                SetNotificationMirroring: usize,
+                pub RemoteId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetRemoteId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotification4,
+                IToastNotification4_Vtbl,
+                0x15154935_28ea_4727_88e9_c58680e2d118
+            );
+            impl windows_core::RuntimeType for IToastNotification4 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotification4_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                Data: usize,
+                SetData: usize,
+                Priority: usize,
+                SetPriority: usize,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotification6,
+                IToastNotification6_Vtbl,
+                0x43ebfe53_89ae_5c1e_a279_3aecfe9b6f54
+            );
+            impl windows_core::RuntimeType for IToastNotification6 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotification6_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub ExpiresOnReboot: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub SetExpiresOnReboot: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    bool,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationFactory,
+                IToastNotificationFactory_Vtbl,
+                0x04124b20_82c6_4229_b109_fd9ed4662b53
+            );
+            impl windows_core::RuntimeType for IToastNotificationFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateToastNotification: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationHistory,
+                IToastNotificationHistory_Vtbl,
+                0x5caddc63_01d3_4c97_986f_0533483fee14
+            );
+            impl windows_core::RuntimeType for IToastNotificationHistory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationHistory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub RemoveGroup: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub RemoveGroupWithId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub RemoveGroupedTagWithId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub RemoveGroupedTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub Remove: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Clear:
+                    unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+                pub ClearWithId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationHistory2,
+                IToastNotificationHistory2_Vtbl,
+                0x3bc3d253_2f31_4092_9129_8ad5abf067da
+            );
+            impl windows_core::RuntimeType for IToastNotificationHistory2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationHistory2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub GetHistory: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub GetHistoryWithId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationManagerStatics,
+                IToastNotificationManagerStatics_Vtbl,
+                0x50ac103f_d235_4598_bbef_98fe4d1a3ad4
+            );
+            impl windows_core::RuntimeType for IToastNotificationManagerStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationManagerStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateToastNotifier: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub CreateToastNotifierWithId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                GetTemplateContent: usize,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationManagerStatics2,
+                IToastNotificationManagerStatics2_Vtbl,
+                0x7ab93c52_0e48_4750_ba9d_1a4113981847
+            );
+            impl windows_core::RuntimeType for IToastNotificationManagerStatics2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationManagerStatics2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub History: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationManagerStatics4,
+                IToastNotificationManagerStatics4_Vtbl,
+                0x8f993fd3_e516_45fb_8130_398e93fa52c3
+            );
+            impl windows_core::RuntimeType for IToastNotificationManagerStatics4 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationManagerStatics4_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                GetForUser: usize,
+                ConfigureNotificationMirroring: usize,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotificationManagerStatics5,
+                IToastNotificationManagerStatics5_Vtbl,
+                0xd6f5f569_d40d_407c_8989_88cab42cfd14
+            );
+            impl windows_core::RuntimeType for IToastNotificationManagerStatics5 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotificationManagerStatics5_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                GetDefault: usize,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotifier,
+                IToastNotifier_Vtbl,
+                0x75927b93_03f3_41ec_91d3_6e5bac1b38e7
+            );
+            impl windows_core::RuntimeType for IToastNotifier {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotifier_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Show: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Hide: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Setting: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut NotificationSetting,
+                ) -> windows_core::HRESULT,
+                pub AddToSchedule: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub RemoveFromSchedule: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub GetScheduledToastNotifications:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotifier2,
+                IToastNotifier2_Vtbl,
+                0x354389c6_7c01_4bd5_9c20_604340cd2b74
+            );
+            impl windows_core::RuntimeType for IToastNotifier2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotifier2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                UpdateWithTagAndGroup: usize,
+                UpdateWithTag: usize,
+            }
+            windows_core::imp::define_interface!(
+                IToastNotifier3,
+                IToastNotifier3_Vtbl,
+                0xae75a04a_3b0c_51ad_b7e8_b08ab6052549
+            );
+            impl windows_core::RuntimeType for IToastNotifier3 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IToastNotifier3_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                ScheduledToastNotificationShowing: usize,
+                pub RemoveScheduledToastNotificationShowing:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct NotificationSetting(pub i32);
+            impl NotificationSetting {
+                pub const Enabled: Self = Self(0i32);
+                pub const DisabledForApplication: Self = Self(1i32);
+                pub const DisabledForUser: Self = Self(2i32);
+                pub const DisabledByGroupPolicy: Self = Self(3i32);
+                pub const DisabledByManifest: Self = Self(4i32);
+            }
+            impl windows_core::TypeKind for NotificationSetting {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for NotificationSetting {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Windows.UI.Notifications.NotificationSetting;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ScheduledToastNotification(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ScheduledToastNotification,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ScheduledToastNotification {
+                pub fn Content(
+                    &self,
+                ) -> windows_core::Result<super::super::Data::Xml::Dom::XmlDocument>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Content)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DeliveryTime(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::DateTime> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DeliveryTime)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SnoozeInterval(
+                    &self,
+                ) -> windows_core::Result<
+                    super::super::Foundation::IReference<super::super::Foundation::TimeSpan>,
+                > {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SnoozeInterval)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn MaximumSnoozeCount(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).MaximumSnoozeCount)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetId(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Id(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Id)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetTag(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetTag)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Tag(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Tag)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetGroup(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetGroup)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Group(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Group)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetSuppressPopup(&self, value: bool) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSuppressPopup)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SuppressPopup(&self) -> windows_core::Result<bool> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SuppressPopup)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RemoteId(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification3>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RemoteId)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetRemoteId(
+                    &self,
+                    value: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification3>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRemoteId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ExpirationTime(
+                    &self,
+                ) -> windows_core::Result<
+                    super::super::Foundation::IReference<super::super::Foundation::DateTime>,
+                > {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification4>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ExpirationTime)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetExpirationTime<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<
+                        super::super::Foundation::IReference<super::super::Foundation::DateTime>,
+                    >,
+                {
+                    let this =
+                        &windows_core::Interface::cast::<IScheduledToastNotification4>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetExpirationTime)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn CreateScheduledToastNotification<P0>(
+                    content: P0,
+                    deliverytime: super::super::Foundation::DateTime,
+                ) -> windows_core::Result<ScheduledToastNotification>
+                where
+                    P0: windows_core::Param<super::super::Data::Xml::Dom::XmlDocument>,
+                {
+                    Self::IScheduledToastNotificationFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateScheduledToastNotification)(
+                            windows_core::Interface::as_raw(this),
+                            content.param().abi(),
+                            deliverytime,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn CreateScheduledToastNotificationRecurring<P0>(
+                    content: P0,
+                    deliverytime: super::super::Foundation::DateTime,
+                    snoozeinterval: super::super::Foundation::TimeSpan,
+                    maximumsnoozecount: u32,
+                ) -> windows_core::Result<ScheduledToastNotification>
+                where
+                    P0: windows_core::Param<super::super::Data::Xml::Dom::XmlDocument>,
+                {
+                    Self::IScheduledToastNotificationFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this)
+                            .CreateScheduledToastNotificationRecurring)(
+                            windows_core::Interface::as_raw(this),
+                            content.param().abi(),
+                            deliverytime,
+                            snoozeinterval,
+                            maximumsnoozecount,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IScheduledToastNotificationFactory<
+                    R,
+                    F: FnOnce(&IScheduledToastNotificationFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ScheduledToastNotification,
+                        IScheduledToastNotificationFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for ScheduledToastNotification {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IScheduledToastNotification>(
+                    );
+            }
+            unsafe impl windows_core::Interface for ScheduledToastNotification {
+                type Vtable = <IScheduledToastNotification as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IScheduledToastNotification as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ScheduledToastNotification {
+                const NAME: &'static str = "Windows.UI.Notifications.ScheduledToastNotification";
+            }
+            unsafe impl Send for ScheduledToastNotification {}
+            unsafe impl Sync for ScheduledToastNotification {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ToastNotification(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ToastNotification,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ToastNotification {
+                pub fn Content(
+                    &self,
+                ) -> windows_core::Result<super::super::Data::Xml::Dom::XmlDocument>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Content)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetExpirationTime<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<
+                        super::super::Foundation::IReference<super::super::Foundation::DateTime>,
+                    >,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetExpirationTime)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ExpirationTime(
+                    &self,
+                ) -> windows_core::Result<
+                    super::super::Foundation::IReference<super::super::Foundation::DateTime>,
+                > {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ExpirationTime)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn RemoveDismissed(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveDismissed)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Activated<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<
+                        super::super::Foundation::TypedEventHandler<
+                            ToastNotification,
+                            windows_core::IInspectable,
+                        >,
+                    >,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Activated)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RemoveActivated(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveActivated)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveFailed(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveFailed)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetTag(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetTag)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Tag(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Tag)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetGroup(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetGroup)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Group(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Group)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetSuppressPopup(&self, value: bool) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSuppressPopup)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SuppressPopup(&self) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IToastNotification2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).SuppressPopup)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RemoteId(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = &windows_core::Interface::cast::<IToastNotification3>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RemoteId)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetRemoteId(
+                    &self,
+                    value: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotification3>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRemoteId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ExpiresOnReboot(&self) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IToastNotification6>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ExpiresOnReboot)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetExpiresOnReboot(&self, value: bool) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotification6>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetExpiresOnReboot)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn CreateToastNotification<P0>(
+                    content: P0,
+                ) -> windows_core::Result<ToastNotification>
+                where
+                    P0: windows_core::Param<super::super::Data::Xml::Dom::XmlDocument>,
+                {
+                    Self::IToastNotificationFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateToastNotification)(
+                            windows_core::Interface::as_raw(this),
+                            content.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IToastNotificationFactory<
+                    R,
+                    F: FnOnce(&IToastNotificationFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ToastNotification,
+                        IToastNotificationFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for ToastNotification {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IToastNotification>();
+            }
+            unsafe impl windows_core::Interface for ToastNotification {
+                type Vtable = <IToastNotification as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IToastNotification as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ToastNotification {
+                const NAME: &'static str = "Windows.UI.Notifications.ToastNotification";
+            }
+            unsafe impl Send for ToastNotification {}
+            unsafe impl Sync for ToastNotification {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ToastNotificationHistory(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ToastNotificationHistory,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ToastNotificationHistory {
+                pub fn RemoveGroup(
+                    &self,
+                    group: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveGroup)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(group),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveGroupWithId(
+                    &self,
+                    group: &windows_core::HSTRING,
+                    applicationid: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveGroupWithId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(group),
+                            core::mem::transmute_copy(applicationid),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveGroupedTagWithId(
+                    &self,
+                    tag: &windows_core::HSTRING,
+                    group: &windows_core::HSTRING,
+                    applicationid: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveGroupedTagWithId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(tag),
+                            core::mem::transmute_copy(group),
+                            core::mem::transmute_copy(applicationid),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveGroupedTag(
+                    &self,
+                    tag: &windows_core::HSTRING,
+                    group: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveGroupedTag)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(tag),
+                            core::mem::transmute_copy(group),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Remove(&self, tag: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Remove)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(tag),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Clear(&self) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Clear)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ClearWithId(
+                    &self,
+                    applicationid: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ClearWithId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(applicationid),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetHistory(
+                    &self,
+                ) -> windows_core::Result<windows_collections::IVectorView<ToastNotification>>
+                {
+                    let this = &windows_core::Interface::cast::<IToastNotificationHistory2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetHistory)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn GetHistoryWithId(
+                    &self,
+                    applicationid: &windows_core::HSTRING,
+                ) -> windows_core::Result<windows_collections::IVectorView<ToastNotification>>
+                {
+                    let this = &windows_core::Interface::cast::<IToastNotificationHistory2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetHistoryWithId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(applicationid),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for ToastNotificationHistory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IToastNotificationHistory>();
+            }
+            unsafe impl windows_core::Interface for ToastNotificationHistory {
+                type Vtable = <IToastNotificationHistory as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IToastNotificationHistory as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ToastNotificationHistory {
+                const NAME: &'static str = "Windows.UI.Notifications.ToastNotificationHistory";
+            }
+            pub struct ToastNotificationManager;
+            impl ToastNotificationManager {
+                pub fn CreateToastNotifier() -> windows_core::Result<ToastNotifier> {
+                    Self::IToastNotificationManagerStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateToastNotifier)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn CreateToastNotifierWithId(
+                    applicationid: &windows_core::HSTRING,
+                ) -> windows_core::Result<ToastNotifier> {
+                    Self::IToastNotificationManagerStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateToastNotifierWithId)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(applicationid),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn History() -> windows_core::Result<ToastNotificationHistory> {
+                    Self::IToastNotificationManagerStatics2(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).History)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IToastNotificationManagerStatics<
+                    R,
+                    F: FnOnce(&IToastNotificationManagerStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ToastNotificationManager,
+                        IToastNotificationManagerStatics,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IToastNotificationManagerStatics2<
+                    R,
+                    F: FnOnce(&IToastNotificationManagerStatics2) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ToastNotificationManager,
+                        IToastNotificationManagerStatics2,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IToastNotificationManagerStatics4<
+                    R,
+                    F: FnOnce(&IToastNotificationManagerStatics4) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ToastNotificationManager,
+                        IToastNotificationManagerStatics4,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IToastNotificationManagerStatics5<
+                    R,
+                    F: FnOnce(&IToastNotificationManagerStatics5) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        ToastNotificationManager,
+                        IToastNotificationManagerStatics5,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeName for ToastNotificationManager {
+                const NAME: &'static str = "Windows.UI.Notifications.ToastNotificationManager";
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct ToastNotifier(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                ToastNotifier,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ToastNotifier {
+                pub fn Show<P0>(&self, notification: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ToastNotification>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Show)(
+                            windows_core::Interface::as_raw(this),
+                            notification.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Hide<P0>(&self, notification: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ToastNotification>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Hide)(
+                            windows_core::Interface::as_raw(this),
+                            notification.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Setting(&self) -> windows_core::Result<NotificationSetting> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Setting)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn AddToSchedule<P0>(&self, scheduledtoast: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ScheduledToastNotification>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).AddToSchedule)(
+                            windows_core::Interface::as_raw(this),
+                            scheduledtoast.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveFromSchedule<P0>(&self, scheduledtoast: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ScheduledToastNotification>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveFromSchedule)(
+                            windows_core::Interface::as_raw(this),
+                            scheduledtoast.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetScheduledToastNotifications(
+                    &self,
+                ) -> windows_core::Result<
+                    windows_collections::IVectorView<ScheduledToastNotification>,
+                > {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetScheduledToastNotifications)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn RemoveScheduledToastNotificationShowing(
+                    &self,
+                    token: i64,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IToastNotifier3>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this)
+                            .RemoveScheduledToastNotificationShowing)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for ToastNotifier {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IToastNotifier>();
+            }
+            unsafe impl windows_core::Interface for ToastNotifier {
+                type Vtable = <IToastNotifier as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IToastNotifier as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for ToastNotifier {
+                const NAME: &'static str = "Windows.UI.Notifications.ToastNotifier";
+            }
+            unsafe impl Send for ToastNotifier {}
+            unsafe impl Sync for ToastNotifier {}
         }
         pub mod Xaml {
             pub mod Interop {

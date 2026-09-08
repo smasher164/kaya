@@ -499,10 +499,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     c.line(&format!("  if (![{accepted}].includes(kind)) return {{ kind, id: null, keys: [], payload: null }};"));
-    c.line("  if (kind === OCC_ALERT_RESULT) {");
-    c.line("    // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
-    c.line("    return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };");
-    c.line("  }");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!("  if (kind === OCC_{}) {{", name.to_uppercase()));
+        c.line("    // A request's one answer: id + the u32 code.");
+        c.line("    return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };");
+        c.line("  }");
+    }
     // The picker's answer: its own arm (python.rs carries the reasoning).
     c.line("  if (kind === OCC_FILE_DIALOG_RESULT) {");
     c.line("    const dialog = read_u64(buf, 8);");

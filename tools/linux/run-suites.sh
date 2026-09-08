@@ -38,8 +38,9 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # `on_tick` spelling (docs/deferred.md's size-policy entry); `dnd` waits
 # on the bindings sweep (docs/dnd-plan.md §4, §5 step 6); `sliders` waits
 # on the eight other bindings' `step`/`tick_spacing`/`on_commit` spelling
-# (docs/slider-plan.md §4, docs/deferred.md's sliders entry).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks"
+# (docs/slider-plan.md §4, docs/deferred.md's sliders entry); `notify`
+# waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3).
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -129,7 +130,11 @@ status=0
 #
 #   x11, every leg           WM_CLASS = the launcher binary's name
 #   wayland, no session bus  app_id   = the launcher binary's name
-#   wayland, a11y-leg.sh     app_id   = "dev.kaya.Milestone2"
+#   wayland, a11y-leg.sh     app_id   = the manifest's `id`
+#                                     (guests/assets/identity.toml,
+#                                      docs/tasks-s3-plan.md N4;
+#                                      "dev.kaya.Milestone2" until
+#                                      2026-09-07)
 #
 # because on Wayland a GtkApplication window's `app_id` comes from the
 # GApplication ID, and that startup path runs only over a session bus,
@@ -1096,9 +1101,31 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/windowed"
     # THE TASK MANAGER, a RUST app by design (docs/tasks-plan.md §0).
     # THROUGH a11y-leg.sh: the Details form's pickers are read by their
-    # accessible names (docs/forms-plan.md §4).
+    # accessible names (docs/forms-plan.md §4). AND THROUGH notify-leg.sh
+    # since S3: a reminder IS a notification (N7), so this leg needs the
+    # desktop half too — one session, made by the outer script and reused
+    # by the inner one.
     run "$proto" tasks-rust env KAYA_SELFTEST=tasks \
+        tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
+    # THE NOTIFICATION SCENE (docs/tasks-s3-plan.md §5), ONCE PER ROUTE the
+    # ruled floor allows — the portal, and GNOME's own org.gtk.Notifications
+    # — because kaya's decision has two arms and a lane that ran one of them
+    # twice would leave the other unmeasured. Each leg builds its own
+    # desktop: a session bus, the recording daemon that IS the platform's
+    # list here, the portal (or a bus without one), the two activation files
+    # and a recording session scheduler (tools/linux/notify-leg.sh).
+    run "$proto" notify-rust env KAYA_SELFTEST=notify \
+        tools/linux/notify-leg.sh portal "$CARGO_TARGET_DIR/debug/examples/notify"
+    run "$proto" notifygnome-rust env KAYA_SELFTEST=notify \
+        tools/linux/notify-leg.sh gnome "$CARGO_TARGET_DIR/debug/examples/notify"
+    # THE FLOOR'S OTHER HALF, which no shared scene can assert: on a bus
+    # with a plain freedesktop daemon and no registry at all, kaya posts
+    # NOTHING and answers the guest `refused` (docs/tasks-s3-plan.md §0's
+    # regime 3, ruled 2026-09-07). A witness leg with its own script, the
+    # dragwitness shape.
+    run "$proto" notifyrefusal-rust \
+        tools/linux/notify-refusal-leg.py "$CARGO_TARGET_DIR/debug/examples/notify"
     # THE ADAPTIVE SCENE (docs/adaptive-layout-plan.md §2).
     run "$proto" adaptive-rust env KAYA_SELFTEST=adaptive \
         "$CARGO_TARGET_DIR/debug/examples/adaptive"

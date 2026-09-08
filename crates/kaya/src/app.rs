@@ -584,6 +584,10 @@ pub struct Capabilities {
     /// [`Tx::create_window`] and mounting a root into it. Clear on iOS
     /// and Android, where `create_window` aborts at the root.
     pub aux_windows: bool,
+    /// This process can post a local notification the desktop will show
+    /// and remember (docs/tasks-s3-plan.md N6): a bundle on macOS, a
+    /// registry on Linux, a permission on the phones.
+    pub notifications: bool,
 }
 
 /// This host's capabilities. See [`Capabilities`].
@@ -593,6 +597,7 @@ pub fn capabilities() -> Capabilities {
     let bits = crate::capi::kaya_capabilities();
     Capabilities {
         aux_windows: bits & crate::capi::KAYA_CAP_AUX_WINDOWS != 0,
+        notifications: bits & crate::capi::KAYA_CAP_NOTIFICATIONS != 0,
     }
 }
 
@@ -1742,25 +1747,23 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
-    /// goes by and the picture that stands for it, as the bytes of one image
-    /// file. Set ONCE, before the first mount.
+    /// DECLARE the app's identity (docs/app-identity-plan.md,
+    /// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+    /// picture that stands for it and the reverse-DNS id it registers under
+    /// are the asset root's own `identity.toml`, which the BUILD already
+    /// reads, and the core reads the same file here. Set ONCE, before the
+    /// first mount.
     ///
-    /// ONE PICTURE, FIVE PLATFORMS — send a PNG. THE BYTES ARE NEVER
-    /// INSPECTED between here and the platform's own decoder, which is why
-    /// the identity scene reads what the DECODER produced.
-    pub fn app_identity(&mut self, name: &str, icon: &dyn BlobSource) {
+    /// STILL AN EXPLICIT CALL, because declaring an identity is a POLICY —
+    /// a declared app is a Dock app on macOS (ruling 1) — so an app that
+    /// wants the platform's own identity declares none at all.
+    ///
+    /// ONE PICTURE, FIVE PLATFORMS. THE BYTES ARE NEVER INSPECTED between
+    /// the manifest and the platform's own decoder, which is why the
+    /// identity scene reads what the DECODER produced.
+    pub fn app_identity(&mut self) {
         self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
-            name: name.to_string(),
-            icon: Some(crate::protocol::Blob(icon.blob_bytes())),
-        }));
-    }
-
-    /// The NAME-ONLY form. Its identity still reaches the surfaces a name
-    /// reaches, and every icon surface keeps the platform's own default.
-    pub fn app_identity_named(&mut self, name: &str) {
-        self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
-            name: name.to_string(),
+            name: String::new(),
             icon: None,
         }));
     }
@@ -1866,6 +1869,26 @@ impl<'a> Tx<'a> {
     /// to two actions (the platform floor); the cancel label is required and
     /// explicit, the slot every native dismissal resolves to. One alert may
     /// be live per process.
+    /// Post a local notification with a guest-chosen id (docs/tasks-s3-plan.md
+    /// N1): chain `.title()`, `.body()`, `.at()` and `.show()`.
+    pub fn show_notification(&mut self, notification: u64) -> NotificationRef<'_, 'a> {
+        NotificationRef {
+            tx: self,
+            spec: crate::protocol::NotificationSpec {
+                notification: crate::protocol::NotificationId(notification),
+                at: 0,
+                title: String::new(),
+                body: String::new(),
+            },
+        }
+    }
+
+    /// Withdraw a pending or delivered notification (a reminder that was
+    /// cleared). An unknown id is ignored by the platform.
+    pub fn cancel_notification(&mut self, notification: crate::protocol::NotificationId) {
+        self.ops.push(TxOp::CancelNotification(notification));
+    }
+
     pub fn show_alert(&mut self) -> AlertRef<'_, 'a> {
         let alert = self.ctx.alloc_alert();
         AlertRef {
@@ -3743,6 +3766,7 @@ pub struct Messages<M> {
     entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
+    notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
     /// Per-dialog, one-shot like an alert: the registration retires with
     /// the one result, so no guest ever inspects a dialog id.
     dialogs: RefCell<HashMap<u64, Box<dyn Fn(Vec<crate::protocol::PickedFile>) -> M>>>,
@@ -3787,6 +3811,7 @@ impl<M> Messages<M> {
             entry_popped: RefCell::new(HashMap::new()),
             section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
+            notifications: RefCell::new(HashMap::new()),
             dialogs: RefCell::new(HashMap::new()),
             clip_reads: RefCell::new(HashMap::new()),
             undone: RefCell::new(HashMap::new()),
@@ -4147,6 +4172,17 @@ impl<M> Messages<M> {
         self.alerts.borrow_mut().insert(alert.0, Box::new(f));
     }
 
+    /// Bind the one-shot result handler to a notification (the id
+    /// [`NotificationRef::show`] returned): activated, or refused. The
+    /// registration retires with the result (docs/tasks-s3-plan.md N1).
+    pub fn on_notification(
+        &self,
+        notification: crate::protocol::NotificationId,
+        f: impl Fn(crate::protocol::NotificationOutcome) -> M + 'static,
+    ) {
+        self.notifications.borrow_mut().insert(notification.0, Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a file-dialog request. Cancel
     /// arrives as an EMPTY list — no platform can confirm an empty
     /// selection, so it needs no sentinel.
@@ -4379,6 +4415,9 @@ impl<M> Messages<M> {
                 Occurrence::AlertResult { alert, choice } => {
                     // One-shot: the registration retires with the result.
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
+                }
+                Occurrence::NotificationResult { notification, outcome } => {
+                    self.notifications.borrow_mut().remove(&notification.0).map(|f| f(*outcome))
                 }
                 Occurrence::FileDialogResult { dialog, files } => {
                     // One-shot, exactly as the alert: the registration
@@ -4883,6 +4922,44 @@ impl AlertRef<'_, '_> {
         );
         let id = self.spec.alert;
         self.tx.ops.push(TxOp::ShowAlert(self.spec));
+        id
+    }
+}
+
+/// A local notification under construction (docs/tasks-s3-plan.md N1):
+/// the alert's chain without a window, and `at` for the OS scheduler.
+pub struct NotificationRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: crate::protocol::NotificationSpec,
+}
+
+impl NotificationRef<'_, '_> {
+    pub fn title(mut self, title: &str) -> Self {
+        self.spec.title = title.to_owned();
+        self
+    }
+
+    pub fn body(mut self, body: &str) -> Self {
+        self.spec.body = body.to_owned();
+        self
+    }
+
+    /// When the platform fires it: a UNIX time in seconds, handed to the OS
+    /// scheduler where one exists. Unset (0) posts now.
+    pub fn at(mut self, unix_seconds: u64) -> Self {
+        self.spec.at = unix_seconds;
+        self
+    }
+
+    /// Send the request, returning its id — the handle
+    /// [`Messages::on_notification`] binds the one-shot result handler to.
+    pub fn show(self) -> crate::protocol::NotificationId {
+        assert!(
+            !self.spec.title.is_empty(),
+            "kaya: a notification needs a title — call .title(text) before .show()"
+        );
+        let id = self.spec.notification;
+        self.tx.ops.push(TxOp::ShowNotification(self.spec));
         id
     }
 }
@@ -6914,17 +6991,14 @@ mod tests {
         assert_ne!(blob.0.as_ptr(), guest_owns, "a guest's own bytes must be copied, not aliased");
         assert_eq!(&blob.0[..], &owned[..], "the copy is not the bytes it was made from");
 
-        // The icon consumer takes the same trait, so both spellings fit
-        // there too — the one call that would not compile if
-        // app_identity had kept its `&[u8]`.
-        tx.app_identity("Aurora Notes", &font);
+        // THE IDENTITY CARRIES NOTHING NOW (docs/tasks-s3-plan.md N4):
+        // the declaration is an empty record, and the root fills it from
+        // the asset root's own identity.toml.
+        tx.app_identity();
         let TxOp::SetAppIdentity(identity) = tx.ops.last().expect("the identity op queued") else {
             panic!("app_identity lowered to something that is not an identity");
         };
-        assert_eq!(
-            identity.icon.as_ref().expect("the icon rode along").0.as_ptr(),
-            read_into
-        );
+        assert!(identity.name.is_empty() && identity.icon.is_none());
     }
 
     /// A MISS PANICS WITH THE CORE'S SENTENCE, byte for byte. The
@@ -7485,6 +7559,7 @@ mod tests {
                     | Occurrence::CloseRequested { .. }
                     | Occurrence::WindowClosed { .. }
                     | Occurrence::AlertResult { .. }
+                    | Occurrence::NotificationResult { .. }
                     | Occurrence::FileDialogResult { .. }
                     | Occurrence::EntryPopped { .. }
                     | Occurrence::BackRequested { .. }

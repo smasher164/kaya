@@ -23,7 +23,18 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
 fi
 export XDG_RUNTIME_DIR="$kaya_run_dir"
 
-eval "$(dbus-launch --sh-syntax)"
+# A BUS THIS LEG ALREADY HAS IS THE ONE TO USE: a leg that needs BOTH the
+# accessibility tree and a notification registry (the task manager, whose
+# reminders are notifications — docs/tasks-s3-plan.md N7) runs this inside
+# tools/linux/notify-leg.sh, which has already made the session and put the
+# desktop's own daemons on it. Launching a second bus here would hand the
+# guest one where nothing it needs is running. Nothing else in the lane
+# exports a session bus, so every other leg still gets its own.
+kaya_own_bus=0
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    eval "$(dbus-launch --sh-syntax)"
+    kaya_own_bus=1
+fi
 export GTK_A11Y=atspi
 /usr/libexec/at-spi-bus-launcher --launch-immediately &
 launcher=$!
@@ -48,6 +59,8 @@ done
 status=$?
 
 kill "$launcher" 2>/dev/null
-[ -n "${DBUS_SESSION_BUS_PID:-}" ] && kill "$DBUS_SESSION_BUS_PID" 2>/dev/null
+if [ "$kaya_own_bus" = 1 ] && [ -n "${DBUS_SESSION_BUS_PID:-}" ]; then
+    kill "$DBUS_SESSION_BUS_PID" 2>/dev/null
+fi
 rm -rf "$kaya_run_dir"
 exit "$status"

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc80ccf259104a87aL
+let spec_hash = 0x21005150bc085070L
 
 let value_bool = 1
 let value_i64 = 2
@@ -159,6 +159,8 @@ let appearance_dark = 2
 let alert_choice_action0 = 0
 let alert_choice_action1 = 1
 let alert_choice_cancel = 4294967295
+let notification_outcome_activated = 0
+let notification_outcome_refused = 1
 let file_mode_read = 0
 let file_mode_write = 1
 let file_mode_read_write = 2
@@ -265,6 +267,8 @@ let tx_kind_create_breakpoint = 48
 let tx_kind_set_drag_source = 49
 let tx_kind_set_drop_target = 50
 let tx_kind_set_reorderable = 51
+let tx_kind_show_notification = 52
+let tx_kind_cancel_notification = 53
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -331,6 +335,7 @@ let occ_kind_drag_ended = 23
 let occ_kind_date_changed = 24
 let occ_kind_time_changed = 25
 let occ_kind_value_committed = 26
+let occ_kind_notification_result = 27
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -749,6 +754,19 @@ let tx_set_reorderable container enabled =
       Buffer.add_int64_le b container;
       Buffer.add_int32_le b (Int32.of_int enabled);
       Buffer.add_int32_le b 0l)
+
+(* Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. *)
+let tx_show_notification notification at title body =
+  finish tx_kind_show_notification (fun b ->
+      Buffer.add_int64_le b notification;
+      Buffer.add_int64_le b at;
+      encode_value b title;
+      encode_value b body)
+
+(* Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored. *)
+let tx_cancel_notification notification =
+  finish tx_kind_cancel_notification (fun b ->
+      Buffer.add_int64_le b notification)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -2040,13 +2058,17 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
     if kind = occ_kind_alert_result
     then
-      (* The alert's one answer: id + u32 choice (the alert_choice values). *)
+      (* A request's one answer: id + the u32 code. *)
+      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
+    else if kind = occ_kind_notification_result
+    then
+      (* A request's one answer: id + the u32 code. *)
       Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None, None, [])
     else if kind = occ_kind_file_dialog_result
     then begin

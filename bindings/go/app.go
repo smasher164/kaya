@@ -98,13 +98,19 @@ type Caps struct {
 	// The host can materialize a surface beside the primary one. False
 	// on iOS and Android, where CreateWindow aborts at the root.
 	AuxWindows bool
+	// This process can post a local notification the desktop will show
+	// (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it.
+	Notifications bool
 }
 
 // Capabilities answers what this host can do. Constant for the life of
 // the process, so asking once and remembering is fine.
 func Capabilities() Caps {
 	bits := capabilityBits()
-	return Caps{AuxWindows: bits&capAuxWindows != 0}
+	return Caps{
+		AuxWindows:    bits&capAuxWindows != 0,
+		Notifications: bits&capNotifications != 0,
+	}
 }
 
 // App owns the id counters, the dispatch tables and the collection
@@ -137,6 +143,9 @@ type App struct {
 	backRequested  map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
+	// One-shot, keyed by the GUEST's notification id (the alert's
+	// grammar; many may be live at once).
+	notifications  map[uint64]func(*Tx, uint32)
 	fileDialogs    map[uint64]func(*Tx, []PickedFile)
 	clipboardReads map[uint64]func(*Tx, Representation)
 	widgetPastes   map[uint64]func(*Tx, Representation)
@@ -210,6 +219,7 @@ func NewApp() *App {
 		sortHandlers:   make(map[uint64]func(*Tx, uint32)),
 		nodeSorts:      make(map[uint64]func(*Tx, []any, uint32)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
+		notifications:  make(map[uint64]func(*Tx, uint32)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
 		widgetPastes:   make(map[uint64]func(*Tx, Representation)),
@@ -2227,36 +2237,20 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	tx.emit(TxSetBrandTypeface(mask, family, platforms, font))
 }
 
-// AppIdentity DECLARES the app's identity (docs/app-identity-plan.md):
-// the name it goes by and the picture that stands for it — the same
-// bytes at run time, the same FILE at build time, so send a PNG. SET
-// ONCE, BEFORE THE FIRST MOUNT; the root refuses a second write, a late
-// one and an empty name. THE BYTES ARE NEVER INSPECTED here, so
-// non-image bytes leave every platform's default in place.
-func (tx *Tx) AppIdentity(name string, icon []byte) {
-	// The bytes go to the core ONCE, by handle, exactly as an image's
-	// do — the record carries the handle, never the picture itself.
-	tx.emit(TxSetAppIdentity(1, name, BlobHandle(RegisterBlob(icon))))
-}
-
-// AppIdentityAsset is AppIdentity with the mark THE APP'S OWN BUILD
-// SHIPPED, opened by name through tx.Asset: the same declaration by a
-// different route, and the picture never enters Go.
-func (tx *Tx) AppIdentityAsset(name string, icon *Asset) {
-	if icon == nil {
-		panic("kaya: AppIdentityAsset got no asset — open one with tx.Asset(\"icons/...\"), or declare the name alone with AppIdentityNamed")
-	}
-	tx.emit(TxSetAppIdentity(1, name, BlobHandle(icon.blobHandle())))
-}
-
-// AppIdentityNamed is the NAME-ONLY form. Its identity still reaches
-// every surface a name reaches, and every icon surface keeps the
-// platform's own default, honestly and visibly.
-func (tx *Tx) AppIdentityNamed(name string) {
-	// The icon slot is written either way — an absent icon rides as an
-	// empty Str — so the record's field count never varies with the
-	// payload (the brand mask's discipline, verbatim).
-	tx.emit(TxSetAppIdentity(0, name, ""))
+// AppIdentity DECLARES the app's identity (docs/app-identity-plan.md,
+// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+// picture that stands for it and the reverse-DNS id it registers under
+// are the asset root's own identity.toml, which the BUILD already reads,
+// and the core reads the same file. SET ONCE, BEFORE THE FIRST MOUNT.
+//
+// STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+// declared app is a Dock app on macOS (ruling 1), so an app that wants
+// the platform's own identity declares none at all.
+func (tx *Tx) AppIdentity() {
+	// THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+	// identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+	// the icon slot is written either way, as an empty Str.
+	tx.emit(TxSetAppIdentity(0, "", ""))
 }
 
 // Window is the prop chain for an existing window (0 = the primary).
@@ -2412,6 +2406,71 @@ func (r AlertRef) Show() uint64 {
 	r.tx.emit(TxShowAlert(
 		r.window, r.id, uint32(len(r.actions)),
 		r.title, r.message, action0, action1, r.cancel))
+	return r.id
+}
+
+// ShowNotification posts a local notification with a GUEST-CHOSEN id
+// (docs/tasks-s3-plan.md N1, N2): the alert's chain without a window,
+// ending in Show. The result handler rides the REQUEST and retires with
+// its one answer — Activated when the user opened it, Refused when the
+// platform would not post it. Many may be live at once.
+func (tx *Tx) ShowNotification(notification uint64) NotificationRef {
+	return NotificationRef{tx: tx, id: notification}
+}
+
+// CancelNotification withdraws a pending or delivered notification (a
+// reminder that was cleared). No answer follows; an unknown id is
+// ignored.
+func (tx *Tx) CancelNotification(notification uint64) {
+	tx.emit(TxCancelNotification(notification))
+}
+
+// NotificationRef accumulates the one atomic SHOW_NOTIFICATION record;
+// nothing is sent until Show, exactly like AlertRef.
+type NotificationRef struct {
+	tx       *Tx
+	id       uint64
+	at       uint64
+	title    string
+	body     string
+	onResult func(*Tx, uint32)
+}
+
+func (r NotificationRef) Title(title string) NotificationRef {
+	r.title = title
+	return r
+}
+
+func (r NotificationRef) Body(body string) NotificationRef {
+	r.body = body
+	return r
+}
+
+// At is when the platform fires it: a UNIX time in seconds, handed to
+// the OS scheduler where one exists. Unset (0) posts now.
+func (r NotificationRef) At(unixSeconds uint64) NotificationRef {
+	r.at = unixSeconds
+	return r
+}
+
+// OnResult binds the one-shot result handler to THIS request: outcome
+// is NotificationOutcomeActivated or NotificationOutcomeRefused. The
+// registration retires with the result.
+func (r NotificationRef) OnResult(fn func(*Tx, uint32)) NotificationRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id; the one answer arrives at
+// the OnResult handler.
+func (r NotificationRef) Show() uint64 {
+	if r.title == "" {
+		panic("kaya: a notification needs a title — call Title(text) before Show()")
+	}
+	if r.onResult != nil {
+		r.tx.app.notifications[r.id] = r.onResult
+	}
+	r.tx.emit(TxShowNotification(r.id, r.at, r.title, r.body))
 	return r.id
 }
 
@@ -4967,6 +5026,12 @@ func (a *App) Serve() {
 			// One-shot: the registration retires with the result.
 			if fn := a.alerts[id]; fn != nil {
 				delete(a.alerts, id)
+				a.dispatch(func(tx *Tx) { fn(tx, choice) })
+			}
+		case kind == occNotificationResult:
+			// One-shot: the registration retires with the result.
+			if fn := a.notifications[id]; fn != nil {
+				delete(a.notifications, id)
 				a.dispatch(func(tx *Tx) { fn(tx, choice) })
 			}
 		case kind == occClipboardResult:

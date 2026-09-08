@@ -81,6 +81,8 @@ pub fn attach(
         return PRESENT_GUEST;
     }
 
+    grant_measured_capabilities(&mut env, &activity);
+
     let (occ_tx, occ_rx) = mpsc::channel();
     let ctx = AppCtx::new(occ_rx, crate::capi::presentation_tx_sender(), occ_tx.clone());
     std::thread::Builder::new()
@@ -91,6 +93,34 @@ pub fn attach(
     register_present_natives(&mut env)
         .expect("kaya: registering KayaPresent natives failed");
     PRESENT_GUEST
+}
+
+/// THE RUNTIME CAPABILITY BITS, MEASURED BEFORE ANY GUEST CAN ASK
+/// (docs/tasks-s3-plan.md N6). Here and not in `KayaCompose.mount`: the
+/// guest thread is spawned below and reads `capabilities()` in its first
+/// build closure, so a grant on the mount path races it. Silent on
+/// failure — a process that cannot ask simply posts nothing.
+fn grant_measured_capabilities(env: &mut JNIEnv, activity: &JObject) {
+    let Ok(class) = env.find_class("dev/kaya/KayaCompose") else {
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        return;
+    };
+    let called = env.call_static_method(
+        class,
+        "measuredCapabilities",
+        "(Landroid/content/Context;)J",
+        &[activity.into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return;
+    }
+    if let Ok(bits) = called.and_then(|v| v.j()) {
+        crate::capi::kaya_grant_capabilities(bits as u64);
+    }
 }
 
 /// Attach when the JVM app itself is the guest: the app's own thread
@@ -112,6 +142,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     if !claim_attach() {
         return;
     }
+    grant_measured_capabilities(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
     register_present_natives(&mut env)
@@ -366,6 +397,17 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "emitAlertResult".into(),
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_alert_result as *mut _,
+            },
+            // Local notifications (docs/tasks-s3-plan.md N1, N6).
+            NativeMethod {
+                name: "emitNotificationResult".into(),
+                sig: "(JI)V".into(),
+                fn_ptr: present_emit_notification_result as *mut _,
+            },
+            NativeMethod {
+                name: "grantCapabilities".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_grant_capabilities as *mut _,
             },
             NativeMethod {
                 name: "emitFileDialogResult".into(),
@@ -956,6 +998,27 @@ extern "system" fn present_emit_value_committed(
         .convert_byte_array(&tag)
         .expect("kaya: reading the slider tag failed");
     unsafe { crate::capi::kaya_emit_value_committed(bytes.as_ptr(), bytes.len(), value) };
+}
+
+/// KayaPresent.emitNotificationResult: a notification's one answer
+/// (activated 0, refused 1).
+extern "system" fn present_emit_notification_result(
+    _env: JNIEnv,
+    _class: JClass,
+    notification: jlong,
+    outcome: jint,
+) {
+    crate::capi::kaya_emit_notification_result(notification as u64, outcome as u32);
+}
+
+/// KayaPresent.grantCapabilities: the runtime bits this host measured,
+/// granted again when a permission the user grants mid-run moves them.
+extern "system" fn present_grant_capabilities(
+    _env: JNIEnv,
+    _class: JClass,
+    bits: jlong,
+) {
+    crate::capi::kaya_grant_capabilities(bits as u64);
 }
 
 /// KayaPresent.emitAlertResult: the jint choice reinterprets as the wire

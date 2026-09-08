@@ -13,11 +13,10 @@ public final class Identity {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // BEFORE THE FIRST MOUNT, per the declared-once wall; the close is
-            // safe once appIdentity has registered the bytes.
-            try (KayaApp.Asset icon = KayaApp.asset("icons/kaya-mark.png")) {
-                tx.appIdentity("Aurora Notes", icon);
-            }
+            // BEFORE THE FIRST MOUNT, per the declared-once wall. NO
+            // ARGUMENTS: the name, the mark and the id are the manifest's
+            // (docs/tasks-s3-plan.md N4).
+            tx.appIdentity();
             KayaApp.WindowRef win = tx.window(0).title("identity").size(480.0, 360.0);
             // ONE PROMOTED COMMAND, and not about commands: Windows mints its
             // custom caption from the first promotion, taking the system icon.

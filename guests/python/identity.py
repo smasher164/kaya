@@ -22,9 +22,10 @@ def on_go():
 
 
 with app.window(title="identity", width=480.0, height=360.0):
-    # BEFORE THE FIRST MOUNT: the scope mounts on exit.
-    with kaya.asset("icons/kaya-mark.png") as icon:
-        kaya.app_identity("Aurora Notes", icon=icon)
+    # BEFORE THE FIRST MOUNT: the scope mounts on exit. NO ARGUMENTS:
+    # the name, the mark and the id are the manifest's
+    # (docs/tasks-s3-plan.md N4).
+    kaya.app_identity()
 
     # ONE PROMOTED COMMAND, AND NOT ABOUT COMMANDS: Windows mints its
     # custom caption from it, replacing the system-drawn icon.

@@ -90,8 +90,6 @@ module KayaApp
     brandTypeface,
     TypefaceAttr (..),
     appIdentity,
-    appIdentityAsset,
-    appIdentityNamed,
     Asset,
     asset,
     assetMissSentence,
@@ -100,6 +98,9 @@ module KayaApp
     Platform (..),
     AlertAttr (..),
     showAlert,
+    NotificationAttr (..),
+    showNotification,
+    cancelNotification,
     PickedFile (..),
     openPicked,
     pickFiles,
@@ -381,10 +382,14 @@ import qualified KayaWire as W
 
 -- | WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the
 -- canonical note, which every binding's copy of this surface shortens.
-newtype Capabilities = Capabilities
+data Capabilities = Capabilities
   { -- | The host can materialize a surface beside the primary one
     -- ('createWindow', 'mountIn'). 'False' on iOS and Android.
-    auxWindows :: Bool
+    auxWindows :: Bool,
+    -- | This process can post a local notification the desktop will
+    -- show (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures
+    -- it at startup.
+    notifications :: Bool
   }
   deriving (Eq, Show)
 
@@ -393,7 +398,11 @@ newtype Capabilities = Capabilities
 capabilities :: IO Capabilities
 capabilities = do
   bits <- R.capabilityBits
-  pure (Capabilities ((bits .&. R.capAuxWindows) /= 0))
+  pure
+    ( Capabilities
+        ((bits .&. R.capAuxWindows) /= 0)
+        ((bits .&. R.capNotifications) /= 0)
+    )
 
 newtype Signal = Signal Word64
 
@@ -591,6 +600,7 @@ data BuildState = BuildState
 data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (Word32 -> IO ())
+  | PNotification !Word64 (Word32 -> IO ())
   | PFileDialog !Word64 ([PickedFile] -> IO ())
   | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
@@ -1152,26 +1162,21 @@ emitTypeface family attrs =
       Just (Left b) -> W.VBlob <$> registerBlob b
       Just (Right s) -> W.VBlob <$> R.assetBlob s
 
--- | DECLARE this app's identity (docs/app-identity-plan.md): the name it
--- goes by and the picture that stands for it, as the bytes of one image
--- file. Send a PNG; each lowering converts.
+-- | DECLARE this app's identity (docs/app-identity-plan.md,
+-- docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+-- picture that stands for it and the reverse-DNS id it registers under
+-- are the asset root's own identity.toml, which the BUILD already reads,
+-- and the core reads the same file. SET ONCE, BEFORE THE FIRST MOUNT.
 --
--- SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write, a
--- late one and an empty name.
-appIdentity :: String -> BS.ByteString -> Build ()
-appIdentity name icon =
-  emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> registerBlob icon)
-
--- | The ASSET form of the icon slot: the same declaration, with the mark
--- NAMED rather than read.
-appIdentityAsset :: String -> Asset -> Build ()
-appIdentityAsset name icon =
-  emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> R.assetBlob icon)
-
--- | The NAME-ONLY form, for an app that has a name and no mark yet.
-appIdentityNamed :: String -> Build ()
-appIdentityNamed name =
-  emitB (W.txSetAppIdentity 0 (W.VStr name) (W.VStr ""))
+-- STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+-- declared app is a Dock app on macOS (ruling 1), so an app that wants
+-- the platform's own identity declares none at all.
+appIdentity :: Build ()
+appIdentity =
+  -- THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+  -- identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+  -- the icon slot is written either way, as an empty Str.
+  emitB (W.txSetAppIdentity 0 (W.VStr "") (W.VStr ""))
 
 -- | Window construction attributes — the config-list spelling. The
 -- handler attrs ride the declaration: 'WOnCloseRequested' fires per
@@ -1675,6 +1680,45 @@ showAlert attrs handler = do
                 (W.VStr (concat (take 1 (drop 1 actions))))
                 (W.VStr (concat (take 1 cancels)))
             )
+
+-- | Notification construction attributes — the config-list spelling,
+-- 'AlertAttr' one request over.
+data NotificationAttr
+  = NTitle String
+  | NBody String
+  | -- | When the platform fires it: a UNIX time in seconds, handed to
+    -- the OS scheduler where one exists. Absent (0) posts now.
+    NAt Word64
+
+-- | Post a local notification with a GUEST-CHOSEN id
+-- (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a window,
+-- the handler riding the request. It fires exactly once — the outcome is
+-- 'W.notificationOutcomeActivated' or 'W.notificationOutcomeRefused' —
+-- and its registration retires with the result. A title is REQUIRED.
+-- Many notifications may be live at once.
+showNotification :: Word64 -> [NotificationAttr] -> (Word32 -> IO ()) -> Build ()
+showNotification notification attrs handler = do
+  let titles = [t | NTitle t <- attrs]
+      bodies = [b | NBody b <- attrs]
+      ats = [a | NAt a <- attrs]
+  case () of
+    _
+      | null titles || any null titles ->
+          error "kaya: a notification needs a title — add NTitle"
+      | otherwise -> do
+          pendB (PNotification notification handler)
+          emitB
+            ( W.txShowNotification
+                notification
+                (case ats of a : _ -> a; [] -> 0)
+                (W.VStr (concat (take 1 titles)))
+                (W.VStr (concat (take 1 bodies)))
+            )
+
+-- | Withdraw a pending or delivered notification (a reminder that was
+-- cleared). No answer follows; an unknown id is ignored.
+cancelNotification :: Word64 -> Build ()
+cancelNotification notification = emitB (W.txCancelNotification notification)
 
 -- | Check one accept-list entry and return it. Ids reach every
 -- platform's own registry verbatim, so they carry no spaces.
@@ -3806,6 +3850,9 @@ data App = App
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64,
+    -- One-shot, keyed by the GUEST's notification id (the alert's
+    -- request/result grammar; many may be live at once).
+    appNotificationHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     -- The undo ledger's two reports, keyed by WINDOW. NOT one-shot: a
     -- user walks a history as often as they like.
     appUndone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
@@ -3901,6 +3948,8 @@ register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
+  PNotification n handler ->
+    modifyIORef' (appNotificationHandlers app) (Map.insert n handler)
   PFileDialog n handler ->
     modifyIORef' (appFileDialogHandlers app) (Map.insert n handler)
   PClipboardRead n handler ->
@@ -4137,6 +4186,7 @@ newApp =
     <*> newIORef Map.empty -- appBackRequested
     <*> newIORef Map.empty -- appAlertHandlers
     <*> newIORef 0 -- appNextAlert
+    <*> newIORef Map.empty -- appNotificationHandlers
     <*> newIORef Map.empty -- appUndone
     <*> newIORef Map.empty -- appRedone
     <*> newIORef Map.empty -- appFileDialogHandlers
@@ -4409,6 +4459,16 @@ dispatchLoop app = do
           handlers <- readIORef (appAlertHandlers app)
           writeIORef (appAlertHandlers app) (Map.delete ident handlers)
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindNotificationResult -> do
+          -- The parser boxes the u32 outcome as VI64, the alert's own
+          -- slot. One-shot: the registration retires with the result.
+          let outcome = case payload of
+                Just (W.VI64 o) -> fromIntegral o :: Word32
+                _ -> 0
+          handlers <- readIORef (appNotificationHandlers app)
+          writeIORef (appNotificationHandlers app) (Map.delete ident handlers)
+          dispatch (mapM_ ($ outcome) (Map.lookup ident handlers))
           dispatchLoop app
       -- The undo pair keys the per-WINDOW tables (ident is the window;
       -- the label rides as the payload). NOT one-shot. THE MODEL IS

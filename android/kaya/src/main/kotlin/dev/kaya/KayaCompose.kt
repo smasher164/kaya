@@ -1,10 +1,18 @@
 package dev.kaya
 
+import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.UiModeManager
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ContentResolver
+import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Bitmap
@@ -683,11 +691,6 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
  * harness asserts (docs/styling-plan.md D3). */
 var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 
-// NO depth-stub helper lives here: it comes back as a CALL, never a
-// sentence, the next time a scene lands mac-first. tools/check-stubs.py
-// and tools/check-steps.py both read the call, and neither can see a
-// backend that refuses in its own words.
-
 /**
  * TEXT RANGES. `start`/`stop` are UTF-16 CODE UNITS — what the core
  * converted to before lowering (docs/ranges-units.md §7) and what a
@@ -1276,7 +1279,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xc80ccf259104a87auL
+    private const val SPEC_HASH: ULong = 0x21005150bc085070uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1331,6 +1334,8 @@ object KayaCompose {
     private const val APPLY_SET_DRAG_SOURCE = 38
     private const val APPLY_SET_DROP_TARGET = 39
     private const val APPLY_SET_REORDERABLE = 40
+    private const val APPLY_POST_NOTIFICATION = 41
+    private const val APPLY_CANCEL_NOTIFICATION = 42
     /** What a drop settles on (the wire's drag_op). */
     internal const val DRAG_OP_NONE = 0
     internal const val DRAG_OP_COPY = 1
@@ -1801,7 +1806,12 @@ object KayaCompose {
         activity.lifecycle.addObserver(
             LifecycleEventObserver { source, event ->
                 when (event) {
-                    Lifecycle.Event.ON_RESUME -> KayaHarnessAccessibility.appResumed = true
+                    Lifecycle.Event.ON_RESUME -> {
+                        KayaHarnessAccessibility.appResumed = true
+                        // The permission prompt has handed the activity
+                        // back; the post that asked is answered now.
+                        kayaAnswerPendingPermissionPost(activity)
+                    }
                     Lifecycle.Event.ON_PAUSE -> {
                         KayaHarnessAccessibility.appResumed = false
                         // The picker is up: this activity is behind it.
@@ -1864,9 +1874,174 @@ object KayaCompose {
                 }
             }
         }
+        // A COLD LAUNCH BY TAP: the extra rode in on the Activity's own
+        // intent, before the core existed (docs/tasks-s3-plan.md §3).
+        // Read here, after startPump, so the occurrence has somewhere to
+        // go; a warm tap arrives at the Activity's onNewIntent instead.
+        notificationIntent(activity.intent)
+        kayaParkedActivation?.let { parked ->
+            kayaParkedActivation = null
+            kayaNotificationActivated(parked)
+        }
         // ONCE PER PROCESS: a second admission starts a second script
         // runner, and two harness threads race one scene to two verdicts.
         if (first && System.getenv("KAYA_SELFTEST") != null) admitSelftestOnFirstDraw(activity)
+    }
+
+    /**
+     * WHAT THIS PROCESS CAN DO, MEASURED BEFORE THE GUEST CAN ASK
+     * (docs/tasks-s3-plan.md N6). Called from the attach entries
+     * (crates/kaya/src/android.rs) on the UI thread, BEFORE the app
+     * thread exists: the guest reads `capabilities()` in its first build
+     * closure, and a grant at mount would race it.
+     */
+    @JvmStatic
+    fun measuredCapabilities(context: Context): Long =
+        if (kayaCanPostNotifications(context)) KAYA_CAP_NOTIFICATIONS else 0L
+
+    /** An activation that arrived before the interpreter was mounted (a
+     * COLD launch by tap): held here and delivered by [mount]. */
+    private var kayaParkedActivation: Long? = null
+
+    /** Activations delivered to the core, which `notification_activate`
+     * waits on — the platform's tap is not this process's own act. */
+    @Volatile
+    private var kayaNotificationActivations = 0
+
+    /** The permission has been asked once this process; a second post
+     * does not re-prompt (Android answers a re-ask silently anyway). */
+    private var kayaNotificationPermissionAsked = false
+
+    /** requestPermissions' code; nothing else in this process asks. */
+    private const val KAYA_NOTIFICATION_REQUEST = 0x6b61
+
+    internal data class Quadruple(
+        val id: Long,
+        val at: Long,
+        val title: String,
+        val body: String,
+    )
+
+    /** The post that asked for the permission, answered at the next
+     * ON_RESUME — the prompt is another activity, and its dismissal
+     * hands this one back whichever way the user answered. */
+    private var kayaPendingPermissionPost: Quadruple? = null
+
+    private fun kayaAnswerPendingPermissionPost(activity: ComponentActivity) {
+        val pending = kayaPendingPermissionPost ?: return
+        kayaPendingPermissionPost = null
+        val context = activity.applicationContext
+        val granted =
+            context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                PackageManager.PERMISSION_GRANTED
+        Log.i(
+            "kaya",
+            "KAYA_NOTIFICATION_PERMISSION: notification=${pending.id} granted=$granted",
+        )
+        if (granted) {
+            KayaPresent.grantCapabilities(KAYA_CAP_NOTIFICATIONS)
+            kayaPostOrSchedule(context, pending.id, pending.at, pending.title, pending.body)
+        } else {
+            KayaPresent.emitNotificationResult(pending.id, KAYA_NOTIFICATION_REFUSED)
+        }
+    }
+
+    /**
+     * A TAP ON A DELIVERED NOTIFICATION, from the Activity's own intent:
+     * `onNewIntent` while the app is up, and [mount] for a cold launch.
+     * The extra is REMOVED as it is read, so the same intent — which
+     * `getIntent()` keeps handing back — answers exactly once.
+     */
+    @JvmStatic
+    fun notificationIntent(intent: Intent?) {
+        if (intent == null || !intent.hasExtra(KAYA_NOTIFICATION_ID_EXTRA)) return
+        val id = intent.getLongExtra(KAYA_NOTIFICATION_ID_EXTRA, 0L)
+        intent.removeExtra(KAYA_NOTIFICATION_ID_EXTRA)
+        if (!mounted) {
+            kayaParkedActivation = id
+            return
+        }
+        kayaNotificationActivated(id)
+    }
+
+    private fun kayaNotificationActivated(id: Long) {
+        val context = mountedActivity?.applicationContext
+        if (context != null) kayaWithdrawNotification(context, id)
+        Log.i("kaya", "KAYA_NOTIFICATION_ACTIVATED: notification=$id")
+        kayaNotificationActivations += 1
+        KayaPresent.emitNotificationResult(id, KAYA_NOTIFICATION_ACTIVATED)
+    }
+
+    /**
+     * APPLY_POST_NOTIFICATION (docs/tasks-s3-plan.md §3): the permission
+     * is asked at the FIRST post, in context (N3), and a denial answers
+     * THAT post `refused`. `at` 0 posts now; any other `at` goes to the
+     * OS scheduler (N2). Runs on the UI thread, with the apply.
+     */
+    private fun kayaPostNotification(id: Long, at: Long, title: String, body: String) {
+        val activity = mountedActivity
+        val context = activity?.applicationContext
+        if (context == null) {
+            Log.i(
+                "kaya",
+                "KAYA_NOTIFICATION_POSTED: notification=$id at=$at route=refused " +
+                    "(no mounted activity to post from)",
+            )
+            KayaPresent.emitNotificationResult(id, KAYA_NOTIFICATION_REFUSED)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            if (kayaNotificationPermissionAsked) {
+                KayaPresent.emitNotificationResult(id, KAYA_NOTIFICATION_REFUSED)
+                return
+            }
+            kayaNotificationPermissionAsked = true
+            // THE ANSWER IS THE PERMISSION STATE, READ WHEN THE PROMPT
+            // GIVES THE ACTIVITY BACK — not a one-shot launcher callback.
+            // A launcher belongs to the Activity INSTANCE that registered
+            // it, so a recreation while the prompt is up loses the answer
+            // and the guest waits for the life of the process (the dialog
+            // family's own measurement, 89338ee6); the grant is
+            // PROCESS-WIDE state that any later onResume can read, and
+            // mount() re-installs the observer on the new Activity.
+            kayaPendingPermissionPost = Quadruple(id, at, title, body)
+            activity.requestPermissions(
+                arrayOf("android.permission.POST_NOTIFICATIONS"), KAYA_NOTIFICATION_REQUEST)
+            return
+        }
+        kayaPostOrSchedule(context, id, at, title, body)
+    }
+
+    private fun kayaPostOrSchedule(
+        context: Context,
+        id: Long,
+        at: Long,
+        title: String,
+        body: String,
+    ) {
+        val took =
+            if (at == 0L) kayaDeliverNotification(context, id, title, body)
+            else kayaScheduleNotification(context, id, at, title, body)
+        // WHAT WAS MEASURED: which route this post took and whether the
+        // platform accepted it. `at` is the core's — an instant already
+        // past arrives as 0 — so a post that is nowhere in the shade
+        // says here whether it was scheduled or refused, rather than
+        // leaving expect_notification to mean both.
+        Log.i(
+            "kaya",
+            "KAYA_NOTIFICATION_POSTED: notification=$id at=$at " +
+                "route=${if (at == 0L) "now" else "alarm"} took=$took " +
+                "enabled=${kayaCanPostNotifications(context)}",
+        )
+        if (!took) KayaPresent.emitNotificationResult(id, KAYA_NOTIFICATION_REFUSED)
+    }
+
+    private fun kayaCancelNotification(id: Long) {
+        val context = mountedActivity?.applicationContext ?: return
+        kayaWithdrawNotification(context, id)
     }
 
     /** The visible title: the top entry's while the stack is covered
@@ -2263,6 +2438,16 @@ object KayaCompose {
                     b.long // window
                     kayaClearUndoForGroup()
                 }
+                APPLY_POST_NOTIFICATION -> {
+                    // { u64 notification; u64 at } and then the title and
+                    // the body as values (docs/tasks-s3-plan.md §4).
+                    val nid = b.long
+                    val at = b.long
+                    val title = readString(b)
+                    val body = readString(b)
+                    kayaPostNotification(nid, at, title, body)
+                }
+                APPLY_CANCEL_NOTIFICATION -> kayaCancelNotification(b.long)
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
                     val dialog = b.long
@@ -2806,6 +2991,7 @@ object KayaCompose {
         // THE APP ANSWERED. An action verb waits for this before it
         // returns (see kayaAwaitAnswer) — written last, so the count
         // moves only once everything in the batch has landed.
+        notePresentedChanged()
         kayaBatches += 1
         KayaDiag.note(
             "batch #$kayaBatches records=$records " +
@@ -3098,6 +3284,30 @@ object KayaCompose {
             kayaDragRequests)
     }
 
+    /** notify_tap requests printed this run; the runner keys its own
+     * retries on the sequence number, as it does for a drag. */
+    private var kayaNotifyTaps = 0
+
+    /**
+     * THE TAP'S ACK: an activation reached the core — the content
+     * PendingIntent landed on the Activity and
+     * [notificationIntent] answered it. Null when it did; otherwise ONE
+     * sentence saying what was seen, since a shade that never opened and
+     * a row the runner could not find look identical from in here.
+     * 20s, the drag's own budget: the runner's poll is half a second and
+     * a uiautomator dump takes ~2s of it.
+     */
+    private fun kayaAwaitNotificationActivation(before: Int): String? {
+        val deadline = System.nanoTime() + 20_000L * 1_000_000
+        while (System.nanoTime() < deadline) {
+            if (kayaNotificationActivations != before) return null
+            Thread.sleep(RETRY_PERIOD_MS)
+        }
+        return "no activation reached this process in 20000ms — the runner " +
+            "expands the shade off the KAYA_REQUEST line, finds the row by its " +
+            "title and taps it; activations=$kayaNotificationActivations"
+    }
+
     /**
      * THE ACK: the platform's own ACTION_DRAG_ENDED for the session this
      * source started, which is the one signal that says the injected
@@ -3306,6 +3516,53 @@ object KayaCompose {
             }
         }
 
+    /**
+     * A TARGET IS A LIVE WIDGET (harness.rs Step::ExpectNoTarget): the
+     * nodes reachable from a PRESENTED root — the window's, a section's,
+     * a live entry's — recomputed once per apply batch. `nodes` alone is
+     * not liveness: APPLY_POP_ENTRY drops the ENTRY and the core still
+     * writes props to the popped screen's widgets, so its subtree stays
+     * in `nodes` and a re-pushed screen's keyed target answered from the
+     * popped copy, which the registries hold first (docs/traps.md).
+     */
+    private var kayaLiveStamp = -1
+    private var kayaLiveIds: Set<Long> = emptySet()
+
+    /**
+     * What the memo is keyed on. NOT `kayaBatches`: this backend pops an
+     * entry from the harness's own `back` (kayaUserBack, the path the
+     * system's back dispatch takes), with no batch behind it, and a
+     * popped screen then answered targets for as long as the guest
+     * stayed quiet — measured 2026-09-07 on tasks.steps' first
+     * expect_no_target.
+     */
+    @JvmStatic
+    internal fun notePresentedChanged() {
+        kayaPresentedGeneration += 1
+    }
+
+    private var kayaPresentedGeneration = 0
+
+    private fun kayaLivePresentedIds(): Set<Long> {
+        if (kayaLiveStamp == kayaPresentedGeneration) return kayaLiveIds
+        val ids = HashSet<Long>()
+        val stack = ArrayDeque<KayaNode>()
+        KayaSceneModel.root?.let { stack.addLast(it) }
+        for (section in KayaSceneModel.sections) {
+            section.root?.let { stack.addLast(it) }
+            for (entry in section.entries) entry.root?.let { stack.addLast(it) }
+        }
+        for (entry in KayaSceneModel.navEntries) entry.root?.let { stack.addLast(it) }
+        while (stack.isNotEmpty()) {
+            val node = stack.removeLast()
+            if (!ids.add(node.id)) continue
+            for (child in node.children) stack.addLast(child)
+        }
+        kayaLiveIds = ids
+        kayaLiveStamp = kayaPresentedGeneration
+        return ids
+    }
+
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
         // harness.rs's Target spelling; sortTag is the stamped table identity.
         val at = spec.indexOf('@')
@@ -3329,21 +3586,23 @@ object KayaCompose {
                 keys = null
             }
             if (id.isEmpty()) return null
-            // A DESTROYED NODE MAY NOT ANSWER A TARGET: the registries are
-            // append-only and `nodes` is the liveness record, so a stamped
-            // copy that left the band would otherwise answer with the empty
-            // children its teardown left. The keyed arm below has always
-            // filtered this way (docs/virtualization-plan.md §1).
+            // A DESTROYED NODE MAY NOT ANSWER A TARGET, and neither may a
+            // POPPED one: `nodes` is only half the liveness record
+            // (kayaLivePresentedIds). A stamped copy that left the band
+            // would otherwise answer with the empty children its teardown
+            // left (docs/virtualization-plan.md §1).
+            val presented = kayaLivePresentedIds()
+            val isLive = { n: KayaNode ->
+                KayaSceneModel.nodes[n.id] === n && n.id in presented
+            }
             if (keys == null) {
-                return registry.firstOrNull {
-                    KayaSceneModel.nodes[it.id] === it && it.a11yId == id
-                }
+                return registry.firstOrNull { isLive(it) && it.a11yId == id }
             }
             // A stamped copy of ANY tagged kind resolves by key: the table's
             // sort tag and a widget's occurrence tag carry the same
             // node-and-keys encoding (the keyed-target entry, 2026-09-01).
             val stampOf = { n: KayaNode -> tableStamp(if (kind == "column") n.sortTag else n.tag) }
-            val live = registry.filter { KayaSceneModel.nodes[it.id] === it }
+            val live = registry.filter(isLive)
             // EVERY copy carrying the id is a candidate, whichever template
             // stamped it: the key path names the copy (tools/scenes/tasks.steps).
             val hits = live.filter { it.a11yId == id && stampOf(it)?.keys == keys }
@@ -6402,13 +6661,88 @@ object KayaCompose {
                         // THE PLATFORM'S OWN ANSWER
                         // (docs/tasks-s2b-plan.md R4): the composition's
                         // isSystemInDarkTheme() reading, never the
-                        // declared prop and never the knob.
+                        // declared prop and never the knob. TWO WORDS,
+                        // "<mode> <source>" (harness.rs ExpectAppearance):
+                        // this toolkit has no override SLOT to read back,
+                        // so the source is measured by comparing the
+                        // composition's reading with the SYSTEM's own
+                        // configuration — which means an override that
+                        // agrees with the host's mode reads as `system`.
                         val want = quoted(parts.drop(1))
-                        val got = onUi(activity) {
-                            if (KayaSceneModel.presentationDark) "dark" else "light"
+                        val reading = onUi(activity) {
+                            val mode =
+                                if (KayaSceneModel.presentationDark) "dark" else "light"
+                            val night =
+                                activity.resources.configuration.uiMode and
+                                    Configuration.UI_MODE_NIGHT_MASK
+                            val systemMode =
+                                if (night == Configuration.UI_MODE_NIGHT_YES) "dark"
+                                else "light"
+                            Pair(mode, if (mode == systemMode) "system" else "override")
                         }
-                        if (got == want) observed.add("appearance $want")
-                        else failures.add("appearance $got, wanted $want")
+                        val (mode, source) = reading
+                        val hit = if (want == "system") source == "system" else mode == want
+                        if (hit) observed.add("appearance $want")
+                        else failures.add("appearance $mode $source, wanted $want")
+                    }
+                    "expect_notification" -> {
+                        // THE PLATFORM'S OWN DELIVERED LIST
+                        // (activeNotifications), never kaya's record of
+                        // what it posted (docs/tasks-s3-plan.md N5).
+                        val nid = parts[1].toLongOrNull() ?: 0L
+                        val want = quoted(parts.drop(2))
+                        val got = kayaDeliveredNotificationTitle(activity, nid)
+                        when {
+                            got == null -> failures.add(
+                                "the platform holds no delivered notification $nid, " +
+                                    "wanted \"$want\"")
+                            got == want -> observed.add("notification $nid \"$want\"")
+                            else -> failures.add(
+                                "notification $nid \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_no_notification" -> {
+                        val nid = parts[1].toLongOrNull() ?: 0L
+                        val got = kayaDeliveredNotificationTitle(activity, nid)
+                        if (got == null) observed.add("no notification $nid")
+                        else failures.add(
+                            "the platform still holds notification $nid \"$got\", " +
+                                "wanted none")
+                    }
+                    "notification_activate" -> {
+                        // A REAL TAP ON THE SHADE, which no app may drive:
+                        // the row belongs to SystemUI, so the verb prints
+                        // the request and the runner opens the shade,
+                        // finds the row by its title and taps it — the
+                        // `drag` verb's one hand (docs/dnd-plan.md D10),
+                        // one feature over. What comes back is the
+                        // platform's own content PendingIntent landing on
+                        // the Activity, which is the activation path a
+                        // user's tap takes.
+                        val nid = parts[1].toLongOrNull() ?: 0L
+                        val title = kayaDeliveredNotificationTitle(activity, nid)
+                        if (title == null) {
+                            failures.add(
+                                "the platform holds no delivered notification $nid to " +
+                                    "activate")
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val activations = kayaNotificationActivations
+                            kayaNotifyTaps += 1
+                            val seq = kayaNotifyTaps
+                            Log.i("kaya", "KAYA_REQUEST: notify_tap $seq $title")
+                            val off = kayaAwaitNotificationActivation(activations)
+                            if (off != null) {
+                                failures.add("notification_activate $nid: $off")
+                            } else {
+                                // THE ACK the runner stops re-tapping on,
+                                // sent BEFORE the answer wait so a slow
+                                // guest cannot buy another tap.
+                                Log.i("kaya", "KAYA_ACK: notify_tap $seq")
+                                kayaAwaitAnswer(answered)
+                            }
+                        }
                     }
                     "expect_sections_presentation" -> {
                         // THE ARM THE SECTIONS RENDER TOOK, off the
@@ -8031,6 +8365,19 @@ object KayaCompose {
                             observed.add("${parts[1]} spans its breadth")
                         } else {
                             failures.add("${parts[1]} is short of its breadth ($short)")
+                        }
+                    }
+                    "expect_no_target" -> {
+                        // harness.rs Step::ExpectNoTarget: the pass is a
+                        // spec that resolves to NOTHING. Retried like every
+                        // other expect by the wrapper above.
+                        if (!parts[1].contains("@")) {
+                            failures.add(
+                                "expect_no_target wants an @id target, got ${parts[1]}")
+                        } else {
+                            val got = onUi(activity) { kayaWidgetTarget(parts[1])?.id }
+                            if (got == null) observed.add("${parts[1]} names no widget")
+                            else failures.add("${parts[1]} still answers (node $got)")
                         }
                     }
                     "expect_lines" -> {
@@ -13420,6 +13767,9 @@ fun kayaUserBack() {
     } else {
         stack.removeAt(stack.size - 1)
         KayaSceneModel.navIndex.remove(top.id)
+        // The popped subtree stops answering targets from here
+        // (KayaCompose.notePresentedChanged), and no batch says so.
+        KayaCompose.notePresentedChanged()
         KayaCompose.refreshNavTitle()
         KayaPresent.emitEntryPopped(top.id)
     }
@@ -13430,6 +13780,203 @@ fun kayaUserBack() {
 fun kayaAnswerAlert(alert: Long, choice: Int) {
     KayaSceneModel.alertId = null
     KayaPresent.emitAlertResult(alert, choice)
+}
+
+// MARK: - Local notifications (docs/tasks-s3-plan.md §3's Compose row)
+
+/** The one channel a kaya reminder is posted on. */
+private const val KAYA_NOTIFICATION_CHANNEL = "kaya-reminders"
+
+/** The kaya id, title and body carried by the content intent (the tap)
+ * and by the alarm's broadcast (the scheduled post). DELIBERATELY NOT A
+ * `KAYA_*` KEY: every host Activity copies extras whose key starts with
+ * `KAYA_` into libc's environ, where these would read as env switches. */
+private const val KAYA_NOTIFICATION_ID_EXTRA = "dev.kaya.notification"
+private const val KAYA_NOTIFICATION_TITLE_EXTRA = "dev.kaya.notification.title"
+private const val KAYA_NOTIFICATION_BODY_EXTRA = "dev.kaya.notification.body"
+
+/** The notification_outcome enum (crates/kaya/src/wire.rs). */
+internal const val KAYA_NOTIFICATION_ACTIVATED = 0
+internal const val KAYA_NOTIFICATION_REFUSED = 1
+
+/** KAYA_CAP_NOTIFICATIONS (crates/kaya/src/capi.rs). */
+internal const val KAYA_CAP_NOTIFICATIONS = 2L
+
+/** The platform's key for a kaya notification: the TAG carries the whole
+ * u64, since `notify` takes an int and two ids may share its low bits. */
+private fun kayaNotificationTag(id: Long): String = "kaya-$id"
+
+private fun kayaNotificationSlot(id: Long): Int = (id and 0x7fffffffL).toInt()
+
+private fun kayaNotificationManager(context: Context): NotificationManager? =
+    context.getSystemService(NotificationManager::class.java)
+
+/**
+ * CAN THIS PROCESS POST? The PLATFORM's own answer, on every API level:
+ * `areNotificationsEnabled` is false until POST_NOTIFICATIONS is granted
+ * on 33+, and false below it when the user has turned the app's
+ * notifications off (docs/tasks-s3-plan.md N6).
+ */
+internal fun kayaCanPostNotifications(context: Context): Boolean =
+    kayaNotificationManager(context)?.areNotificationsEnabled() == true
+
+/**
+ * The activation intent for `id`: the app's own launcher component,
+ * addressed EXPLICITLY (an ACTION_MAIN intent to a running task is
+ * answered by bringing the task forward, with no onNewIntent), so a tap
+ * lands on the live Activity and the extra reaches [KayaCompose.notificationIntent].
+ */
+private fun kayaNotificationContentIntent(context: Context, id: Long): Intent? {
+    val component = context.packageManager
+        .getLaunchIntentForPackage(context.packageName)?.component ?: return null
+    return Intent()
+        .setComponent(component)
+        .setFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP,
+        )
+        .putExtra(KAYA_NOTIFICATION_ID_EXTRA, id)
+}
+
+/**
+ * Post NOW, through the platform's own manager. True when the platform
+ * took it; false is the caller's `refused` (N1). Reachable from the
+ * alarm receiver in a COLD process, so it takes a Context and touches
+ * none of the interpreter's state.
+ */
+internal fun kayaDeliverNotification(
+    context: Context,
+    id: Long,
+    title: String,
+    body: String,
+): Boolean {
+    val manager = kayaNotificationManager(context) ?: return false
+    if (!manager.areNotificationsEnabled()) return false
+    // The app's OWN name, out of the installed package's label — which
+    // android/build.gradle.kts writes from guests/assets/identity.toml,
+    // so the channel carries the declared identity and no second copy of
+    // it (docs/app-identity-plan.md ruling 4).
+    val label = context.applicationInfo.loadLabel(context.packageManager).toString()
+    manager.createNotificationChannel(
+        NotificationChannel(
+            KAYA_NOTIFICATION_CHANNEL, label, NotificationManager.IMPORTANCE_HIGH),
+    )
+    val content = kayaNotificationContentIntent(context, id) ?: return false
+    val pending = PendingIntent.getActivity(
+        context,
+        kayaNotificationSlot(id),
+        content,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val notification = Notification.Builder(context, KAYA_NOTIFICATION_CHANNEL)
+        // The app's declared mark, the same resource the launcher shows
+        // (android:icon, written by the identity build).
+        .setSmallIcon(context.applicationInfo.icon)
+        .setContentTitle(title)
+        .setContentText(body)
+        .setContentIntent(pending)
+        .setAutoCancel(true)
+        .build()
+    return try {
+        manager.notify(kayaNotificationTag(id), kayaNotificationSlot(id), notification)
+        true
+    } catch (e: RuntimeException) {
+        Log.w("kaya", "KAYA_DIAG notification $id was refused by the platform: $e")
+        false
+    }
+}
+
+/**
+ * Hand `at` to the OS scheduler (docs/tasks-s3-plan.md N2): an exact,
+ * idle-surviving alarm into [KayaNotificationAlarm], which posts in
+ * whatever process is alive then. Exact when the platform allows it —
+ * `USE_EXACT_ALARM` is declared by the app, and what it answers is
+ * measured rather than assumed.
+ */
+private fun kayaScheduleNotification(
+    context: Context,
+    id: Long,
+    at: Long,
+    title: String,
+    body: String,
+): Boolean {
+    val alarms = context.getSystemService(AlarmManager::class.java) ?: return false
+    val fire = Intent(context, KayaNotificationAlarm::class.java)
+        .putExtra(KAYA_NOTIFICATION_ID_EXTRA, id)
+        .putExtra(KAYA_NOTIFICATION_TITLE_EXTRA, title)
+        .putExtra(KAYA_NOTIFICATION_BODY_EXTRA, body)
+    val pending = PendingIntent.getBroadcast(
+        context,
+        kayaNotificationSlot(id),
+        fire,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val exact = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
+    return try {
+        if (exact) {
+            alarms.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP, at * 1000L, pending)
+        } else {
+            // WHAT WAS MEASURED, and nothing more: this platform answered
+            // canScheduleExactAlarms() false, so the alarm is the
+            // inexact one it does allow.
+            Log.i(
+                "kaya",
+                "KAYA_DIAG notification $id: canScheduleExactAlarms() is false on " +
+                    "API ${Build.VERSION.SDK_INT}; the alarm is setAndAllowWhileIdle",
+            )
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at * 1000L, pending)
+        }
+        true
+    } catch (e: SecurityException) {
+        Log.w("kaya", "KAYA_DIAG notification $id: the alarm was refused: $e")
+        false
+    }
+}
+
+/** Withdraw a pending alarm and a delivered notification (N1). */
+internal fun kayaWithdrawNotification(context: Context, id: Long) {
+    val fire = Intent(context, KayaNotificationAlarm::class.java)
+    val pending = PendingIntent.getBroadcast(
+        context,
+        kayaNotificationSlot(id),
+        fire,
+        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+    )
+    if (pending != null) {
+        context.getSystemService(AlarmManager::class.java)?.cancel(pending)
+        pending.cancel()
+    }
+    kayaNotificationManager(context)
+        ?.cancel(kayaNotificationTag(id), kayaNotificationSlot(id))
+}
+
+/**
+ * The harness's read: the PLATFORM's own delivered list
+ * (`activeNotifications`), never kaya's record of what it posted
+ * (docs/tasks-s3-plan.md N5).
+ */
+internal fun kayaDeliveredNotificationTitle(context: Context, id: Long): String? {
+    val manager = kayaNotificationManager(context) ?: return null
+    val tag = kayaNotificationTag(id)
+    val live = manager.activeNotifications.firstOrNull { it.tag == tag } ?: return null
+    return live.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+}
+
+/**
+ * The scheduled post's own process: an alarm fires here, and this posts.
+ * The core need not be up — a notification is the platform's, and only
+ * the ACTIVATION needs kaya (the Activity's own intent carries it).
+ */
+class KayaNotificationAlarm : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = intent.getLongExtra(KAYA_NOTIFICATION_ID_EXTRA, 0L)
+        val title = intent.getStringExtra(KAYA_NOTIFICATION_TITLE_EXTRA) ?: ""
+        val body = intent.getStringExtra(KAYA_NOTIFICATION_BODY_EXTRA) ?: ""
+        Log.i("kaya", "KAYA_NOTIFICATION_ALARM: notification=$id title=\"$title\"")
+        kayaDeliverNotification(context, id, title, body)
+    }
 }
 
 /** THE ONE SPELLING every harness reads a slider back in (harness.rs

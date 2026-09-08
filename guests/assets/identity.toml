@@ -24,6 +24,13 @@
 name = "Aurora Notes"
 icon = "guests/assets/icons/kaya-mark.png"
 
+# THE REVERSE-DNS ID (docs/tasks-s3-plan.md N4): what every platform needs to
+# post a notification under — the mac wrapper bundle's CFBundleIdentifier,
+# GTK's application id, WinUI's registration. Read by the build and by the
+# core at startup; spelled in no guest and no backend source. The phones'
+# package ids are the LANES' host ids and stay theirs.
+id = "dev.kaya.aurora.notes"
+
 # THE LAUNCH SLOT (docs/tasks-s2-plan.md T4): what the platform draws
 # between the tap and the first frame. `image` defaults to `icon`, so
 # one picture stands for the app in the launcher AND on the way in.

@@ -23,7 +23,6 @@ dev_shell_or_die()
 #   tools/run-leg.py <scene> <lang> [--build] [--appearance dark]
 
 import os
-import shutil
 import subprocess
 
 from lanes import mac as lane
@@ -100,12 +99,9 @@ if lang == "rust":
     if subprocess.run(build, cwd=ROOT).returncode != 0:
         print(f"run-leg: build failed: {' '.join(build)}", file=sys.stderr)
         sys.exit(1)
-    staged = ROOT / lane.RUST_GUESTS / stem
-    staged.parent.mkdir(parents=True, exist_ok=True)
-    # A fresh inode, or the kernel kills the guest at exec with no output
-    # (docs/traps.md, "Code Signature Invalid").
-    staged.unlink(missing_ok=True)
-    shutil.copy2(ROOT / f"target/debug/examples/{stem}", staged)
+    # The lane's own staging, one copy (tools/lib/lanes/mac.py): the fresh
+    # inode and the bundled scenes' .app wrapper both live there.
+    lane.stage_rust(ROOT, [stem])
 
 argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
 env = dict(os.environ)

@@ -64,6 +64,10 @@ RUST_SCENES = [
     "menus", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
     "dirty", "dnd", "pickers", "sliders", "tooltips",
+    # The notification conformance scene: the activation is a REAL tap on
+    # SpringBoard's own shade, driven by the xcui driver's notify_tap
+    # (docs/tasks-s3-plan.md N5).
+    "notify",
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     "tasks",
 ]

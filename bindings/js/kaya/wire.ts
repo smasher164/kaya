@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc80ccf259104a87an;
+export const SPEC_HASH = 0x21005150bc085070n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -136,6 +136,8 @@ export const APPEARANCE_DARK = 2;
 export const ALERT_CHOICE_ACTION0 = 0;
 export const ALERT_CHOICE_ACTION1 = 1;
 export const ALERT_CHOICE_CANCEL = 4294967295;
+export const NOTIFICATION_OUTCOME_ACTIVATED = 0;
+export const NOTIFICATION_OUTCOME_REFUSED = 1;
 export const FILE_MODE_READ = 0;
 export const FILE_MODE_WRITE = 1;
 export const FILE_MODE_READ_WRITE = 2;
@@ -243,6 +245,8 @@ export const TX_CREATE_BREAKPOINT = 48;
 export const TX_SET_DRAG_SOURCE = 49;
 export const TX_SET_DROP_TARGET = 50;
 export const TX_SET_REORDERABLE = 51;
+export const TX_SHOW_NOTIFICATION = 52;
+export const TX_CANCEL_NOTIFICATION = 53;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -309,6 +313,7 @@ export const OCC_DRAG_ENDED = 23;
 export const OCC_DATE_CHANGED = 24;
 export const OCC_TIME_CHANGED = 25;
 export const OCC_VALUE_COMMITTED = 26;
+export const OCC_NOTIFICATION_RESULT = 27;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -667,6 +672,16 @@ export function tx_set_drop_target(widget: number, operations: number, path_len:
 /** Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it. */
 export function tx_set_reorderable(container: number, enabled: number): Uint8Array {
   return record(TX_SET_REORDERABLE, cat(u64(container), u32(enabled), u32(0)));
+}
+
+/** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. */
+export function tx_show_notification(notification: number, at: number, title: WireValue, body: WireValue): Uint8Array {
+  return record(TX_SHOW_NOTIFICATION, cat(u64(notification), u64(at), enc.value(title), enc.value(body)));
+}
+
+/** Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored. */
+export function tx_cancel_notification(notification: number): Uint8Array {
+  return record(TX_CANCEL_NOTIFICATION, cat(u64(notification)));
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -1487,9 +1502,13 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
-    // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
+    // A request's one answer: id + the u32 code.
+    return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
+  }
+  if (kind === OCC_NOTIFICATION_RESULT) {
+    // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
   }
   if (kind === OCC_FILE_DIALOG_RESULT) {

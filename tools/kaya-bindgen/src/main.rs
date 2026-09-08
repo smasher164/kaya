@@ -45,6 +45,8 @@ fn main() {
         ("bindings/js/kaya/wire.ts", js::emit(&SPEC)),
     ];
 
+    every_code_answer_is_decoded(&SPEC, &outputs);
+
     let mut stale = false;
     for (rel, content) in &outputs {
         let path = std::path::Path::new(&root).join(rel);
@@ -63,6 +65,51 @@ fn main() {
     if stale {
         std::process::exit(1);
     }
+}
+
+/// The one line every code-answer decode arm carries, in all eight
+/// languages' comment syntax stripped to its text. The arms are emitted
+/// from a DERIVED family, so counting the mark counts the arms.
+pub(crate) const CODE_ANSWER_MARK: &str = "A request's one answer: id + the u32 code.";
+
+/// EVERY CODE-ANSWER RECORD IS DECODED BY EVERY BINDING, checked on the
+/// path nobody can avoid: this runs on a regeneration AND on `--check`,
+/// and build.rs forces a regeneration the moment this generator moves.
+///
+/// The failure it exists to refuse is measured, not hypothetical
+/// (2026-09-07): `notification_result` is byte-for-byte `alert_result`
+/// — a u64 request id, a u32 code, `reserved` — and all eight decoders
+/// named the alert's arm BY NAME, so the new record fell through to the
+/// click tail, which took the OUTCOME for a key-path length: dropped
+/// silently when it was 0 (`activated`), read one byte past the record
+/// when it was 1 (`refused`). Nothing else could see it — the wire
+/// round-trips, every gate passes, and the guest just never learns the
+/// answer. A by-name arm coming back leaves the mark short here.
+fn every_code_answer_is_decoded(spec: &ProtocolSpec, outputs: &[(&str, String)]) {
+    let family = code_answer_occurrence_names(spec);
+    let mut bad = Vec::new();
+    for (rel, content) in outputs {
+        // The C floor hands the record out whole; it has no dispatching
+        // decoder to carry an arm.
+        if rel.ends_with(".h") {
+            continue;
+        }
+        let arms = content.matches(CODE_ANSWER_MARK).count();
+        println!("kaya-bindgen: {rel}: {arms} code-answer decode arms");
+        if arms != family.len() {
+            bad.push(format!(
+                "{rel} decodes {arms} of the {} code-answer occurrences \
+                 ({}) — a record whose whole body is a request id and a u32 \
+                 code is read by the CLICK tail otherwise, which takes that \
+                 code for a key-path length. The arm is emitted from \
+                 code_answer_occurrence_names; anything naming one record is \
+                 how this broke before",
+                family.len(),
+                family.join(", ")
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "kaya-bindgen: {}", bad.join("; "));
 }
 
 /// Shared emitter helpers.
@@ -303,6 +350,29 @@ pub(crate) fn clip_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static 
         .iter()
         .filter(|r| {
             representation_shaped(r) && !(r.fields.len() > 1 && r.fields[1].name == "path_len")
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
+/// ONE-SHOT REQUEST ANSWERS: a request id and a u32 CODE, nothing else.
+/// `alert_result`'s choice and `notification_result`'s outcome are the
+/// same three words on the wire. DERIVED, for `id_only`'s reason one
+/// record over: the alert's arm was hand-listed BY NAME, so the day
+/// notification_result landed all eight parsers read it as click-shaped
+/// — the outcome taken for a key-path length, silently dropped when it
+/// was 0 and read one byte past the record when it was 1.
+pub(crate) fn code_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 3
+                && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
+                && matches!(r.fields[1].ty, kaya::spec::FieldTy::U32)
+                // `path_len` is the click tag, whose u32 counts KEYS.
+                && r.fields[1].name != "path_len"
+                && r.fields[2].name == "reserved"
         })
         .map(|r| r.name)
         .collect()

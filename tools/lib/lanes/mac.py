@@ -44,7 +44,7 @@ SCENES = [
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
-DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks"]
+DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -154,6 +154,9 @@ ORDER = [
     ("drain",),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
+    # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
+    # breadth slice (docs/tasks-s3-plan.md §6).
+    ("notify", ("rust",)),
     ("drain",),
     ("adaptive", LANGS),
     ("drain",),
@@ -306,6 +309,115 @@ def wired_scenes():
 # (docs/traps.md, 2026-09-01 — a hand-spelled env ran a stale interpreter).
 KAYA_LIB_LANGS = ("csharp", "ocaml", "java")
 RUST_GUESTS = "target/rust-guests"
+# THE BUNDLED SCENES (docs/tasks-s3-plan.md N4): a scene that posts a
+# notification runs as a minimal .app, since macOS answers UNUserNotificationCenter
+# only from a bundle with an identifier — the identity manifest's `id`. The
+# rest stay bare executables (docs/deferred.md: an unbundled launch walks its
+# siblings, which is why the staging directory is small).
+BUNDLED_SCENES = {"notify", "tasks"}
+IDENTITY_MANIFEST = "guests/assets/identity.toml"
+
+
+def app_identity(root):
+    """The manifest's name, mark and reverse-DNS id — read, never spelled
+    (docs/tasks-s3-plan.md N4): the wrapper bundle is a BUILD, and a build
+    reads the declaration (tools/check-app-identity.py)."""
+    import tomllib
+    manifest = tomllib.loads((root / IDENTITY_MANIFEST).read_text(encoding="utf-8"))
+    ident = manifest.get("id", "")
+    if not ident or "." not in ident:
+        raise SystemExit(f"mac lane: {IDENTITY_MANIFEST} declares no reverse-DNS `id`")
+    name, icon = manifest.get("name", ""), manifest.get("icon", "")
+    if not name or not icon or not (root / icon).is_file():
+        raise SystemExit(f"mac lane: {IDENTITY_MANIFEST} must declare `name` and an `icon` that exists")
+    return name, icon, ident
+
+
+def app_id(root):
+    return app_identity(root)[2]
+
+
+def rust_guest_path(stem):
+    """Where a staged rust guest's executable is: inside its .app for a
+    bundled scene, bare otherwise."""
+    if stem in BUNDLED_SCENES:
+        return f"{RUST_GUESTS}/{stem}.app/Contents/MacOS/{stem}"
+    return f"{RUST_GUESTS}/{stem}"
+
+
+def stage_rust(root, stems):
+    """Copy built examples into the small staging directory — ONE COPY,
+    validate-mac's whole roster and run-leg's one leg — wrapping the
+    bundled scenes: Info.plist from the manifest (CFBundleIdentifier =
+    `id`, LSUIElement so the lanes stay accessory), an ad-hoc signature,
+    and LaunchServices told about the bundle, without which the centre
+    answers "Notifications are not allowed for this application"
+    (measured 2026-09-08, tools/mac/notifyprobe). A fresh inode every
+    time, or the kernel kills the guest at exec (docs/traps.md, "Code
+    Signature Invalid")."""
+    import shutil
+    import subprocess
+    staging = root / RUST_GUESTS
+    staging.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        built = root / f"target/debug/examples/{stem}"
+        if stem not in BUNDLED_SCENES:
+            dest = staging / stem
+            dest.unlink(missing_ok=True)
+            shutil.copy2(built, dest)
+            continue
+        app = staging / f"{stem}.app"
+        shutil.rmtree(app, ignore_errors=True)
+        macos = app / "Contents/MacOS"
+        macos.mkdir(parents=True)
+        shutil.copy2(built, macos / stem)
+        name, icon, ident = app_identity(root)
+        resources = app / "Contents/Resources"
+        resources.mkdir()
+        # The declared mark as the bundle's icon: Notification Center and the
+        # centre's permission sheet draw THIS, not the wire's Dock icon.
+        iconset = resources / "AppIcon.iconset"
+        iconset.mkdir()
+        # The mark is 64px, so the set stops at 32x32@2x (sips refuses an
+        # icns straight from a small png; iconutil takes the set).
+        steps = [(16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
+                 (32, "icon_32x32.png"), (64, "icon_32x32@2x.png")]
+        for px, member in steps:
+            sized = subprocess.run(
+                ["sips", "-z", str(px), str(px), str(root / icon), "--out", str(iconset / member)],
+                capture_output=True, text=True, encoding="utf-8")
+            if sized.returncode != 0:
+                raise SystemExit(f"mac lane: sips could not size {icon} to {px}px: "
+                                 f"{sized.stderr.strip() or sized.stdout.strip()}")
+        icns = subprocess.run(
+            ["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "AppIcon.icns")],
+            capture_output=True, text=True, encoding="utf-8")
+        shutil.rmtree(iconset)
+        if icns.returncode != 0 or not (resources / "AppIcon.icns").is_file():
+            raise SystemExit(f"mac lane: iconutil could not write the bundle icon from {icon}: "
+                             f"{icns.stderr.strip() or icns.stdout.strip()}")
+        (app / "Contents/Info.plist").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n<dict>\n'
+            f'  <key>CFBundleExecutable</key><string>{stem}</string>\n'
+            f'  <key>CFBundleIdentifier</key><string>{ident}</string>\n'
+            f'  <key>CFBundleName</key><string>{name}</string>\n'
+            f'  <key>CFBundleDisplayName</key><string>{name}</string>\n'
+            '  <key>CFBundleIconFile</key><string>AppIcon</string>\n'
+            '  <key>CFBundlePackageType</key><string>APPL</string>\n'
+            '  <key>CFBundleShortVersionString</key><string>0.0</string>\n'
+            '  <key>LSUIElement</key><true/>\n'
+            '</dict>\n</plist>\n',
+            encoding="utf-8")
+        for cmd in (["codesign", "--force", "--sign", "-", str(app)],
+                    ["/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+                     "LaunchServices.framework/Support/lsregister", "-f", str(app)]):
+            done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+            if done.returncode != 0:
+                raise SystemExit(f"mac lane: {cmd[0]} failed on {app}: "
+                                 f"{done.stderr.strip() or done.stdout.strip()}")
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
 
@@ -314,7 +426,7 @@ def leg_argv(scene, lang, hs_bin):
     binary (cabal list-bin) so this module does no I/O of its own."""
     stem = guest_stem(scene)
     if lang == "rust":
-        return [f"{RUST_GUESTS}/{stem}"]
+        return [rust_guest_path(stem)]
     if lang == "python":
         return ["python3", f"guests/python/{stem}.py"]
     if lang == "js":

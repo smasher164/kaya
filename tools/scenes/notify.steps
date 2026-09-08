@@ -1,0 +1,15 @@
+# A post the PLATFORM holds (its own delivered list), an activation the
+# guest answers, a cancel the platform honours (docs/tasks-s3-plan.md N5).
+expect label#0 "ready"
+click button#0
+expect label#0 "posted 1"
+expect_notification 12 "Call the plumber"
+notification_activate 12
+expect label#0 "activated 12"
+expect_no_notification 12
+click button#0
+expect label#0 "posted 2"
+expect_notification 12 "Call the plumber"
+click button#1
+expect label#0 "cleared"
+expect_no_notification 12

@@ -143,39 +143,6 @@ func TestFontAssetShipsTheBlobForm(t *testing.T) {
 	}
 }
 
-func TestAppIdentityAssetShipsTheBlobForm(t *testing.T) {
-	mark := openMark(t)
-	defer mark.Close()
-
-	var found []byte
-	app := NewApp()
-	app.Build(func(tx *Tx) {
-		tx.AppIdentityAsset("Aurora Notes", mark)
-		for _, r := range tx.records {
-			if recKind(r) == txSetAppIdentity {
-				found = r
-			}
-		}
-	})
-	if found == nil {
-		t.Fatal("AppIdentityAsset queued no record at all")
-	}
-	r := &reader{b: found, at: 8}
-	mask := r.u32()
-	r.u32() // reserved
-	name := r.value()
-	icon := r.value()
-	if mask != 1 {
-		t.Errorf("mask shipped as %d, want 1", mask)
-	}
-	if name.tag != ValueStr || name.str != "Aurora Notes" {
-		t.Errorf("name shipped as tag %d %q", name.tag, name.str)
-	}
-	if icon.tag != ValueBlob || icon.i64 == 0 {
-		t.Errorf("icon slot shipped as tag %d handle %d, want a live blob handle", icon.tag, icon.i64)
-	}
-}
-
 func openMark(t *testing.T) *Asset {
 	t.Helper()
 	var asset *Asset

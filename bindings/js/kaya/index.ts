@@ -1695,6 +1695,11 @@ export const APPEARANCE_DARK = wire.APPEARANCE_DARK;
 /** The alert_choice cancel sentinel: `if (choice === kaya.CANCEL)`. */
 export const CANCEL = wire.ALERT_CHOICE_CANCEL;
 
+/** A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal
+ * is not one of them: two platforms never report it. */
+export const NOTIFICATION_ACTIVATED = wire.NOTIFICATION_OUTCOME_ACTIVATED;
+export const NOTIFICATION_REFUSED = wire.NOTIFICATION_OUTCOME_REFUSED;
+
 export type AlertOptions = {
   title?: string;
   message?: string;
@@ -1732,6 +1737,51 @@ export function showAlert(opts: AlertOptions): number | Promise<number> {
     a._alertHandlers.set(alertId, resolve);
     show();
   });
+}
+
+export type NotificationOptions = {
+  /** The GUEST's id: many notifications may be live at once, and an id
+   * retires on its result or its cancel. */
+  notification: number;
+  title: string;
+  body?: string;
+  /** A UNIX time in seconds, handed to the OS scheduler where one
+   * exists. Absent (0) posts now. */
+  at?: number;
+  onResult?: (outcome: number) => void;
+};
+
+/** Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert's
+ * grammar without a window — the platform shows it outside the app.
+ * onResult(outcome) fires exactly once, kaya.NOTIFICATION_ACTIVATED when
+ * the user opened it and kaya.NOTIFICATION_REFUSED when the platform
+ * would not post it, and WITHOUT it the call answers a promise of the
+ * outcome instead, whose continuation is its own implicit transaction
+ * (docs/js-plan.md §4, showAlert's own twin). */
+export function showNotification(opts: NotificationOptions & { onResult: (outcome: number) => void }): number;
+export function showNotification(opts: NotificationOptions): Promise<number>;
+export function showNotification(opts: NotificationOptions): number | Promise<number> {
+  if (!opts.title) throw new Error("a notification needs a title — pass title:");
+  const a = app();
+  const id = opts.notification;
+  const show = (): void => {
+    records().push(wire.tx_show_notification(id, opts.at ?? 0, opts.title, opts.body ?? ""));
+  };
+  if (opts.onResult !== undefined) {
+    a._notificationHandlers.set(id, opts.onResult);
+    show();
+    return id;
+  }
+  return new Promise<number>((resolve) => {
+    a._notificationHandlers.set(id, resolve);
+    show();
+  });
+}
+
+/** Withdraw a pending or delivered notification (a reminder that was
+ * cleared). No answer follows; an unknown id is ignored. */
+export function cancelNotification(notification: number): void {
+  records().push(wire.tx_cancel_notification(notification));
 }
 
 // ---------------------------------------------------------------- files
@@ -2568,19 +2618,20 @@ export function brandTypeface(family: string, opts: TypefaceOptions = {}): void 
   );
 }
 
-/** DECLARE the app's identity (docs/app-identity-plan.md): the name it
- * goes by and the picture that stands for it. Set once, before the
- * first mount. */
-export function appIdentity(name: string, opts: { icon?: Asset | Uint8Array } = {}): void {
-  if (opts.icon !== undefined && !(opts.icon instanceof Asset || opts.icon instanceof Uint8Array)) {
-    throw new TypeError(
-      `kaya: appIdentity icon takes an image FILE's bytes, not ${runtime.describe(opts.icon)} — the NAME is the first argument, and a mark the app's BUILD shipped is kaya.asset('icons/...')`,
-    );
-  }
-  if (typeof name !== "string") {
-    throw new TypeError(`kaya: appIdentity takes the app's name as a string ('Aurora Notes'), not ${runtime.describe(name)} — an image FILE's bytes ride the icon slot, which is a different thing`);
-  }
-  records().push(wire.tx_set_app_identity(opts.icon !== undefined ? 1 : 0, name, opts.icon !== undefined ? new BlobHandle(blobOf(opts.icon)) : ""));
+/** DECLARE the app's identity (docs/app-identity-plan.md,
+ * docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+ * picture that stands for it and the reverse-DNS id it registers under
+ * are the asset root's own identity.toml, which the BUILD already reads,
+ * and the core reads the same file. Set ONCE, before the first mount.
+ * 
+ * STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+ * declared app is a Dock app on macOS (ruling 1), so an app that wants
+ * the platform's own identity declares none at all. */
+export function appIdentity(): void {
+  // THE SLOTS RIDE EMPTY and the root fills them: mask 0, no name, no
+  // blob. The record's shape is fixed, so the icon slot is written
+  // either way, as an empty Str.
+  records().push(wire.tx_set_app_identity(0, "", ""));
 }
 
 /** Make THIS transaction one undoable step in `window`'s history, under
@@ -2603,12 +2654,15 @@ export function undoable(label: string, window = 0): void {
 
 /** WHAT THIS HOST CAN DO. Named booleans, never the bits. CAPABILITIES
  * INFORM; WALLS REFUSE. */
-export type Capabilities = { readonly auxWindows: boolean };
+export type Capabilities = { readonly auxWindows: boolean; readonly notifications: boolean };
 
 /** This host's capabilities, constant for the life of the process. */
 export function capabilities(): Capabilities {
   const bits = runtime.capabilityBits();
-  return Object.freeze({ auxWindows: (bits & runtime.CAP_AUX_WINDOWS) !== 0 });
+  return Object.freeze({
+    auxWindows: (bits & runtime.CAP_AUX_WINDOWS) !== 0,
+    notifications: (bits & runtime.CAP_NOTIFICATIONS) !== 0,
+  });
 }
 
 /** Declare a signal: a render pipe with no read. A number is an F64 on
@@ -3507,6 +3561,9 @@ export class App {
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
   /** @internal */ readonly _itemCatalogs = new Map<number, ContextCatalog>();
   /** @internal */ readonly _alertHandlers = new Map<number, (choice: number) => void>();
+  /** @internal One-shot, keyed by the GUEST's notification id (the
+   * alert's grammar; many may be live at once). */
+  readonly _notificationHandlers = new Map<number, (outcome: number) => void>();
   /** @internal */ readonly _fileDialogHandlers = new Map<number, (files: PickedFile[]) => void>();
   /** @internal */ readonly _clipboardHandlers = new Map<number, (clip: Clip | null) => void>();
   /** @internal */ readonly _menuHandlers = new Map<string, Handler>();
@@ -3831,6 +3888,13 @@ export class App {
     if (kind === wire.OCC_ALERT_RESULT) {
       const handler = this._alertHandlers.get(ident);
       this._alertHandlers.delete(ident);
+      if (handler !== undefined) this._dispatch(handler as Handler, payload);
+      return;
+    }
+    if (kind === wire.OCC_NOTIFICATION_RESULT) {
+      // One-shot like the alert, and the id retires with it.
+      const handler = this._notificationHandlers.get(ident);
+      this._notificationHandlers.delete(ident);
       if (handler !== undefined) this._dispatch(handler as Handler, payload);
       return;
     }

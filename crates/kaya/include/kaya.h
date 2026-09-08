@@ -111,6 +111,8 @@
 
 #define KAYA_OCCURRENCE_VALUE_COMMITTED 26
 
+#define KAYA_OCCURRENCE_NOTIFICATION_RESULT 27
+
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
@@ -328,6 +330,13 @@
 #define KAYA_TX_SET_REORDERABLE 51
 
 /**
+ * Local notifications (docs/tasks-s3-plan.md N1).
+ */
+#define KAYA_TX_SHOW_NOTIFICATION 52
+
+#define KAYA_TX_CANCEL_NOTIFICATION 53
+
+/**
  * The size-class vocabulary (wire::SIZE_CLASS_*): what a breakpoint's
  * `size_class` value and kaya_window_metrics' `size_class` argument
  * speak. COMPACT is the only class a breakpoint may name today; NONE is
@@ -397,6 +406,13 @@
  * static assert under `kaya_capabilities` keeps it honest.
  */
 #define KAYA_CAP_AUX_WINDOWS 1
+
+/**
+ * Local notifications: this process can post one the desktop will show and
+ * remember — a RUNTIME fact the presentation layer grants at startup
+ * (docs/tasks-s3-plan.md N6), never part of the static word.
+ */
+#define KAYA_CAP_NOTIFICATIONS 2
 
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -881,6 +897,13 @@
 #define KAYA_ALERT_CHOICE_CANCEL UINT32_MAX
 
 /**
+ * The notification_outcome enum (spec enum "notification_outcome").
+ */
+#define KAYA_NOTIFICATION_OUTCOME_ACTIVATED 0
+
+#define KAYA_NOTIFICATION_OUTCOME_REFUSED 1
+
+/**
  * The align enum's values (spec enum "align"); baseline is rows-only.
  */
 #define KAYA_ALIGN_START 0
@@ -1195,6 +1218,23 @@ typedef struct KayaHostApi {
    */
   void (*emit_alert_result)(uint64_t, uint32_t);
   /**
+   * A notification's one answer (a NOTIFICATION_OUTCOME value):
+   * activated by the user, or refused by the platform.
+   */
+  void (*emit_notification_result)(uint64_t, uint32_t);
+  /**
+   * The runtime capability bits this host measured (KAYA_CAP_NOTIFICATIONS
+   * when the process is a bundle that can post), granted before the
+   * guest's first read.
+   */
+  void (*grant_capabilities)(uint64_t);
+  /**
+   * The capability word as the core holds it (static bits plus the
+   * runtime ones it granted at startup) — the interpreter's ONE reading
+   * of whether this process can post a notification.
+   */
+  uint64_t (*capabilities)(void);
+  /**
    * The picker's answer: parallel arrays of `count` NUL-terminated
    * paths and names, or count 0 for cancel.
    */
@@ -1368,9 +1408,18 @@ uint64_t kaya_spec_hash(void);
 /**
  * The capability word, which is the SCENE CORE'S const and not a second
  * copy of its predicate: the wall that refuses `create_window` tests the
- * same bits this hands out (crates/kaya/src/scene.rs).
+ * same bits this hands out (crates/kaya/src/scene.rs) — plus the runtime
+ * bits the presentation layer granted.
  */
 uint64_t kaya_capabilities(void);
+
+/**
+ * Presentation side: grant the runtime capability bits this host has
+ * measured — before the guest's first read, so the interpreter calls it
+ * at startup. Only KAYA_CAP_NOTIFICATIONS is grantable; a static bit
+ * offered here is a programming error.
+ */
+void kaya_grant_capabilities(uint64_t bits);
 
 /**
  * Take over the calling thread, which must be the process main thread,
@@ -1703,6 +1752,14 @@ void kaya_emit_pasted(const uint8_t *tag, uintptr_t tag_len, const struct KayaRe
  * by construction and panics loudly if one appears.
  */
 void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
+
+/**
+ * Presentation side: a notification's one answer — a NOTIFICATION_OUTCOME
+ * value (activated by the user, or refused by the platform). Exported on
+ * every platform; answerable only on the interpreter platforms, the
+ * kaya_emit_alert_result rule.
+ */
+void kaya_emit_notification_result(uint64_t notification, uint32_t outcome);
 
 /**
  * Presentation side: emit a click, exactly as a backend's action handler

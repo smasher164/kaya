@@ -741,11 +741,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            return null;");
     c.line("        }");
     c.line("        long id = b.getLong(8);");
-    c.line("        if (kind == OCC_KIND_ALERT_RESULT) {");
-    c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*,");
-    c.line("            // the cancel sentinel being -1 in java-int terms).");
-    c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
-    c.line("        }");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "        if (kind == OCC_KIND_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line("            // A request's one answer: id + the u32 code.");
+        c.line("            // The alert's cancel sentinel is -1 in java-int terms.");
+        c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

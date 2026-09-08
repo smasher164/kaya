@@ -20,6 +20,31 @@ pub struct WindowId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AlertId(pub u64);
 
+/// A notification's id: guest-chosen, retiring on its result or its cancel
+/// (docs/tasks-s3-plan.md N1). Many may be live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NotificationId(pub u64);
+
+/// A local notification request: shown by the PLATFORM outside the app's
+/// window. `at` is a UNIX time in seconds handed to the OS scheduler where
+/// one exists, 0 = now (N2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotificationSpec {
+    pub notification: NotificationId,
+    pub at: u64,
+    pub title: String,
+    pub body: String,
+}
+
+/// A notification's one answer: the user opened it, or the platform would
+/// not post it. Dismissal is deliberately absent (two platforms never
+/// report it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NotificationOutcome {
+    Activated,
+    Refused,
+}
+
 /// A live file dialog, guest-chosen like an alert id, retiring when its
 /// result fires. One may be live per process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -527,6 +552,9 @@ pub enum Occurrence {
     /// The alert's one answer; the dialog is already gone when this
     /// fires, and the alert id retired with it.
     AlertResult { alert: AlertId, choice: AlertChoice },
+    /// A notification's one answer: activated by the user, or refused
+    /// by the platform. The id retires with it.
+    NotificationResult { notification: NotificationId, outcome: NotificationOutcome },
     /// The user's back affordance popped an entry natively —
     /// informational and post-fact. A programmatic pop_entry does not
     /// echo here: its caller already knows.
@@ -1619,6 +1647,11 @@ pub enum TxOp {
     /// answered by exactly one AlertResult (the request/result
     /// grammar). One alert may be live per process.
     ShowAlert(AlertSpec),
+    /// Post a local notification (the alert grammar without a window),
+    /// answered by one NotificationResult.
+    ShowNotification(NotificationSpec),
+    /// Withdraw a pending or delivered notification by id.
+    CancelNotification(NotificationId),
     /// Request the platform's file picker over a live window: the
     /// alert's grammar exactly, answered by one FileDialogResult. One
     /// dialog may be live per process.
@@ -1849,6 +1882,11 @@ pub enum ApplyOp {
     /// validated the spec); answer exactly once with an AlertResult
     /// emission — an action index or the cancel sentinel.
     PresentAlert(AlertSpec),
+    /// Post the platform's real notification (validated); answer with a
+    /// NotificationResult emission when activated or refused.
+    PostNotification(NotificationSpec),
+    /// Withdraw a notification by id.
+    CancelNotification(NotificationId),
     /// Present the platform's real file picker (already validated).
     PresentFileDialog(FileDialogSpec),
     /// Present the platform's real save dialog (already validated).
@@ -2117,6 +2155,12 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_ALERT_RESULT,
                         &crate::wire::alert_result_body(alert, choice),
+                    );
+                }
+                Occurrence::NotificationResult { notification, outcome } => {
+                    ring.push_record(
+                        crate::ring::REC_NOTIFICATION_RESULT,
+                        &crate::wire::notification_result_body(notification, outcome),
                     );
                 }
                 Occurrence::EntryPopped { entry } => {

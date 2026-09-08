@@ -1436,6 +1436,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   collection_move it already has; the core reorders nothing \
                   on its own. `enabled` 0 withdraws it.",
         },
+        Record {
+            kind: 52,
+            name: "show_notification",
+            fields: &[
+                f("notification", FieldTy::U64),
+                f("at", FieldTy::U64),
+                f("title", FieldTy::Value),
+                f("body", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Post a local notification (docs/tasks-s3-plan.md N1, N2): the \
+                  alert grammar without a window — the platform shows it \
+                  outside the app, and the one answer is notification_result \
+                  when the user activates it or the platform refuses to post. \
+                  `at` is a UNIX time in seconds handed to the OS scheduler \
+                  where one exists (0 = now); title and body are Str values. \
+                  Ids are guest-chosen; many may be live, and an id retires \
+                  on its result or its cancel.",
+        },
+        Record {
+            kind: 53,
+            name: "cancel_notification",
+            fields: &[f("notification", FieldTy::U64)],
+            payload: None,
+            doc: "Withdraw a pending or delivered notification by id (a \
+                  reminder that was cleared). No answer follows; an unknown \
+                  id is ignored.",
+        },
     ],
     apply: &[
         Record {
@@ -2615,6 +2643,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   this carries the value the user settled on. A programmatic \
                   write never echoes; same ownership stance.",
         },
+        Record {
+            kind: 27,
+            name: "notification_result",
+            fields: &[
+                f("notification", FieldTy::U64),
+                f("outcome", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "A notification's one answer (docs/tasks-s3-plan.md N1): \
+                  outcome is a NOTIFICATION_OUTCOME value — activated when \
+                  the user opened it, refused when the platform would not \
+                  post it (permission denied, no identity, no registry to \
+                  remember it). Dismissal is not an outcome: two platforms \
+                  never report it. The id retires here.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -2836,6 +2880,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("action1", 1),
                 ("cancel", 4294967295),
             ],
+        },
+        EnumSpec {
+            // docs/tasks-s3-plan.md N1: activated or refused, nothing else.
+            name: "notification_outcome",
+            variants: &[("activated", 0), ("refused", 1)],
         },
         EnumSpec {
             // What kaya_open_picked opens a handle for (Android's
@@ -3119,6 +3168,8 @@ mod tests {
             ("set_drag_source", wire::TX_SET_DRAG_SOURCE),
             ("set_drop_target", wire::TX_SET_DROP_TARGET),
             ("set_reorderable", wire::TX_SET_REORDERABLE),
+            ("show_notification", wire::TX_SHOW_NOTIFICATION),
+            ("cancel_notification", wire::TX_CANCEL_NOTIFICATION),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -3207,6 +3258,7 @@ mod tests {
                 ("date_changed", crate::ring::REC_DATE_CHANGED),
                 ("time_changed", crate::ring::REC_TIME_CHANGED),
                 ("value_committed", crate::ring::REC_VALUE_COMMITTED),
+                ("notification_result", crate::ring::REC_NOTIFICATION_RESULT),
             ]
         );
     }
@@ -3493,6 +3545,8 @@ mod tests {
                     ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
                     ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
+                    ("notification_outcome", "activated") => wire::NOTIFICATION_OUTCOME_ACTIVATED,
+                    ("notification_outcome", "refused") => wire::NOTIFICATION_OUTCOME_REFUSED,
                     ("axis", "horizontal") => wire::AXIS_HORIZONTAL,
                     ("axis", "vertical") => wire::AXIS_VERTICAL,
                     ("size_class", "none") => wire::SIZE_CLASS_NONE,

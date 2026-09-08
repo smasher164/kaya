@@ -109,6 +109,17 @@ class MainActivity : ComponentActivity() {
         KayaRing.startGuest(scene)
     }
 
+    // A TAP ON A DELIVERED NOTIFICATION reaches a running app here
+    // (docs/tasks-s3-plan.md §3): the content PendingIntent is addressed
+    // to this component with SINGLE_TOP, so the platform delivers the
+    // id as a new intent rather than re-creating the Activity. A COLD
+    // launch by tap is read by KayaCompose.mount off `getIntent()`.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        KayaCompose.notificationIntent(intent)
+    }
+
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
         KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 

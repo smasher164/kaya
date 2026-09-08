@@ -109,6 +109,7 @@ func LookupEnv(name string) (string, bool) {
 // The host capability word, taken from the HEADER rather than written
 // again here, so a renumbering reaches Go with no edit.
 const capAuxWindows = uint64(C.KAYA_CAP_AUX_WINDOWS)
+const capNotifications = uint64(C.KAYA_CAP_NOTIFICATIONS)
 
 // The core's own number, not a copy (check-file-modes' trap class).
 const sortNoneValue = uint32(C.KAYA_SORT_NONE)

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc80ccf259104a87a;
+    public const ulong SpecHash = 0x21005150bc085070;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -141,6 +141,8 @@ static class KayaWire
     public const uint AlertChoiceAction0 = 0;
     public const uint AlertChoiceAction1 = 1;
     public const uint AlertChoiceCancel = 4294967295;
+    public const uint NotificationOutcomeActivated = 0;
+    public const uint NotificationOutcomeRefused = 1;
     public const uint FileModeRead = 0;
     public const uint FileModeWrite = 1;
     public const uint FileModeReadWrite = 2;
@@ -247,6 +249,8 @@ static class KayaWire
     public const ushort TxKindSetDragSource = 49;
     public const ushort TxKindSetDropTarget = 50;
     public const ushort TxKindSetReorderable = 51;
+    public const ushort TxKindShowNotification = 52;
+    public const ushort TxKindCancelNotification = 53;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -313,6 +317,7 @@ static class KayaWire
     public const ushort OccKindDateChanged = 24;
     public const ushort OccKindTimeChanged = 25;
     public const ushort OccKindValueCommitted = 26;
+    public const ushort OccKindNotificationResult = 27;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -902,6 +907,25 @@ static class KayaWire
         w.Write(enabled);
         w.Write(0u);
         return Finish(stream, w, TxKindSetReorderable);
+    }
+
+    /// Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
+    public static byte[] TxShowNotification(ulong notification, ulong at, object title, object body)
+    {
+        var w = Begin(out var stream);
+        w.Write(notification);
+        w.Write(at);
+        EncodeValue(w, title);
+        EncodeValue(w, body);
+        return Finish(stream, w, TxKindShowNotification);
+    }
+
+    /// Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
+    public static byte[] TxCancelNotification(ulong notification)
+    {
+        var w = Begin(out var stream);
+        w.Write(notification);
+        return Finish(stream, w, TxKindCancelNotification);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -2181,12 +2205,18 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
         {
-            // The alert's one answer: id + u32 choice (AlertChoice*).
+            // A request's one answer: id + the u32 code.
+            payload = BitConverter.ToUInt32(rec, 16);
+            return true;
+        }
+        if (kind == OccKindNotificationResult)
+        {
+            // A request's one answer: id + the u32 code.
             payload = BitConverter.ToUInt32(rec, 16);
             return true;
         }

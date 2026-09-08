@@ -3393,6 +3393,15 @@ struct CoreState {
     css_error: Rc<RefCell<Option<String>>>,
     /// The live modal alert (one per process): the request's identity plus
     /// the REAL dialog object for the runner's reads.
+    /// THE SUBTREES KAYA KNOWS ARE GONE: a popped entry's root, and the
+    /// roots a destroyed window took with it. A target is refused only when
+    /// it sits inside one of these — never by asking the toolkit whether a
+    /// widget is "still somewhere", because a toolkit has honest unknowns
+    /// (a covered entry's page, a pane held out of a split while it
+    /// rebuilds, a widget not yet through layout) and that question answers
+    /// DEAD for every one of them. WEAK, so a dead subtree the app dropped
+    /// leaves this list by itself. See resolve_id.
+    dead_subtrees: Vec<glib::WeakRef<gtk4::Widget>>,
     live_alert: std::rc::Rc<RefCell<Option<GtkLiveAlert>>>,
     /// The live file picker, and the directory the next one opens on. THE
     /// DIRECTORY IS ARMED, NOT SET: a dialog's initial folder is read when it
@@ -4256,7 +4265,8 @@ fn user_back(core: &mut CoreState, window: u64) {
         return;
     }
     core.nav_stacks.get_mut(&window).unwrap().pop();
-    core.nav_entries.remove(&top);
+    let gone = core.nav_entries.remove(&top).and_then(|entry| entry.root);
+    note_dead_subtree(core, gone);
     core.scene.user_popped(WindowId(top));
     refresh_nav(core, window);
     core.occurrences.send(Occurrence::EntryPopped {
@@ -4484,6 +4494,25 @@ fn refresh_three_panes(core: &mut CoreState, window: u64, target: &gtk4::Window)
 
 /// window's own when the stack is empty; the back button shows only over
 /// entries.
+/// Record a screen kaya has just taken away — a popped entry's root, or a
+/// destroyed window's — so a target inside it stops resolving (see
+/// `CoreState::dead_subtrees` and resolve_id). Dropped weak refs are pruned
+/// on the way past, and a root that came BACK (the same widget re-mounted
+/// into a new entry) is forgotten here rather than remembered wrongly.
+fn note_dead_subtree(core: &mut CoreState, root: Option<gtk4::Widget>) {
+    core.dead_subtrees.retain(|weak| weak.upgrade().is_some());
+    if let Some(root) = root {
+        core.dead_subtrees.push(root.downgrade());
+    }
+}
+
+/// A mounted root is alive again whatever it was before: the same widget
+/// tree re-pushed must answer targets.
+fn forget_dead_subtree(core: &mut CoreState, root: &gtk4::Widget) {
+    core.dead_subtrees
+        .retain(|weak| weak.upgrade().is_some_and(|w| w != *root));
+}
+
 fn refresh_nav(core: &mut CoreState, window: u64) {
     use gtk4::prelude::{GtkWindowExt, WidgetExt};
     // A section host reconciles its PAGE, not a window (stacks are
@@ -9233,11 +9262,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 aux.destroy();
             }
             core.window_veto.borrow_mut().remove(&window.0);
-            // A destroyed window takes its navigation stack with it.
+            // A destroyed window takes its navigation stack with it — and
+            // every root it held is a subtree kaya knows is gone.
             for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
-                core.nav_entries.remove(&entry);
+                let gone = core.nav_entries.remove(&entry).and_then(|e| e.root);
+                note_dead_subtree(core, gone);
             }
-            core.window_roots.remove(&window.0);
+            let gone = core.window_roots.remove(&window.0);
+            note_dead_subtree(core, gone);
             core.window_titles.remove(&window.0);
             core.app_titled.remove(&window.0);
             core.identity_icon_on.remove(&window.0);
@@ -9246,9 +9278,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // ... and its sections, each with ITS stack (the one way
             // a section dies).
             for sid in core.sections.remove(&window.0).unwrap_or_default() {
-                core.section_pages.remove(&sid);
+                let gone = core.section_pages.remove(&sid).and_then(|p| p.root);
+                note_dead_subtree(core, gone);
                 for entry in core.nav_stacks.remove(&sid).unwrap_or_default() {
-                    core.nav_entries.remove(&entry);
+                    let gone = core.nav_entries.remove(&entry).and_then(|e| e.root);
+                    note_dead_subtree(core, gone);
                 }
             }
             core.section_stacks.remove(&window.0);
@@ -9294,7 +9328,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .get_mut(&window.0)
                 .and_then(|s| s.pop())
                 .expect("scene validated the pop");
-            core.nav_entries.remove(&top);
+            let gone = core.nav_entries.remove(&top).and_then(|entry| entry.root);
+            note_dead_subtree(core, gone);
             refresh_nav(core, window.0);
         }
         ApplyOp::SetEntryProp { entry, prop, value } => {
@@ -10090,6 +10125,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 );
             }
         }
+        ApplyOp::PostNotification(spec) => post_notification(core.occurrences.clone(), spec),
+        ApplyOp::CancelNotification(id) => cancel_notification(id.0),
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps the
             // vocabulary 1:1. Answered exactly once through
@@ -11053,7 +11090,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // (docs/app-identity-plan.md I4a).
                     apply_identity_icon(core, owner);
                 }
-            } else if let Some(entry) = core.nav_entries.get_mut(&window.0) {
+            } else if core.nav_entries.contains_key(&window.0) {
+                forget_dead_subtree(core, &root_widget);
+                let entry = core.nav_entries.get_mut(&window.0).expect("just checked");
                 entry.root = Some(root_widget);
                 let host = entry.window;
                 if core.nav_stacks.get(&host).and_then(|s| s.last()) == Some(&window.0) {
@@ -11347,6 +11386,678 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
     }
 }
 
+// --- Local notifications (docs/tasks-s3-plan.md N1-N6, §3's GTK row) ---
+//
+// THE FLOOR IS REGIME 1 (ruled 2026-09-07): kaya posts only where the
+// desktop itself REMEMBERS the notification and relaunches the app when it
+// is clicked — the portal, or GNOME's own `org.gtk.Notifications` — and it
+// keeps no resident process anywhere. On a plain freedesktop daemon the
+// click would reach nobody once we exit, so nothing is posted at all: the
+// capability reads false and every post is answered `refused`, with no log
+// line of kaya's own (docs/tasks-s3-plan.md §0's three regimes).
+
+const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
+const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+const PORTAL_NOTIFICATION: &str = "org.freedesktop.portal.Notification";
+/// The host app's id, registered ON THE POSTING CONNECTION and before any
+/// other portal call (xdg-desktop-portal 1.19+). Measured 2026-09-07: a
+/// Register on one connection and a post on another leaves the portal with
+/// no id for us, and the daemon sees `desktop-entry=` empty.
+const PORTAL_REGISTRY: &str = "org.freedesktop.host.portal.Registry";
+const GNOME_NAME: &str = "org.gtk.Notifications";
+const GNOME_PATH: &str = "/org/gtk/Notifications";
+/// The two GApplication actions the desktop invokes on us: the click's
+/// (N1) and the scheduler's (N2 — a transient timer asks the app to post
+/// when the reminder's time comes).
+const ACTION_ACTIVATED: &str = "notify-activated";
+const ACTION_NOTIFY: &str = "notify";
+/// Every notification call is bounded: the app thread waits on the probe
+/// and the main loop runs the rest.
+const NOTIFY_TIMEOUT_MS: i32 = 5000;
+
+/// The identifier the desktop holds a kaya notification under; the kaya id
+/// rides back out of it on activation.
+fn notification_id_string(id: u64) -> String {
+    format!("kaya-{id}")
+}
+
+fn notification_id_of(text: &str) -> Option<u64> {
+    text.strip_prefix("kaya-")?.parse().ok()
+}
+
+/// The DEFAULT ACTION'S TARGET, and the parameter the session's timer hands
+/// back: the identifier string, not the number. `gapplication action` parses
+/// its parameter with GVariant's own rules and NO type hint, so a bare `12`
+/// arrives as INT32 and an action declaring anything else refuses it by name
+/// — measured 2026-09-07 ("expected type x but got type i"), which no scene
+/// can see because every scene posts with `at` 0 and fires no timer.
+fn notification_target(id: u64) -> String {
+    notification_id_string(id)
+}
+
+/// What the session's scheduler is asked to run when the reminder's time
+/// comes: the app's own `notify` action, with the identifier QUOTED so it
+/// parses as the string the action declares.
+fn scheduled_command(app: &str, id: u64) -> Vec<String> {
+    vec![
+        "gapplication".to_owned(),
+        "action".to_owned(),
+        app.to_owned(),
+        ACTION_NOTIFY.to_owned(),
+        format!("'{}'", notification_target(id)),
+    ]
+}
+
+/// The app's reverse-DNS id, out of the ONE declaration (N4): the
+/// GApplication id AND what the desktop remembers a notification under.
+/// Spelled in no guest and in no backend source — read from the asset root
+/// the core resolves, whose census lists `identity.toml`.
+pub(crate) fn app_identity_id() -> Option<String> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let bytes = match crate::assets::read("identity.toml") {
+            Ok(bytes) => bytes,
+            Err(why) => {
+                kaya_diag!("KAYA_DIAG app identity: {why}");
+                return None;
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        for line in text.lines() {
+            let line = line.trim();
+            // TOML puts every top-level key ABOVE the first table, so the
+            // first `[section]` ends the search — `[launch]`'s own keys are
+            // not the app's id.
+            if line.starts_with('[') {
+                break;
+            }
+            let Some(rest) = line.strip_prefix("id") else { continue };
+            let Some(rest) = rest.trim_start().strip_prefix('=') else { continue };
+            let value = rest.trim().trim_matches('"');
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        }
+        kaya_diag!(
+            "KAYA_DIAG app identity: the manifest declares no top-level `id`, so this \
+             process has no name for the desktop to remember a notification under and \
+             none to register as its application id"
+        );
+        None
+    })
+    .clone()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NotifyRoute {
+    /// `org.freedesktop.portal.Notification`: the portal is the
+    /// session-long process that keeps the record after we exit and calls
+    /// us back on a click.
+    Portal,
+    /// GNOME's own interface, which its shell answers the same way.
+    Gnome,
+}
+
+/// What kaya posted under a kaya id. KEPT AFTER THE NOTIFICATION IS GONE,
+/// because it is the JOIN KEY for the harness's platform read and not a
+/// record of what is live: the freedesktop hop drops the client's id, so
+/// the title is all of ours that reaches the daemon (measured 2026-09-07 —
+/// `Notify app_name='' … hints={desktop-entry=dev.kaya.aurora}`).
+struct Posted {
+    title: String,
+    body: String,
+    /// The transient timer unit a scheduled post asked the session's
+    /// manager for, so a cancel can stop it (N2).
+    unit: Option<String>,
+}
+
+static POSTED: std::sync::Mutex<std::collections::BTreeMap<u64, Posted>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn session_bus() -> Option<gio::DBusConnection> {
+    gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).ok()
+}
+
+fn name_has_owner(conn: &gio::DBusConnection, name: &str) -> bool {
+    conn.call_sync(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        Some(&glib::Variant::tuple_from_iter([name.to_variant()])),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    )
+    .ok()
+    .and_then(|reply| reply.child_value(0).get::<bool>())
+    .unwrap_or(false)
+}
+
+/// THE ONE DECISION, taken once: the capability bit and every post read
+/// it, so what a guest is told and what it walks into cannot disagree.
+/// Synchronous and cheap on purpose — `kaya::run` takes it before the app
+/// thread exists, so the guest's first `capabilities()` read is the truth
+/// (N6).
+fn notification_route() -> Option<NotifyRoute> {
+    static ROUTE: std::sync::OnceLock<Option<NotifyRoute>> = std::sync::OnceLock::new();
+    *ROUTE.get_or_init(|| {
+        let bus = session_bus();
+        let id = app_identity_id();
+        let portal = bus.as_ref().is_some_and(portal_serves_notifications);
+        let registered = portal
+            && match (&bus, &id) {
+                (Some(conn), Some(id)) => register_host_app(conn, id),
+                _ => false,
+            };
+        let gnome = bus.as_ref().is_some_and(|conn| name_has_owner(conn, GNOME_NAME));
+        let route = if registered {
+            Some(NotifyRoute::Portal)
+        } else if gnome && id.is_some() {
+            Some(NotifyRoute::Gnome)
+        } else {
+            None
+        };
+        // THE FOUR THINGS THE DECISION WAS MADE OF, under the harness only:
+        // a capability that reads false has four possible causes and the
+        // guest's own word for it ("cannot post") tells them apart for
+        // none. Each word below is a measurement this function just took.
+        if std::env::var_os("KAYA_SELFTEST").is_some() {
+            kaya_diag!(
+                "KAYA_DIAG notification route: session bus {}, app id {}, \
+                 portal answers {portal}, registered {registered}, \
+                 org.gtk.Notifications owned {gnome} -> {route:?}",
+                if bus.is_some() { "yes" } else { "no" },
+                id.as_deref().unwrap_or("<none>")
+            );
+        }
+        route
+    })
+}
+
+/// Whether a portal with a NOTIFICATION BACKEND is on this bus. The
+/// property read activates the portal the way any first call does, which
+/// is what a desktop that ships one expects; a frontend with no backend
+/// for the interface answers nothing and we fall through.
+fn portal_serves_notifications(conn: &gio::DBusConnection) -> bool {
+    conn.call_sync(
+        Some(PORTAL_NAME),
+        PORTAL_PATH,
+        "org.freedesktop.DBus.Properties",
+        "Get",
+        Some(&glib::Variant::tuple_from_iter([
+            PORTAL_NOTIFICATION.to_variant(),
+            "version".to_variant(),
+        ])),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    )
+    .is_ok()
+}
+
+/// Tell the portal which app this connection is, so the click it hears
+/// after we have exited names an app it can launch again. A Flatpak needs
+/// none of this and a portal below 1.19 has no Registry at all — either
+/// way a failure means the click could not come back, which is not a route
+/// under the ruled floor.
+fn register_host_app(conn: &gio::DBusConnection, id: &str) -> bool {
+    let started = std::time::Instant::now();
+    let answer = conn.call_sync(
+        Some(PORTAL_NAME),
+        PORTAL_PATH,
+        PORTAL_REGISTRY,
+        "Register",
+        Some(&glib::Variant::tuple_from_iter([
+            id.to_variant(),
+            glib::VariantDict::new(None).end(),
+        ])),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    );
+    if let Err(why) = &answer {
+        if std::env::var_os("KAYA_SELFTEST").is_some() {
+            kaya_diag!(
+                "KAYA_DIAG notification route: Register({id}) refused after {}ms: {why}",
+                started.elapsed().as_millis()
+            );
+        }
+    }
+    answer.is_ok()
+}
+
+/// Read by `kaya::run` before the app thread starts (N6).
+pub(crate) fn can_post_notifications() -> bool {
+    notification_route().is_some()
+}
+
+fn answer_notification(
+    sink: &OccSink,
+    id: u64,
+    outcome: crate::protocol::NotificationOutcome,
+) {
+    sink.send(Occurrence::NotificationResult {
+        notification: crate::protocol::NotificationId(id),
+        outcome,
+    });
+}
+
+/// The click, from whichever registry heard it: the platform's own copy
+/// goes the way it does when a user taps one, and the guest gets its one
+/// answer.
+fn notification_activated(id: u64, sink: &OccSink) {
+    withdraw_notification(id);
+    if let Ok(mut posted) = POSTED.lock() {
+        if let Some(entry) = posted.get_mut(&id) {
+            entry.unit = None;
+        }
+    }
+    answer_notification(sink, id, crate::protocol::NotificationOutcome::Activated);
+}
+
+/// ASYNCHRONOUS ON PURPOSE: this runs inside the portal's own callback,
+/// and a sync call back into the portal while it is waiting on our
+/// `Activate` is a deadlock until both timeouts expire.
+fn withdraw_notification(id: u64) {
+    let (Some(route), Some(conn)) = (notification_route(), session_bus()) else {
+        return;
+    };
+    let ident = notification_id_string(id);
+    let (name, path, interface, args) = match route {
+        NotifyRoute::Portal => (
+            PORTAL_NAME,
+            PORTAL_PATH,
+            PORTAL_NOTIFICATION,
+            glib::Variant::tuple_from_iter([ident.to_variant()]),
+        ),
+        NotifyRoute::Gnome => {
+            let Some(app) = app_identity_id() else { return };
+            (
+                GNOME_NAME,
+                GNOME_PATH,
+                GNOME_NAME,
+                glib::Variant::tuple_from_iter([app.to_variant(), ident.to_variant()]),
+            )
+        }
+    };
+    conn.call(
+        Some(name),
+        path,
+        interface,
+        "RemoveNotification",
+        Some(&args),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+        |_result| {},
+    );
+}
+
+/// The record the desktop is asked to hold: the guest's title and body,
+/// and the action a click activates us with — the kaya id as its target,
+/// which is what comes back through the portal's `ActionInvoked` and
+/// through GNOME's `ActivateAction`.
+fn notification_body(route: NotifyRoute, id: u64, title: &str, body: &str) -> glib::Variant {
+    let dict = glib::VariantDict::new(None);
+    dict.insert("title", title);
+    dict.insert("body", body);
+    // GNOME's interface takes the app's own action namespace; the portal
+    // takes the bare action name it will hand back to us.
+    dict.insert(
+        "default-action",
+        match route {
+            NotifyRoute::Portal => ACTION_ACTIVATED.to_owned(),
+            NotifyRoute::Gnome => format!("app.{ACTION_ACTIVATED}"),
+        },
+    );
+    dict.insert("default-action-target", notification_target(id));
+    dict.end()
+}
+
+fn deliver_notification(sink: OccSink, id: u64, title: String, body: String) {
+    let (Some(route), Some(conn)) = (notification_route(), session_bus()) else {
+        answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+        return;
+    };
+    let ident = notification_id_string(id);
+    let record = notification_body(route, id, &title, &body);
+    let (name, path, interface, args) = match route {
+        NotifyRoute::Portal => (
+            PORTAL_NAME,
+            PORTAL_PATH,
+            PORTAL_NOTIFICATION,
+            glib::Variant::tuple_from_iter([ident.to_variant(), record]),
+        ),
+        NotifyRoute::Gnome => {
+            let Some(app) = app_identity_id() else {
+                answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+                return;
+            };
+            (
+                GNOME_NAME,
+                GNOME_PATH,
+                GNOME_NAME,
+                glib::Variant::tuple_from_iter([app.to_variant(), ident.to_variant(), record]),
+            )
+        }
+    };
+    // The REFUSAL RIDES THE ANSWER, never a log line: a desktop that took
+    // the record says nothing, and one that refused it answers the guest
+    // exactly as a denied permission does on the other four platforms (N1).
+    conn.call(
+        Some(name),
+        path,
+        interface,
+        "AddNotification",
+        Some(&args),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+        move |result| {
+            if result.is_err() {
+                answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+            }
+        },
+    );
+}
+
+/// `at` in the session's own scheduler (N2): a transient systemd user
+/// timer firing `gapplication action <id> notify <n>`, which reaches the
+/// running primary instance and, when the app has exited, D-Bus-activates
+/// it. `at` is the second route and an in-process timer the last, for a
+/// session that runs neither manager — the lane's container is that
+/// session, which is why the route is the one the lane records.
+fn schedule_notification(id: u64, at: u64, sink: OccSink) {
+    let Some(app) = app_identity_id() else {
+        answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+        return;
+    };
+    let when = glib::DateTime::from_unix_local(at as i64)
+        .and_then(|t| t.format("%Y-%m-%d %H:%M:%S"))
+        .map(|s| s.to_string())
+        .ok();
+    let Some(when) = when else {
+        answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+        return;
+    };
+    let unit = format!("kaya-notify-{}-{id}", std::process::id());
+    let fire = scheduled_command(&app, id);
+    let systemd = std::process::Command::new("systemd-run")
+        .args(["--user", "--collect"])
+        .arg(format!("--unit={unit}"))
+        .arg(format!("--on-calendar={when}"))
+        .args(&fire)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if matches!(&systemd, Ok(status) if status.success()) {
+        if let Ok(mut posted) = POSTED.lock() {
+            if let Some(entry) = posted.get_mut(&id) {
+                entry.unit = Some(unit);
+            }
+        }
+        return;
+    }
+    if at_schedule(at, &fire) {
+        return;
+    }
+    // No session manager of either kind: the app is alive right now, so a
+    // main-loop timer is what is left. It dies with the process, which is
+    // exactly what the two schedulers above exist to avoid.
+    let delay = at.saturating_sub(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
+    glib::timeout_add_local_once(std::time::Duration::from_secs(delay), move || {
+        fire_scheduled(id, &sink);
+    });
+}
+
+/// The `at` route hands its command to a SHELL, and the GVariant quotes
+/// that ride through systemd-run's argv untouched would be eaten by it —
+/// `gapplication` would then see a bare `kaya-12`, which is not a GVariant
+/// at all. One round of shell quoting keeps the two routes identical.
+fn shell_line(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| {
+            if arg.contains('\'') {
+                format!("\"{arg}\"")
+            } else {
+                arg.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The classic recipe, one manager down: `echo <command> | at -t <when>`.
+fn at_schedule(at: u64, fire: &[String]) -> bool {
+    use std::io::Write as _;
+    let Some(stamp) = glib::DateTime::from_unix_local(at as i64)
+        .and_then(|t| t.format("%Y%m%d%H%M.%S"))
+        .map(|s| s.to_string())
+        .ok()
+    else {
+        return false;
+    };
+    let child = std::process::Command::new("at")
+        .args(["-t", &stamp])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return false };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = writeln!(stdin, "{}", shell_line(fire));
+    }
+    matches!(child.wait(), Ok(status) if status.success())
+}
+
+/// The scheduler's own action: post what this id was scheduled with. A
+/// process that never held the record — one D-Bus-activated by the timer
+/// after the app exited — has nothing to post and says so, which is S9's
+/// piece and not this slice's (docs/tasks-s3-plan.md N2).
+fn fire_scheduled(id: u64, sink: &OccSink) {
+    let held = POSTED
+        .lock()
+        .ok()
+        .and_then(|posted| posted.get(&id).map(|p| (p.title.clone(), p.body.clone())));
+    match held {
+        Some((title, body)) => deliver_notification(sink.clone(), id, title, body),
+        None => {
+            answer_notification(sink, id, crate::protocol::NotificationOutcome::Refused);
+        }
+    }
+}
+
+fn post_notification(sink: OccSink, spec: crate::protocol::NotificationSpec) {
+    let id = spec.notification.0;
+    if notification_route().is_none() {
+        answer_notification(&sink, id, crate::protocol::NotificationOutcome::Refused);
+        return;
+    }
+    if let Ok(mut posted) = POSTED.lock() {
+        posted.insert(
+            id,
+            Posted { title: spec.title.clone(), body: spec.body.clone(), unit: None },
+        );
+    }
+    if spec.at == 0 {
+        deliver_notification(sink, id, spec.title, spec.body);
+    } else {
+        schedule_notification(id, spec.at, sink);
+    }
+}
+
+fn cancel_notification(id: u64) {
+    let unit = POSTED
+        .lock()
+        .ok()
+        .and_then(|mut posted| posted.get_mut(&id).and_then(|entry| entry.unit.take()));
+    if let Some(unit) = unit {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "stop", &unit])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    withdraw_notification(id);
+}
+
+thread_local! {
+    /// Where the portal's click subscription lives; see below.
+    static PORTAL_CLICKS: RefCell<Option<gio::SignalSubscription>> =
+        const { RefCell::new(None) };
+}
+
+/// The two ways a click reaches this process, installed once at startup:
+/// the portal's `ActionInvoked` signal, and — for GNOME's interface and
+/// for the scheduler's timer — the GApplication actions the desktop
+/// invokes over `org.freedesktop.Application`.
+fn install_notification_routes(app: &gtk4::Application, sink: OccSink) {
+    let activated = gio::SimpleAction::new(ACTION_ACTIVATED, Some(glib::VariantTy::STRING));
+    let clicked = sink.clone();
+    activated.connect_activate(move |_, param| {
+        if let Some(id) = param.and_then(|p| p.str()).and_then(notification_id_of) {
+            notification_activated(id, &clicked);
+        }
+    });
+    app.add_action(&activated);
+    let scheduled = gio::SimpleAction::new(ACTION_NOTIFY, Some(glib::VariantTy::STRING));
+    let timer = sink.clone();
+    scheduled.connect_activate(move |_, param| {
+        if let Some(id) = param.and_then(|p| p.str()).and_then(notification_id_of) {
+            fire_scheduled(id, &timer);
+        }
+    });
+    app.add_action(&scheduled);
+    if notification_route() != Some(NotifyRoute::Portal) {
+        return;
+    }
+    let Some(conn) = session_bus() else { return };
+    // THE PORTAL HANDS THE ID BACK: measured 2026-09-07,
+    // `ActionInvoked('kaya-12', 'notify-activated', [<int64 12>])` — the
+    // freedesktop hop below it carries neither.
+    let subscription = conn.subscribe_to_signal(
+        Some(PORTAL_NAME),
+        Some(PORTAL_NOTIFICATION),
+        Some("ActionInvoked"),
+        Some(PORTAL_PATH),
+        None,
+        gio::DBusSignalFlags::NONE,
+        move |signal| {
+            let ident = signal.parameters.child_value(0);
+            let Some(id) = ident.str().and_then(notification_id_of) else { return };
+            notification_activated(id, &sink);
+        },
+    );
+    // THE SUBSCRIPTION IS THE LISTENING: dropping it unsubscribes, so it is
+    // parked for the process's life beside the loop that dispatches it.
+    PORTAL_CLICKS.with_borrow_mut(|slot| *slot = Some(subscription));
+}
+
+/// The lane's notification recorder IS the platform's list here (N5): the
+/// freedesktop protocol has no query — a daemon draws and forgets — so
+/// tools/linux/notifyd.py holds what the desktop was handed and answers
+/// for it. The verbs are the lane's; on a session without the recorder
+/// they say so rather than reading kaya's own record back.
+#[cfg(feature = "harness")]
+const RECORDER_NAME: &str = "dev.kaya.NotificationRecorder";
+#[cfg(feature = "harness")]
+const RECORDER_PATH: &str = "/dev/kaya/NotificationRecorder";
+
+#[cfg(feature = "harness")]
+fn recorder_call(method: &str, args: glib::Variant) -> Option<glib::Variant> {
+    let conn = session_bus()?;
+    match conn.call_sync(
+        Some(RECORDER_NAME),
+        RECORDER_PATH,
+        RECORDER_NAME,
+        method,
+        Some(&args),
+        None,
+        gio::DBusCallFlags::NONE,
+        NOTIFY_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    ) {
+        Ok(reply) => Some(reply),
+        Err(why) => {
+            kaya_diag!(
+                "KAYA_DIAG notification {method}: {RECORDER_NAME} did not answer on this \
+                 session bus ({why}). That interface is the lane's own notification \
+                 daemon (tools/linux/notifyd.py); a desktop session has a real one \
+                 drawing the popups and no query at all, so this verb reads nothing here."
+            );
+            None
+        }
+    }
+}
+
+/// One row of the recorder's list: route, the desktop's id for it, the app
+/// it was attributed to, the summary and the body.
+#[cfg(feature = "harness")]
+fn recorder_held() -> Vec<(String, String, String, String)> {
+    let no_arguments: [glib::Variant; 0] = [];
+    let Some(reply) = recorder_call("List", glib::Variant::tuple_from_iter(no_arguments))
+    else {
+        return Vec::new();
+    };
+    let rows = reply.child_value(0);
+    (0..rows.n_children())
+        .map(|i| {
+            let row = rows.child_value(i);
+            let text = |n: usize| row.child_value(n).str().unwrap_or_default().to_owned();
+            (text(0), text(1), text(2), text(3))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod notify_tests {
+    use super::{notification_id_of, notification_target, scheduled_command, shell_line};
+    use gtk4::glib;
+
+    /// THE FIRED COMMAND AND THE ACTION AGREE ON A TYPE, which no leg can
+    /// see: every scene posts with `at` 0, so the session's timer is armed
+    /// by nothing a lane runs, and the command it would carry is exercised
+    /// only here. `gapplication action` parses its parameter with GVariant's
+    /// own rules and NO type hint — a bare `12` arrives as INT32, and the
+    /// action refuses it by name (measured in the container 2026-09-07:
+    /// "Invalid parameter for action ‘notify’: expected type x but got type
+    /// i", with the notification never posted and nothing else red).
+    #[test]
+    fn gtk_notification_timer_parameter_parses_as_the_action_declares() {
+        let fire = scheduled_command("dev.kaya.aurora", 12);
+        assert_eq!(
+            fire[..4],
+            ["gapplication", "action", "dev.kaya.aurora", "notify"]
+        );
+        // What `gapplication` does with the last word, verbatim.
+        let parsed = glib::Variant::parse(None, &fire[4])
+            .expect("the timer's parameter must be a GVariant literal");
+        assert_eq!(
+            parsed.type_(),
+            glib::VariantTy::STRING,
+            "the notify action is declared with VariantTy::STRING"
+        );
+        assert_eq!(parsed.str(), Some(notification_target(12).as_str()));
+        assert_eq!(parsed.str().and_then(notification_id_of), Some(12));
+        // The shape that shipped for an afternoon, and what it parses as.
+        let bare = glib::Variant::parse(None, "12").expect("a number is a variant");
+        assert_ne!(bare.type_(), glib::VariantTy::STRING);
+        // The `at` route sends the same command through a shell.
+        assert!(shell_line(&fire).ends_with("notify \"'kaya-12'\""));
+    }
+}
+
 fn request_exit(code: i32) {
     EXIT_CODE.store(code, Ordering::Relaxed);
     CORE.with_borrow(|core| {
@@ -11361,9 +12072,14 @@ fn request_exit(code: i32) {
 /// The main-thread half, independent of who owns the app thread. Returns
 /// the exit code; the host process decides how to exit.
 pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
-    let app = gtk4::Application::builder()
-        .application_id("dev.kaya.Milestone2")
-        .build();
+    // THE APP'S OWN ID, out of the one declaration (docs/tasks-s3-plan.md
+    // N4): the name the desktop attributes a window to AND the name it
+    // remembers a notification under, so a click can D-Bus-activate us.
+    let mut builder = gtk4::Application::builder();
+    if let Some(id) = app_identity_id() {
+        builder = builder.application_id(&id);
+    }
+    let app = builder.build();
 
     // activate can fire more than once; the core is set up once.
     let ends = Rc::new(RefCell::new(Some((occ_tx, tx_rx))));
@@ -11651,6 +12367,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     markers.insert(0, primary_chrome.marker);
                     markers
                 },
+                dead_subtrees: Vec::new(),
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
                 live_file_dialog: std::rc::Rc::new(RefCell::new(None)),
                 pending_dialog_dir: std::rc::Rc::new(RefCell::new(None)),
@@ -11731,6 +12448,12 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 app: Some(app.clone()),
             });
         });
+
+        // The click's two doors and the scheduler's action
+        // (docs/tasks-s3-plan.md N1, N2), on the core's own sink: a
+        // rust-native backend answers on the sink its guest listens to,
+        // never capi's presentation slot.
+        install_notification_routes(app, occ_tx.clone());
 
         // The first transaction may already be queued; drain now.
         drain_transactions();
@@ -14007,10 +14730,37 @@ impl crate::harness::Stage for GtkStage {
                     .get(&widget.0)
                     .map(|table| table.tag.borrow().clone())
             }
-            fn find(names: Vec<gtk4::Widget>, id: &str) -> Option<isize> {
+            // A TARGET IS A LIVE WIDGET, keyed arm and plain arm both: the
+            // per-kind registries are PUSH-ONLY, so a screen that was
+            // popped — or a window that was destroyed — leaves its widgets
+            // in them carrying their authored ids, and the first match wins
+            // over the copy the user is looking at (the tasks Details
+            // screen, popped and pushed again).
+            //
+            // THE QUESTION IS "IS IT INSIDE SOMETHING KAYA KNOWS IS GONE?",
+            // never "is it still somewhere alive?": the second makes every
+            // honest unknown a death — a covered entry's page, a pane the
+            // split holds out while it rebuilds, a widget not yet through
+            // layout — and two such shapes went red on the windows lane the
+            // day this rule landed. An empty list answers at once, and only
+            // the case the rule exists for changes.
+            fn live(core: &CoreState, widget: &gtk4::Widget) -> bool {
+                if core.dead_subtrees.is_empty() {
+                    return true;
+                }
+                let mut node = Some(widget.clone());
+                while let Some(w) = node {
+                    if core.dead_subtrees.iter().any(|d| d.upgrade().is_some_and(|g| g == w)) {
+                        return false;
+                    }
+                    node = w.parent();
+                }
+                true
+            }
+            fn find(core: &CoreState, names: Vec<gtk4::Widget>, id: &str) -> Option<isize> {
                 names
                     .iter()
-                    .position(|w| w.widget_name() == id)
+                    .position(|w| w.widget_name() == id && live(core, w))
                     .map(|i| i as isize)
             }
             if let Some(keys) = keys.as_deref() {
@@ -14022,6 +14772,7 @@ impl crate::harness::Stage for GtkStage {
                         .enumerate()
                         .filter(|(_, (column, widget))| {
                             column.widget_name() == id
+                                && live(core, column.upcast_ref())
                                 && table_tag(core, **widget).is_some_and(|tag| {
                                     crate::harness::table_tag_keys_match(&tag, keys)
                                 })
@@ -14048,7 +14799,7 @@ impl crate::harness::Stage for GtkStage {
                 let hits: Vec<usize> = candidates
                     .iter()
                     .enumerate()
-                    .filter(|(_, w)| w.widget_name() == id)
+                    .filter(|(_, w)| w.widget_name() == id && live(core, w.upcast_ref()))
                     .filter(|(_, w)| {
                         tag_of(w).is_some_and(|tag| crate::harness::table_tag_keys_match(&tag, keys))
                     })
@@ -14059,9 +14810,13 @@ impl crate::harness::Stage for GtkStage {
                     // for every cause is what cost a stale-interpreter run
                     // on the mac (docs/traps.md, 2026-09-01).
                     let with_id = candidates.iter().filter(|w| w.widget_name() == id).count();
+                    let live_id = candidates
+                        .iter()
+                        .filter(|w| w.widget_name() == id && live(core, w))
+                        .count();
                     let tagged = candidates.iter().filter(|w| tag_of(w).is_some()).count();
                     eprintln!(
-                        "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] {}: {} live, {with_id} carrying the id, {tagged} tagged",
+                        "KAYA_DIAG keyed target {kind:?}@{id}[{keys}] {}: {} in the registry, {with_id} carrying the id ({live_id} of them live), {tagged} tagged",
                         if hits.is_empty() { "unresolved" } else { "ambiguous" },
                         candidates.len()
                     );
@@ -14082,11 +14837,13 @@ impl crate::harness::Stage for GtkStage {
                     .iter()
                     .zip(&core.column_ids)
                     .position(|(w, wid)| {
-                        w.widget_name() == id && core.widgets.contains_key(wid)
+                        w.widget_name() == id
+                            && core.widgets.contains_key(wid)
+                            && live(core, w.upcast_ref())
                     })
                     .map(|i| i as isize);
             }
-            find(kind_registry(core, kind), &id)
+            find(core, kind_registry(core, kind), &id)
         })
     }
 
@@ -14660,6 +15417,53 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| 1 + core.aux_windows.len())
     }
 
+    /// THE PLATFORM'S OWN LIST (docs/tasks-s3-plan.md N5), never kaya's
+    /// record of what it posted. The join is by TITLE on the portal route
+    /// and by the desktop's id on GNOME's, because the freedesktop hop
+    /// under the portal drops the client's id and keeps only the text and
+    /// the `desktop-entry` attribution (measured 2026-09-07). What comes
+    /// back is the DAEMON's summary, so a title the desktop mangled reads
+    /// as the mangled one.
+    fn notification_title(&self, notification: u64) -> Option<String> {
+        let title = POSTED.lock().ok()?.get(&notification)?.title.clone();
+        let ident = notification_id_string(notification);
+        let mine = app_identity_id().unwrap_or_default();
+        recorder_held()
+            .into_iter()
+            .find(|(route, held, app, summary)| {
+                if route == "gtk" {
+                    *held == ident && *app == mine
+                } else {
+                    *summary == title && (app.is_empty() || *app == mine)
+                }
+            })
+            .map(|(_, _, _, summary)| summary)
+    }
+
+    /// The click, driven for real: the recorder emits what a mako or dunst
+    /// box emits when a user taps it, and the answer travels the route the
+    /// notification took — the portal hearing the daemon and calling back
+    /// into this process, or GNOME's own `ActivateAction`.
+    fn activate_notification(&self, notification: u64) {
+        let key = match notification_route() {
+            Some(NotifyRoute::Gnome) => notification_id_string(notification),
+            _ => POSTED
+                .lock()
+                .ok()
+                .and_then(|posted| posted.get(&notification).map(|p| p.title.clone()))
+                .unwrap_or_else(|| notification_id_string(notification)),
+        };
+        let answer = recorder_call(
+            "Invoke",
+            glib::Variant::tuple_from_iter([key.to_variant(), "".to_variant()]),
+        );
+        if let Some(answer) = answer {
+            kaya_diag!(
+                "KAYA_DIAG notification {notification} activate: {}",
+                answer.child_value(0).str().unwrap_or_default()
+            );
+        }
+    }
     fn alert_title(&self, window: u64) -> Option<String> {
         Self::on_main(move |core| {
             let live = core.live_alert.borrow();
@@ -15453,10 +16257,20 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn appearance(&self) -> String {
-        // The toolkit's own reading, the same one presentation_report sends;
-        // on the main thread, where libadwaita's StyleManager lives.
+        // TWO WORDS, BOTH READ BACK FROM THE TOOLKIT (docs/tasks-s2b-plan.md
+        // R4): the mode, and whether an override slot is filled — on GTK
+        // that slot is libadwaita's own colour scheme, whose `Default` IS
+        // "follow the session". Never kaya's record of what was asked
+        // (tools/check-appearance.py's B3), which would answer for the app
+        // instead of for the platform.
         Self::on_main(|_core| {
-            if adw::StyleManager::default().is_dark() { "dark".to_string() } else { "light".to_string() }
+            let mode = if adw::StyleManager::default().is_dark() { "dark".to_string() } else { "light".to_string() };
+            let source = if adw::StyleManager::default().color_scheme() == adw::ColorScheme::Default {
+                "system"
+            } else {
+                "override"
+            };
+            format!("{mode} {source}")
         })
     }
     fn sections_presentation(&self, window: u64) -> String {

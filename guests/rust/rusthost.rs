@@ -129,6 +129,7 @@ mod search;
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
 mod tasks;
+mod notify;
 
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.py and the panic below
 /// hold that.
@@ -183,6 +184,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),
+        Ok("notify") => notify::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.
         Ok("typeface") => typeface::app(ctx),

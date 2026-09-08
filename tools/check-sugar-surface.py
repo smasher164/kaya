@@ -193,6 +193,103 @@ if range_fake != 9:
                   f"({range_fake}/9 range-verb patterns fired for a "
                   f"verb that exists nowhere)")
 
+# --- THE NOTIFICATION SURFACE, in all nine -------------------------
+# docs/tasks-s3-plan.md N1: a request with a guest-chosen id, one
+# withdrawal, and ONE-SHOT result handler bound AT THE SHOW — the
+# alert's grammar without a window. NEITHER SWEEP ABOVE SEES IT: a
+# notification is not a KIND and not a WINDOW PROP, while the wire
+# records reach every binding through the generator whether or not a
+# guest can spell either, so all eight could ship unable to post.
+#
+# THE THIRD CLAUSE IS THE ONE WITH TEETH, and it is a semantics rather
+# than a spelling: the registration RETIRES with the result. No lane can
+# see a handler that stopped retiring — the scene posts, is answered, and
+# reads the same label back either way — so a binding whose table kept
+# the closure would fire an old handler for a REUSED id, silently, on
+# every platform at once. Each removal is read out of the binding's own
+# dispatch arm.
+def check_notification_verb(lang_patterns, what, findings=None):
+    for lang, rel, pattern in lang_patterns:
+        global status
+        if not grep_file(pattern, rel):
+            msg = (f"check-sugar-surface: {lang} has no notification "
+                   f"{what} (wanted /{pattern}/ in {rel})")
+            if findings is None:
+                print(msg)
+                status = 1
+            else:
+                findings.append(msg)
+
+
+def notification_clauses(snake, pascal, camel):
+    """(request, withdrawal) patterns per binding, for a verb spelled
+    `<snake>_notification` in the snake languages."""
+    return [
+        ("rust", "crates/kaya/src/app.rs", f"pub fn {snake}_notification\\("),
+        ("python", "bindings/python/kaya/__init__.py",
+         f"^def {snake}_notification\\("),
+        ("go", "bindings/go/app.go",
+         f"func \\(tx \\*Tx\\) {pascal}Notification\\("),
+        ("csharp", "bindings/csharp/KayaApp.cs",
+         f"public [A-Za-z]+ {pascal}Notification\\("),
+        ("java", "bindings/java/dev/kaya/KayaApp.java",
+         f"public [A-Za-z]+ {camel}Notification\\("),
+        ("swift", "bindings/swift/KayaApp.swift",
+         f"func {camel}Notification\\("),
+        ("haskell", "bindings/haskell/KayaApp.hs",
+         f"^{camel}Notification ::"),
+        ("ocaml", "bindings/ocaml/kaya_app.ml",
+         f"^let {snake}_notification "),
+        ("js", "bindings/js/kaya/index.ts",
+         f"^export function {camel}Notification\\("),
+    ]
+
+
+# The one-shot RETIREMENT, read out of each binding's own dispatch arm.
+# Written out rather than derived: nine languages spell "take it out of
+# the table" nine ways, and a casing rule would match the INSERT too.
+NOTIFICATION_RETIRES = [
+    ("rust", "crates/kaya/src/app.rs",
+     r"notifications\.borrow_mut\(\)\.remove\("),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"_notification_handlers\.pop\("),
+    ("go", "bindings/go/app.go", r"delete\(a\.notifications, id\)"),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"notifications\.Remove\(id"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"notifications\.remove\(occ\.id\)"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"notifications\.removeValue\(forKey: id\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"appNotificationHandlers app\) \(Map\.delete ident"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"Hashtbl\.remove app\.notification_handlers id"),
+    ("js", "bindings/js/kaya/index.ts",
+     r"_notificationHandlers\.delete\(ident\)"),
+]
+
+check_notification_verb(notification_clauses("show", "Show", "show"),
+                        "request")
+check_notification_verb(notification_clauses("cancel", "Cancel", "cancel"),
+                        "withdrawal")
+check_notification_verb(NOTIFICATION_RETIRES,
+                        "handler retirement at the result")
+
+# THE BUILT-IN NEGATIVES: a verb spelled nowhere must fail in all nine,
+# and so must a retirement pattern nothing satisfies. Collected, so the
+# fakes' failures die with the list.
+for _what, _clauses in (
+    ("request", notification_clauses("kaya_fake", "KayaFake", "kayaFake")),
+    ("retirement", [(lang, rel, r"kayaFakeRetirement\(")
+                    for lang, rel, _ in NOTIFICATION_RETIRES]),
+):
+    fake = []
+    check_notification_verb(_clauses, _what, findings=fake)
+    if len(fake) != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed "
+                      f"({len(fake)}/9 notification-{_what} patterns "
+                      f"fired for a spelling that exists nowhere)")
+
 # --- THE CAPABILITIES SURFACE, in all nine -------------------------
 # Every binding wraps `kaya_capabilities()`, or a guest derives the
 # answer from its OWN platform predicate. TWO CLAUSES, because either
@@ -259,6 +356,7 @@ def check_cap_flag(snake, pascal, camel, findings=None):
 
 
 check_cap_flag("aux_windows", "AuxWindows", "auxWindows")
+check_cap_flag("notifications", "Notifications", "notifications")
 
 # THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the same reason
 # the range verbs have one: sixteen patterns that can only pass are
@@ -287,73 +385,123 @@ if cap_fake != 9:
 # on testing the old one, which reads as a host that lost a capability.
 # Three DO read the core's own name, so for them the check is that they
 # still name it rather than quietly becoming copiers.
+# EVERY BIT THE CORE DECLARES, not one of them: the table is keyed on
+# the core's own constant name, so a bit added to scene.rs and to no
+# binding is a finding here rather than a capability six languages
+# silently report as false (docs/tasks-s3-plan.md N3 added the second).
+CAP_BITS = {
+    "CAP_AUX_WINDOWS": {
+        "copiers": {
+            "python": ("bindings/python/kaya/runtime.py",
+                       r"^CAP_AUX_WINDOWS = (\d+)$"),
+            "csharp": ("bindings/csharp/Kaya.cs",
+                       r"CAP_AUX_WINDOWS = (\d+);"),
+            "java": ("bindings/java/dev/kaya/KayaApp.java",
+                     r"CAP_AUX_WINDOWS = (\d+);"),
+            "haskell": ("bindings/haskell/KayaRuntime.hs",
+                        r"^capAuxWindows = (\d+)$"),
+            "ocaml": ("bindings/ocaml/kaya_runtime.ml",
+                      r"^let cap_aux_windows = (\d+)L$"),
+            "js": ("bindings/js/kaya/runtime.ts",
+                   r"^export const CAP_AUX_WINDOWS = (\d+);$"),
+        },
+        "readers": {
+            "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_AUX_WINDOWS"),
+            "go": ("bindings/go/runtime.go", "C.KAYA_CAP_AUX_WINDOWS"),
+            "swift": ("bindings/swift/KayaApp.swift",
+                      "KAYA_CAP_AUX_WINDOWS"),
+        },
+    },
+    "CAP_NOTIFICATIONS": {
+        "copiers": {
+            "python": ("bindings/python/kaya/runtime.py",
+                       r"^CAP_NOTIFICATIONS = (\d+)$"),
+            "csharp": ("bindings/csharp/Kaya.cs",
+                       r"CAP_NOTIFICATIONS = (\d+);"),
+            "java": ("bindings/java/dev/kaya/KayaApp.java",
+                     r"CAP_NOTIFICATIONS = (\d+);"),
+            "haskell": ("bindings/haskell/KayaRuntime.hs",
+                        r"^capNotifications = (\d+)$"),
+            "ocaml": ("bindings/ocaml/kaya_runtime.ml",
+                      r"^let cap_notifications = (\d+)L$"),
+            "js": ("bindings/js/kaya/runtime.ts",
+                   r"^export const CAP_NOTIFICATIONS = (\d+);$"),
+        },
+        "readers": {
+            "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_NOTIFICATIONS"),
+            "go": ("bindings/go/runtime.go", "C.KAYA_CAP_NOTIFICATIONS"),
+            "swift": ("bindings/swift/KayaApp.swift",
+                      "KAYA_CAP_NOTIFICATIONS"),
+        },
+    },
+}
+
+
 def cap_numbers():
-    """(output lines, ok). The authority: the scene core owns the bit
-    (capi.rs's exported constant is static-asserted equal to it, and
-    the header's #define is cbindgen's copy of capi.rs's)."""
+    """(output lines, ok). The authority: the scene core owns the bits
+    (capi.rs's exported constants are static-asserted equal to them, and
+    the header's #defines are cbindgen's copies of capi.rs's)."""
     out = []
     scene = read_rel("crates/kaya/src/scene.rs")
-    found = re.search(r"const CAP_AUX_WINDOWS: u64 = (\d+);", scene)
-    if not found:
+    declared = dict(
+        (name, int(value))
+        for name, value in re.findall(
+            r"const (CAP_[A-Z_]+): u64 = (\d+);", scene))
+    if not declared:
         out.append("check-sugar-surface: crates/kaya/src/scene.rs "
-                   "declares no CAP_AUX_WINDOWS — the capability bit "
-                   "has no authority to check the bindings against")
+                   "declares no CAP_* bit — the capability numbers have "
+                   "no authority to check the bindings against")
         return out, False
-    truth = int(found.group(1))
+    # A BIT THE CORE DECLARES AND THIS TABLE DOES NOT is the shape that
+    # let a second capability reach the wire while six bindings wrote
+    # nothing: the census must grow with the core, not with memory.
+    for name in sorted(declared):
+        if name not in CAP_BITS:
+            out.append(f"check-sugar-surface: the core declares {name} "
+                       f"(crates/kaya/src/scene.rs) and this gate's "
+                       f"CAP_BITS table does not — add its nine "
+                       f"spellings, or the bindings can drop it in "
+                       f"silence")
+            return out, False
+    print("check-sugar-surface: capability bits censused: "
+          + ", ".join(f"{n}={declared[n]}" for n in sorted(declared)))
 
-    COPIERS = {
-        "python": ("bindings/python/kaya/runtime.py",
-                   r"^CAP_AUX_WINDOWS = (\d+)$"),
-        "csharp": ("bindings/csharp/Kaya.cs",
-                   r"CAP_AUX_WINDOWS = (\d+);"),
-        "java": ("bindings/java/dev/kaya/KayaApp.java",
-                 r"CAP_AUX_WINDOWS = (\d+);"),
-        "haskell": ("bindings/haskell/KayaRuntime.hs",
-                    r"^capAuxWindows = (\d+)$"),
-        "ocaml": ("bindings/ocaml/kaya_runtime.ml",
-                  r"^let cap_aux_windows = (\d+)L$"),
-        "js": ("bindings/js/kaya/runtime.ts",
-               r"^export const CAP_AUX_WINDOWS = (\d+);$"),
-    }
-    READERS = {
-        "rust": ("crates/kaya/src/app.rs", "KAYA_CAP_AUX_WINDOWS"),
-        "go": ("bindings/go/runtime.go", "C.KAYA_CAP_AUX_WINDOWS"),
-        "swift": ("bindings/swift/KayaApp.swift",
-                  "KAYA_CAP_AUX_WINDOWS"),
-    }
-
-    def audit(number):
+    def audit(bit, number):
         """Every copier's written bit, against `number`."""
         bad = []
-        for lang, (path, pattern) in COPIERS.items():
+        for lang, (path, pattern) in CAP_BITS[bit]["copiers"].items():
             text = read_rel(path)
             wrote = [int(g) for g in re.findall(pattern, text, re.M)]
             if not wrote:
-                bad.append(f"{lang} writes no capability bit at all "
+                bad.append(f"{lang} writes no {bit} at all "
                            f"({path} wanted /{pattern}/)")
             elif any(v != number for v in wrote):
-                bad.append(f"{lang} writes CAP_AUX_WINDOWS={wrote} "
+                bad.append(f"{lang} writes {bit}={wrote} "
                            f"where the core says {number} ({path}) — "
                            f"the guest would test a bit the core no "
                            f"longer sets")
         return bad
 
-    fails = audit(truth)
-    for lang, (path, name) in READERS.items():
-        if name not in read_rel(path):
-            fails.append(f"{lang} no longer names {name} ({path}) — "
-                         f"it read the core's own constant, and "
-                         f"anything else here is a number that drifts")
+    fails = []
+    for bit, truth in sorted(declared.items()):
+        fails.extend(audit(bit, truth))
+        for lang, (path, name) in CAP_BITS[bit]["readers"].items():
+            if name not in read_rel(path):
+                fails.append(f"{lang} no longer names {name} ({path}) — "
+                             f"it read the core's own constant, and "
+                             f"anything else here is a number that "
+                             f"drifts")
 
-    # THE WATCHED NEGATIVE: move the authority under them and EVERY
-    # copier must notice. A reader that silently found nothing agrees
-    # with any number at all.
-    missed = len(COPIERS) - len(audit(truth + 41))
-    if missed:
-        out.append(f"check-sugar-surface: self-test failed ({missed} "
-                   f"of {len(COPIERS)} capability-number readers did "
-                   f"not notice a renumbered bit)")
-        return out, False
+        # THE WATCHED NEGATIVE: move the authority under them and EVERY
+        # copier must notice. A reader that silently found nothing
+        # agrees with any number at all.
+        copiers = CAP_BITS[bit]["copiers"]
+        missed = len(copiers) - len(audit(bit, truth + 41))
+        if missed:
+            out.append(f"check-sugar-surface: self-test failed ({missed} "
+                       f"of {len(copiers)} {bit} readers did not notice "
+                       f"a renumbered bit)")
+            return out, False
 
     out.extend("check-sugar-surface: " + line for line in fails)
     return out, not fails
@@ -4425,16 +4573,23 @@ check_styling_point(
 
 # THE APP IDENTITY (docs/app-identity-plan.md): a transaction verb no
 # other sweep can see, so a binding shipping it wire-only strands
-# apps in that language while every other gate passes. RED BY DESIGN
-# until the eighth binding lands. Same base-name rule as the brand
-# rows.
+# apps in that language while every other gate passes. Same base-name
+# rule as the brand rows.
+#
+# AND THE ARGUMENT LIST IS EMPTY IN ALL NINE (docs/tasks-s3-plan.md N4):
+# the name, the mark and the reverse-DNS id are the manifest's, read by
+# the core, so a binding that brought its parameters back would have
+# every value it sent SILENTLY REPLACED at the root — the record would
+# apply, the app would be correctly identified, and the guest's own
+# string would mean nothing. That is why each pattern here closes its
+# parentheses rather than stopping at the name.
 check_styling_point(
     "app_identity",
-    r"pub fn app_identity\(&mut self", r"^def app_identity\(",
-    r"func \(tx \*Tx\) AppIdentity\(", r"public void AppIdentity\(",
-    r"public void appIdentity\(", r"func appIdentity\(",
-    r"^appIdentity ::", r"^let app_identity ",
-    r"^export function appIdentity\(")
+    r"pub fn app_identity\(&mut self\)", r"^def app_identity\(\):",
+    r"func \(tx \*Tx\) AppIdentity\(\)", r"public void AppIdentity\(\)",
+    r"public void appIdentity\(\)", r"func appIdentity\(\)",
+    r"^appIdentity :: Build \(\)", r"^let app_identity \(\) =",
+    r"^export function appIdentity\(\)")
 
 # `asset(name)` (docs/assets-plan.md): a transaction-tier call no other
 # sweep can see. FOUR SHAPES, idiom rather than semantics (invariant 1).

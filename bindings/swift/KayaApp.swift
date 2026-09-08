@@ -1418,6 +1418,11 @@ struct KayaCapabilities {
     /// rule, keyed on the platform rather than on the capability. (A `#if`
     /// around an IMPORT or an unavailable API is a different thing.)
     let auxWindows: Bool
+
+    /// This process can post a local notification the desktop will show
+    /// (docs/tasks-s3-plan.md N3). A RUNTIME bit: the host measures it at
+    /// startup, so it is false where no notification service answers.
+    let notifications: Bool
 }
 
 final class KayaApp {
@@ -1426,7 +1431,9 @@ final class KayaApp {
     /// through the bridging header, never a copied number.
     static func capabilities() -> KayaCapabilities {
         let bits = kaya_capabilities()
-        return KayaCapabilities(auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0)
+        return KayaCapabilities(
+            auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0,
+            notifications: bits & UInt64(KAYA_CAP_NOTIFICATIONS) != 0)
     }
 
     // Work handed over by other threads, waiting to run as transactions
@@ -1475,6 +1482,9 @@ final class KayaApp {
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    // One-shot, keyed by the GUEST's notification id (the alert's
+    // request/result grammar; many may be live at once).
+    private var notifications: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
@@ -1954,6 +1964,14 @@ final class KayaApp {
         alerts[alert] = handler
     }
 
+    /// Bind a notification's one-shot result handler; the registration
+    /// retires with the result.
+    func onNotification(
+        _ notification: UInt64, _ handler: @escaping (KayaAppTx, UInt32) throws -> Void
+    ) {
+        notifications[notification] = handler
+    }
+
     func allocAlert() -> UInt64 {
         nextAlert += 1
         return nextAlert
@@ -2240,6 +2258,12 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
                 // One-shot: the registration retires with the result.
                 if let handler = alerts.removeValue(forKey: id) {
+                    dispatch { try build { tx in try handler(tx, choice) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
+                // One-shot like the alert, and the id retires with it;
+                // the outcome rides the same u32 slot the choice does.
+                if let handler = notifications.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
@@ -3491,6 +3515,34 @@ final class KayaAppTx {
         return id
     }
 
+    /// Post a local notification with a GUEST-CHOSEN id
+    /// (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a
+    /// window — the platform shows it outside the app. `onResult` fires
+    /// exactly once and retires, with KAYA_NOTIFICATION_OUTCOME_ACTIVATED
+    /// when the user opened it and KAYA_NOTIFICATION_OUTCOME_REFUSED when
+    /// the platform would not post it. `at` is a UNIX time in seconds
+    /// handed to the OS scheduler where one exists; 0 posts now. Many may
+    /// be live at once.
+    @discardableResult
+    func showNotification(
+        _ notification: UInt64, title: String = "", body: String = "",
+        at: UInt64 = 0,
+        onResult: ((KayaAppTx, UInt32) throws -> Void)? = nil
+    ) -> UInt64 {
+        precondition(
+            !title.isEmpty,
+            "kaya: a notification needs a title — pass title:")
+        if let onResult { app.onNotification(notification, onResult) }
+        tx.showNotification(notification, at, .str(title), .str(body))
+        return notification
+    }
+
+    /// Withdraw a pending or delivered notification (a reminder that was
+    /// cleared). No answer follows; an unknown id is ignored.
+    func cancelNotification(_ notification: UInt64) {
+        tx.cancelNotification(notification)
+    }
+
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
     /// carries handles you redeem later (DESIGN.md, File dialogs).
     /// `filters` is advisory on every platform, `onResult` fires exactly
@@ -3715,22 +3767,21 @@ final class KayaAppTx {
         tx.setBrandTypeface(1, .str(family), pairs, .blob(font.blob()))
     }
 
-    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
-    /// goes by and the picture that stands for it. Send a PNG; each
-    /// lowering converts. SET ONCE, BEFORE THE FIRST MOUNT: the root
-    /// refuses a second write, a late one and an empty name.
-    func appIdentity(_ name: String, icon: Data? = nil) {
-        // The icon SLOT rides either way and the mask says whether it
-        // means anything, so the field count never varies.
-        tx.setAppIdentity(
-            icon == nil ? 0 : 1, .str(name),
-            icon.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
-    }
-
-    /// The ASSET form of the icon slot: the same declaration, with the mark
-    /// NAMED rather than read. THE BYTES NEVER ENTER THE GUEST'S HEAP.
-    func appIdentity(_ name: String, icon: KayaAsset) {
-        tx.setAppIdentity(1, .str(name), .blob(icon.blob()))
+    /// DECLARE the app's identity (docs/app-identity-plan.md,
+    /// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+    /// picture that stands for it and the reverse-DNS id it registers under
+    /// are the asset root's own identity.toml, which the BUILD already
+    /// reads, and the core reads the same file. SET ONCE, BEFORE THE FIRST
+    /// MOUNT.
+    ///
+    /// STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+    /// declared app is a Dock app on macOS (ruling 1), so an app that wants
+    /// the platform's own identity declares none at all.
+    func appIdentity() {
+        // THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+        // identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+        // the icon slot is written either way, as an empty Str.
+        tx.setAppIdentity(0, .str(""), .str(""))
     }
 
     /// Create an auxiliary window (capability-gated: phone hosts reject at

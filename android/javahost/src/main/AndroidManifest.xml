@@ -4,6 +4,18 @@
          package this one cannot see is filtered out with no error
          anywhere (docs/traps.md: "An explicit broadcast to a package the
          sender cannot SEE is filtered out with no error"). -->
+    <!-- LOCAL NOTIFICATIONS (docs/tasks-s3-plan.md N2, N3). Declared by
+         the APP and not by the kaya library: POST_NOTIFICATIONS is the
+         runtime prompt the first post asks for on API 33+ (the lane
+         pre-grants it over adb), and USE_EXACT_ALARM is a claim about
+         what this app IS — a reminders app qualifies, and a library may
+         not make that claim for every app built on it. SCHEDULE_EXACT_ALARM
+         is its pre-33 spelling, granted at install there. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
     <queries>
         <package android:name="dev.kaya.cliphelper" />
     </queries>

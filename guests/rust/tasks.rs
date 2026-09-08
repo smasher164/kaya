@@ -66,6 +66,7 @@ enum Msg {
     ClearDeadline,
     Reminder(kaya::Time),
     ClearReminder,
+    Reminded(String, kaya::NotificationOutcome),
     Project(usize),
     Delete,
     DetailPopped,
@@ -210,6 +211,11 @@ struct App {
     order: BTreeMap<String, Vec<String>>,
     next: u32,
     detail: Option<Detail>,
+    // Each posted reminder's notification id (docs/tasks-s3-plan.md N7).
+    notifications: BTreeMap<String, u64>,
+    next_notification: u64,
+    pending_open: Option<String>,
+    can_notify: bool,
     open_project: Option<(String, kaya::Collection<Line>)>,
     // The selected section: the surface the menu's screens push onto.
     active: WindowId,
@@ -597,6 +603,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         order: BTreeMap::new(),
         next: 1,
         detail: None,
+        notifications: BTreeMap::new(),
+        next_notification: 1,
+        pending_open: None,
+        can_notify: kaya::capabilities().notifications,
         open_project: None,
         active: INBOX,
         logbook_screen: None,
@@ -691,7 +701,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let project = row.project.clone();
                 ctx.apply(|tx| {
                     tx.undoable(if checked { "complete" } else { "reopen" });
-                    app.place(tx, &key, row);
+                    app.place(tx, &key, row.clone());
                     app.project_count(tx, &project);
                     // A row reopened from the Logbook screen leaves its list.
                     if was == List::Logbook {
@@ -700,83 +710,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         }
                     }
                 });
+                ctx.apply(|tx| app.sync_reminder(tx, &msgs, &key, &row));
             }
-            Msg::Details(path) => {
-                let key = key_of(&path);
-                let Some((list, row)) = app.tasks.get(&key).cloned() else { continue };
-                let Some(section) = section_of(list) else { continue };
-                let names: Vec<String> = app.projects.values().cloned().collect();
-                let mut options = vec!["No project"];
-                options.extend(names.iter().map(String::as_str));
-                let selected = app.projects.keys().position(|k| *k == row.project).map_or(0, |i| i + 1);
-                let today = app.today;
-                let detail = ctx.apply(|tx| {
-                    let entry = tx.push_entry_in(section, DETAIL).title(&row.title).id();
-                    let when_text = tx.signal(when_line("When", parse_date(&row.when)));
-                    let deadline_text = tx.signal(when_line("Deadline", parse_date(&row.deadline)));
-                    let reminder_text = tx.signal(reminder_line(parse_time(&row.reminder)));
-                    let when_sig = tx.signal(parse_date(&row.when).unwrap_or(today));
-                    let deadline_sig = tx.signal(parse_date(&row.deadline).unwrap_or(today));
-                    let reminder_sig = tx.signal(parse_time(&row.reminder).unwrap_or(kaya::Time::new(9, 0).unwrap()));
-                    let project_label = tx.signal("Project");
-                    // A form scrolls: on a phone it is taller than the screen.
-                    let root = tx
-                        .scroll(|tx| {
-                            tx.column(|tx| {
-                            let notes = tx.textarea().placeholder("Notes").a11y_id("notes").id();
-                            tx.set_text(notes, &row.notes);
-                            msgs.on_change(notes, Msg::Notes);
-                            let reference_text = tx.signal("Reference");
-                            let reference = tx.label(reference_text).role(kaya::Role::Link).a11y_id("reference").id();
-                            tx.href(reference, format!("https://example.com/tasks/{key}"));
-                            // The form (docs/forms-plan.md): four labelled rows,
-                            // each label naming its value, the Clear trailing.
-                            tx.column(|tx| {
-                                tx.labeled(when_text, |tx| {
-                                    let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
-                                    msgs.on_date(picker, Msg::When);
-                                    let clear = tx.button("Clear").a11y_id("clear_when").id();
-                                    msgs.on_click(clear, Msg::ClearWhen);
-                                })
-                                .id();
-                                tx.labeled(deadline_text, |tx| {
-                                    let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
-                                    msgs.on_date(picker, Msg::Deadline);
-                                    let clear = tx.button("Clear").a11y_id("clear_deadline").id();
-                                    msgs.on_click(clear, Msg::ClearDeadline);
-                                })
-                                .id();
-                                tx.labeled(reminder_text, |tx| {
-                                    let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
-                                    msgs.on_time(picker, Msg::Reminder);
-                                    let clear = tx.button("Clear").a11y_id("clear_reminder").id();
-                                    msgs.on_click(clear, Msg::ClearReminder);
-                                })
-                                .id();
-                                tx.labeled(project_label, |tx| {
-                                    let project = tx.select(&options, selected).a11y_id("project").id();
-                                    msgs.on_select(project, Msg::Project);
-                                })
-                                .id();
-                            })
-                            .a11y_id("details")
-                            .id();
-                            let delete = tx
-                                .button("Delete")
-                                .role(kaya::Role::Destructive)
-                                .a11y_id("delete")
-                                .id();
-                            msgs.on_click(delete, Msg::Delete);
-                            })
-                            .id();
-                        })
-                        .id();
-                    tx.mount_in(entry, root);
-                    msgs.on_entry_popped(entry, Msg::DetailPopped);
-                    Detail { key: key.clone(), section, when_text, deadline_text, reminder_text }
-                });
-                app.detail = Some(detail);
-            }
+            Msg::Details(path) => open_details(&mut app, &ctx, &msgs, key_of(&path)),
             Msg::Notes(text) => {
                 let Some(key) = app.detail.as_ref().map(|d| d.key.clone()) else { continue };
                 let Some((_, row)) = app.tasks.get(&key).cloned() else { continue };
@@ -788,12 +724,27 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::When(d) | Msg::Deadline(d) => {
                 let is_when = matches!(msg, Msg::When(_));
-                app.set_date(&ctx, is_when, Some(d));
+                app.set_date(&ctx, &msgs, is_when, Some(d));
             }
-            Msg::ClearWhen => app.set_date(&ctx, true, None),
-            Msg::ClearDeadline => app.set_date(&ctx, false, None),
-            Msg::Reminder(t) => app.set_reminder(&ctx, Some(t)),
-            Msg::ClearReminder => app.set_reminder(&ctx, None),
+            Msg::ClearWhen => app.set_date(&ctx, &msgs, true, None),
+            Msg::ClearDeadline => app.set_date(&ctx, &msgs, false, None),
+            Msg::Reminder(t) => app.set_reminder(&ctx, &msgs, Some(t)),
+            Msg::ClearReminder => app.set_reminder(&ctx, &msgs, None),
+            Msg::Reminded(key, outcome) => {
+                app.notifications.remove(&key);
+                if outcome != kaya::NotificationOutcome::Activated || !app.tasks.contains_key(&key) {
+                    continue;
+                }
+                match app.detail.as_ref() {
+                    Some(d) if d.key == key => {}
+                    Some(d) => {
+                        let section = d.section;
+                        app.pending_open = Some(key);
+                        ctx.apply(|tx| tx.pop_entry_in(section));
+                    }
+                    None => open_details(&mut app, &ctx, &msgs, key),
+                }
+            }
             Msg::Project(index) => {
                 let Some(key) = app.detail.as_ref().map(|d| d.key.clone()) else { continue };
                 let Some((_, row)) = app.tasks.get(&key).cloned() else { continue };
@@ -836,10 +787,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     app.project_count(tx, &row.project);
                     app.update_count(tx, list);
                 });
-                ctx.apply(|tx| tx.pop_entry_in(section));
+                ctx.apply(|tx| {
+                    app.drop_reminder(tx, &key);
+                    tx.pop_entry_in(section);
+                });
                 app.detail = None;
             }
-            Msg::DetailPopped => app.detail = None,
+            Msg::DetailPopped => {
+                app.detail = None;
+                if let Some(key) = app.pending_open.take() {
+                    open_details(&mut app, &ctx, &msgs, key);
+                }
+            }
             Msg::OpenProject(path) => {
                 let project = key_of(&path);
                 let Some(name) = app.projects.get(&project).cloned() else { continue };
@@ -1075,6 +1034,84 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     }
 }
 
+// The details screen, from a row's button or a reminder's activation
+// (docs/tasks-s3-plan.md N7).
+fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, key: String) {
+    let Some((list, row)) = app.tasks.get(&key).cloned() else { return };
+    let Some(section) = section_of(list) else { return };
+    let names: Vec<String> = app.projects.values().cloned().collect();
+    let mut options = vec!["No project"];
+    options.extend(names.iter().map(String::as_str));
+    let selected = app.projects.keys().position(|k| *k == row.project).map_or(0, |i| i + 1);
+    let today = app.today;
+    let detail = ctx.apply(|tx| {
+        let entry = tx.push_entry_in(section, DETAIL).title(&row.title).id();
+        let when_text = tx.signal(when_line("When", parse_date(&row.when)));
+        let deadline_text = tx.signal(when_line("Deadline", parse_date(&row.deadline)));
+        let reminder_text = tx.signal(reminder_line(parse_time(&row.reminder)));
+        let when_sig = tx.signal(parse_date(&row.when).unwrap_or(today));
+        let deadline_sig = tx.signal(parse_date(&row.deadline).unwrap_or(today));
+        let reminder_sig = tx.signal(parse_time(&row.reminder).unwrap_or(kaya::Time::new(9, 0).unwrap()));
+        let project_label = tx.signal("Project");
+        // A form scrolls: on a phone it is taller than the screen.
+        let root = tx
+            .scroll(|tx| {
+                tx.column(|tx| {
+                let notes = tx.textarea().placeholder("Notes").a11y_id("notes").id();
+                tx.set_text(notes, &row.notes);
+                msgs.on_change(notes, Msg::Notes);
+                let reference_text = tx.signal("Reference");
+                let reference = tx.label(reference_text).role(kaya::Role::Link).a11y_id("reference").id();
+                tx.href(reference, format!("https://example.com/tasks/{key}"));
+                // The form (docs/forms-plan.md): four labelled rows,
+                // each label naming its value, the Clear trailing.
+                tx.column(|tx| {
+                    tx.labeled(when_text, |tx| {
+                        let picker = tx.date_picker_bound(when_sig).a11y_id("when").id();
+                        msgs.on_date(picker, Msg::When);
+                        let clear = tx.button("Clear").a11y_id("clear_when").id();
+                        msgs.on_click(clear, Msg::ClearWhen);
+                    })
+                    .id();
+                    tx.labeled(deadline_text, |tx| {
+                        let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
+                        msgs.on_date(picker, Msg::Deadline);
+                        let clear = tx.button("Clear").a11y_id("clear_deadline").id();
+                        msgs.on_click(clear, Msg::ClearDeadline);
+                    })
+                    .id();
+                    tx.labeled(reminder_text, |tx| {
+                        let picker = tx.time_picker_bound(reminder_sig).a11y_id("reminder").id();
+                        msgs.on_time(picker, Msg::Reminder);
+                        let clear = tx.button("Clear").a11y_id("clear_reminder").id();
+                        msgs.on_click(clear, Msg::ClearReminder);
+                    })
+                    .id();
+                    tx.labeled(project_label, |tx| {
+                        let project = tx.select(&options, selected).a11y_id("project").id();
+                        msgs.on_select(project, Msg::Project);
+                    })
+                    .id();
+                })
+                .a11y_id("details")
+                .id();
+                let delete = tx
+                    .button("Delete")
+                    .role(kaya::Role::Destructive)
+                    .a11y_id("delete")
+                    .id();
+                msgs.on_click(delete, Msg::Delete);
+                })
+                .id();
+            })
+            .id();
+        tx.mount_in(entry, root);
+        msgs.on_entry_popped(entry, Msg::DetailPopped);
+        Detail { key: key.clone(), section, when_text, deadline_text, reminder_text }
+    });
+    app.detail = Some(detail);
+}
+
 fn when_line(what: &str, d: Option<kaya::Date>) -> String {
     match d {
         Some(d) => format!("{what}: {}", short(d)),
@@ -1090,7 +1127,7 @@ fn reminder_line(t: Option<kaya::Time>) -> String {
 }
 
 impl App {
-    fn set_date(&mut self, ctx: &kaya::AppCtx, is_when: bool, d: Option<kaya::Date>) {
+    fn set_date(&mut self, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, is_when: bool, d: Option<kaya::Date>) {
         let Some(detail) = self.detail.as_ref() else { return };
         let key = detail.key.clone();
         let (text_sig, what) = if is_when {
@@ -1108,11 +1145,14 @@ impl App {
         ctx.apply(|tx| {
             tx.undoable(format!("set {}", what.to_lowercase()));
             tx.write(text_sig, line);
-            self.place(tx, &key, row);
+            self.place(tx, &key, row.clone());
         });
+        if is_when {
+            ctx.apply(|tx| self.sync_reminder(tx, msgs, &key, &row));
+        }
     }
 
-    fn set_reminder(&mut self, ctx: &kaya::AppCtx, t: Option<kaya::Time>) {
+    fn set_reminder(&mut self, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, t: Option<kaya::Time>) {
         let Some(detail) = self.detail.as_ref() else { return };
         let key = detail.key.clone();
         let text_sig = detail.reminder_text;
@@ -1122,8 +1162,45 @@ impl App {
         ctx.apply(|tx| {
             tx.undoable("set reminder");
             tx.write(text_sig, line);
-            self.place(tx, &key, row);
+            self.place(tx, &key, row.clone());
         });
+        // Its own batch: an undoable group refuses a notification op.
+        ctx.apply(|tx| self.sync_reminder(tx, msgs, &key, &row));
+    }
+
+    // A reminder is a notification at its time on the task's day, re-posted
+    // under the same id when either moves, cancelled when it is cleared or
+    // the task is done (docs/tasks-s3-plan.md N7). The instant is UTC — the
+    // guest has no zone — and one already past posts now (scene.rs).
+    fn sync_reminder(&mut self, tx: &mut kaya::Tx, msgs: &kaya::Messages<Msg>, key: &str, row: &TaskRow) {
+        let live = if row.done { None } else { parse_time(&row.reminder) };
+        let Some(t) = live else {
+            self.drop_reminder(tx, key);
+            return;
+        };
+        if !self.can_notify {
+            return;
+        }
+        let id = match self.notifications.get(key) {
+            Some(id) => *id,
+            None => {
+                let id = self.next_notification;
+                self.next_notification += 1;
+                self.notifications.insert(key.to_string(), id);
+                id
+            }
+        };
+        let day = parse_date(&row.when).unwrap_or(self.today);
+        let at = (days(day) * 86_400 + i64::from(t.hour) * 3_600 + i64::from(t.minute) * 60) as u64;
+        let shown = tx.show_notification(id).title(&row.title).body(&short(day)).at(at).show();
+        let key = key.to_string();
+        msgs.on_notification(shown, move |outcome| Msg::Reminded(key.clone(), outcome));
+    }
+
+    fn drop_reminder(&mut self, tx: &mut kaya::Tx, key: &str) {
+        if let Some(id) = self.notifications.remove(key) {
+            tx.cancel_notification(kaya::NotificationId(id));
+        }
     }
 }
 

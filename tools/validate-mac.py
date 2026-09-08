@@ -90,9 +90,9 @@ if run([str(ROOT / "tools/build-id.py"), "--verify",
 RUST_GUESTS = ROOT / "target/rust-guests"
 shutil.rmtree(RUST_GUESTS, ignore_errors=True)
 RUST_GUESTS.mkdir(parents=True)
-for _s in [*lane.SCENES, *lane.DEPTH_SCENES]:
-    shutil.copy2(ROOT / f"target/debug/examples/{_s}",
-                 RUST_GUESTS / _s)
+# ONE COPY of the staging, run-leg's too (tools/lib/lanes/mac.py): the
+# bundled scenes get their .app wrapper here.
+lane.stage_rust(ROOT, [*lane.SCENES, *lane.DEPTH_SCENES])
 _staged = sum(1 for _ in RUST_GUESTS.iterdir()) + 1
 if _staged > 64:
     die(f"validate-mac: the rust guest staging directory holds "

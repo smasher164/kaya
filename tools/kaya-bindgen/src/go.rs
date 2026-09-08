@@ -592,10 +592,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\treturn 0, 0, nil, nil, false");
     c.line("\t}");
     c.line("\tid = binary.LittleEndian.Uint64(rec[8:])");
-    c.line("\tif kind == occAlertResult {");
-    c.line("\t\t// The alert's one answer: id + u32 choice (AlertChoice*).");
-    c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
-    c.line("\t}");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\t// A request's one answer: id + the u32 code.");
+        c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
+        c.line("\t}");
+    }
     // The picker's answer is a LIST OF RECORDS, so it needs its own
     // arm: the generic tail would take the file count for a key-path
     // length and start eight bytes early.

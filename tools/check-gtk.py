@@ -163,6 +163,21 @@ ENTRIES = (
      "slider.scale.adjustment().set_upper(v);\n                    "
      "slider_marks(slider);",
      "slider.scale.adjustment().set_upper(v);"),
+    # THE NOTIFICATION TIMER'S TWO LINKS, NEITHER OF WHICH ANY LEG CAN SEE
+    # (docs/tasks-s3-plan.md N2): every scene posts with `at` 0, so the
+    # session's timer is armed by no leg on any lane and the command it
+    # carries is exercised only by gtk::notify_tests. Both perturbations
+    # below are the shape that SHIPPED for an afternoon — a bare number,
+    # which `gapplication` parses as INT32 and the action refuses by name
+    # ("expected type x but got type i", measured in the container
+    # 2026-09-07) with the reminder simply never posted.
+    ("the timer's command built by the pinned helper",
+     "let fire = scheduled_command(&app, id);",
+     'let fire = vec!["gapplication".to_owned(), "action".to_owned(), '
+     'app.clone(), ACTION_NOTIFY.to_owned(), id.to_string()];'),
+    ("the notification's default-action target",
+     'dict.insert("default-action-target", notification_target(id));',
+     'dict.insert("default-action-target", id as i64);'),
     # THE SEED'S TWO LINKS, NEITHER OF WHICH ANY LEG CAN SEE (2026-09-06,
     # docs/deferred.md's `clipboard-python-wayland` WATCH). `materialize`
     # reads THE APP'S OWN formats, so a seed that returns while only the
@@ -271,6 +286,8 @@ PY
         && run_exact_test gtk::flex::tests::gtk_table_viewport_rejects_overflow \\
         && run_exact_test gtk::flex::tests::gtk_table_padded_card_convicts_nothing \\
         && run_exact_test gtk::flex::tests::gtk_slider_snaps_clamps_and_derives \\
+        && run_exact_test \\
+            gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\
             >/dev/null 2>&1; then
                 echo "check-gtk: zero-test self-test was accepted" >&2

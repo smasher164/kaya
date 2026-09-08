@@ -39,7 +39,11 @@ SUITES = ("compose", "jvm", "go", "python")
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the emulator drags, twenty-five sightings under a matrix and
 # green alone (docs/deferred.md, the dnd-compose WATCH).
-EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose"}
+# notify-compose joins them for the same reason one step further out:
+# its activation is a REAL tap on SystemUI's notification shade, driven
+# from the host (docs/tasks-s3-plan.md N5).
+EXCLUSIVE = {"dnd-compose", "dnd-jvm", "dnd-go", "tasks-compose",
+             "notify-compose"}
 
 # The roster, per suite and in queue order. Leg names are the census
 # surface every gate reads; the exceptions ride FLAGS below.
@@ -65,6 +69,9 @@ LEGS = {
         "tasks-compose",
         "tooltips-compose",
         "search-compose",
+        # The notification conformance scene: rust-only for now, so it
+        # rides the compose suite alone (docs/tasks-s3-plan.md §5).
+        "notify-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",

@@ -142,6 +142,7 @@ let kaya_capabilities =
   foreign ~from:lib "kaya_capabilities" (void @-> returning int64_t)
 
 let cap_aux_windows = 1L
+let cap_notifications = 2L
 let capability_bits () = kaya_capabilities ()
 
 (* The stale-artifact guard: the loaded library must speak the spec

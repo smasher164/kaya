@@ -92,6 +92,7 @@ _lib.kaya_asset_why_not.restype = ctypes.c_size_t
 # crates/kaya/src/scene.rs.
 _lib.kaya_capabilities.restype = ctypes.c_uint64
 CAP_AUX_WINDOWS = 1
+CAP_NOTIFICATIONS = 2
 
 
 def capability_bits():

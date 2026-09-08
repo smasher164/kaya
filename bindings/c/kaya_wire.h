@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xc80ccf259104a87aULL
+#define KAYA_SPEC_HASH 0x21005150bc085070ULL
 
 
 /* Create a signal holding `initial`. */
@@ -663,6 +663,23 @@ static inline void kaya_tx_set_reorderable(KayaTx *tx, uint64_t container, uint3
     kaya_wire_u64(tx, container);
     kaya_wire_u32(tx, enabled);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel. */
+static inline void kaya_tx_show_notification(KayaTx *tx, uint64_t notification, uint64_t at, KayaVal title, KayaVal body) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SHOW_NOTIFICATION);
+    kaya_wire_u64(tx, notification);
+    kaya_wire_u64(tx, at);
+    kaya_wire_value(tx, title);
+    kaya_wire_value(tx, body);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored. */
+static inline void kaya_tx_cancel_notification(KayaTx *tx, uint64_t notification) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CANCEL_NOTIFICATION);
+    kaya_wire_u64(tx, notification);
     kaya_wire_end(tx, kaya_at);
 }
 

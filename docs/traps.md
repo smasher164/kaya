@@ -9874,3 +9874,163 @@ driver's line, so the leg log names the release that beat the begin.
 tools/linux/dragprobe.py proves the whole chain before the first leg of
 every lane run — the flag, the wait, the reading — and refuses a route
 whose gate never fired, since a quiet host drops fine without it.
+
+## A headless macOS notification request burns its bundle id (2026-09-08)
+
+The first notify leg asked `UNUserNotificationCenter.requestAuthorization`
+for a banner, as a real app should, from an accessory process nobody
+was watching. The centre answered `Notifications are not allowed for this
+application` (UNErrorDomain 1) — and every LATER request under that bundle
+id answered the same, provisional or not, LaunchServices registration or
+not, regular policy or not, while a fresh id granted provisionally at
+once (tools/mac/notifyprobe, then the leg itself under
+`dev.kaya.aurora-fresh1`: OK on every step). The refusal is recorded per
+bundle id in the user's notification preferences, and nothing in the
+process can undo it; System Settings › Notifications is where a burned
+id is re-enabled. So the harness NEVER asks without `.provisional`
+(swift/KayaSwiftUI.swift's post, keyed on KAYA_SELFTEST), which grants
+with no prompt and still delivers to the centre's list, and a lane
+machine whose id was burned before that rule reads `refused` on every
+mac notify leg until the maintainer flips it back. The delivered list
+itself is no proof of display (a notification the centre never showed
+sits in it when the app is unauthorized), which is why the read-back
+checks the authorization status first.
+
+The manifest's id moved to `dev.kaya.aurora.notes` the same night, since the
+first id stays refused on the maintainer's machine until System Settings
+re-enables it and Notification Center keeps a burned id's cached name and
+icon; the provisional ask under KAYA_SELFTEST is what keeps the new one
+from burning. Never reuse a burned id in a lane.
+
+## A keyed target answers from a popped screen (2026-09-08)
+
+Every backend's target registries are append-only and the core never
+prunes widget ids on PopEntry or DestroyWindow (scene.rs says so), so
+the first `a11y_id` match is the OLDEST — the popped screen's widget.
+tasks' details pops t2's screen and pushes t1's; `time_picker@reminder`
+resolved to the dead picker (no control: "has no picker control after
+5000ms" on the mac) and `expect_href label@reference` read t2's link,
+while `click button@delete` on the dead button had passed for weeks
+because the app registers the same handler for every copy. The rule, on
+all four backends: A TARGET IS A LIVE WIDGET — reachable from a presented
+root (SwiftUI: kayaLiveIds, memoized per apply batch and bumped on a
+user pop, which is no batch; the other three read their toolkit's own
+tree), never a name comparison. The guard is `expect_no_target
+<kind>@<id>` (harness.rs Step::ExpectNoTarget, carrying the SPEC and not
+a Target, since the pre-resolution loop would turn a miss into a failure)
+asserted right after each `back` in tools/scenes/tasks.steps.
+
+## The lane host is dark at night (2026-09-08)
+
+tasks.steps asserted `expect_appearance "light"` after the app chose
+System, on the premise that every lane host is light. The maintainer's
+mac runs Auto appearance, which is Dark after sunset, and the mac tasks
+leg read `appearance dark, wanted light` at 02:40. The premise is not
+the host's mode but the toolkit's OVERRIDE SLOT: `expect_appearance
+"system"` passes when it is empty, and every reporter now answers two
+words, `<mode> <source>` (NSApp.appearance, overrideUserInterfaceStyle,
+libadwaita's color_scheme, WinUI's RequestedTheme; Compose compares the
+composition's reading with the system's, having no slot). Held by
+tools/check-appearance.py B4.
+
+## The iOS simulator's shade will not activate a notification (2026-09-08)
+
+Measured six ways with the XCUITest driver: a screen-coordinate tap,
+`XCUIElement.tap()` and an element-relative tap, on the notification cell
+and on the platter's own button, under provisional and full authorization,
+with the app foreground and backgrounded. Every combination found the
+`ListCell` (label "APP, <when>, <title>, <body>", hittable true) and none
+reached the delegate's didReceive. The driver's hands are not the cause:
+in the same shade `sb_tap clear-button` cleared Notification Center and
+`press Allow` answered the permission prompt. The one activation that
+worked is a live banner over ANOTHER app (simctl push to a backgrounded
+app, tapped by element coordinate), which no scene can use — a provisional
+post draws no banner, and the frontmost app's own banner is the compact
+pill, published with frame 153,-72,68,13 and hittable false while it is
+visibly on screen, gone in about two seconds. So iOS takes the mac's
+carve-out (docs/tasks-s3-plan.md N5): the verb delivers the centre's own
+activation callback. Reproduce with tools/ios/notifyprobe and the driver's
+`shade` verb. Two rules from it: provisional authorization on the
+simulator grants silently (alertSetting disabled, notificationCenterSetting
+enabled), so the delivered list is readable with nothing pressed; and A
+SCREEN-COORDINATE TAP LANDS NOWHERE IN SPRINGBOARD'S COVER SHEET — `sb_drag
+337 450 337 450 40` on the Clear button did nothing while `sb_tap
+clear-button` worked — tap the element, never the coordinate.
+
+## A record decoded by name (2026-09-08)
+
+`notification_result` {u64, u32, reserved} is byte-for-byte `alert_result`'s
+shape, and every one of the eight generated decoders carried the alert's arm
+BY NAME (`OCC_ALERT_RESULT`), so the new occurrence fell through to the
+generic click tail: the outcome was read as a key-path LENGTH — `activated`
+(0) became a click with no keys and the outcome was lost, `refused` (1) read
+one key value from offset 24 of a 24-byte record. Python's own check died
+of it: `struct.error: unpack_from requires a buffer of at least 32 bytes …
+at offset 24`. tools/kaya-bindgen/src/main.rs's `id_only_occurrence_names`
+already said why families are DERIVED and never hand-listed; the alert arm
+was the one that stayed hand-listed. The rule: a decoder arm is emitted from
+a classifier over the SPEC's shape, and `every_code_answer_is_decoded` counts
+the arms per generated file against the family and refuses a short one on
+every regeneration and on `gen-bindings.py --check`. `file_dialog_result` is
+the last by-name arm (docs/deferred.md's S3 entry carries its KEY).
+
+## The Windows App SDK's notifications are a silent no-op for an unpackaged exe (2026-09-08)
+
+Measured on the Windows VM (Win 11 Pro 26200.9168 arm64), five readings from
+one process: `AppNotificationManager::Default().Register()` Ok;
+`IsSupported()` false; `Setting()` 5 (Unsupported); `Show(n)` Ok and NOTHING
+delivered; `GetAllAsync()` a NULL vector. Nothing on that path reports a
+failure, and the app believes it posted. The cause is deployment:
+`Get-AppxPackage` lists the Windows App Runtime FRAMEWORK packages only
+(every one IsFramework=True), no Main and no Singleton package, which is the
+state `MddBootstrapInitialize2` leaves an unpackaged app in, and the
+app-notification stack lives in the Singleton. The documented remedy,
+`DeploymentManager::GetStatus()`, FAIL-FASTS the calling process (0xC0000409)
+in that configuration, so the API that diagnoses the gap cannot be called
+from inside it. `Register()` also takes no application id and gives the
+process none: it filed the app under an AUMID derived from the EXE PATH
+(`HKCU\SOFTWARE\Classes\AppUserModelId\C:.kaya.notify.exe`) while
+`GetCurrentProcessExplicitAppUserModelID` stayed E_FAIL. The classic route
+needs nothing: `ToastNotificationManager::CreateToastNotifierWithId(<AUMID>)`
+posts, `ToastNotificationHistory::GetHistoryWithId` reads it back by tag
+with the payload intact, and `AddToSchedule` fires five seconds later —
+measured for an AUMID with no registry key of any kind and with the
+machine's global toast toggle OFF, which suppresses the BANNER and not the
+record. The WinUI arm ships on it (docs/deferred.md's S3 entry).
+
+## A portal any leg can activate takes over GTK's file chooser (2026-09-08)
+
+Installing xdg-desktop-portal in the linux image (for the notification
+route) made GtkFileDialog route through the portal: the dialog opened in
+the PORTAL's process and every filedialog and save leg failed with "no
+file dialog live", 24 legs on one lane run. The image keeps the portal's
+two D-Bus service files in /opt/kaya-portal, off the bus's default search
+path, and only a notify leg (tools/linux/notify-leg.sh) puts that
+directory on XDG_DATA_DIRS for its own bus.
+
+## The portal registers an app id only against a desktop entry it can resolve (2026-09-08)
+
+`org.freedesktop.host.portal.Registry.Register` answers "App info not
+found for '<id>'" when the desktop entry's `Exec` program is RELATIVE,
+while `Gio.DesktopAppInfo.new()` in another process loads that same entry
+without complaint — and `shutil.which("a/b.sh")` returns a relative path
+AS GIVEN, which is how the first fix missed. kaya then read its capability
+false and the app said "cannot post" with no cause on the record, which is
+why the GTK arm prints the four measurements its decision was made of
+under KAYA_SELFTEST. The registration is per CONNECTION: the posting
+connection is the one that registers.
+
+## A sectioned window's title was the process name (2026-09-08)
+
+The macOS sections presentations (the sidebar's NavigationSplitView and the
+bar's TabView) bound no `navigationTitle`, so the window showed SwiftUI's
+default for an untitled WindowGroup: the PROCESS NAME unbundled, the
+bundle's CFBundleDisplayName bundled. Every scene's title equals its guest's
+stem, so `expect_title "tasks"` passed for a milestone on the coincidence,
+and the first bundled tasks leg — the wrapper carrying "Aurora Notes" —
+read `title "Aurora Notes", wanted "tasks"`. The diag at registration had
+shown `t='tasks'`; SwiftUI re-titles after the first appearance. Setting
+`NSWindow.title` by hand does not stick either. Both presentations bind
+the caption now, like every other presentation; the bundled tasks leg is
+the guard, since only a display-named bundle can tell the two apart.
+

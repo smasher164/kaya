@@ -20,10 +20,9 @@ function onGo(): void {
 }
 
 app.window({ title: "identity", width: 480, height: 360 }, () => {
-  // BEFORE THE FIRST MOUNT: the scope mounts on exit.
-  const icon = kaya.asset("icons/kaya-mark.png");
-  kaya.appIdentity("Aurora Notes", { icon });
-  icon.close();
+  // BEFORE THE FIRST MOUNT: the scope mounts on exit. NO ARGUMENTS: the
+  // name, the mark and the id are the manifest's (docs/tasks-s3-plan.md N4).
+  kaya.appIdentity();
 
   // ONE PROMOTED COMMAND, AND NOT ABOUT COMMANDS: Windows mints its custom
   // caption from it, replacing the system-drawn icon.

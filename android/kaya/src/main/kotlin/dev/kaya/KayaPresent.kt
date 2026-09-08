@@ -73,6 +73,17 @@ object KayaPresent {
      * native dismissal. kaya_emit_alert_result's JNI spelling. */
     @JvmStatic external fun emitAlertResult(alert: Long, choice: Int)
 
+    /** A notification's ONE answer (docs/tasks-s3-plan.md N1): the user
+     * activated it, or the platform refused to post it.
+     * kaya_emit_notification_result's JNI spelling. */
+    @JvmStatic external fun emitNotificationResult(notification: Long, outcome: Int)
+
+    /** The runtime capability bits this host has MEASURED
+     * (KAYA_CAP_NOTIFICATIONS), granted once the platform has answered —
+     * a permission the user grants mid-run moves them.
+     * kaya_grant_capabilities's JNI spelling. */
+    @JvmStatic external fun grantCapabilities(bits: Long)
+
     /**
      * The picker's one answer: parallel arrays of `content://` URIs and
      * the display names beside them. EMPTY IS CANCEL — there is no

@@ -159,7 +159,7 @@ harness that reads the platform's own notification list back and drives
 an activation where a test can; and the task manager posting at the
 reminder's time and opening the task on activation.
 
-## §2 — The rulings (PROPOSED; each has a recommendation)
+## §2 — The rulings (RULED 2026-09-08 as recommended: "i'm cool with the rulings", after the Linux floor of 2026-09-07)
 
 ### N1 — Shape: a request with an id, one occurrence (RECOMMEND: the alert's grammar)
 
@@ -245,6 +245,8 @@ reports.
 
 ### N4 — Identity: identity.toml gains `id`, the reverse-DNS name every platform wants — and NO GUEST SPELLS IT (RECOMMEND)
 
+BUILT 2026-09-08: `app_identity()` takes no arguments in all nine bindings (the overloads retired), the core reads `name`, `icon` and `id` out of guests/assets/identity.toml through the asset root and refuses a manifest missing any of the three; the mac wrapper bundle takes CFBundleIdentifier, CFBundleName and its icon from the same file, WinUI registers the toast AUMID from it, and GTK's application id follows (docs/deferred.md's S3 entry).
+
 macOS needs a bundle identifier to post at all, GNOME attributes the
 notification to the `GApplication` id, Windows registers an AUMID for
 an unpackaged exe, Android and iOS have theirs in their packages. One
@@ -301,6 +303,36 @@ answered by the driver on iOS (SpringBoard's "Allow") and pre-granted
 on the emulator (`adb shell pm grant … POST_NOTIFICATIONS`) and the mac
 (the lane's bundle is registered once with `tccutil`-free means: the
 centre's prompt appears once per bundle id; the mac driver clicks it).
+
+AMENDED 2026-09-08, MEASURED: iOS TAKES THE mac's CARVE-OUT. On the
+simulator, provisional authorization grants with no prompt (0.02s, status
+3, alertSetting disabled, notificationCenterSetting enabled), so the post
+is delivered QUIETLY into the centre and `expect_notification` reads it
+back with nothing pressed; full authorization does prompt, and the driver's
+`press Allow` answers it (measured: requestAuthorization blocked 12.46s
+until the press), so the Allow half stays available. The shade is
+reachable and is two pages — a drag from the top edge opens the clock
+page, a swipe from 86% to 31% brings the list in, and the cell is a
+`ListCell` button labelled "APP, <when>, <title>, <body>" — but NOTHING
+ACTIVATES IT: a screen-coordinate tap, `XCUIElement.tap()` and an
+element-relative tap, on the cell and on the platter's own button, under
+provisional and full authorization, foreground and backgrounded — six
+combinations, each with the element found and hittable — leave the row in
+the shade and never reach the delegate's didReceive. The one presentation
+that did activate is a live BANNER over another app (simctl push to a
+backgrounded app, tapped through the element's own coordinate), and that
+route is closed to the scene twice over: a provisional post shows no
+banner, and the frontmost app's own banner is the compact pill, published
+with an off-screen frame and hittable false while visibly on screen, gone
+in two seconds. So `notification_activate` on iOS delivers the centre's
+own activation callback with the delivered identifier, the mac arm's exact
+shape; a physical device is untested and might answer. The reproduction is
+tools/ios/notifyprobe (the mac probe's twin) and the driver's `shade` verb,
+which pulls the sheet, reveals the list and reports every cell with its
+subtree. And a rule for any SpringBoard work after this: A SCREEN-COORDINATE
+TAP LANDS NOWHERE IN THE COVER SHEET — `sb_drag` on SpringBoard's own Clear
+button did nothing while `sb_tap clear-button` worked — so tap the ELEMENT,
+never the coordinate (docs/traps.md).
 
 ### N6 — Capability: `notifications` is a bit in `capabilities` (RECOMMEND)
 
@@ -360,7 +392,7 @@ The body's first line is the app's choice; kaya truncates nothing.
   the harness's `notification_activate` on macOS and Windows calls THAT
   path, never a shortcut that emits the occurrence directly.
 
-## §6 — Build order (after the rulings)
+## §6 — Build order (rulings taken 2026-09-08; steps 1 and 2 green on the mac the same night, step 3 in flight on five agents)
 
 1. Spec + regenerate; identity.toml `id`; the ledger entry with its
    KEY line.
@@ -373,12 +405,28 @@ The body's first line is the app's choice; kaya truncates nothing.
    permission, PendingIntent), the eight bindings; the gate rows.
 4. The matrix.
 
+Step 1 (N7) built 2026-09-08 on the mac: guests/rust/tasks.rs posts a reminder at its
+instant under the task's own notification id (re-posted on a time or day change,
+cancelled on clear, completion and delete), activation opens that task's details
+(popping another task's first), and tools/scenes/tasks.steps drives post, cancel,
+re-post, activation and the details' href on every lane. Two findings on the way:
+a popped screen's widgets answered keyed targets (docs/traps.md; `expect_no_target`
+is the guard) and the dark-at-night host premise (docs/tasks-s2b-plan.md R4). The core
+normalizes a past `at` to now (scene.rs, its unit test), since the schedulers disagree
+about a past time.
+
 ## §7 — To be measured before the design is frozen
 
-- macOS: a minimal `.app` wrapper around the tasks guest posts and
-  receives activation under the lane (the process runs `.accessory`,
-  which is not a bundle question — but the delegate must be set before
-  the first post, and the prompt appears once per bundle id per user).
+- ~~macOS: a minimal `.app` wrapper around the tasks guest posts and
+  receives activation under the lane~~ — MEASURED 2026-09-08 on the notify
+  scene: the wrapper (Info.plist from the manifest's `id`, ad-hoc signed,
+  LaunchServices-registered) posts, the platform's delivered list reads
+  it back, the activation path answers, cancel clears — under PROVISIONAL
+  authorization, which grants with no prompt; a banner request from a
+  headless process is refused AND burns the bundle id for good
+  (docs/traps.md, "A headless macOS notification request burns its
+  bundle id"), so the harness asks provisionally and a real app asks for
+  the banner.
 - Linux: the lane's image gains `xdg-desktop-portal` and its GTK backend
   (versions read and recorded; the Registry needs ≥ 1.19), and the
   measurement is the whole click with the app CLOSED: post through the
@@ -402,6 +450,28 @@ The body's first line is the app's choice; kaya truncates nothing.
   On a real GNOME session: `gapplication action` from the fired timer
   reaches the running primary instance and the post lands.
 - Windows: `AppNotificationManager.Register()` from an unpackaged exe
+  MEASURED 2026-09-08 ON THE VM (Win 11 Pro 26200 arm64), and it is NOT the
+  route that shipped: for an unpackaged exe the App SDK's manager is a SILENT
+  NO-OP — `Register()` Ok, `Show()` Ok, `IsSupported()` false, `Setting`
+  Unsupported, `GetAllAsync()` a null vector, nothing delivered — because
+  only the Windows App Runtime's FRAMEWORK packages are present and the
+  notification stack lives in the Singleton package, which the bootstrap
+  does not deploy; `DeploymentManager.GetStatus()` fail-fasts the process
+  (0xC0000409) in that build, and `Register()` files the app under the exe
+  PATH (`HKCU\SOFTWARE\Classes\AppUserModelId\C:.kaya.notify.exe`), so the
+  manifest's `id` has no sink on that route. WHAT SHIPPED: the classic WinRT
+  `ToastNotificationManager` under the manifest's `id` as the AUMID
+  (`SetCurrentProcessExplicitAppUserModelID` first), post by tag `kaya-<n>`
+  in group `kaya`, read from `ToastNotificationHistory`, cancel by tag plus
+  a schedule sweep, `at` through `ScheduledToastNotification`, activation
+  through one funnel — zero provisioning, measured green with the VM's
+  global toast toggle OFF (the banner is suppressed; the platform's record,
+  which N5 reads, is there either way).
+  RULING OWED (Akhil): a click on a CLOSED app (S9's Windows piece) needs
+  either the App SDK route with the Main+Singleton runtime packages deployed
+  on every machine that runs a kaya app, or protocol activation of a
+  registered handler on the classic route — an install-time decision either
+  way, not a backend's.
   on the VM, and `NotificationInvoked` firing in-process while the app
   runs (the documented behaviour; measured, not assumed).
 - Android: `NotificationManager.activeNotifications` visible to the

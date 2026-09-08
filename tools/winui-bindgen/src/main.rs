@@ -486,6 +486,27 @@ fn main() {
         "Windows.Storage.Streams.RandomAccessStreamReference".to_string(),
         "Windows.Storage.IStorageItem".to_string(),
         "Windows.Storage.StorageFile".to_string(),
+        // LOCAL NOTIFICATIONS (docs/tasks-s3-plan.md §3's WinUI row) — the
+        // OLDER WinRT toast API, which is what the arm posts, reads,
+        // schedules and removes through. MEASURED on the VM 2026-09-07: the
+        // App SDK's `AppNotificationManager` answers `IsSupported() == false`
+        // for an unpackaged exe whose Windows App Runtime SINGLETON package is
+        // not deployed (the bootstrap stages the framework packages only), so
+        // its `Show` delivers nothing and its `GetAllAsync` answers a null
+        // vector, while these post under the declared AUMID with no
+        // provisioning at all. `ToastNotificationHistory` is the platform's own
+        // record `expect_notification` reads (N5), the notifier's schedule is
+        // the only scheduler Windows has (N2), and `ScheduledToastNotification`
+        // takes an `XmlDocument` payload — there is no builder on this side —
+        // with `IXmlDocumentIO` carrying `LoadXml`.
+        "Windows.UI.Notifications.ToastNotificationManager".to_string(),
+        "Windows.UI.Notifications.ToastNotifier".to_string(),
+        "Windows.UI.Notifications.ScheduledToastNotification".to_string(),
+        "Windows.UI.Notifications.NotificationSetting".to_string(),
+        "Windows.UI.Notifications.ToastNotificationHistory".to_string(),
+        "Windows.UI.Notifications.ToastNotification".to_string(),
+        "Windows.Data.Xml.Dom.XmlDocument".to_string(),
+        "Windows.Data.Xml.Dom.IXmlDocumentIO".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

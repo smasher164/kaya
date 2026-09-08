@@ -22,13 +22,18 @@ type draw = { d_viewbox : viewbox; mutable d_ops : Kaya_wire.value list }
 
 (* WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
    note, which every binding's copy of this surface shortens. *)
-type capabilities = { aux_windows : bool }
+(* [notifications] is a RUNTIME bit: this process can post a local
+   notification the desktop will show (docs/tasks-s3-plan.md N3). *)
+type capabilities = { aux_windows : bool; notifications : bool }
 
 (* This host's capabilities. Constant for the life of the process, so
    asking once and remembering is fine. *)
 let capabilities () =
   let bits = Kaya_runtime.capability_bits () in
-  { aux_windows = Int64.logand bits Kaya_runtime.cap_aux_windows <> 0L }
+  {
+    aux_windows = Int64.logand bits Kaya_runtime.cap_aux_windows <> 0L;
+    notifications = Int64.logand bits Kaya_runtime.cap_notifications <> 0L;
+  }
 
 (* A live menu item: its OWN id space (the c_menu_item counter) behind its
    own constructor, so cross-use with widget or node handles is a type
@@ -198,6 +203,9 @@ type app = {
   section_selected : (int64, unit -> unit) Hashtbl.t;
   alert_handlers : (int64, int -> unit) Hashtbl.t;
   mutable next_alert : int64;
+  (* One-shot, keyed by the GUEST's notification id (the alert's
+     request/result grammar; many may be live at once). *)
+  notification_handlers : (int64, int -> unit) Hashtbl.t;
   file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
   mutable next_file_dialog : int64;
   (* Clipboard reads share the alert's request/result grammar and so
@@ -326,6 +334,7 @@ let create () =
     section_selected = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
+    notification_handlers = Hashtbl.create 8;
     file_dialog_handlers = Hashtbl.create 4;
     next_file_dialog = 0L;
     clipboard_handlers = Hashtbl.create 4;
@@ -1775,29 +1784,21 @@ let brand_typeface ?(platforms = []) ?font ?font_asset family =
           means anything, so the record's field count never varies. *)
        (Option.value slot ~default:(Kaya_wire.Str "")))
 
-(* DECLARE this app's identity (docs/app-identity-plan.md): the name it
-   goes by and the picture that stands for it, as one PNG's bytes.
-   [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION and [~icon_asset] names
-   the mark instead; the two are exclusive. SET ONCE, BEFORE THE FIRST
-   MOUNT: the root refuses a second write, a late one and an empty name. *)
-let app_identity ?icon ?icon_asset name =
-  let slot =
-    match (icon, icon_asset) with
-    | Some _, Some _ ->
-      invalid_arg
-        "kaya: app_identity takes ~icon or ~icon_asset, never both — there is \
-         one icon slot on the wire"
-    | Some bytes, None -> Some (Kaya_wire.Blob (Kaya_runtime.register_blob bytes))
-    | None, Some a -> Some (Kaya_wire.Blob (Kaya_runtime.asset_blob a))
-    | None, None -> None
-  in
+(* DECLARE this app's identity (docs/app-identity-plan.md,
+   docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
+   picture that stands for it and the reverse-DNS id it registers under
+   are the asset root's own identity.toml, which the BUILD already reads,
+   and the core reads the same file. SET ONCE, BEFORE THE FIRST MOUNT.
+
+   STILL AN EXPLICIT CALL, because declaring an identity is a POLICY: a
+   declared app is a Dock app on macOS (ruling 1), so an app that wants
+   the platform's own identity declares none at all. *)
+let app_identity () =
+  (* THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+     identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+     the icon slot is written either way, as an empty Str. *)
   emit (the_tx ())
-    (Kaya_wire.tx_set_app_identity
-       (match slot with Some _ -> 1 | None -> 0)
-       (Kaya_wire.Str name)
-       (* THE ICON SLOT IS ALWAYS WRITTEN and the mask says whether it
-          means anything, so the record's field count never varies. *)
-       (Option.value slot ~default:(Kaya_wire.Str "")))
+    (Kaya_wire.tx_set_app_identity 0 (Kaya_wire.Str "") (Kaya_wire.Str ""))
 
 (* Set a window's attributes in one construct — the attribute set is
    EXACTLY [create_window]'s; the primary differs only in having no
@@ -1946,6 +1947,31 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
        (Kaya_wire.Str cancel));
   id
 
+
+(* Post a local notification with a GUEST-CHOSEN id
+   (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a window
+   — the platform shows it outside the app. [~on_result] fires exactly
+   once and retires, with [notification_activated] when the user opened
+   it and [notification_refused] when the platform would not post it.
+   [~at] is a UNIX time in seconds handed to the OS scheduler where one
+   exists; 0 posts now. Many may be live at once. *)
+let show_notification ?(title = "") ?(body = "") ?(at = 0L) ?on_result
+    notification =
+  let tx = the_tx () in
+  if title = "" then
+    invalid_arg "kaya: a notification needs a title — pass ~title";
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.notification_handlers notification f)
+    on_result;
+  emit tx
+    (Kaya_wire.tx_show_notification notification at (Kaya_wire.Str title)
+       (Kaya_wire.Str body));
+  notification
+
+(* Withdraw a pending or delivered notification (a reminder that was
+   cleared). No answer follows; an unknown id is ignored. *)
+let cancel_notification notification =
+  emit (the_tx ()) (Kaya_wire.tx_cancel_notification notification)
 
 (* The filters encoding, written ONCE because two requests carry it:
    alternating label and space-separated extensions. *)
@@ -2195,6 +2221,11 @@ let set_reorderable (Widget id) enabled =
 (* The alert_choice cancel sentinel, for handlers: the wire u32
    0xFFFFFFFF as an OCaml int32 (-1l). *)
 let alert_cancel = Kaya_wire.alert_choice_cancel
+
+(* A notification's two outcomes (docs/tasks-s3-plan.md N1). Dismissal is
+   not one of them: two platforms never report it. *)
+let notification_activated = Kaya_wire.notification_outcome_activated
+let notification_refused = Kaya_wire.notification_outcome_refused
 
 
 
@@ -3940,6 +3971,14 @@ let dispatch_loop app =
            | Some handler, Some (Kaya_wire.I64 c) ->
                Hashtbl.remove app.alert_handlers id;
                dispatch app (fun () -> handler (Int64.to_int c))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_notification_result then
+           (* One-shot like the alert, and the id retires with it; the
+              outcome rides the same u32 slot the choice does. *)
+           (match (Hashtbl.find_opt app.notification_handlers id, payload) with
+           | Some handler, Some (Kaya_wire.I64 outcome) ->
+               Hashtbl.remove app.notification_handlers id;
+               dispatch app (fun () -> handler (Int64.to_int outcome))
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_file_dialog_result then
            (* One-shot like the alert, and the id retires with it. The

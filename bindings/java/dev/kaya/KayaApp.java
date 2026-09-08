@@ -244,7 +244,6 @@ public final class KayaApp {
     private static final int BRAND_MASK_LIGHT = 1;
     private static final int BRAND_MASK_DARK = 2;
     private static final int TYPEFACE_MASK_FONT = 1;
-    private static final int IDENTITY_MASK_ICON = 1;
 
     // No `nodes`: template nodes draw from `widgets`, one sequence per
     // app (DESIGN.md, Binding conventions).
@@ -294,6 +293,11 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, java.util.List<PickedFile>>> fileDialogs =
             new java.util.HashMap<>();
+    // One-shot, keyed by the GUEST's notification id (the alert's
+    // grammar; many may be live at once).
+    private final java.util.Map<Long, BiConsumer<Tx, Integer>> notifications =
+            new java.util.HashMap<>();
+
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
@@ -652,6 +656,64 @@ public final class KayaApp {
         }
     }
 
+    /** The notification chain (docs/tasks-s3-plan.md N1, N2): the
+     * alert's chain without a window, accumulating the one atomic
+     * SHOW_NOTIFICATION record and sending it at show(). The id is the
+     * GUEST's; many may be live at once. */
+    public static final class NotificationRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private long at;
+        private String title = "";
+        private String body = "";
+        private BiConsumer<Tx, Integer> onResult;
+
+        NotificationRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        public NotificationRef title(String title) {
+            this.title = title;
+            return this;
+        }
+
+        public NotificationRef body(String body) {
+            this.body = body;
+            return this;
+        }
+
+        /** When the platform fires it: a UNIX time in seconds, handed
+         * to the OS scheduler where one exists. Unset (0) posts now. */
+        public NotificationRef at(long unixSeconds) {
+            this.at = unixSeconds;
+            return this;
+        }
+
+        /** Bind the one-shot result handler to THIS request: the
+         * outcome is KayaWire.NOTIFICATION_OUTCOME_ACTIVATED or
+         * KayaWire.NOTIFICATION_OUTCOME_REFUSED. */
+        public NotificationRef onResult(BiConsumer<Tx, Integer> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        public long show() {
+            if (title.isEmpty()) {
+                throw new IllegalStateException(
+                        "kaya: a notification needs a title — "
+                                + "call title(text) before show()");
+            }
+            if (onResult != null) {
+                app.notifications.put(id, onResult);
+            }
+            tx.emit(KayaWire.txShowNotification(id, at, title, body));
+            return id;
+        }
+    }
+
     /** One representation, arriving: YOU OFFER MANY AND YOU RECEIVE
      * ONE. */
     public sealed interface Representation {
@@ -883,12 +945,15 @@ public final class KayaApp {
      * INFORM; WALLS REFUSE: a false here is not what makes a call
      * illegal.
      *
+     * @param notifications this process can post a local notification
+     *     the desktop will show (docs/tasks-s3-plan.md N3) — a RUNTIME
+     *     bit the host measures
      * @param auxWindows the host can materialize a surface beside the
      *     primary one ({@code tx.createWindow}, {@code tx.mountIn}).
      *     False on Android, whose system owns surface geometry; there
      *     {@code createWindow} aborts at the root.
      */
-    public record Capabilities(boolean auxWindows) {}
+    public record Capabilities(boolean auxWindows, boolean notifications) {}
 
     /**
      * The core's number written again — no header on this tier to read
@@ -896,12 +961,14 @@ public final class KayaApp {
      * holds it against crates/kaya/src/scene.rs.
      */
     private static final long CAP_AUX_WINDOWS = 1;
+    private static final long CAP_NOTIFICATIONS = 2;
 
     /** This host's capabilities; constant for the life of the
      * process. */
     public static Capabilities capabilities() {
         long bits = KayaRing.capabilities();
-        return new Capabilities((bits & CAP_AUX_WINDOWS) != 0);
+        return new Capabilities(
+                (bits & CAP_AUX_WINDOWS) != 0, (bits & CAP_NOTIFICATIONS) != 0);
     }
 
     /**
@@ -4879,6 +4946,26 @@ public final class KayaApp {
         }
 
         /**
+         * Post a local notification with a GUEST-CHOSEN id
+         * (docs/tasks-s3-plan.md N1, N2): the alert's grammar without a
+         * window, a chain that ends in show. The result handler rides
+         * the REQUEST and retires with its one answer — activated when
+         * the user opened it, refused when the platform would not post
+         * it. Many may be live at once.
+         */
+        public NotificationRef showNotification(long notification) {
+            return new NotificationRef(this, KayaApp.this, notification);
+        }
+
+        /**
+         * Withdraw a pending or delivered notification (a reminder that
+         * was cleared). No answer follows; an unknown id is ignored.
+         */
+        public void cancelNotification(long notification) {
+            emit(KayaWire.txCancelNotification(notification));
+        }
+
+        /**
          * Ask the platform for files. THE PICK, NOT THE OPEN — the
          * result carries handles you redeem later (DESIGN.md, File
          * dialogs). A chain that ends in show, like showAlert. CANCEL IS
@@ -5082,42 +5169,22 @@ public final class KayaApp {
         }
 
         /**
-         * DECLARE the app's identity (docs/app-identity-plan.md): the
-         * name it goes by and the picture that stands for it. ONE
-         * PICTURE, FIVE PLATFORMS — send a PNG, each lowering converts.
-         * SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second
-         * write, a late one and an empty name. THE BYTES ARE NEVER
-         * INSPECTED here.
+         * DECLARE the app's identity (docs/app-identity-plan.md,
+         * docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by,
+         * the picture that stands for it and the reverse-DNS id it
+         * registers under are the asset root's own identity.toml, which
+         * the BUILD already reads, and the core reads the same file. SET
+         * ONCE, BEFORE THE FIRST MOUNT.
+         *
+         * <p>STILL AN EXPLICIT CALL, because declaring an identity is a
+         * POLICY: a declared app is a Dock app on macOS (ruling 1), so an
+         * app that wants the platform's own identity declares none at all.
          */
-        public void appIdentity(String name, byte[] icon) {
-            // ONE COPY INTO CORE MEMORY, the handle consumed by this
-            // transaction's submit.
-            emit(KayaWire.txSetAppIdentity(
-                    IDENTITY_MASK_ICON, name,
-                    new KayaWire.BlobHandle(KayaRing.blobRegister(icon))));
-        }
-
-        /**
-         * The ASSET form of the icon slot: the same declaration, with
-         * the mark named rather than read. THE BYTES NEVER ENTER THE
-         * JVM'S HEAP. Everything else is
-         * {@link #appIdentity(String, byte[])}'s, verbatim.
-         */
-        public void appIdentity(String name, Asset icon) {
-            emit(KayaWire.txSetAppIdentity(
-                    IDENTITY_MASK_ICON, name,
-                    new KayaWire.BlobHandle(icon.blob())));
-        }
-
-        /**
-         * The NAME-ONLY form, for an app that has a name and no mark
-         * yet. Its identity still reaches every surface a name reaches,
-         * and every icon surface keeps the platform's own default.
-         */
-        public void appIdentity(String name) {
-            // The icon slot rides either way; the mask says whether it
-            // means anything.
-            emit(KayaWire.txSetAppIdentity(0, name, ""));
+        public void appIdentity() {
+            // THE SLOTS RIDE EMPTY and the root fills them from the asset root's own
+            // identity.toml: mask 0, no name, no blob. The record's shape is fixed, so
+            // the icon slot is written either way, as an empty Str.
+            emit(KayaWire.txSetAppIdentity(0, "", ""));
         }
 
         /**
@@ -6809,6 +6876,13 @@ public final class KayaApp {
                 // One-shot: the registration retires with the result;
                 // payload is the parsed choice (Integer).
                 BiConsumer<Tx, Integer> handler = alerts.remove(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
+                // One-shot like the alert, and the id retires with it;
+                // payload is the parsed outcome (Integer).
+                BiConsumer<Tx, Integer> handler = notifications.remove(occ.id);
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
                 }

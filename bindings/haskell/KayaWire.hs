@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc80ccf259104a87a
+specHash = 0x21005150bc085070
 
 valueBool :: Word32
 valueBool = 1
@@ -280,6 +280,10 @@ alertChoiceAction1 :: Word32
 alertChoiceAction1 = 1
 alertChoiceCancel :: Word32
 alertChoiceCancel = 4294967295
+notificationOutcomeActivated :: Word32
+notificationOutcomeActivated = 0
+notificationOutcomeRefused :: Word32
+notificationOutcomeRefused = 1
 fileModeRead :: Word32
 fileModeRead = 0
 fileModeWrite :: Word32
@@ -492,6 +496,10 @@ txKindSetDropTarget :: Word16
 txKindSetDropTarget = 50
 txKindSetReorderable :: Word16
 txKindSetReorderable = 51
+txKindShowNotification :: Word16
+txKindShowNotification = 52
+txKindCancelNotification :: Word16
+txKindCancelNotification = 53
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -624,6 +632,8 @@ occKindTimeChanged :: Word16
 occKindTimeChanged = 25
 occKindValueCommitted :: Word16
 occKindValueCommitted = 26
+occKindNotificationResult :: Word16
+occKindNotificationResult = 27
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -859,6 +869,14 @@ txSetDropTarget widget operations pathLen keys = wireRecord txKindSetDropTarget 
 -- Make every stamped row of a live For draggable within its own collection (docs/dnd-plan.md D8): each row is a source whose payload is its key, and a destination that accepts only its own collection's rows. The drop arrives as `dropped` with the ANCHOR — the key of the row it landed on and a before/onto bit — and the app confirms with the collection_move it already has; the core reorders nothing on its own. `enabled` 0 withdraws it.
 txSetReorderable :: Word64 -> Word32 -> Builder
 txSetReorderable container enabled = wireRecord txKindSetReorderable (word64LE container <> word32LE enabled <> word32LE 0)
+
+-- Post a local notification (docs/tasks-s3-plan.md N1, N2): the alert grammar without a window — the platform shows it outside the app, and the one answer is notification_result when the user activates it or the platform refuses to post. `at` is a UNIX time in seconds handed to the OS scheduler where one exists (0 = now); title and body are Str values. Ids are guest-chosen; many may be live, and an id retires on its result or its cancel.
+txShowNotification :: Word64 -> Word64 -> Value -> Value -> Builder
+txShowNotification notification at title body = wireRecord txKindShowNotification (word64LE notification <> word64LE at <> encodeValue title <> encodeValue body)
+
+-- Withdraw a pending or delivered notification by id (a reminder that was cleared). No answer follows; an unknown id is ignored.
+txCancelNotification :: Word64 -> Builder
+txCancelNotification notification = wireRecord txKindCancelNotification (word64LE notification)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -1861,15 +1879,20 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
       if kind == occKindAlertResult
         then do
-          -- The alert's one answer: id + u32 choice (alertChoice*).
-          choice <- peekByteOff rec 16 :: IO Word32
-          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing, Nothing, []))
+          -- A request's one answer: id + the u32 code.
+          code <- peekByteOff rec 16 :: IO Word32
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
+      else if kind == occKindNotificationResult
+        then do
+          -- A request's one answer: id + the u32 code.
+          code <- peekByteOff rec 16 :: IO Word32
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral code)), Nothing, Nothing, []))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,

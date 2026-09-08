@@ -9,9 +9,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     const UNTITLED: WindowId = WindowId(1);
 
     let (status, field, go) = ctx.apply(|tx| {
-        // BEFORE THE FIRST MOUNT, per the declared-once wall.
-        let icon = tx.asset("icons/kaya-mark.png");
-        tx.app_identity("Aurora Notes", &icon);
+        // BEFORE THE FIRST MOUNT, per the declared-once wall. NO
+        // ARGUMENTS: the name, the mark and the id are the manifest's
+        // (docs/tasks-s3-plan.md N4).
+        tx.app_identity();
         tx.window(kaya::DEFAULT_WINDOW).title("identity").size(480.0, 360.0);
         // ONE PROMOTED COMMAND, AND NOT ABOUT COMMANDS: Windows mints its
         // custom caption from it, replacing the system-drawn icon.

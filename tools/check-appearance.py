@@ -288,6 +288,27 @@ def census(src):
                     f"must read the toolkit back, never what the app asked for"
                 )
 
+    # --- B4. The SOURCE word reads the toolkit's override SLOT, so a scene
+    # that chose System holds on a host that is dark at night (the mac's
+    # auto-switch, 2026-09-08): an empty slot is "system".
+    for path, needle, slot in (
+        (GTK, "fn appearance(&self) -> String {", "color_scheme()"),
+        (WINUI, "fn appearance(&self) -> String {", "RequestedTheme()"),
+        (MAC, 'case "expect_appearance":', "NSApp.appearance == nil"),
+        (COMPOSE, '"expect_appearance" ->', "UI_MODE_NIGHT_MASK"),
+    ):
+        text = code[path]
+        start = text.find(needle)
+        if start < 0:
+            continue  # B3 named the missing reader
+        body = text[start:start + 1200]
+        if slot not in body:
+            out.append(
+                f"{path}: the expect_appearance reader answers no source word — "
+                f"it must read the toolkit's override slot (`{slot}`) and say "
+                f"system or override"
+            )
+
     # --- A4. The relaunching mechanism may not come back. ----------------
     # setApplicationNightMode changes the app's resource configuration,
     # which RELAUNCHES the activity; onCreate then runs twice in one
@@ -501,7 +522,13 @@ g.negative(
         r"installAppearanceBackground(\1, null)", "N16", want=2)),
     want="fed by the asked function",
 )
-g.negatives_ran(19)
+g.negative(
+    "N20 the mac reader's source word no longer reading the override slot",
+    lambda: census(without(
+        MAC, r'NSApp\.appearance == nil \? "system" : "override"', '"system"', "N20")),
+    want="answers no source word",
+)
+g.negatives_ran(20)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

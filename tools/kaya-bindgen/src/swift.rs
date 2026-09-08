@@ -576,11 +576,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
-    c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
-    c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
-    c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
-    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil, nil, [])");
-    c.line("        }");
+    // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
+    // rather than named (main.rs's code_answer_occurrence_names). The
+    // generic tail takes that code for a key-path length.
+    for name in crate::code_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line("            // A request's one answer: id + the u32 code.");
+        c.line("            let code = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
+        c.line("            return (kind, id, [], .i64(Int64(code)), [], nil, nil, [])");
+        c.line("        }");
+    }
     // The picker's answer is a LIST OF RECORDS, which no single
     // KayaValue can carry — hence the tuple's `files` member. Its own
     // arm: the generic tail would take the file count for a key-path

@@ -296,6 +296,12 @@ pub enum Step {
     /// consuming none of the leftover. root_fills cannot see it either.
     ExpectFills(Target),
     ExpectBreadth(Target),
+    /// The target resolves to NOTHING — a popped entry's or a destroyed
+    /// window's widget may not answer (A TARGET IS A LIVE WIDGET; docs/traps.md).
+    /// Keyed only, and resolved in its own arm: None is the pass — which is
+    /// why it carries the SPEC (kind, id, keys) and no Target for the
+    /// pre-resolution loop to normalize.
+    ExpectNoTarget(TargetKind, &'static str, Option<&'static str>),
     /// The inverse: the target sits short of its container's breadth —
     /// the `fill = false` opt-out's observation (docs/layout-knobs-plan.md §1).
     ExpectHugs(Target),
@@ -370,6 +376,16 @@ pub enum Step {
     /// (0 or 1) or fire the platform's dismissal (the cancel slot). An
     /// action, silent like click.
     AlertChoose(u32),
+    /// The platform's DELIVERED list holds this notification with this
+    /// title — read from the platform, never from the request
+    /// (docs/tasks-s3-plan.md N5).
+    ExpectNotification(u64, String),
+    /// The platform's delivered list does NOT hold this id.
+    ExpectNoNotification(u64),
+    /// Activate the delivered notification the way the user would where a
+    /// test can reach the shade, or through the backend's own activation
+    /// path where it cannot (N5). An action, silent like click.
+    NotificationActivate(u64),
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
@@ -634,6 +650,10 @@ impl Step {
             | Step::ExpectClipboard(..)
             | Step::ExpectFileDialog(..)
             | Step::AlertChoose(..)
+            | Step::ExpectNotification(..)
+            | Step::ExpectNoNotification(..)
+            | Step::ExpectNoTarget(..)
+            | Step::NotificationActivate(..)
             | Step::ExpectAlerts(..)
             | Step::ExpectEntries(..)
             | Step::Back(..)
@@ -699,6 +719,7 @@ impl Step {
             Step::Frame(_) => false,
             Step::ExpectFills { .. } => true,
             Step::ExpectBreadth { .. } => true,
+            Step::ExpectNoTarget { .. } => true,
             Step::ExpectHugs { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
@@ -726,6 +747,9 @@ impl Step {
             Step::ExpectClipboard(..) => true,
             Step::ExpectFileDialog(..) => true,
             Step::AlertChoose { .. } => false,
+            Step::ExpectNotification { .. } => true,
+            Step::ExpectNoNotification { .. } => true,
+            Step::NotificationActivate { .. } => false,
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
             Step::Back { .. } => false,
@@ -1035,6 +1059,13 @@ pub trait Stage: Send + 'static {
     fn choose_alert(&self, choice: u32);
     /// The number of live alerts (0 or 1).
     fn alert_count(&self) -> usize;
+    /// The title of the notification the PLATFORM holds as delivered under
+    /// this id, None when it holds none — the platform's own list
+    /// (docs/tasks-s3-plan.md N5), never the request's copy.
+    fn notification_title(&self, notification: u64) -> Option<String>;
+    /// Activate a delivered notification: the shade's real tap where a test
+    /// reaches it, the backend's own activation path where it cannot.
+    fn activate_notification(&self, notification: u64);
     /// What the live file picker is REALLY showing: the directory it is
     /// pointed at, and the file names its list actually contains — read
     /// from the platform panel, never from the request. None when no
@@ -1137,7 +1168,10 @@ pub trait Stage: Send + 'static {
     /// the declared prop (the expect_split rule).
     fn sections_presentation(&self, window: u64) -> String;
     /// The appearance the platform reports for the app — "light" or "dark",
-    /// read back from the toolkit (docs/tasks-s2b-plan.md R4; tools/check-appearance.py).
+    /// read back from the toolkit, then the SOURCE: "system" when the
+    /// toolkit's override slot is empty, "override" when it is filled
+    /// (docs/tasks-s2b-plan.md R4; tools/check-appearance.py). A scene
+    /// wanting "system" after the app chose it holds on a dark host too.
     fn appearance(&self) -> String;
     /// Drive the switcher to the section at `index` (add order) through the
     /// platform's real switching path — the user's route, so it emits
@@ -1446,6 +1480,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_breadth" => Step::ExpectBreadth(parse_target(rest)?),
+            "expect_no_target" => {
+                let t = parse_target(rest)?;
+                let Some(id) = t.id else {
+                    return Err(format!("expect_no_target wants an @id target, got {rest:?}"));
+                };
+                Step::ExpectNoTarget(t.kind, id, t.keys)
+            }
             "expect_hugs" => Step::ExpectHugs(parse_target(rest)?),
             "expect_lines" => {
                 let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -1608,8 +1649,10 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_appearance" => {
                 let want = parse_string(rest)?;
-                if want != "light" && want != "dark" {
-                    return Err(format!("expect_appearance takes light or dark, got {want:?}"));
+                if want != "light" && want != "dark" && want != "system" {
+                    return Err(format!(
+                        "expect_appearance takes light, dark or system, got {want:?}"
+                    ));
                 }
                 Step::ExpectAppearance(want)
             }
@@ -1677,6 +1720,28 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     }
                 };
                 Step::AlertChoose(choice)
+            }
+            "expect_notification" => {
+                let (id, rest) = rest
+                    .trim()
+                    .split_once(' ')
+                    .ok_or_else(|| format!("expect_notification wants an id and a title: {line:?}"))?;
+                let id = id.parse::<u64>().map_err(|_| {
+                    format!("expect_notification wants a numeric id, got {id:?}: {line:?}")
+                })?;
+                Step::ExpectNotification(id, parse_string(rest)?)
+            }
+            "expect_no_notification" => {
+                let id = rest.trim().parse::<u64>().map_err(|_| {
+                    format!("expect_no_notification wants a numeric id: {line:?}")
+                })?;
+                Step::ExpectNoNotification(id)
+            }
+            "notification_activate" => {
+                let id = rest.trim().parse::<u64>().map_err(|_| {
+                    format!("notification_activate wants a numeric id: {line:?}")
+                })?;
+                Step::NotificationActivate(id)
             }
             "expect_file_dialog" => {
                 // `expect_file_dialog <dir> <name>...`: bare names, so
@@ -3376,6 +3441,33 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
                 None => Err("no file dialog live".to_string()),
             })),
+            Step::ExpectNotification(id, want) => Some(poll(|| {
+                match stage.notification_title(*id) {
+                    Some(got) if got == *want => Ok(format!("notification {id} {want:?}")),
+                    Some(got) => Err(format!("notification {id} {got:?}, wanted {want:?}")),
+                    None => Err(format!(
+                        "the platform holds no delivered notification {id}, wanted {want:?}"
+                    )),
+                }
+            })),
+            Step::ExpectNoNotification(id) => Some(poll(|| {
+                match stage.notification_title(*id) {
+                    None => Ok(format!("no notification {id}")),
+                    Some(got) => Err(format!(
+                        "the platform still holds notification {id} {got:?}, wanted none"
+                    )),
+                }
+            })),
+            Step::NotificationActivate(id) => {
+                // An action, silent like click: the observable is the
+                // guest's reaction to the result — the notification_result
+                // occurrence and the transaction the guest writes from it.
+                await_quiet();
+                let answered = crate::scene::answers();
+                stage.activate_notification(*id);
+                await_answer(answered);
+                None
+            }
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result — the alert_result
@@ -3757,7 +3849,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             }
             Step::ExpectAppearance(want) => Some(poll(|| {
                 let got = stage.appearance();
-                if got == *want {
+                let (mode, source) = got.split_once(' ').unwrap_or((got.as_str(), ""));
+                let hit = if want == "system" { source == "system" } else { mode == want };
+                if hit {
                     Ok(format!("appearance {want}"))
                 } else {
                     Err(format!("appearance {got}, wanted {want}"))
@@ -3929,6 +4023,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     } else {
                         Err(format!("{} is short of its breadth ({short})", target_spec(t)))
                     }
+                }))
+            }
+            Step::ExpectNoTarget(kind, id, keys) => {
+                let spec = target_spec(&Target { kind: *kind, index: 0, id: Some(id), keys: *keys });
+                Some(poll(|| match stage.resolve_id(*kind, id, *keys) {
+                    None => Ok(format!("{spec} names no widget")),
+                    Some(index) => Err(format!("{spec} still answers (index {index})")),
                 }))
             }
             Step::ExpectLines(t, want) => {
@@ -5310,6 +5411,10 @@ mod tests {
             None
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn notification_title(&self, _notification: u64) -> Option<String> {
+            None
+        }
+        fn activate_notification(&self, _notification: u64) {}
         /// A picker that ANSWERS A FIXED NUMBER OF READS and is then
         /// gone: every dialog verb's postcondition is that the panel
         /// leaves, so a mock that answers forever could only walk the
@@ -5418,7 +5523,7 @@ mod tests {
             "bar".into()
         }
         fn appearance(&self) -> String {
-            "light".into()
+            "light system".into()
         }
         fn active_section_title(&self) -> String {
             String::new()
@@ -6239,6 +6344,10 @@ mod tests {
             "0".into()
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn notification_title(&self, _notification: u64) -> Option<String> {
+            None
+        }
+        fn activate_notification(&self, _notification: u64) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
         }
@@ -6259,7 +6368,7 @@ mod tests {
             "bar".into()
         }
         fn appearance(&self) -> String {
-            "light".into()
+            "light system".into()
         }
         fn active_section_title(&self) -> String {
             String::new()
@@ -6508,6 +6617,10 @@ mod tests {
             "0".into()
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn notification_title(&self, _notification: u64) -> Option<String> {
+            None
+        }
+        fn activate_notification(&self, _notification: u64) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
         }
@@ -6528,7 +6641,7 @@ mod tests {
             "bar".into()
         }
         fn appearance(&self) -> String {
-            "light".into()
+            "light system".into()
         }
         fn active_section_title(&self) -> String {
             String::new()
@@ -7375,6 +7488,30 @@ mod tests {
             assert_eq!(code, 1, "{verdict}");
             assert!(verdict.contains("not a context_open target"), "{verdict}");
         }
+    }
+
+    /// Every shared scene parses in THIS parser: the two interpreters parse
+    /// their own copies, so a verb argument this arm refuses (`expect_appearance
+    /// "system"`, 2026-09-08) was green on the mac and died on windows at
+    /// parse time, a full lane later.
+    #[test]
+    fn every_scene_parses_here() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/scenes");
+        let mut seen = 0;
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(dir).expect("tools/scenes") {
+            let path = entry.expect("entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("steps") {
+                continue;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(&path).expect("read");
+            if let Err(e) = parse(&text) {
+                bad.push(format!("{}: {e}", path.display()));
+            }
+        }
+        assert!(seen >= 40, "a census that read {seen} scenes agrees with everything");
+        assert!(bad.is_empty(), "scenes this parser refuses:\n{}", bad.join("\n"));
     }
 }
 

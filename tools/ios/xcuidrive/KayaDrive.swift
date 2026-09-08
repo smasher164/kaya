@@ -31,6 +31,9 @@
 //   pb_write <kind> <b64>       one item replacing the board, kaya's stage marker beside it
 //   pb_read <kind>              `S types=[…]` then `S b64=…`, the prompt answered by these hands
 //   pb_types                    `S types=[…]`, prompt-free
+//   THE NOTIFICATION SHADE (docs/tasks-s3-plan.md N5):
+//   shade                       pull Notification Center down and say what it holds, cell by cell (diagnosis)
+//   sb_drag X1 Y1 X2 Y2 [MS]    a drag in SPRINGBOARD's coordinates (the shade is its window)
 //   quit                        the test returns and xcodebuild exits
 //
 // Coordinates are the app frame's points (its origin is the screen's).
@@ -328,6 +331,66 @@ final class KayaDrive: XCTestCase {
         return (true, "cancelled by \(how)")
     }
 
+    // MARK: - the notification shade (docs/tasks-s3-plan.md N5)
+    /// SPRINGBOARD'S NOTIFICATION CELL, by identifier. MEASURED 2026-09-07 on
+    /// iOS 26: the cell in the shade is a Button with this identifier and an
+    /// EMPTY label, and its whole subtree is unlabelled — so a match on the
+    /// notification's title alone finds nothing.
+    let notifyCellId = "ListCell"
+    /// The notification's own view, which a BANNER publishes with no ListCell
+    /// around it (measured 2026-09-07): the shade and the banner are one match.
+    let notifyLookId = "NotificationShortLookView"
+    /// What SpringBoard is showing that could be a notification: every cell
+    /// with its frame and label, and each cell's own subtree, for a refusal's
+    /// sentence and for the `shade` verb.
+    func shadeSummary(_ sb: XCUIApplication) -> String {
+        guard let root = try? sb.snapshot() else { return "SpringBoard published no snapshot" }
+        var cells: [String] = []
+        var texts: [String] = []
+        func inside(_ s: XCUIElementSnapshot, _ depth: Int) -> [String] {
+            var out = ["  " + String(repeating: " ", count: depth)
+                + "type=\(s.elementType.rawValue) id=\"\(s.identifier)\" label=\"\(s.label)\" \(rect(s.frame))"]
+            for child in s.children { out += inside(child, depth + 1) }
+            return out
+        }
+        func walk(_ s: XCUIElementSnapshot) {
+            if s.identifier == notifyCellId || s.identifier == notifyLookId {
+                cells.append("cell \(rect(s.frame)) label=\"\(s.label)\"\n"
+                    + inside(s, 0).prefix(24).joined(separator: "\n"))
+            }
+            if s.elementType == .staticText, !s.label.isEmpty { texts.append(s.label) }
+            s.children.forEach(walk)
+        }
+        walk(root)
+        return "SpringBoard shows \(cells.count) notification cell(s) and texts "
+            + "\(Array(texts.prefix(12)))" + (cells.isEmpty ? "" : "\n" + cells.joined(separator: "\n"))
+    }
+
+    /// THE PULL: a press-drag from the top edge down. The x is the screen's
+    /// LEFT quarter because the right of a notched device's top edge opens
+    /// Control Center instead.
+    func pullShade(_ sb: XCUIApplication) {
+        let w = sb.frame.width, h = sb.frame.height
+        sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: w * 0.25, dy: 0))
+            .press(forDuration: 0.2,
+                   thenDragTo: sb.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: w * 0.25, dy: h * 0.75)))
+    }
+
+    /// THE COVER SHEET'S SECOND PAGE, where the notifications are. MEASURED
+    /// 2026-09-07 on iOS 26: the pull lands on the CLOCK page and SpringBoard's
+    /// tree then carries no notification cell at all — the pull alone finds
+    /// nothing, however long it waits — so the list is swiped up into view. The
+    /// swipe starts well above the home indicator, which would take the whole
+    /// sheet down instead.
+    func revealShadeList(_ sb: XCUIApplication) {
+        let w = sb.frame.width, h = sb.frame.height
+        sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: w * 0.5, dy: h * 0.86))
+            .press(forDuration: 0.2,
+                   thenDragTo: sb.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: w * 0.5, dy: h * 0.31)))
+    }
+
     // MARK: - the pasteboard
     func pbTypes() -> String { "S types=[" + UIPasteboard.general.types.map { "\"\($0)\"" }.joined(separator: ", ") + "]" }
     /// A content read of another principal's clip raises the paste alert
@@ -455,6 +518,29 @@ final class KayaDrive: XCTestCase {
             return (ok, "state=\(a.state.rawValue) frame=\(rect(a.frame))")
         case "sb_describe":
             return (true, XCUIApplication(bundleIdentifier: "com.apple.springboard").debugDescription)
+        case "shade":
+            // Pull Notification Center down, bring its list up, and say what it
+            // holds. DIAGNOSIS ONLY: a notification found this way cannot be
+            // activated on the simulator (docs/tasks-s3-plan.md N5's iOS
+            // carve-out; the measurement is in tools/ios/notifyprobe).
+            let sbs = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            pullShade(sbs)
+            revealShadeList(sbs)
+            pause(0.5)
+            return (true, shadeSummary(sbs))
+        case "sb_drag":
+            // SpringBoard's own coordinate space, which the app-frame `drag`
+            // cannot reach: the shade belongs to SpringBoard.
+            let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            guard words.count > 4, let x1 = Double(words[1]), let y1 = Double(words[2]),
+                  let x2 = Double(words[3]), let y2 = Double(words[4])
+            else { return (false, "sb_drag X1 Y1 X2 Y2 [HOLD_MS]") }
+            let hold = words.count > 5 ? (Double(words[5]) ?? 200) / 1000 : 0.2
+            sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x1, dy: y1))
+                .press(forDuration: hold,
+                       thenDragTo: sb.coordinate(withNormalizedOffset: .zero)
+                        .withOffset(CGVector(dx: x2, dy: y2)))
+            return (true, "dragged \(x1),\(y1) -> \(x2),\(y2)")
         case "sb_find", "sb_tap", "press":
             // SpringBoard's tree is the one that is ALWAYS readable while
             // the foreground app's own blocked read holds the alert
@@ -699,6 +785,8 @@ final class KayaDrive: XCTestCase {
         case "savecancel":
             guard waitForSaveSheet(a) else { return (false, "no save dialog is up to cancel") }
             return cancelSheet(a, "save dialog")
+
+
         default:
             return (false, "unknown verb \(verb)")
         }
