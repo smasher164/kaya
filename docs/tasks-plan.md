@@ -467,7 +467,7 @@ the gate or trap it became.
 | S1 | a search entry filtering the open list | the search field (a role on entry) | 1 |
 | S2 | switches in Settings, the Today badge, a link in notes, the launch slot | toggle switch, badge, hyperlink label, splash | 2 |
 | S2b | an app-wide Light / Dark / System switch in Settings | the appearance PROP: programmatic dark mode, bound to a signal, over the per-process `KAYA_APPEARANCE` install sites every backend already has (QUEUED 2026-09-07 by the maintainer: "users often just want to select one of those things"; nobody uses Discord's light mode) | 2b |
-| S2c | the Details screen's run cards on iOS read as Reminders' do | the inset separator between a run card's stacked text children; the lone-button card as the grouped button row (QUEUED 2026-09-07 with S2's review; the notes placeholder went into S2 itself) | 2c |
+| S2c | the Details screen's run cards on iOS read as Reminders' do | the hairline between a run card's rows; the lone-button card as the grouped button row (BUILT 2026-09-07 evening, docs/adaptive-layout-plan.md D7.5's run-card paragraph; the notes placeholder went into S2 itself) | 2c |
 | S3 | a reminder fires as a notification; activating it opens the task | local notifications | 3 |
 | S4 | tasks survive a relaunch; settings persist | app data directory, the preferences store, window memory | 4 |
 | S5 | the app under the largest text size, an RTL locale, a non-US locale, on every lane | the compliance pass | 5 |

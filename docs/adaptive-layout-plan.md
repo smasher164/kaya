@@ -265,6 +265,21 @@ run after it (the Delete button) are cards of their own, the Settings
 shape. The flatten does not dissolve a form. macOS is unchanged, since
 `kayaIsGroupedFlow` is false there by construction.
 
+THE RUN CARD'S INTERIOR (2026-09-07, the maintainer's S2 review: "Is
+that white rectangle supposed to be an area where you enter notes…?"):
+a run card had given its children nothing to stand on — one padded
+stack, no separators, a lone button as a left-aligned pill. It takes
+the FORM card's interior now, so the two cards on the Details screen
+read as one grammar: one row per child at the grouped row rhythm
+(kayaFoldSectionPadY each), a hairline between rows, the horizontal
+inset on the stack — Reminders' notes/URL card; and a run whose whole
+content is one button draws it as the grouped BUTTON ROW, borderless
+and centred across the card in the role's tint, Settings' "Sign Out".
+The card is the bezel. macOS is untouched (no grouped flow there);
+tools/check-table-card.py holds the divider, the button-row
+environment and the borderless centred style. The placeholder the same
+review asked for went into S2 itself.
+
 ### D8 — the breakpoint speaks size classes (ruled and built 2026-08-31)
 
 THE RAW NUMBER DIED. `stack_below=<points>` made the author invent the

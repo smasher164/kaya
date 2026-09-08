@@ -12509,13 +12509,23 @@ private struct KayaGroupedSections: View {
     /// The card, the FACE's colours and radius on a run of ordinary
     /// content — macOS keeps its flat look exactly as the face does.
     @ViewBuilder private func kayaCarded(_ nodes: [KayaNode]) -> some View {
-        let body = VStack(alignment: .leading, spacing: flow.spacing) {
-            ForEach(nodes) { child in
+        // THE RUN CARD'S INTERIOR is the form card's (docs/adaptive-layout-plan.md
+        // D7.5, 2026-09-07): one row per child at the grouped row rhythm, a
+        // hairline between rows, and a lone BUTTON drawn as the grouped button
+        // row. tools/check-table-card.py holds both.
+        let body = VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(nodes.enumerated()), id: \.element.id) { i, child in
                 KayaRender(node: child, flexVertical: true, flexStretch: true)
+                    .environment(
+                        \.kayaGroupedButtonRow, nodes.count == 1 && child.kind == kindButton)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     // The cross box, so expect_breadth and expect_aligned read
                     // a carded child as they read a flex one.
                     .background(KayaCellReader(id: child.id, parent: flow.id, vertical: true))
+                    .padding(.vertical, kayaFoldSectionPadY)
+                if i < nodes.count - 1 {
+                    Divider()
+                }
             }
         }
         .environment(\.kayaInGroupedCard, true)
@@ -12524,7 +12534,6 @@ private struct KayaGroupedSections: View {
         #else
             body
                 .padding(.horizontal, kayaFoldSectionPadX)
-                .padding(.vertical, kayaFoldSectionPadY)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background(kayaCardShape())
         #endif
@@ -12568,6 +12577,20 @@ extension EnvironmentValues {
     var kayaInGroupedCard: Bool {
         get { self[KayaInGroupedCardKey.self] }
         set { self[KayaInGroupedCardKey.self] = newValue }
+    }
+}
+
+/// Set for the ONE button that is a run card's whole content: Settings'
+/// "Sign Out" row — centred across the card, the role's tint, no bezel
+/// (docs/adaptive-layout-plan.md D7.5, the run card's interior).
+private struct KayaGroupedButtonRowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var kayaGroupedButtonRow: Bool {
+        get { self[KayaGroupedButtonRowKey.self] }
+        set { self[KayaGroupedButtonRowKey.self] = newValue }
     }
 }
 
@@ -13687,8 +13710,15 @@ func kayaIconQuadrants(_ image: CGImage) -> String? {
 private struct KayaButtonStyle: PrimitiveButtonStyle {
     let prominent: Bool
     var plain = false
+    /// A run card's lone button (docs/adaptive-layout-plan.md D7.5): the
+    /// grouped button row — borderless, the role's tint, centred across the
+    /// card. The card is the bezel.
+    var groupedRow = false
     func makeBody(configuration: Configuration) -> some View {
-        if prominent {
+        if groupedRow {
+            BorderlessButtonStyle().makeBody(configuration: configuration)
+                .frame(maxWidth: .infinity, alignment: .center)
+        } else if prominent {
             BorderedProminentButtonStyle().makeBody(configuration: configuration)
         } else if plain {
             BorderlessButtonStyle().makeBody(configuration: configuration)
@@ -13759,6 +13789,7 @@ struct KayaRender: View {
     var reorderIn: KayaNode? = nil
     /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
+    @Environment(\.kayaGroupedButtonRow) private var kayaGroupedButtonRow
 
     var body: some View {
         // The widget/node anchor: a context catalog rides .contextMenu on the
@@ -14032,7 +14063,8 @@ struct KayaRender: View {
                     KayaHost.emit(node.tag)
                 }
                 .buttonStyle(KayaButtonStyle(
-                    prominent: node.role == roleProminent, plain: node.role == rolePlain))
+                    prominent: node.role == roleProminent, plain: node.role == rolePlain,
+                    groupedRow: kayaGroupedButtonRow))
                 .alignmentGuide(.top) { d in
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]

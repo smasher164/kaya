@@ -11753,6 +11753,7 @@ KEY: tasks S2b, appearance prop, WPROP_APPEARANCE, APPEARANCE_SYSTEM, appearance
 
 ## BUILD — task manager S2: switches, the Today badge, a link in notes, the launch slot (rulings TAKEN 2026-09-07; depth green on the mac the same day)
 KEY: tasks S2, role switch, role link, href, section badge, SPROP_BADGE, expect_section_badge, expect_href, launch slot, [launch], UILaunchScreen, UIColorName, actool, launch catalog, core-splashscreen, installSplashScreen, kaya_launch_background, Theme.Kaya.Launch, docs/tasks-s2-plan.md
+- S2c BUILT (2026-09-07 evening, the maintainer's three approved run-card rulings): the iOS run card takes the form card's interior — a row per child, a hairline between rows — and a lone button is the grouped button row; check-table-card holds all three (docs/adaptive-layout-plan.md D7.5).
 - CLOSED IN THE SLICE (2026-09-07 afternoon): the notes field's `Notes`
   placeholder, asserted on every lane; the macOS textarea's
   AXPlaceholderValue, published by hand since the drawn placeholder is

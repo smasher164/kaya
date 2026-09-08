@@ -173,6 +173,24 @@ PRESENT = (
     ("ios card interior, vertical", SWIFTUI,
      ".padding(.vertical, kayaTableCardInsetY)",
      ".padding(.vertical, 0)"),
+    # THE RUN CARD'S INTERIOR (D7.5, 2026-09-07): the form card's row
+    # rhythm and a hairline between rows — Reminders' notes/URL card — and
+    # a lone button drawn as the grouped button row (Settings' "Sign Out").
+    # No observable sees either: every carded child reports the same box
+    # with the divider gone or the bezel back.
+    ("ios run card divider between rows", SWIFTUI,
+     "                if i < nodes.count - 1 {\n"
+     "                    Divider()",
+     "                if false {\n"
+     "                    Divider()"),
+    ("ios run card lone button is the button row", SWIFTUI,
+     "\\.kayaGroupedButtonRow, nodes.count == 1 && child.kind == kindButton)",
+     "\\.kayaGroupedButtonRow, false)"),
+    ("ios grouped button row is borderless and centred", SWIFTUI,
+     "            BorderlessButtonStyle().makeBody(configuration: configuration)\n"
+     "                .frame(maxWidth: .infinity, alignment: .center)",
+     "            BorderedButtonStyle().makeBody(configuration: configuration)\n"
+     "                .frame(maxWidth: .infinity, alignment: .center)"),
 
     # And the one number that has to follow it, GTK's `css_inset_span`
     # clause in this file's spelling: the reporters read the card's
