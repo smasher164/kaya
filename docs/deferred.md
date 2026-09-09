@@ -11765,6 +11765,11 @@ KEY: tasks S3, show_notification, cancel_notification, notification_result, noti
   - The eight bindings' sugar, check-sugar-surface's rows, check-verbs green on Compose; N4's `tx.app_identity()` no-argument form; the task manager posting at the reminder's time (N7).
 - MEASURED: a headless banner request burns the bundle id (docs/traps.md); the maintainer's machine carries a burned `dev.kaya.aurora` from the first run and needs it re-enabled in System Settings › Notifications before the mac lane's notify leg can pass there.
 
+## LEAK — the windows lane's flight-recorder sampler outlives the lane (measured twice 2026-09-08)
+
+KEY: flightrec.ps1, -Mode sample, ALL.stop, sampler leak, windows lane exit path
+- tools/guest/flightrec.ps1 runs as a `-Mode sample -Leg lane` poller for the whole lane and is meant to stop when the runner drops `C:\kaya\flightrec\ALL.stop` on its exit path (the next run deletes the file at startup). Measured: the packaging agent reaped FIVE of its own after hand runs, and the plain matrix of 2026-09-08 21:34 left one polling (pid 22144, started 21:34:53) after its windows lane had finished at 04:51:23Z with every leg PASS — stopped by hand with the stop file an hour later. So the exit path does not reliably reach the sampler: either the lane's exit skips the drop on some route (a verdict path that returns before it), or a run that starts as another ends deletes the stop file before the sampler polls it. Remedy: the runner WAITS for the sampler's exit (tasklist by pid until absent, with a ceiling and a sentence) rather than dropping a file and leaving; and the matrix's cleanup proof lists the VM's powershell processes the way the agents' do. Not fixed in the packaging slice.
+
 ## BUILD — packaging part 1: a complete app from one manifest (rulings TAKEN 2026-09-08, docs/packaging-plan.md P1-P7; the shared core and four arms green the same day)
 
 KEY: packaging part 1, tools/lib/packaging, identity.load, mark.resample, render_png, regen-mark, install-desktop, apk_icon_verify, QUALIFIER_API, LAUNCH_PX, tools/package.py, MSIX, AppxManifest, PackageDependency, AUMID self-registration
