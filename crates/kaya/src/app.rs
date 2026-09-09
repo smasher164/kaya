@@ -601,6 +601,123 @@ pub fn capabilities() -> Capabilities {
     }
 }
 
+/// The app's own writable directory (docs/tasks-s4-plan.md P1), created
+/// on first ask: Application Support/<id> on macOS, Documents on iOS,
+/// `$XDG_DATA_HOME/<id>` on Linux, `%LOCALAPPDATA%\<id>` on Windows, the
+/// files directory on Android. THE APP'S DOCUMENT GOES HERE and kaya has
+/// no opinion about its format — a SQLite database through rusqlite is the
+/// standard answer (P1). Under `KAYA_SELFTEST` it is scratch and act one
+/// empties it.
+///
+/// Panics only where there is no directory to answer with — Android before
+/// attach — which is a program that asked before the platform handed the
+/// core a container.
+pub fn app_data_dir() -> std::path::PathBuf {
+    // THE SENTENCE IS FROZEN IN NINE (tools/check-sugar-surface.py's prefs
+    // clause): the state with no directory is one a guest cannot plan
+    // around, so every binding refuses in its own idiom with these bytes.
+    // The FLOOR still answers 0 for "none".
+    crate::prefs::app_data_dir().expect(
+        "kaya: app_data_dir asked before the platform handed one over \
+         (Android before attach)",
+    )
+}
+
+/// The preference store (docs/tasks-s4-plan.md P3): small typed settings
+/// under the app's own id, in the platform's own store where the platform
+/// has one. Take it at startup and keep it — it holds nothing.
+///
+/// A key under the `kaya.` prefix is kaya's own (window memory) and a
+/// write to one panics naming the key.
+pub fn prefs() -> Prefs {
+    Prefs { _private: () }
+}
+
+/// The handle [`prefs`] answers. Reads take the default the caller
+/// supplies; a key holding another type reads as absent.
+#[derive(Clone, Copy, Debug)]
+pub struct Prefs {
+    _private: (),
+}
+
+impl Prefs {
+    pub fn get_string(&self, key: &str, default: &str) -> String {
+        self.check(key);
+        match crate::prefs::get(key) {
+            Some(crate::prefs::PrefValue::Str(text)) => text,
+            _ => default.to_owned(),
+        }
+    }
+
+    pub fn get_i64(&self, key: &str, default: i64) -> i64 {
+        self.check(key);
+        match crate::prefs::get(key) {
+            Some(crate::prefs::PrefValue::I64(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn get_f64(&self, key: &str, default: f64) -> f64 {
+        self.check(key);
+        match crate::prefs::get(key) {
+            Some(crate::prefs::PrefValue::F64(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn get_bool(&self, key: &str, default: bool) -> bool {
+        self.check(key);
+        match crate::prefs::get(key) {
+            Some(crate::prefs::PrefValue::Bool(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn set_string(&self, key: &str, value: &str) {
+        self.write(key, crate::prefs::PrefValue::Str(value.to_owned()));
+    }
+
+    pub fn set_i64(&self, key: &str, value: i64) {
+        self.write(key, crate::prefs::PrefValue::I64(value));
+    }
+
+    pub fn set_f64(&self, key: &str, value: f64) {
+        self.write(key, crate::prefs::PrefValue::F64(value));
+    }
+
+    pub fn set_bool(&self, key: &str, value: bool) {
+        self.write(key, crate::prefs::PrefValue::Bool(value));
+    }
+
+    pub fn remove(&self, key: &str) {
+        self.check(key);
+        self.refuse_reserved(key);
+        crate::prefs::remove(key);
+    }
+
+    fn write(&self, key: &str, value: crate::prefs::PrefValue) {
+        self.check(key);
+        self.refuse_reserved(key);
+        crate::prefs::set(key, value);
+    }
+
+    /// A key is NON-EMPTY UTF-8, and the empty one is refused LOUDLY in
+    /// all nine (tools/check-sugar-surface.py freezes the sentence): the
+    /// floor can only ignore it, because an `extern "C"` frame cannot
+    /// unwind, and a write that vanishes with no error is the silent
+    /// class. Reached by every read as well as every write.
+    fn check(&self, key: &str) {
+        assert!(!key.is_empty(), "kaya: a preference key must not be empty");
+    }
+
+    /// The nine bindings' one refusal, in Rust's idiom. Not the floor's
+    /// `fault` report: a guest calling the sugar is on the app thread,
+    /// which CAN unwind, so the panic is the legible answer here.
+    fn refuse_reserved(&self, key: &str) {
+        assert!(!crate::prefs::is_reserved(key), "{}", crate::prefs::reserved_refusal(key));
+    }
+}
+
 pub struct AppCtx {
     pub(crate) occurrences: Receiver<Inbox>,
     pub(crate) transactions: Sender<Transaction>,
@@ -5169,6 +5286,17 @@ impl WindowRef<'_, '_> {
     pub fn appearance(self, mode: crate::Appearance) -> Self {
         self.tx
             .set_window_prop(self.window, WindowProp::Appearance, crate::appearance_raw(mode));
+        self
+    }
+
+    /// WINDOW MEMORY, ON BY DEFAULT (docs/tasks-s4-plan.md P4): the window
+    /// opens at the frame the previous process left it at, saved under
+    /// kaya's own reserved preference key. `remember_frame(false)` opts a
+    /// window out; the phones have no window frame and the prop is inert
+    /// there.
+    pub fn remember_frame(self, on: bool) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::RememberFrame, on);
         self
     }
 

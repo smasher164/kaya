@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x21005150bc085070L;
+    public static final long SPEC_HASH = 0x605e18f72b2af791L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -112,6 +112,7 @@ public final class KayaWire {
     public static final int WPROP_DIRTY = 7;
     public static final int WPROP_INSET = 8;
     public static final int WPROP_APPEARANCE = 9;
+    public static final int WPROP_REMEMBER_FRAME = 10;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
@@ -1775,6 +1776,21 @@ public final class KayaWire {
     public static byte[] txBindWindowAppearance(long window, long signalId) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_APPEARANCE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant remember_frame value (window 0, the primary surface). */
+    public static byte[] txSetWindowRememberFrame(long window, boolean rememberFrame) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_REMEMBER_FRAME).putInt(SOURCE_CONST);
+        encodeValue(b, rememberFrame);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound remember_frame value (window 0, the primary surface). */
+    public static byte[] txBindWindowRememberFrame(long window, long signalId) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_REMEMBER_FRAME).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

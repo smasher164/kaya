@@ -2625,6 +2625,47 @@ The harness continues a scene in the relaunched process: a `relaunch`
 line ends act one, the core consumes the marker act one left before the
 app thread exists, and the runner joins the two verdicts as one leg.
 
+## App data and preferences (docs/tasks-s4-plan.md, rulings taken 2026-09-09)
+
+Two stores, because every platform teaches the split and its surfaces
+key on it (backup rules, `defaults`, the Settings bundle): the app's DATA
+is a SQLite database the guest keeps through its language's own binding
+in the directory `app_data_dir()` answers — Application Support/<id> on
+macOS, Documents on iOS, the files directory on Android, `$XDG_DATA_HOME/
+<id>` on Linux, `%LOCALAPPDATA%\<id>` on Windows — and kaya answers the
+directory and nothing else, since a kaya database API in nine bindings
+would be a worse SQL than any of theirs. The app's SETTINGS are a typed
+key-value store, `prefs()`, on the platform's own backing: `UserDefaults`
+on macOS and iOS (the plist `defaults` reads), `SharedPreferences` on
+Android (the file Auto Backup restores), and kaya's own keyfile under
+`~/.config/<id>` and `%LOCALAPPDATA%\<id>` on the two desktops that have
+no convention worth adopting. ONE semantics in all nine bindings: string,
+i64, f64 and bool, each get taking a default and answering it when the
+key is absent OR holds another type (the platforms disagree — one
+coerces, one throws — and neither is the rule); a set is durable when it
+returns; keys under `kaya.` are kaya's own and a guest write to one is
+refused by name, in the binding's own idiom, with one sentence in all
+nine (`kaya: preference key "<key>" is reserved (the kaya. prefix is
+kaya's own)`) before the floor call, which refuses it again; an empty key
+is refused the same way, and so is `app_data_dir()` asked before the
+platform has handed one over (Android before attach), which the floor
+reports as a zero length and every binding turns into the one refusal
+rather than an absent value a guest cannot plan around. Two spellings
+are on the record: Haskell's `Prefs` record fields carry a `pref` prefix
+(a record field is a top-level selector there and the module already
+exports the collection's `remove`), and OCaml's handle is a record of
+closures because its module system has no value to hand back. Kaya uses the reserved keys for WINDOW MEMORY: the
+desktops remember a window's frame across launches and restore it before
+the first frame, clamped onto a screen that still has it, with the
+`remember_frame` window prop the opt-out and the phones inert.
+UNDER THE HARNESS both stores are scratch — the domain `<id>.selftest`
+and a data directory under the state home — emptied by the process that
+starts a scene's first act and kept by the process a relaunch marker
+adopts, which is what lets `relaunch launch` (the plain door: the same
+artifact started the way a user would, no notification) measure
+persistence, and `expect_pref` reads the platform's own store back rather
+than the core's memory.
+
 ## Accessibility (the universal props, landed 2026-07-25)
 
 Native widgets ARE the accessibility tree (see the Accessibility case

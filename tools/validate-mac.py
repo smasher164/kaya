@@ -301,6 +301,9 @@ signal.signal(signal.SIGINT, lambda *_: sys.exit(130))
 # reliable.
 RECORDINGS = ROOT / "target/recordings/mac"
 REC_PROC = None
+# The film's pixel dimensions, read once at extraction: every crop is
+# clamped to them.
+FILM_W = FILM_H = 0
 PIDFILE = RECORDINGS / "pids"
 if os.environ.get("KAYA_RECORD"):
     if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
@@ -347,12 +350,43 @@ _rec_slots = threading.Condition()
 _rec_free = list(range(JOBS))
 
 
-def run_recorded(name, argv, env, log):
-    """One recorded leg: claim a tile, launch the guest into it,
-    register its pid with the suite recorder, and release the guest's
-    gate once the recorder reports the window tracked — a leg cannot
-    outrun its recording. Returns False only for a guest failure;
-    recording gaps surface at extraction."""
+def _record_process(rec_dir, slot, argv, leg_env, lf, log, label):
+    """Launch one filmed process into `slot`: register its pid with the
+    suite recorder and release the guest's gate once the recorder reports
+    the window tracked — a process cannot outrun its recording. Returns
+    its exit code, or None when it had to be killed."""
+    proc = subprocess.Popen(argv, env=leg_env, stdout=lf, stderr=lf)
+    with open(PIDFILE, "a", encoding="utf-8") as pf:
+        pf.write(f"{proc.pid}\n")
+    (rec_dir / "pid").write_text(f"{proc.pid}\n", encoding="utf-8")
+    for _ in range(300):
+        rec_log = (RECORDINGS / "rec.log").read_text(
+            encoding="utf-8", errors="replace") \
+            if (RECORDINGS / "rec.log").is_file() else ""
+        if re.search(rf"TRACKING {proc.pid}$", rec_log, re.M):
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    (rec_dir / "go").write_text("", encoding="utf-8")
+    # Bounded: a hung guest fails the leg instead of wedging the suite.
+    try:
+        return proc.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        with open(log, "a", encoding="utf-8") as out:
+            out.write(f"{label}: guest did not exit within 120s\n")
+        return None
+
+
+def run_recorded(name, argv, env, log, scene=None):
+    """One recorded leg, both acts. THE FILM IS ONE CLIP over act one, the
+    gap and act two (docs/tasks-s4-plan.md P6); the STILLS split at the
+    process, because extraction crops the window rect the recorder saw for
+    a pid and the relaunched process gets a new window — so act two's tile
+    is `<leg>~act2`. Returns False only for a guest failure; recording
+    gaps surface at extraction."""
     rec_dir = RECORDINGS / name
     shutil.rmtree(rec_dir, ignore_errors=True)
     rec_dir.mkdir(parents=True)
@@ -366,34 +400,49 @@ def run_recorded(name, argv, env, log):
                        KAYA_HARNESS_GATE=str(rec_dir / "go"),
                        KAYA_WIN_SLOT=str(slot))
         leg_env.setdefault("KAYA_SELFTEST", "1")
+        second = scene is not None and scene in lane.RELAUNCH_DOOR
+        if second:
+            lane.clear_act2(ROOT, leg_env)
         with open(rec_dir / "leg.log", "w", encoding="utf-8",
                   errors="replace") as lf:
-            proc = subprocess.Popen(argv, env=leg_env, stdout=lf,
-                                    stderr=lf)
-        with open(PIDFILE, "a", encoding="utf-8") as pf:
-            pf.write(f"{proc.pid}\n")
-        (rec_dir / "pid").write_text(f"{proc.pid}\n", encoding="utf-8")
-        for _ in range(300):
-            rec_log = (RECORDINGS / "rec.log").read_text(
-                encoding="utf-8", errors="replace") \
-                if (RECORDINGS / "rec.log").is_file() else ""
-            if re.search(rf"TRACKING {proc.pid}$", rec_log, re.M):
-                break
-            if proc.poll() is not None:
-                break
-            time.sleep(0.05)
-        (rec_dir / "go").write_text("", encoding="utf-8")
-        # Bounded: a hung guest fails the leg instead of wedging the
-        # suite.
-        try:
-            proc.wait(timeout=120)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            with open(log, "a", encoding="utf-8") as lf:
-                lf.write(f"{name}: guest did not exit within 120s\n")
-            failed = True
-        if proc.wait() != 0:
-            failed = True
+            rc = _record_process(rec_dir, slot, argv, leg_env, lf, log, name)
+        failed = rc != 0
+        if second and not failed:
+            text = (rec_dir / "leg.log").read_text(encoding="utf-8",
+                                                   errors="replace")
+            if not lane.act_one_ok(text):
+                with open(log, "a", encoding="utf-8") as out:
+                    out.write(f"{name}: act one did not publish "
+                              f'"KAYA_SELFTEST: ACT 1 OK", so the '
+                              f"platform's door was never pushed\n")
+                failed = True
+            else:
+                act2_dir = RECORDINGS / f"{name}~act2"
+                shutil.rmtree(act2_dir, ignore_errors=True)
+                act2_dir.mkdir(parents=True)
+
+                def launch(argv2, env2, root, lf2, _dir=act2_dir,
+                           _slot=slot):
+                    env2 = dict(env2,
+                                KAYA_HARNESS_GATE=str(_dir / "go"),
+                                KAYA_WIN_SLOT=str(_slot))
+                    # ACT TWO'S OWN LOG, not the joined one: extraction
+                    # takes each still at the STEP TIME its log records,
+                    # and a log holding both acts would name act one's
+                    # steps and cut them at act one's times — black frames
+                    # in act two's tile, measured 2026-09-09.
+                    own = _dir / "leg.log"
+                    with open(own, "w", encoding="utf-8",
+                              errors="replace") as out:
+                        rc2 = _record_process(_dir, _slot, argv2, env2,
+                                              out, log, f"{name}~act2")
+                    lf2.write(own.read_text(encoding="utf-8",
+                                            errors="replace"))
+                    return 1 if rc2 is None else rc2
+
+                failed = lane.second_act(ROOT, scene, argv, leg_env,
+                                         rec_dir / "leg.log",
+                                         launch=launch) != 0
     finally:
         with _rec_slots:
             _rec_free.append(slot)
@@ -437,6 +486,11 @@ def rec_suite_stop():
     # Legs share the one film; extractions are independent — run them
     # all at once and collect verdicts after. The packet index is
     # scanned once here, not per worker.
+    global FILM_W, FILM_H
+    FILM_W, FILM_H = (int(v) for v in out_of(
+        ["ffprobe", "-v", "error", "-select_streams", "v",
+         "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x",
+         str(RECORDINGS / "suite.mov")]).strip().split("x")[:2])
     pts = out_of(["ffprobe", "-v", "exclusive", "-select_streams", "v",
                   "-show_entries", "packet=pts_time", "-of", "csv=p=0",
                   str(RECORDINGS / "suite.mov")])
@@ -462,8 +516,13 @@ def rec_suite_stop():
             continue
         _, _, x, y, wd, ht = window.split()
         s = float(scale)
-        crop = (f"crop={int(float(wd) * s)}:{int(float(ht) * s)}:"
-                f"{int(float(x) * s)}:{int(float(y) * s)}")
+        cx, cy = int(float(x) * s), int(float(y) * s)
+        cw, ch = int(float(wd) * s), int(float(ht) * s)
+        # CLAMPED TO THE FILM: a window that grew past its tile runs off
+        # the display, and a crop rectangle outside the frame yields BLACK
+        # stills rather than an error (measured 2026-09-09).
+        cw, ch = max(2, min(cw, FILM_W - cx)), max(2, min(ch, FILM_H - cy))
+        crop = f"crop={cw}:{ch}:{cx}:{cy}"
         (rec_dir / "crop").write_text(crop + "\n", encoding="utf-8")
         p = subprocess.Popen(
             [str(ROOT / "tools/harness-extract.sh"),
@@ -522,7 +581,7 @@ def _leg_worker(name, argv, env, scene=None):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
     if os.environ.get("KAYA_RECORD"):
-        ok = run_recorded(name, argv, env, log)
+        ok = run_recorded(name, argv, env, log, scene)
         verdict = "PASS" if ok else "FAIL"
         secs = int(time.monotonic() - t0)
         (LEGS_DIR / f"{name}.verdict").write_text(verdict + "\n",
@@ -561,7 +620,7 @@ def _leg_worker(name, argv, env, scene=None):
     # left over is from a run that DIED before its second act.
     second = scene is not None and scene in lane.RELAUNCH_DOOR
     if second:
-        lane.clear_act2(ROOT)
+        lane.clear_act2(ROOT, leg_env)
     rc = attempt("w")
     if foreign_pasteboard_retry(rc, log.read_text(encoding="utf-8",
                                                   errors="replace")):

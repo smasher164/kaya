@@ -24,6 +24,15 @@ mod act2;
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod harness;
+// The preference store and the app data directory
+// (docs/tasks-s4-plan.md §4); ungated — a shipped app is what they are
+// for. prefs_keyfile is the Linux and Windows BACKING, compiled
+// everywhere so the core's own tests exercise it on every host.
+mod prefs;
+#[cfg(target_os = "android")]
+mod prefs_android;
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+mod prefs_keyfile;
 mod protocol;
 mod ring;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).
@@ -86,6 +95,9 @@ extern crate self as kaya;
 pub use app::{
     Accepts, ActionRef, Align, AnyAnchor, AppCtx, Axis, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
     capabilities,
+    // The app's own document directory and its settings store
+    // (docs/tasks-s4-plan.md P1, P3).
+    Prefs, app_data_dir, prefs,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, ToggleRef, Tpl, TplSource, Tx,

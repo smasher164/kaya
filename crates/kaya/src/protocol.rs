@@ -1495,6 +1495,10 @@ pub enum WindowProp {
     /// system, light, dark), applied PROCESS-WIDE from the default window
     /// (docs/tasks-s2b-plan.md R1-R3).
     Appearance,
+    /// Whether the desktops remember this window's frame across launches
+    /// (Bool-valued; default true; docs/tasks-s4-plan.md P4). Inert on the
+    /// phones.
+    RememberFrame,
 }
 
 /// The presentation hint's closed set (spec enum

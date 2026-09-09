@@ -67,6 +67,9 @@ LEGS = {
         "dnd-compose", "pickers-compose", "sliders-compose",
         # The task manager: a RUST app by design (docs/tasks-plan.md §0).
         "tasks-compose",
+        # What survives a relaunch (docs/tasks-s4-plan.md P7): the same
+        # guest, the PLAIN door.
+        "taskspersist-compose",
         "tooltips-compose",
         "search-compose",
         # The notification conformance scene: rust-only for now, so it
@@ -117,7 +120,7 @@ LEGS = {
 # tools/check-steps.py reads this beside the other lanes' doors; the
 # runner refuses a scene whose door it does not open, and a door named
 # for a scene with no `relaunch`.
-RELAUNCH_DOOR = {"tasks": "notify_tap"}
+RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch"}
 
 # THE RECREATION LEGS' SCENE and the statement they cut in half:
 # `todos` because the model it re-projects is EARNED, and the cut is
@@ -186,10 +189,11 @@ FLAGS = {
 # Script modifiers, keyed by SCENE and shared by every suite that runs it
 # — the two mobile lanes take the same list and grammar, since two
 # answers to one question is how lanes drift. `cut` is
-# (verb, keep, extra-for-validation); `drop` is (step specs, keep,
-# reason), each spec a leading run of words naming exactly one step and
-# the specs together one contiguous block; `append` rides after the
-# cut's prefix. The reasons live at the runner's sites and the plans.
+# (verb, keep, extra-for-validation); `drop` is a TUPLE OF BLOCKS, each
+# (step specs, keep, reason), each spec a leading run of words naming
+# exactly one step and the specs of one block together one contiguous
+# run; `append` rides after the cut's prefix. The reasons live at the
+# runner's sites and the plans.
 MODS = {
     "sections": {"cut": ("expect_windows",
                          "expect_section expect_section_symbol", "")},
@@ -205,16 +209,27 @@ MODS = {
     "dirty": {"cut": ("close_window", "expect_dirty", ""),
               "append": 'expect_title "dirty"'},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
-    "identity": {"drop": (("expect_title window#1",), "expect_app_icon",
-                          "no auxiliary windows")},
+    "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
+                           "no auxiliary windows"),)},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),
     # so the file drop and the one assertion it feeds do not run here;
     # every drag between this app's own widgets does.
-    "dnd": {"drop": (("drag_file",
-                      'expect label#4 "files target got dropped.txt '
-                      'dropped bytes (copy)"'),
-                     "expect_order expect=label#5 expect=label#0",
-                     "no foreign drag source reaches a phone app")},
+    # THE FRAME IS THE DESKTOPS' (docs/tasks-s4-plan.md §4): a phone has no
+    # window frame, so the resize in act one and the size assertion in act
+    # two both go. TWO BLOCKS AND NOT A CUT — they sit on opposite sides of
+    # the `relaunch`, and a tail cut at `resize_window` would take the whole
+    # second act with it, which is the thing this leg exists for.
+    "taskspersist": {"drop": (
+        (("resize_window",), "relaunch expect_pref",
+         "the system owns the surface on a phone"),
+        (("expect_window_size",), "expect_pref expect_no_pref",
+         "a phone window has no frame to remember"),
+    )},
+    "dnd": {"drop": ((("drag_file",
+                       'expect label#4 "files target got dropped.txt '
+                       'dropped bytes (copy)"'),
+                      "expect_order expect=label#5 expect=label#0",
+                      "no foreign drag source reaches a phone app"),)},
 }
 
 # Machine-derived by tools/lib/android-leg-order.py from the shared

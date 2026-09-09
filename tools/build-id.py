@@ -133,6 +133,7 @@ GATES = {
 # self-test and nothing else.
 ARTIFACT_GATES = {
     "check-abort": ["target/debug/libkaya.dylib"],
+    "java-typecheck": ["target/debug/libkaya.dylib"],
     "check-wheel": ["target/debug/libkaya.dylib"],
     "check-empty-child": ["target/debug/libkaya.dylib"],
     "check-pane-ladder": ["target/debug/libkaya.dylib"],

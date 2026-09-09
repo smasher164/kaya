@@ -424,7 +424,7 @@ N = [
     ("N5 rule 2 — os.system",
      r"^import re$", "import re\nimport os\nos.system('ls')", "os.system"),
     ("N6 rule 3 — a read with no encoding",
-     r'path\.read_text\(encoding="utf-8"\)', "path.read_text()",
+     r"^import re$", "import re\nY = Path('x').read_text()",
      "with no encoding="),
     ("N7 rule 4 — a literal-zero exit in the middle",
      r"^import re$", "import re\nimport sys\nsys.exit(0)", "false-PASS"),

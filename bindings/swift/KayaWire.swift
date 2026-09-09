@@ -18,7 +18,7 @@ enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x21005150bc085070
+let kayaSpecHash: UInt64 = 0x605e18f72b2af791
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
 func kayaPackDate(_ year: Int, _ month: Int, _ day: Int) -> Int64 {
@@ -1762,6 +1762,26 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_APPEARANCE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a constant remember_frame value (window 0, the primary surface).
+    mutating func setWindowRememberFrame(_ window: UInt64, _ rememberFrame: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_REMEMBER_FRAME))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(rememberFrame))
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a signal-bound remember_frame value (window 0, the primary surface).
+    mutating func bindWindowRememberFrame(_ window: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_REMEMBER_FRAME))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(kayaAt)

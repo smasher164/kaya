@@ -2678,6 +2678,97 @@ export function capabilities(): Capabilities {
   });
 }
 
+/** The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+ * Application Support/<id> on macOS, Documents on iOS, the files
+ * directory on Android, $XDG_DATA_HOME/<id> on Linux,
+ * %LOCALAPPDATA%\<id> on Windows. Created on first ask.
+ *
+ * KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the app's,
+ * written the standard way (better-sqlite3 is the recommendation).
+ * Settings are small and typed and belong in prefs().
+ *
+ * THROWS where the platform has handed no directory over — an error
+ * state a guest cannot plan around, so all nine bindings refuse rather
+ * than answering an absent value (ruled 2026-09-09). */
+export function appDataDir(): string {
+  const dir = runtime.appDataDir();
+  if (dir === "") {
+    throw new Error("kaya: app_data_dir asked before the platform handed one over (Android before attach)");
+  }
+  return dir;
+}
+
+/** The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
+ * typed key-value record under the app's id, the platform's own where
+ * the platform has one — UserDefaults on Apple, SharedPreferences on
+ * Android, a key file on Linux and Windows.
+ *
+ * A PULL, NOT A SIGNAL: a setting is read when the app builds and
+ * written when the user changes it. Every get takes the default it
+ * answers when the key is absent OR holds another type. Writes are
+ * durable when they return, and the store may be used from any thread. */
+export type Prefs = {
+  getString(key: string, def: string): string;
+  getI64(key: string, def: number): number;
+  getF64(key: string, def: number): number;
+  getBool(key: string, def: boolean): boolean;
+  setString(key: string, value: string): void;
+  setI64(key: string, value: number): void;
+  setF64(key: string, value: number): void;
+  setBool(key: string, value: boolean): void;
+  remove(key: string): void;
+};
+
+function prefKey(key: string): string {
+  if (key === "") throw new Error("kaya: a preference key must not be empty");
+  return key;
+}
+
+/** A guest may READ any key and WRITE any key kaya has not reserved
+ * (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`). */
+function prefWriteKey(key: string): string {
+  prefKey(key);
+  if (key.startsWith("kaya.")) {
+    throw new Error(`kaya: preference key "${key}" is reserved (the kaya. prefix is kaya's own)`);
+  }
+  return key;
+}
+
+const thePrefs: Prefs = Object.freeze({
+  getString(key: string, def: string): string {
+    return runtime.prefGetString(prefKey(key)) ?? def;
+  },
+  getI64(key: string, def: number): number {
+    return runtime.prefGetI64(prefKey(key)) ?? def;
+  },
+  getF64(key: string, def: number): number {
+    return runtime.prefGetF64(prefKey(key)) ?? def;
+  },
+  getBool(key: string, def: boolean): boolean {
+    return runtime.prefGetBool(prefKey(key)) ?? def;
+  },
+  setString(key: string, value: string): void {
+    runtime.prefSetString(prefWriteKey(key), String(value));
+  },
+  setI64(key: string, value: number): void {
+    runtime.prefSetI64(prefWriteKey(key), Math.trunc(value));
+  },
+  setF64(key: string, value: number): void {
+    runtime.prefSetF64(prefWriteKey(key), Number(value));
+  },
+  setBool(key: string, value: boolean): void {
+    runtime.prefSetBool(prefWriteKey(key), Boolean(value));
+  },
+  remove(key: string): void {
+    runtime.prefRemove(prefWriteKey(key));
+  },
+});
+
+/** The app's preferences store — one per process. */
+export function prefs(): Prefs {
+  return thePrefs;
+}
+
 /** Declare a signal: a render pipe with no read. A number is an F64 on
  * the wire (docs/js-plan.md §4). */
 export function signal<T extends string | number | boolean | CivilDate | CivilTime>(initial: T): Signal<Widen<T>> {
@@ -3430,6 +3521,10 @@ export type WindowProps = {
   height?: number;
   vetoClose?: boolean;
   dirty?: boolean;
+  /** The OPT-OUT from window memory (docs/tasks-s4-plan.md P4): a
+   * desktop window reopens at the frame the previous process left
+   * unless this is false. Inert on the phones. */
+  rememberFrame?: boolean;
   panes?: number;
   sectionsPresentation?: number;
   /** The app's OWN light/dark choice, applied process-wide from the
@@ -3454,6 +3549,7 @@ function windowProps(window: number, p: WindowProps): void {
   if (p.title !== undefined) recs.push(wire.tx_set_window_title(window, String(p.title)));
   if (p.vetoClose !== undefined) recs.push(wire.tx_set_window_veto_close(window, Boolean(p.vetoClose)));
   if (p.dirty !== undefined) recs.push(wire.tx_set_window_dirty(window, Boolean(p.dirty)));
+  if (p.rememberFrame !== undefined) recs.push(wire.tx_set_window_remember_frame(window, Boolean(p.rememberFrame)));
   if (p.panes !== undefined) recs.push(wire.tx_set_window_panes(window, Math.trunc(p.panes)));
   if (p.sectionsPresentation !== undefined) recs.push(wire.tx_set_window_sections_presentation(window, Math.trunc(p.sectionsPresentation)));
   if (p.appearance !== undefined) recs.push(wire.tx_set_window_appearance(window, Math.trunc(p.appearance)));

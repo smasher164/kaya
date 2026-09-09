@@ -166,6 +166,20 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
     Ok(Declaration { name, icon, id })
 }
 
+/// The declared id ALONE, cached, and without the icon read
+/// `declared_identity` pays for: the preference domain, the app data
+/// directory and the act-two directory all key on it, and the first two
+/// are asked on every prefs call (docs/tasks-s4-plan.md §4).
+pub(crate) fn declared_id() -> Option<String> {
+    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        let bytes = crate::assets::read(IDENTITY_MANIFEST).ok()?;
+        let text = String::from_utf8(bytes).ok()?;
+        manifest_value(&text, "id").filter(|v| !v.is_empty())
+    })
+    .clone()
+}
+
 /// A copy's key path, in hashable form (wire paths are Vec<Value>).
 type PathKey = Vec<Key>;
 
@@ -1113,7 +1127,7 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
                  entries — {n} is not one (docs/multicolumn-plan.md)"
             );
         }
-        (WindowProp::Dirty, Value::Bool(_)) => {}
+        (WindowProp::Dirty | WindowProp::RememberFrame, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,

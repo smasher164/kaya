@@ -268,3 +268,9 @@ executable kaya-abort-check
   import: shared
   main-is: AbortCheck.hs
   build-depends: kaya-guests
+
+-- Not a scene: the notification dispatch order, run (docs/tasks-s9-plan.md R1).
+executable kaya-notify-order-check
+  import: shared
+  main-is: NotifyOrderCheck.hs
+  build-depends: kaya-guests, directory

@@ -372,6 +372,7 @@ pub(crate) const WPROP_PANES: u32 = 6;
 pub(crate) const WPROP_DIRTY: u32 = 7;
 pub(crate) const WPROP_INSET: u32 = 8;
 pub(crate) const WPROP_APPEARANCE: u32 = 9;
+pub(crate) const WPROP_REMEMBER_FRAME: u32 = 10;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -837,6 +838,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_DIRTY => WindowProp::Dirty,
         WPROP_INSET => WindowProp::Inset,
         WPROP_APPEARANCE => WindowProp::Appearance,
+        WPROP_REMEMBER_FRAME => WindowProp::RememberFrame,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -852,6 +854,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Dirty => WPROP_DIRTY,
         WindowProp::Inset => WPROP_INSET,
         WindowProp::Appearance => WPROP_APPEARANCE,
+        WindowProp::RememberFrame => WPROP_REMEMBER_FRAME,
     }
 }
 

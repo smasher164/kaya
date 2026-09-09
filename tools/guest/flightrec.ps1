@@ -6,8 +6,12 @@
 # GetForegroundWindow, UIA and PrintWindow all answer nothing.
 
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('sample', 'collect')][string]$Mode,
+    [Parameter(Mandatory = $true)][ValidateSet('sample', 'collect', 'list')][string]$Mode,
     [Parameter(Mandatory = $true)][string]$Leg,
+    # The lane run this sampler belongs to (docs/deferred.md's LEAK entry):
+    # a sampler names its run so the lane's exit can wait for ITS OWN and
+    # tell a leaked one from a neighbour's.
+    [string]$Run = 'none',
     # Lane-long: ALL.stop is the normal exit, and this deadline only stops
     # a sampler whose lane died without one.
     [int]$Seconds = 5400
@@ -26,6 +30,74 @@ if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Ou
 $enc = New-Object System.Text.UTF8Encoding $false
 function Reset($path) { [System.IO.File]::WriteAllText($path, '', $enc) }
 function Emit($path, $text) { [System.IO.File]::AppendAllText($path, "$text`r`n", $enc) }
+
+# --------------------------------------------------------------- list --
+# WHAT IS STILL POLLING, ANSWERED BEFORE THE Add-Type BELOW: the lane's
+# exit waits on this and a wait must be cheap (the C# compile the user32
+# declarations need costs seconds). TWO SOURCES, because either alone has
+# a hole: a sampler drops sample-<run>.pid at startup and removes it in a
+# finally, which is the only thing that says WHICH RUN it belongs to; and
+# the live process list catches a sampler with no pid file at all -- one
+# started from a build of this script that predates the file, which is
+# every lane's FIRST run after a flightrec.ps1 edit, since the runner
+# starts the sampler before it deploys. A pid is reused, so the name is
+# read back before a row counts as alive. Runs over ssh, session 0 -- it
+# enumerates processes and touches no desktop.
+function SamplerPid($path) {
+    $text = ''
+    try { $text = [System.IO.File]::ReadAllText($path).Trim() } catch { $text = '' }
+    $n = 0
+    if ([int]::TryParse($text, [ref]$n)) { return $n }
+    return 0
+}
+
+function StartedAt($proc) {
+    try { return $proc.StartTime.ToString('o') } catch { return '?' }
+}
+
+if ($Mode -eq 'list') {
+    $runs = @{}
+    foreach ($f in @(Get-ChildItem -Path $dir -Filter 'sample-*.pid' -ErrorAction SilentlyContinue)) {
+        $token = $f.BaseName.Substring(7)
+        $sp = SamplerPid $f.FullName
+        $proc = $null
+        if ($sp -gt 0) { $proc = Get-Process -Id $sp -ErrorAction SilentlyContinue }
+        if ($proc -and $proc.ProcessName -eq 'powershell') {
+            $runs[$sp] = $token
+        } else {
+            Write-Output "stale run=$token pid=$sp (no live powershell with that pid)"
+            Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # THE PROCESS LIST IS THE NET UNDER THE PID FILES. A sampler it can see
+    # and no pid file names is reported run=? and the lane refuses on it:
+    # at the end of a lane, a sampler nobody can attribute is the leak this
+    # whole mechanism exists for.
+    $seen = @{}
+    foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue)) {
+        $line = $p.CommandLine
+        if ($line -and $line -like '*flightrec.ps1*' -and $line -like '*-Mode sample*') {
+            $seen[[int]$p.ProcessId] = $line
+        }
+    }
+    $live = 0
+    $pids = @(@($runs.Keys) + @($seen.Keys) | Sort-Object -Unique)
+    foreach ($sp in $pids) {
+        $token = '?'
+        if ($runs.ContainsKey($sp)) { $token = $runs[$sp] }
+        $proc = Get-Process -Id $sp -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        $where = 'process'
+        if ($runs.ContainsKey($sp)) {
+            $where = 'pidfile'
+            if ($seen.ContainsKey($sp)) { $where = 'pidfile+process' }
+        }
+        Write-Output "sampler run=$token pid=$sp name=$($proc.ProcessName) started=$(StartedAt $proc) seen=$where"
+        $live = $live + 1
+    }
+    Write-Output "samplers=$live"
+    exit 0
+}
 
 # CharSet.Unicode IS NOT OPTIONAL on the two text calls, measured:
 # DllImport defaults to Ansi, so a *W function's UTF-16 unmarshals to ONE
@@ -76,46 +148,56 @@ function VisibleWindows() {
 if ($Mode -eq 'sample') {
     $out = Join-Path $dir "$Leg-foreground.txt"
     Reset $out
-    Emit $out "flightrec sample: ring=$Leg started=$(Get-Date -Format o)"
-    $last = ''
-    $lines = 1
-    $t0 = Get-Date
-    # STOPPED BY A FILE, not by killing powershell: a name-wide taskkill
-    # would take the other legs' samplers with it. ALL.stop is the lane's
-    # backstop, dropped by the runner's EXIT trap.
-    $stop = Join-Path $dir "$Leg.stop"
-    $stopAll = Join-Path $dir 'ALL.stop'
-    while (((Get-Date) - $t0).TotalSeconds -lt $Seconds) {
-        if ((Test-Path $stop) -or (Test-Path $stopAll)) { break }
-        # THE STOP CHANNEL VANISHING IS ALSO A STOP: both stop files live
-        # in $dir, so a cleanup that removes it would leave this polling
-        # for a file that can never appear (measured 2026-08-27, a sampler
-        # orphaned for its whole deadline).
-        if (-not (Test-Path $dir)) { break }
-        $h = [KayaFR.Win]::GetForegroundWindow()
-        $line = if ($h -eq [IntPtr]::Zero) { 'foreground=none' } else { Describe $h }
-        # Only CHANGES, so a lane does not write two lines a second of the
-        # same window.
-        if ($line -ne $last) {
-            # GUEST EPOCH SECONDS, not milliseconds-since-start: one
-            # sampler serves the whole lane, so a reader must be able to
-            # place a line against a leg that started whenever
-            # (flightrec_win_clock_sync reads the offset once).
-            $at = [int64](Get-Date -UFormat %s)
-            Emit $out "at=$at $line"
-            $last = $line
-            $lines++
-            # A ring, HALVED rather than trimmed by one: a rewrite per
-            # line on a file this size is the cost this design shed.
-            if ($lines -gt 5000) {
-                $keep = (Get-Content $out -Tail 2500)
-                [System.IO.File]::WriteAllLines($out, $keep, $enc)
-                $lines = $keep.Count
+    Emit $out "flightrec sample: ring=$Leg run=$Run pid=$PID started=$(Get-Date -Format o)"
+    # THE PID FILE IS THE LANE'S HANDLE ON THIS PROCESS (docs/deferred.md's
+    # LEAK entry): written before the loop, removed in the finally below,
+    # so `-Mode list` answers for a sampler that is still polling and for
+    # one that was killed without cleaning up.
+    $pidfile = Join-Path $dir "sample-$Run.pid"
+    [System.IO.File]::WriteAllText($pidfile, "$PID", $enc)
+    try {
+        $last = ''
+        $lines = 1
+        $t0 = Get-Date
+        # STOPPED BY A FILE, not by killing powershell: a name-wide taskkill
+        # would take the other legs' samplers with it. ALL.stop is the lane's
+        # backstop, dropped by the runner's EXIT trap.
+        $stop = Join-Path $dir "$Leg.stop"
+        $stopAll = Join-Path $dir 'ALL.stop'
+        while (((Get-Date) - $t0).TotalSeconds -lt $Seconds) {
+            if ((Test-Path $stop) -or (Test-Path $stopAll)) { break }
+            # THE STOP CHANNEL VANISHING IS ALSO A STOP: both stop files live
+            # in $dir, so a cleanup that removes it would leave this polling
+            # for a file that can never appear (measured 2026-08-27, a sampler
+            # orphaned for its whole deadline).
+            if (-not (Test-Path $dir)) { break }
+            $h = [KayaFR.Win]::GetForegroundWindow()
+            $line = if ($h -eq [IntPtr]::Zero) { 'foreground=none' } else { Describe $h }
+            # Only CHANGES, so a lane does not write two lines a second of the
+            # same window.
+            if ($line -ne $last) {
+                # GUEST EPOCH SECONDS, not milliseconds-since-start: one
+                # sampler serves the whole lane, so a reader must be able to
+                # place a line against a leg that started whenever
+                # (flightrec_win_clock_sync reads the offset once).
+                $at = [int64](Get-Date -UFormat %s)
+                Emit $out "at=$at $line"
+                $last = $line
+                $lines++
+                # A ring, HALVED rather than trimmed by one: a rewrite per
+                # line on a file this size is the cost this design shed.
+                if ($lines -gt 5000) {
+                    $keep = (Get-Content $out -Tail 2500)
+                    [System.IO.File]::WriteAllLines($out, $keep, $enc)
+                    $lines = $keep.Count
+                }
             }
+            Start-Sleep -Milliseconds 500
         }
-        Start-Sleep -Milliseconds 500
+    } finally {
+        Emit $out "flightrec sample: ring=$Leg run=$Run pid=$PID stopped=$(Get-Date -Format o)"
+        Remove-Item $pidfile -Force -ErrorAction SilentlyContinue
     }
-    Emit $out "flightrec sample: ring=$Leg stopped=$(Get-Date -Format o)"
     exit 0
 }
 

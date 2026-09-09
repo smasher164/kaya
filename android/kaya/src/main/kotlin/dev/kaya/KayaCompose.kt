@@ -1279,7 +1279,7 @@ object KayaCompose {
     // but only the runtime assert catches a stale compiled APK against
     // a new libkaya. ULong because the fingerprint's high bit is fair
     // game and a Kotlin Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x21005150bc085070uL
+    private const val SPEC_HASH: ULong = 0x605e18f72b2af791uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -1396,6 +1396,7 @@ object KayaCompose {
     private const val WPROP_DIRTY = 7
     private const val WPROP_INSET = 8
     private const val WPROP_APPEARANCE = 9
+    private const val WPROP_REMEMBER_FRAME = 10
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     private const val SPROP_SYMBOL = 3
@@ -2316,6 +2317,7 @@ object KayaCompose {
                         // fails. NOT INTO THE TITLE, on any platform —
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
+                        WPROP_REMEMBER_FRAME -> readBool(b)
                         WPROP_INSET -> KayaSceneModel.windowInset = readF64(b)
                         // PROCESS-WIDE FROM THE DEFAULT WINDOW
                         // (docs/tasks-s2b-plan.md R1-R3). Both halves,
@@ -6383,9 +6385,12 @@ object KayaCompose {
         // `relaunch` belong to the process the PLATFORM starts, so they
         // are taken out here and the loop below ends at the arm.
         val flat = kayaStatements(script)
-        val relaunchAt = flat.indexOf("relaunch")
+        // THE VERB, not the whole statement: the door rides as one
+        // argument (docs/tasks-s4-plan.md P5), so `relaunch launch` is
+        // the same act boundary as a bare `relaunch`.
+        val relaunchAt = flat.indexOfFirst { it.substringBefore(' ') == "relaunch" }
         val actTwoSteps = if (relaunchAt < 0) null else flat.drop(relaunchAt + 1)
-        val relaunches = flat.count { it == "relaunch" }
+        val relaunches = flat.count { it.substringBefore(' ') == "relaunch" }
         if (relaunches > 1) {
             failures.add(
                 "the scene carries $relaunches `relaunch` statements — a scene has at " +
@@ -6719,6 +6724,35 @@ object KayaCompose {
                         if (hit) observed.add("appearance $want")
                         else failures.add("appearance $mode $source, wanted $want")
                     }
+                    "expect_pref" -> {
+                        // THE PLATFORM'S OWN STORE, RE-OPENED
+                        // (docs/tasks-s4-plan.md §4): SharedPreferences
+                        // for the domain the core named, never kaya's
+                        // memory of what it wrote. The value's STRING
+                        // FORM is what was stored — a number crosses as
+                        // the text Rust's Display wrote, so nothing here
+                        // formats one and the three harnesses cannot
+                        // spell 2.0 against 2.
+                        val key = parts[1]
+                        val want = quoted(parts.drop(2))
+                        val got = kayaPrefRead(activity, key)
+                        when {
+                            got == null -> failures.add(
+                                "the preferences store holds no \"$key\", wanted " +
+                                    "\"$want\"" + kayaPrefWhere())
+                            got == want -> observed.add("pref $key \"$want\"")
+                            else -> failures.add(
+                                "pref $key \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_no_pref" -> {
+                        val key = parts[1]
+                        val got = kayaPrefRead(activity, key)
+                        if (got == null) observed.add("no pref $key")
+                        else failures.add(
+                            "the preferences store still holds $key \"$got\", " +
+                                "wanted none")
+                    }
                     "expect_notification" -> {
                         // THE PLATFORM'S OWN DELIVERED LIST
                         // (activeNotifications), never kaya's record of
@@ -6781,15 +6815,26 @@ object KayaCompose {
                     "relaunch" -> {
                         // THE END OF ACT ONE (docs/tasks-s9-plan.md R6):
                         // this process leaves after its verdict, so the
-                        // runner's tap on the shade row opens a COLD
-                        // app — the whole point of S9.
+                        // runner's door opens a COLD app — the whole
+                        // point of S9. WHICH DOOR IS THE ARGUMENT
+                        // (docs/tasks-s4-plan.md P5): none is the tap on
+                        // the shade row, `launch` is the app started
+                        // again with nothing pending.
+                        val door = parts.getOrNull(1) ?: "notify_tap"
                         val context = activity.applicationContext
-                        val live = kayaLiveNotifications(context)
+                        val live =
+                            if (door == "notify_tap") kayaLiveNotifications(context)
+                            else emptyList()
                         val steps = actTwoSteps
                         when {
+                            door != "notify_tap" && door != "launch" -> failures.add(
+                                "relaunch $door: no harness opens a door by that name — " +
+                                    "`relaunch` is the notification's row in the shade and " +
+                                    "`relaunch launch` is the app started the way a user " +
+                                    "starts it")
                             steps.isNullOrEmpty() -> failures.add(
                                 "relaunch: no step follows it, so act two is empty")
-                            live.size != 1 -> failures.add(
+                            door == "notify_tap" && live.size != 1 -> failures.add(
                                 "relaunch: this lane's door is a tap on ONE row in the " +
                                     "notification shade and the platform holds " +
                                     "${live.size} delivered kaya notification(s) " +
@@ -6801,14 +6846,17 @@ object KayaCompose {
                                 } else {
                                     // THE RUNNER'S DOOR, named with what it
                                     // needs: uiautomator finds the shade row
-                                    // by its TEXT.
+                                    // by its TEXT, and the plain door needs
+                                    // nothing but the word.
                                     Log.i(
                                         "kaya",
-                                        "KAYA_RELAUNCH: door notify_tap notification=" +
+                                        if (door == "launch") "KAYA_RELAUNCH: door launch"
+                                        else "KAYA_RELAUNCH: door notify_tap notification=" +
                                             "${live[0].first} title=${live[0].second}",
                                     )
                                     observed.add(
-                                        "relaunch through notification ${live[0].first}")
+                                        if (door == "launch") "relaunch through a plain launch"
+                                        else "relaunch through notification ${live[0].first}")
                                     relaunching = true
                                 }
                             }
@@ -14117,6 +14165,33 @@ private fun kayaWriteActTwoVerdict(path: String, line: String) {
         file.writeText(line + "\n", Charsets.UTF_8)
     } catch (e: java.io.IOException) {
         Log.e("kaya", "KAYA_ACT2: the verdict could not be written to $path: $e")
+    }
+}
+
+/** Which SharedPreferences file the core opened (crates/kaya/src/android.rs
+ * exports it at attach). The domain rule — the declared id, scratch under
+ * the harness — is the core's and is spelled nowhere here. */
+private const val KAYA_PREF_DOMAIN_ENV = "KAYA_PREF_DOMAIN"
+
+/**
+ * `expect_pref`'s read: the platform's own store re-opened, answering the
+ * value's STRING FORM (docs/tasks-s4-plan.md §4). Null is absent — and
+ * also a process the core named no domain for, which [kayaPrefWhere]
+ * tells the reader apart.
+ */
+private fun kayaPrefRead(context: Context, key: String): String? {
+    val domain = System.getenv(KAYA_PREF_DOMAIN_ENV) ?: return null
+    return KayaPrefs.get(context.applicationContext, domain, key)?.drop(1)
+}
+
+/** Where the read above looked, for the miss sentence. */
+private fun kayaPrefWhere(): String {
+    val domain = System.getenv(KAYA_PREF_DOMAIN_ENV)
+    return if (domain == null) {
+        " (the core exported no $KAYA_PREF_DOMAIN_ENV, so this read opened no store at " +
+            "all — attach is what names the domain)"
+    } else {
+        " (the store read was $domain)"
     }
 }
 

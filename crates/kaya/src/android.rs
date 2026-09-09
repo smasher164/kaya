@@ -44,6 +44,17 @@ static ASSETS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
 
+/// dev.kaya.KayaPrefs, resolved beside KayaAssets and for the same reason
+/// (docs/tasks-s4-plan.md §4): a preference is read and written from the
+/// APP THREAD, which resolves classes through the system class loader.
+static PREFS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
+/// The app's private files directory as the host handed it in
+/// (`Kaya.attach(activity, stateRoot)`), which is `app_data_dir()`'s
+/// answer here: only a Context knows it, so nothing may guess.
+static STATE_ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
 /// THE BUILD-ONCE LATCH, this side of the JNI boundary
 /// (docs/deferred.md's mount entry, ruled 2026-08-27): a second
 /// `onCreate` in one process re-attaches the presentation and NEVER
@@ -87,7 +98,7 @@ pub fn attach(
     // KAYA_SELFTEST (docs/tasks-s9-plan.md R6a). Android's state root
     // comes from the platform: HOME is not the app's files directory and
     // only a Context knows it.
-    crate::act2::arm(read_state_root(&mut env, &state_root).as_deref());
+    arm_state(&mut env, &state_root);
 
     grant_measured_capabilities(&mut env, &activity);
 
@@ -152,7 +163,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
         return;
     }
     // The `attach` above's order, one tier over.
-    crate::act2::arm(read_state_root(&mut env, &state_root).as_deref());
+    arm_state(&mut env, &state_root);
     grant_measured_capabilities(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
@@ -225,6 +236,23 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
                 let _ = env.exception_clear();
             }
             log::warn!("kaya: dev.kaya.KayaAssets did not resolve ({e}); this process cannot read its own APK's assets");
+        }
+    }
+    match env.find_class("dev/kaya/KayaPrefs") {
+        Ok(class) => {
+            if let Ok(global) = env.new_global_ref(&class) {
+                let _ = PREFS_CLASS.set(global);
+            }
+        }
+        Err(e) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!(
+                "kaya: dev.kaya.KayaPrefs did not resolve ({e}); this process has no \
+                 preferences store"
+            );
         }
     }
 }
@@ -315,6 +343,166 @@ pub(crate) fn apk_asset_list() -> Vec<String> {
         }
     }
     out
+}
+
+// ---- the preferences store's backing (docs/tasks-s4-plan.md P2, §4) ----
+// dev.kaya.KayaPrefs answers; the type discipline and the tagged strings
+// are documented there. This side owns the DOMAIN, which is the core's
+// word and is exported so the Compose harness's `expect_pref` opens the
+// same store without spelling the rule (act2.rs's KAYA_ACT2_DIR shape).
+
+/// The app's private files directory, as handed in at attach.
+pub(crate) fn state_root() -> Option<&'static std::path::Path> {
+    STATE_ROOT.get().map(std::path::PathBuf::as_path)
+}
+
+/// THE STATE ROOT FIRST: `act2::arm` adopts a marker from it, and both the
+/// scratch data directory and the pref domain it exports read the
+/// KAYA_SELFTEST that adoption may have set.
+fn arm_state(env: &mut JNIEnv, state_root: &JString) {
+    let root = read_state_root(env, state_root);
+    if let Some(root) = root.as_deref() {
+        let _ = STATE_ROOT.set(root.to_path_buf());
+    }
+    crate::act2::arm(root.as_deref());
+}
+
+fn prefs_env() -> Option<(
+    jni::AttachGuard<'static>,
+    &'static jni::objects::GlobalRef,
+    &'static jni::objects::GlobalRef,
+)> {
+    let vm = JVM.get()?;
+    let class = PREFS_CLASS.get()?;
+    let context = APP_CONTEXT.get()?;
+    let env = vm.attach_current_thread().ok()?;
+    Some((env, class, context))
+}
+
+/// KayaPrefs.get: `<tag><text>`, or `None` for absent and for anything
+/// this store holds that kaya did not write.
+pub(crate) fn pref_get(key: &str) -> Option<String> {
+    let domain = crate::prefs::domain()?;
+    let (mut env, class, context) = prefs_env()?;
+    let domain = env.new_string(domain).ok()?;
+    let key = env.new_string(key).ok()?;
+    let called = env.call_static_method(
+        class,
+        "get",
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        &[
+            (context.as_obj()).into(),
+            (&domain).into(),
+            (&key).into(),
+        ],
+    );
+    if pref_threw(&mut env, "get") {
+        return None;
+    }
+    let obj = called.and_then(|v| v.l()).ok()?;
+    if obj.is_null() {
+        return None;
+    }
+    let text: jni::objects::JString = obj.into();
+    env.get_string(&text).ok().map(Into::into)
+}
+
+/// KayaPrefs.set, durable when it returns (`commit()`).
+pub(crate) fn pref_set(key: &str, tag: char, value: &str) {
+    let Some(domain) = crate::prefs::domain() else { return };
+    let Some((mut env, class, context)) = prefs_env() else {
+        return;
+    };
+    let name = key;
+    let (Ok(domain), Ok(key), Ok(tag), Ok(value)) = (
+        env.new_string(domain),
+        env.new_string(name),
+        env.new_string(tag.to_string()),
+        env.new_string(value),
+    ) else {
+        return;
+    };
+    let called = env.call_static_method(
+        class,
+        "set",
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;\
+         Ljava/lang/String;Ljava/lang/String;)Z",
+        &[
+            (context.as_obj()).into(),
+            (&domain).into(),
+            (&key).into(),
+            (&tag).into(),
+            (&value).into(),
+        ],
+    );
+    if pref_threw(&mut env, "set") {
+        return;
+    }
+    if !matches!(called.and_then(|v| v.z()), Ok(true)) {
+        log::warn!("kaya: the preferences store refused a write to \"{name}\"");
+    }
+}
+
+pub(crate) fn pref_remove(key: &str) {
+    let Some(domain) = crate::prefs::domain() else { return };
+    let Some((mut env, class, context)) = prefs_env() else {
+        return;
+    };
+    let (Ok(domain), Ok(key)) = (env.new_string(domain), env.new_string(key)) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        class,
+        "remove",
+        "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Z",
+        &[
+            (context.as_obj()).into(),
+            (&domain).into(),
+            (&key).into(),
+        ],
+    );
+    pref_threw(&mut env, "remove");
+}
+
+/// Empties the domain — the SELFTEST one, and the arm refuses any other:
+/// act one clears the scratch store (docs/tasks-s4-plan.md §4), and a
+/// process that reached here with the real domain open would wipe the
+/// user's settings.
+pub(crate) fn pref_clear() {
+    let Some(domain) = crate::prefs::domain() else { return };
+    if !domain.ends_with(".selftest") {
+        log::warn!(
+            "kaya: refusing to empty the preferences domain \"{domain}\" — clear() is \
+             the harness's scratch reset and this process is not under KAYA_SELFTEST"
+        );
+        return;
+    }
+    let Some((mut env, class, context)) = prefs_env() else {
+        return;
+    };
+    let Ok(domain) = env.new_string(domain) else {
+        return;
+    };
+    let _ = env.call_static_method(
+        class,
+        "clear",
+        "(Landroid/content/Context;Ljava/lang/String;)Z",
+        &[(context.as_obj()).into(), (&domain).into()],
+    );
+    pref_threw(&mut env, "clear");
+}
+
+/// A pending exception is read, described and cleared HERE: left standing
+/// it detonates at the next unrelated JNI call, on a thread that has
+/// nothing to do with preferences.
+fn pref_threw(env: &mut JNIEnv, what: &str) -> bool {
+    if !env.exception_check().unwrap_or(false) {
+        return false;
+    }
+    let _ = env.exception_describe();
+    let _ = env.exception_clear();
+    log::warn!("kaya: dev.kaya.KayaPrefs.{what} threw; the store answers as if empty");
+    true
 }
 
 /// What to print for `Place::Apk` in the miss sentence's second line,

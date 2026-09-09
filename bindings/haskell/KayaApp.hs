@@ -39,6 +39,9 @@ module KayaApp
     Collection,
     Capabilities (..),
     capabilities,
+    appDataDir,
+    Prefs (..),
+    prefs,
     Declare (..),
     kayaMain,
     newApp,
@@ -102,6 +105,7 @@ module KayaApp
     showNotification,
     cancelNotification,
     onNotificationActivation,
+    notificationResult,
     PickedFile (..),
     openPicked,
     pickFiles,
@@ -404,6 +408,117 @@ capabilities = do
         ((bits .&. R.capAuxWindows) /= 0)
         ((bits .&. R.capNotifications) /= 0)
     )
+
+-- | The notification_result decision, in a function of its own because
+-- the ring loop's branch has no seam a test can reach (the ring is C
+-- memory) — Go's @notificationResult@ for the same reason, and
+-- guests\/haskell's @kaya-notify-order-check@ drives the three cases
+-- through here. THE ORDER IS THE SEMANTICS (docs\/tasks-s9-plan.md R1)
+-- and tools\/check-sugar-surface.py reads it out of this body: the
+-- one-shot handler bound at the show first, retiring with the result;
+-- else the process-level one, which does not; else the drop is
+-- announced.
+notificationResult :: App -> Word64 -> Word32 -> IO ()
+notificationResult app ident outcome = do
+  handlers <- readIORef (appNotificationHandlers app)
+  writeIORef (appNotificationHandlers app) (Map.delete ident handlers)
+  activation <- readIORef (appNotificationActivation app)
+  case (Map.lookup ident handlers, activation) of
+    (Just handler, _) -> dispatch (handler outcome)
+    (Nothing, Just act) -> dispatch (act ident outcome)
+    (Nothing, Nothing) -> do
+      let word =
+            if outcome == W.notificationOutcomeActivated
+              then "activated"
+              else "refused"
+      hPutStrLn
+        stderr
+        ( "kaya: notification "
+            ++ show ident
+            ++ " outcome "
+            ++ word
+            ++ " reached no handler — none was bound at the show and no"
+            ++ " process-level handler is registered"
+            ++ " (KayaApp.onNotificationActivation)"
+        )
+
+-- | The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+-- Application Support\/\<id\> on macOS, Documents on iOS, the files
+-- directory on Android, @$XDG_DATA_HOME\/\<id\>@ on Linux,
+-- @%LOCALAPPDATA%\\\<id\>@ on Windows. Created on first ask.
+--
+-- KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the app's,
+-- written the standard way. Settings are small and typed and belong in
+-- 'prefs'.
+--
+-- RAISES where the platform has handed no directory over — an error
+-- state a guest cannot plan around, so all nine bindings refuse rather
+-- than answering an absent value (ruled 2026-09-09).
+appDataDir :: IO String
+appDataDir = do
+  dir <- R.appDataDir
+  if null dir
+    then
+      errorWithoutStackTrace
+        ( "kaya: app_data_dir asked before the platform handed one over"
+            ++ " (Android before attach)"
+        )
+    else return dir
+
+-- | The app's preferences store (docs\/tasks-s4-plan.md P2\/P3): a small
+-- typed key-value record under the app's id, the platform's own where
+-- the platform has one — UserDefaults on Apple, SharedPreferences on
+-- Android, a key file on Linux and Windows.
+--
+-- A PULL, NOT A SIGNAL: a setting is read when the app builds and
+-- written when the user changes it. Every getter takes the default it
+-- answers when the key is absent OR holds another type. Writes are
+-- durable when they return, and the store may be used from any thread.
+-- THE FIELDS CARRY THE `pref` PREFIX, a language flavor and not a
+-- divergence: this module already exports a collection `remove`, and
+-- Haskell record fields are top-level selectors.
+data Prefs = Prefs
+  { prefGetString :: String -> String -> IO String,
+    prefGetI64 :: String -> Int64 -> IO Int64,
+    prefGetF64 :: String -> Double -> IO Double,
+    prefGetBool :: String -> Bool -> IO Bool,
+    prefSetString :: String -> String -> IO (),
+    prefSetI64 :: String -> Int64 -> IO (),
+    prefSetF64 :: String -> Double -> IO (),
+    prefSetBool :: String -> Bool -> IO (),
+    prefRemove :: String -> IO ()
+  }
+
+-- A guest may READ any key and WRITE any key kaya has not reserved
+-- (docs/tasks-s4-plan.md P4: window memory lives under @kaya.@).
+prefKey :: String -> String
+prefKey "" = errorWithoutStackTrace "kaya: a preference key must not be empty"
+prefKey key = key
+
+prefWriteKey :: String -> String
+prefWriteKey key
+  | null key = prefKey key
+  | take 5 key == "kaya." =
+      errorWithoutStackTrace
+        ( "kaya: preference key \"" ++ key ++ "\" is reserved "
+            ++ "(the kaya. prefix is kaya's own)"
+        )
+  | otherwise = key
+
+-- | The app's preferences store — one per process.
+prefs :: Prefs
+prefs =
+  Prefs
+    { prefGetString = \k d -> maybe d id <$> R.prefGetString (prefKey k),
+      prefGetI64 = \k d -> maybe d id <$> R.prefGetI64 (prefKey k),
+      prefGetF64 = \k d -> maybe d id <$> R.prefGetF64 (prefKey k),
+      prefGetBool = \k d -> maybe d id <$> R.prefGetBool (prefKey k),
+      prefSetString = \k v -> R.prefSetString (prefWriteKey k) v,
+      prefSetI64 = \k v -> R.prefSetI64 (prefWriteKey k) v,
+      prefSetF64 = \k v -> R.prefSetF64 (prefWriteKey k) v,
+      prefSetBool = \k v -> R.prefSetBool (prefWriteKey k) v,
+      prefRemove = \k -> R.prefRemove (prefWriteKey k)
+    }
 
 newtype Signal = Signal Word64
 
@@ -1204,6 +1319,10 @@ data WindowAttr
     -- D1). 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
     -- byte-compared across platforms.
     WDirty Bool
+  | -- | The OPT-OUT from window memory (docs/tasks-s4-plan.md P4): a
+    -- desktop window reopens at the frame the previous process left
+    -- unless this is False. Inert on the phones.
+    WRememberFrame Bool
   | -- | The space kaya's own interpreters put around this window's
     -- mounted root, in layout units — LAYOUT, not appearance
     -- (docs/styling-plan.md D3).
@@ -1238,6 +1357,7 @@ window n = mapM_ apply
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WAppearance a) = emitB (W.txSetWindowAppearance n a)
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
+    apply (WRememberFrame v) = emitB (W.txSetWindowRememberFrame n v)
     apply (WInset units) = emitB (W.txSetWindowInset n units)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
@@ -4477,36 +4597,10 @@ dispatchLoop app = do
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindNotificationResult -> do
-          -- The parser boxes the u32 outcome as VI64, the alert's own
-          -- slot. THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
-          -- and tools/check-sugar-surface.py reads it out of this arm:
-          -- the one-shot handler bound at the show first, retiring with
-          -- the result; else the process-level one, which does not; else
-          -- the drop is announced.
-          let outcome = case payload of
-                Just (W.VI64 o) -> fromIntegral o :: Word32
-                _ -> 0
-          handlers <- readIORef (appNotificationHandlers app)
-          writeIORef (appNotificationHandlers app) (Map.delete ident handlers)
-          activation <- readIORef (appNotificationActivation app)
-          case (Map.lookup ident handlers, activation) of
-            (Just handler, _) -> dispatch (handler outcome)
-            (Nothing, Just act) -> dispatch (act ident outcome)
-            (Nothing, Nothing) -> do
-              let word =
-                    if outcome == W.notificationOutcomeActivated
-                      then "activated"
-                      else "refused"
-              hPutStrLn
-                stderr
-                ( "kaya: notification "
-                    ++ show ident
-                    ++ " outcome "
-                    ++ word
-                    ++ " reached no handler — none was bound at the show and no"
-                    ++ " process-level handler is registered"
-                    ++ " (KayaApp.onNotificationActivation)"
-                )
+          -- The parser boxes the u32 outcome as VI64, the alert's own slot.
+          notificationResult app ident $ case payload of
+            Just (W.VI64 o) -> fromIntegral o :: Word32
+            _ -> 0
           dispatchLoop app
       -- The undo pair keys the per-WINDOW tables (ident is the window;
       -- the label rides as the payload). NOT one-shot. THE MODEL IS

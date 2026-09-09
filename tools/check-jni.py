@@ -58,6 +58,60 @@ def exports(text, klass):
     # `KayaRing_attach`.
     return set(re.findall(r"Java_dev_kaya_" + klass + r"_([a-z]\w*)", text))
 
+# THE CENSUS THAT KEEPS FILES HONEST: the table above is hand-listed, so a
+# NEW class declaring a native is read by NOTHING and the gate still says
+# OK — the same hole one level up from the one it exists for. Every Kotlin
+# class in the interpreter's package and every Java class in the desktop
+# binding's either appears above or declares no native at all.
+CLASS_DIRS = [
+    (ROOT / "android/kaya/src/main/kotlin/dev/kaya", "*.kt", "kotlin"),
+    (ROOT / "bindings/java-desktop/dev/kaya", "*.java", "java"),
+]
+
+# Natives libkaya does NOT register, each with the library that exports
+# them by name instead. Held to still existing and to still declaring one,
+# because a stale exemption is the next stale audit.
+UNREGISTERED = {
+    "KayaGo.kt": "the Go guest's own c-shared library exports "
+                 "Java_dev_kaya_KayaGo_attach by name (docs/go-mobile-plan.md)",
+    "KayaPy.kt": "tools/android/pyhost-jni.c, the python host's shim .so, "
+                 "exports it by name (docs/python-mobile-plan.md D2)",
+}
+
+
+def class_natives():
+    """(file name, declared native names) for every class file on disk."""
+    out = []
+    for directory, glob, lang in CLASS_DIRS:
+        reader = kotlin_externals if lang == "kotlin" else java_natives
+        for entry in sorted(directory.glob(glob)):
+            out.append((entry.name, reader(entry.read_text(encoding="utf-8"))))
+    return out
+
+
+def unread_classes(found):
+    errs = []
+    named = set(FILES) | set(UNREGISTERED)
+    declaring = {name for name, natives in found if natives}
+    for name, natives in found:
+        if natives and name not in named:
+            errs.append(f"{name} declares native(s) {sorted(natives)} and is in "
+                        f"neither this gate's FILES table nor UNREGISTERED, so "
+                        f"nothing checks that they are registered — a native "
+                        f"nobody registers throws at FIRST USE, not at attach")
+    for name, why in sorted(UNREGISTERED.items()):
+        if name not in dict(found):
+            errs.append(f"UNREGISTERED names {name}, which is not on disk — a "
+                        f"stale exemption ({why})")
+        elif name not in declaring:
+            errs.append(f"UNREGISTERED exempts {name}, which declares no native "
+                        f"at all — the exemption reads as covered ({why})")
+    if len(found) < 6:
+        errs.append(f"{len(found)} class file(s) read, under the floor of 6 — a "
+                    f"census that reads nothing agrees with everything")
+    return errs
+
+
 def check(src):
     """src: dict name -> text. Returns the list of failures."""
     errs = []
@@ -174,6 +228,33 @@ for label, mutated, needle in selftests:
               f"mentioning '{needle}' (got {errs})", file=sys.stderr)
         sys.exit(1)
 print(f"check-jni: self-tests OK ({len(selftests)} perturbations, all red)")
+
+# The census's own negatives, watched on every run: a new class with a
+# native, a stale exemption, and a reader that found nothing.
+_found = class_natives()
+for _label, _doctored, _needle in (
+    ("a new class declaring a native",
+     [*_found, ("KayaNew.kt", {"someNative"})], "KayaNew.kt"),
+    ("an exemption for a file that is gone",
+     [(n, v) for n, v in _found if n != "KayaGo.kt"], "stale exemption"),
+    ("an exemption for a file that declares nothing",
+     [(n, set() if n == "KayaPy.kt" else v) for n, v in _found],
+     "declares no native at all"),
+    ("a reader that found two files", _found[:2], "under the floor"),
+):
+    _out = unread_classes(_doctored)
+    if not any(_needle in e for e in _out):
+        print(f"check-jni: SELF-TEST FAILED — the class census passed "
+              f"{_label} (wanted a finding naming {_needle!r}; got {_out})",
+              file=sys.stderr)
+        sys.exit(1)
+_census = unread_classes(_found)
+if _census:
+    for e in _census:
+        print(f"check-jni: {e}", file=sys.stderr)
+    sys.exit(1)
+print(f"check-jni: the class census read {len(_found)} file(s), "
+      f"{len(UNREGISTERED)} exempt (4 watched negatives, all red)")
 
 errs = check(src)
 if errs:

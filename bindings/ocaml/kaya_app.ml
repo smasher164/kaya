@@ -35,6 +35,104 @@ let capabilities () =
     notifications = Int64.logand bits Kaya_runtime.cap_notifications <> 0L;
   }
 
+(* The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+   Application Support/<id> on macOS, Documents on iOS, the files
+   directory on Android, $XDG_DATA_HOME/<id> on Linux,
+   %LOCALAPPDATA%\<id> on Windows. Created on first ask.
+
+   KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the app's,
+   written the standard way. Settings are small and typed and belong in
+   [prefs].
+
+   RAISES where the platform has handed no directory over — an error
+   state a guest cannot plan around, so all nine bindings refuse rather
+   than answering an absent value (ruled 2026-09-09). *)
+let app_data_dir () =
+  match Kaya_runtime.app_data_dir () with
+  | Some dir -> dir
+  | None ->
+      failwith
+        "kaya: app_data_dir asked before the platform handed one over \
+         (Android before attach)"
+
+(* The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
+   typed key-value record under the app's id, the platform's own where
+   the platform has one — UserDefaults on Apple, SharedPreferences on
+   Android, a key file on Linux and Windows.
+
+   A PULL, NOT A SIGNAL: a setting is read when the app builds and
+   written when the user changes it. Every getter takes the default it
+   answers when the key is absent OR holds another type. Writes are
+   durable when they return, and the store may be used from any thread.
+
+   A RECORD OF CLOSURES rather than a module, because the charge is one
+   HANDLE in all nine bindings and OCaml's module system has no value to
+   hand back. *)
+type prefs = {
+  get_string : string -> string -> string;
+  get_i64 : string -> int64 -> int64;
+  get_f64 : string -> float -> float;
+  get_bool : string -> bool -> bool;
+  set_string : string -> string -> unit;
+  set_i64 : string -> int64 -> unit;
+  set_f64 : string -> float -> unit;
+  set_bool : string -> bool -> unit;
+  remove : string -> unit;
+}
+
+(* A guest may READ any key and WRITE any key kaya has not reserved
+   (docs/tasks-s4-plan.md P4: window memory lives under [kaya.]). *)
+let pref_key key =
+  if String.length key = 0 then
+    failwith "kaya: a preference key must not be empty";
+  key
+
+let pref_write_key key =
+  ignore (pref_key key);
+  if String.length key >= 5 && String.sub key 0 5 = "kaya." then
+    failwith
+      (Printf.sprintf
+         "kaya: preference key \"%s\" is reserved (the kaya. prefix is \
+          kaya's own)"
+         key);
+  key
+
+let the_prefs =
+  {
+    get_string =
+      (fun key default ->
+        match Kaya_runtime.pref_get_string (pref_key key) with
+        | Some v -> v
+        | None -> default);
+    get_i64 =
+      (fun key default ->
+        match Kaya_runtime.pref_get_i64 (pref_key key) with
+        | Some v -> v
+        | None -> default);
+    get_f64 =
+      (fun key default ->
+        match Kaya_runtime.pref_get_f64 (pref_key key) with
+        | Some v -> v
+        | None -> default);
+    get_bool =
+      (fun key default ->
+        match Kaya_runtime.pref_get_bool (pref_key key) with
+        | Some v -> v
+        | None -> default);
+    set_string =
+      (fun key value -> Kaya_runtime.pref_set_string (pref_write_key key) value);
+    set_i64 =
+      (fun key value -> Kaya_runtime.pref_set_i64 (pref_write_key key) value);
+    set_f64 =
+      (fun key value -> Kaya_runtime.pref_set_f64 (pref_write_key key) value);
+    set_bool =
+      (fun key value -> Kaya_runtime.pref_set_bool (pref_write_key key) value);
+    remove = (fun key -> Kaya_runtime.pref_remove (pref_write_key key));
+  }
+
+(* The app's preferences store — one per process. *)
+let prefs () = the_prefs
+
 (* A live menu item: its OWN id space (the c_menu_item counter) behind its
    own constructor, so cross-use with widget or node handles is a type
    error. *)
@@ -1808,7 +1906,8 @@ let app_identity () =
 (* Set a window's attributes in one construct — the attribute set is
    EXACTLY [create_window]'s; the primary differs only in having no
    creation moment, since the process owns it. *)
-let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
+let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
+    ?panes
     ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
@@ -1823,6 +1922,11 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
      spells its own platform's affordance (docs/dirty-plan.md D2/D4). THE
      TITLE STRING IS NEVER TOUCHED (D1). *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_dirty id v)) dirty;
+  (* [~remember_frame] is the OPT-OUT from window memory
+     (docs/tasks-s4-plan.md P4); inert on the phones. *)
+  Option.iter
+    (fun v -> emit tx (Kaya_wire.tx_set_window_remember_frame id v))
+    remember_frame;
   (* [~panes] is the CEILING on how many of this window's stack entries
      present side by side: 1 is the serial stack, 2 and 3 are columns on
      a window wide enough, the shallowest shed first as it narrows
@@ -1865,12 +1969,14 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
 
 (* Create an auxiliary window (capability-gated: phone hosts reject at the
    root); materializes hidden, [mount_in] presents. *)
-let create_window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
+let create_window ?title ?width ?height ?inset ?veto_close ?dirty
+    ?remember_frame ?panes
     ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
-  window ?title ?width ?height ?inset ?veto_close ?dirty ?panes
+  window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
+    ?panes
     ?sections_presentation ?appearance
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
@@ -1984,6 +2090,35 @@ let cancel_notification notification =
    the whole of a process the platform RELAUNCHED for a tap, since it
    never called [show_notification]. It does not retire, and a one-shot
    handler for the same id still wins. Needs no transaction. *)
+(* The notification_result decision, in a function of its own because
+   the ring loop's branch has no seam a test can reach (the ring is C
+   memory) — Go's [notification_result] for the same reason, and
+   bindings/ocaml/checks/notify_order_check.ml drives the three cases
+   through here. THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1)
+   and tools/check-sugar-surface.py reads it out of this body: the
+   one-shot handler bound at the show first, retiring with the result;
+   else the process-level one, which does not; else the drop is
+   announced. *)
+let notification_result app id outcome =
+  match
+    ( Hashtbl.find_opt app.notification_handlers id,
+      app.notification_activation )
+  with
+  | Some handler, _ ->
+      Hashtbl.remove app.notification_handlers id;
+      dispatch app (fun () -> handler outcome)
+  | None, Some f -> dispatch app (fun () -> f id outcome)
+  | None, None ->
+      prerr_endline
+        (Printf.sprintf
+           "kaya: notification %Ld outcome %s reached no handler — none was \
+            bound at the show and no process-level handler is registered \
+            (Kaya_app.on_notification_activation)"
+           id
+           (if outcome = Kaya_wire.notification_outcome_activated then
+              "activated"
+            else "refused"))
+
 let on_notification_activation app ~f = app.notification_activation <- Some f
 
 (* The filters encoding, written ONCE because two requests carry it:
@@ -3986,35 +4121,11 @@ let dispatch_loop app =
                dispatch app (fun () -> handler (Int64.to_int c))
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_notification_result then
-           (* THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1), and
-              tools/check-sugar-surface.py reads it out of this arm: the
-              one-shot handler bound at the show first, retiring with the
-              result; else the process-level one, which does not; else
-              the drop is announced. The outcome rides the same u32 slot
-              the choice does. *)
-           (let outcome =
-              match payload with
-              | Some (Kaya_wire.I64 o) -> Int64.to_int o
-              | _ -> 0
-            in
-            match
-              ( Hashtbl.find_opt app.notification_handlers id,
-                app.notification_activation )
-            with
-            | Some handler, _ ->
-                Hashtbl.remove app.notification_handlers id;
-                dispatch app (fun () -> handler outcome)
-            | None, Some f -> dispatch app (fun () -> f id outcome)
-            | None, None ->
-                prerr_endline
-                  (Printf.sprintf
-                     "kaya: notification %Ld outcome %s reached no handler — \
-                      none was bound at the show and no process-level handler \
-                      is registered (Kaya_app.on_notification_activation)"
-                     id
-                     (if outcome = Kaya_wire.notification_outcome_activated then
-                        "activated"
-                      else "refused")))
+           (* The outcome rides the same u32 slot the choice does. *)
+           notification_result app id
+             (match payload with
+             | Some (Kaya_wire.I64 o) -> Int64.to_int o
+             | _ -> 0)
          else if kind = Kaya_wire.occ_kind_file_dialog_result then
            (* One-shot like the alert, and the id retires with it. The
               parser flattens three values per file into the values

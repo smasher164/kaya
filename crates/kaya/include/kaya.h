@@ -794,6 +794,8 @@
 
 #define KAYA_WPROP_APPEARANCE 9
 
+#define KAYA_WPROP_REMEMBER_FRAME 10
+
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
  * table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -1383,6 +1385,15 @@ typedef struct KayaHostApi {
   void (*frame)(double);
   void (*harness_frame)(void);
   uintptr_t (*canvas_raster_shape)(uint64_t, uint8_t*, uintptr_t);
+  /**
+   * KAYA'S OWN WINDOW MEMORY (docs/tasks-s4-plan.md P4). The key is
+   * RESERVED, so the guest floor (`kaya_pref_set_string`) refuses it and
+   * the backend reaches the store through these two instead — which is
+   * also what keeps `kaya.window.<id>.frame` spelled once, in
+   * crates/kaya/src/prefs.rs. `window_frame` answers 0 for none.
+   */
+  uintptr_t (*window_frame)(uint64_t, uint8_t*, uintptr_t);
+  void (*set_window_frame)(uint64_t, const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -1489,6 +1500,83 @@ void kaya_asset_release(uint64_t handle);
  * `asset_why_not` is the one author, so a scene can freeze the bytes once.
  */
 uintptr_t kaya_asset_why_not(const uint8_t *name, uintptr_t name_len, uint8_t *out, uintptr_t cap);
+
+/**
+ * The bytes of the app's data directory (§4), created on first ask.
+ * Returns the FULL length and writes min(len, cap) bytes, so a caller
+ * sizes with `cap` 0 and asks again — `kaya_fault`'s shape. 0 means
+ * there is none yet (Android before attach).
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes.
+ */
+uintptr_t kaya_app_data_dir(uint8_t *out, uintptr_t cap);
+
+/**
+ * 1 = present, with `*len` the full length and min(len, cap) bytes
+ * written into `out`; 0 = absent, which includes a key holding another
+ * type.
+ *
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` null or valid for `cap`;
+ * `len` null or valid for one `usize`.
+ */
+int32_t kaya_pref_get_string(const uint8_t *key,
+                             uintptr_t key_len,
+                             uint8_t *out,
+                             uintptr_t cap,
+                             uintptr_t *len);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one `i64`.
+ */
+int32_t kaya_pref_get_i64(const uint8_t *key, uintptr_t key_len, int64_t *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one `double`.
+ */
+int32_t kaya_pref_get_f64(const uint8_t *key, uintptr_t key_len, double *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one byte.
+ */
+int32_t kaya_pref_get_bool(const uint8_t *key, uintptr_t key_len, uint8_t *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes and `value` for `value_len`.
+ */
+void kaya_pref_set_string(const uint8_t *key,
+                          uintptr_t key_len,
+                          const uint8_t *value,
+                          uintptr_t value_len);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_pref_set_i64(const uint8_t *key, uintptr_t key_len, int64_t value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_pref_set_f64(const uint8_t *key, uintptr_t key_len, double value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_pref_set_bool(const uint8_t *key, uintptr_t key_len, uint8_t value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_pref_remove(const uint8_t *key, uintptr_t key_len);
 
 /**
  * Fetch a blob's bytes by the handle an apply record carried. Returns

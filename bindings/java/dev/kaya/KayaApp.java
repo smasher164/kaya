@@ -984,6 +984,151 @@ public final class KayaApp {
     }
 
     /**
+     * The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+     * Application Support/&lt;id&gt; on macOS, Documents on iOS, the files
+     * directory on Android, $XDG_DATA_HOME/&lt;id&gt; on Linux,
+     * %LOCALAPPDATA%\&lt;id&gt; on Windows. Created on first ask.
+     *
+     * <p>KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the
+     * app's, written the standard way (sqlite-jdbc is the
+     * recommendation). Settings are small and typed and belong in
+     * {@link #prefs()}.
+     *
+     * <p>THROWS where the platform has handed no directory over — an
+     * error state a guest cannot plan around, so all nine bindings
+     * refuse rather than answering an absent value (ruled 2026-09-09).
+     */
+    public static String appDataDir() {
+        String dir = new String(KayaRing.appDataDir(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        if (dir.isEmpty()) {
+            throw new IllegalStateException(
+                    "kaya: app_data_dir asked before the platform handed one "
+                            + "over (Android before attach)");
+        }
+        return dir;
+    }
+
+    /**
+     * The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
+     * typed key-value record under the app's id, the platform's own
+     * where the platform has one — UserDefaults on Apple,
+     * SharedPreferences on Android, a key file on Linux and Windows.
+     *
+     * <p>A PULL, NOT A SIGNAL: a setting is read when the app builds and
+     * written when the user changes it. Every get takes the default it
+     * answers when the key is absent OR holds another type. Writes are
+     * durable when they return, and the store may be used from any
+     * thread.
+     */
+    public static final class Prefs {
+        private static final Prefs THE = new Prefs();
+
+        private Prefs() {}
+
+        private static byte[] key(String key) {
+            if (key == null || key.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "kaya: a preference key must not be empty");
+            }
+            return key.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        /** A guest may READ any key and WRITE any key kaya has not
+         * reserved (docs/tasks-s4-plan.md P4: window memory lives under
+         * {@code kaya.}). */
+        private static byte[] writeKey(String key) {
+            byte[] raw = key(key);
+            if (key.startsWith("kaya.")) {
+                throw new IllegalArgumentException(
+                        "kaya: preference key \"" + key + "\" is reserved "
+                                + "(the kaya. prefix is kaya's own)");
+            }
+            return raw;
+        }
+
+        public String getString(String name, String def) {
+            byte[] value = KayaRing.prefGetString(key(name));
+            return value == null
+                    ? def
+                    : new String(value, java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        public long getI64(String name, long def) {
+            long[] value = KayaRing.prefGetI64(key(name));
+            return value == null ? def : value[0];
+        }
+
+        public double getF64(String name, double def) {
+            double[] value = KayaRing.prefGetF64(key(name));
+            return value == null ? def : value[0];
+        }
+
+        public boolean getBool(String name, boolean def) {
+            boolean[] value = KayaRing.prefGetBool(key(name));
+            return value == null ? def : value[0];
+        }
+
+        public void setString(String name, String value) {
+            KayaRing.prefSetString(writeKey(name),
+                    value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        public void setI64(String name, long value) {
+            KayaRing.prefSetI64(writeKey(name), value);
+        }
+
+        public void setF64(String name, double value) {
+            KayaRing.prefSetF64(writeKey(name), value);
+        }
+
+        public void setBool(String name, boolean value) {
+            KayaRing.prefSetBool(writeKey(name), value);
+        }
+
+        public void remove(String name) {
+            KayaRing.prefRemove(writeKey(name));
+        }
+    }
+
+    /** The app's preferences store — one per process. */
+    public static Prefs prefs() {
+        return Prefs.THE;
+    }
+
+    /**
+     * The notification_result decision, in a method of its own because
+     * the ring loop's switch has no seam a test can reach (the ring is
+     * raw memory) — Go's `notificationResult` for the same reason, and
+     * tools/checks/java-notify/NotifyOrderCheck.java drives the three
+     * cases through here. THE ORDER IS THE SEMANTICS
+     * (docs/tasks-s9-plan.md R1) and tools/check-sugar-surface.py reads
+     * it out of this body: the one-shot handler bound at show() first,
+     * retiring with the result; else the process-level one, which does
+     * not; else the drop is announced.
+     */
+    void notificationResult(long id, int outcome) {
+        BiConsumer<Tx, Integer> handler = notifications.remove(id);
+        if (handler != null) {
+            dispatch(tx -> handler.accept(tx, outcome));
+        } else if (notificationActivation != null) {
+            NotificationActivationHandler act = notificationActivation;
+            dispatch(tx -> act.accept(tx, id, outcome));
+        } else {
+            String word =
+                    outcome == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED
+                            ? "activated"
+                            : "refused";
+            System.err.println(
+                    "kaya: notification " + id + " outcome "
+                            + word + " reached no handler — none was "
+                            + "bound at the show and no process-level handler "
+                            + "is registered "
+                            + "(KayaApp.onNotificationActivation)");
+        }
+    }
+
+    /**
      * OPEN AN ASSET — a file this app's BUILD put where the running
      * program can find it (docs/assets-plan.md): {@code name} is a
      * relative path under the asset root, spelled with {@code /}. No
@@ -1657,6 +1802,16 @@ public final class KayaApp {
          */
         public WindowRef dirty(boolean on) {
             tx.emit(KayaWire.txSetWindowDirty(id, on));
+            return this;
+        }
+
+        /**
+         * The OPT-OUT from window memory (docs/tasks-s4-plan.md P4): a
+         * desktop window reopens at the frame the previous process left
+         * unless this is false. Inert on the phones.
+         */
+        public WindowRef rememberFrame(boolean on) {
+            tx.emit(KayaWire.txSetWindowRememberFrame(id, on));
             return this;
         }
 
@@ -6904,30 +7059,7 @@ public final class KayaApp {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_RESULT) {
-                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
-                // and tools/check-sugar-surface.py reads it out of this
-                // arm: the one-shot handler bound at show() first,
-                // retiring with the result; else the process-level one,
-                // which does not; else the drop is announced. payload is
-                // the parsed outcome (Integer).
-                BiConsumer<Tx, Integer> handler = notifications.remove(occ.id);
-                if (handler != null) {
-                    dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
-                } else if (notificationActivation != null) {
-                    NotificationActivationHandler act = notificationActivation;
-                    dispatch(tx -> act.accept(tx, occ.id, (Integer) occ.payload));
-                } else {
-                    String outcome =
-                            (Integer) occ.payload == KayaWire.NOTIFICATION_OUTCOME_ACTIVATED
-                                    ? "activated"
-                                    : "refused";
-                    System.err.println(
-                            "kaya: notification " + occ.id + " outcome "
-                                    + outcome + " reached no handler — none was "
-                                    + "bound at the show and no process-level handler "
-                                    + "is registered "
-                                    + "(KayaApp.onNotificationActivation)");
-                }
+                notificationResult(occ.id, (Integer) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL. A SAVE DIALOG ANSWERS HERE TOO,

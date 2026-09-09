@@ -93,6 +93,38 @@ object KayaRing {
     @JvmStatic external fun assetMissSentence(name: ByteArray): ByteArray
 
     /**
+     * The app's own writable directory (docs/tasks-s4-plan.md P1), as
+     * UTF-8 bytes; empty before Android's attach has handed it in.
+     */
+    @JvmStatic external fun appDataDir(): ByteArray
+
+    /**
+     * The preference store (docs/tasks-s4-plan.md P3). A NULL getter
+     * answer is ABSENT — and a key holding another type is absent by the
+     * same rule, since the store keeps a type per key — so the binding
+     * hands back the caller's default. Keys and strings are BYTES, like
+     * every other surface here: JNI's string calls speak modified UTF-8.
+     */
+    @JvmStatic external fun prefGetString(key: ByteArray): ByteArray?
+
+    @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
+
+    @JvmStatic external fun prefGetF64(key: ByteArray): DoubleArray?
+
+    @JvmStatic external fun prefGetBool(key: ByteArray): BooleanArray?
+
+    /** Durable when it returns (docs/tasks-s4-plan.md P3). */
+    @JvmStatic external fun prefSetString(key: ByteArray, value: ByteArray)
+
+    @JvmStatic external fun prefSetI64(key: ByteArray, value: Long)
+
+    @JvmStatic external fun prefSetF64(key: ByteArray, value: Double)
+
+    @JvmStatic external fun prefSetBool(key: ByteArray, value: Boolean)
+
+    @JvmStatic external fun prefRemove(key: ByteArray)
+
+    /**
      * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
      * with `seekable[0]` set to 1 for random access. Native because no
      * public API wraps a descriptor. BLOCKS, possibly for a long time —

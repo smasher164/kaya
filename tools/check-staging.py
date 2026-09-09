@@ -222,12 +222,109 @@ def check(root):
                      f"rides the wire AND an edit to it never busts the "
                      f"stamp")
 
+    # --- ONE STATE HOME PER LEG --------------------------------------
+    # The harness's scratch — the act-two marker, the preferences domain and
+    # the app's own data directory — is ONE tree per APP, and this lane runs
+    # many legs of one app at once: every act one EMPTIES that tree, so a
+    # pooled neighbour's open SQLite goes readonly under it (measured on the
+    # mac lane 2026-09-09). Each launcher therefore carries its OWN
+    # `XDG_STATE_HOME=C:\kaya\legs\<leg>\state`, clears that tree at its
+    # own start, and shares it with nobody. NO LEG CAN SEE THIS: two legs
+    # with one state home pass alone and corrupt each other only when the
+    # pool happens to overlap them.
+    guest = root / "tools" / "guest"
+    homes = {}
+    scened = 0
+    for path in sorted(guest.glob("run_*.cmd")) + sorted(guest.glob("pkg_*.cmd")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "set KAYA_SELFTEST=" not in text:
+            # No scene, no harness scratch: the two dnd witnesses start kaya
+            # with the variable REMOVED, and a packaged leg's outer launcher
+            # carries no environment at all (its inner one does).
+            continue
+        scened += 1
+        leg = path.name[4:-4]
+        want = f"C:\\kaya\\legs\\{leg}\\state"
+        home = None
+        for line in text.splitlines():
+            if line.startswith("set XDG_STATE_HOME="):
+                home = line[len("set XDG_STATE_HOME="):].strip()
+        if home is None:
+            fail(f"tools/guest/{path.name} runs a scene and sets no "
+                 f"XDG_STATE_HOME — it would share the app's one harness "
+                 f"tree with every other leg, and whichever act one ran "
+                 f"next would empty this leg's database under it")
+            continue
+        if home != want:
+            fail(f"tools/guest/{path.name} sets XDG_STATE_HOME={home!r}, "
+                 f"which is not its own {want!r} — a state home that names "
+                 f"another leg is the shared tree again with extra steps")
+        if f"rmdir /s /q C:\\kaya\\legs\\{leg}" not in text:
+            fail(f"tools/guest/{path.name} never clears "
+                 f"C:\\kaya\\legs\\{leg} — act one must start from an "
+                 f"empty tree or a relaunch scene reads what the LAST run "
+                 f"left and passes without measuring this one")
+        homes.setdefault(home, []).append(path.name)
+    if scened < 200:
+        fail(f"only {scened} guest launcher(s) run a scene at all — this "
+             f"census read almost nothing and would agree with anything")
+    for home, names in sorted(homes.items()):
+        if len(names) > 1:
+            fail(f"{', '.join(names)} share the state home {home!r}: "
+                 f"whichever runs act one empties the other's act-two "
+                 f"marker, preferences and database mid-leg")
+
+    # --- NO VERDICT OVER A LIVE SAMPLER ------------------------------
+    # docs/deferred.md's LEAK entry: the windows lane dropped a stop file
+    # on its way out and left, and three matrices leaked one polling
+    # sampler each with every leg green -- the lane could not see it, so
+    # the exit path WAITS for its own sampler now and refuses a verdict
+    # while one is alive. Every link is held: the call, its place ahead of
+    # the verdict, the wait's own question to the guest, and the guest's
+    # answer.
+    rec_rel = "tools/lib/flightrec_lane.py"
+    rec_path = root / rec_rel
+    rec = rec_path.read_text(encoding="utf-8") if rec_path.is_file() else ""
+    ps1_path = root / "tools" / "guest" / "flightrec.ps1"
+    ps1 = ps1_path.read_text(encoding="utf-8") if ps1_path.is_file() else ""
+    verdict_at = win.find('print("deploy-win: ALL PASS")')
+    end_at = win.find("FR.lane_end(")
+    if end_at < 0:
+        fail("tools/deploy-win.py waits for no flight-recorder sampler "
+             "before its verdict — it calls FR.lane_end() nowhere, so a "
+             "sampler of this lane's own run outlives the lane and loads "
+             "the machine the next lane is timed on (docs/deferred.md, "
+             "the windows sampler LEAK entry: three matrices, three "
+             "leaks, all green)")
+    elif verdict_at < 0:
+        fail("tools/deploy-win.py no longer prints `deploy-win: ALL PASS` "
+             "where this census reads it — re-point the clause")
+    elif end_at > verdict_at:
+        fail("tools/deploy-win.py prints its verdict before it waits for "
+             "its flight-recorder sampler — a lane that says ALL PASS and "
+             "THEN discovers a live sampler has already told the matrix "
+             "it was clean")
+    if "def lane_end" not in rec:
+        fail(f"{rec_rel} defines no lane_end() — the windows lane's "
+             f"verdict gate has nothing to call")
+    elif "-Mode list" not in rec:
+        fail(f"{rec_rel} asks the guest what samplers it still has "
+             f"nowhere: without `-Mode list` the wait is a sleep and the "
+             f"refusal cannot name a pid")
+    if "'sample', 'collect', 'list'" not in ps1:
+        fail("tools/guest/flightrec.ps1 answers no `list` mode, so the "
+             "lane's wait asks a question the guest does not understand")
+    if "sample-$Run.pid" not in ps1:
+        fail("tools/guest/flightrec.ps1 writes no pid file for its run, "
+             "so `list` cannot tell THIS lane's sampler from a "
+             "neighbour's and the wait has nothing to wait on")
+
     return findings
 
 
 # --- self-tests: each perturbation applied to a COPY, count printed --
 
-SHADOW_RELS = ["tools/deploy-win.py",
+SHADOW_RELS = ["tools/deploy-win.py", "tools/lib/flightrec_lane.py",
                "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
                "tools/scenes", "tools/guest", "guests/python"]
@@ -338,6 +435,56 @@ if not any("tools/guest/ghosthelper.ps1 is staged" in f for f in _f7):
     sys.exit(1)
 print("check-staging: self-test — N7 (a guest .ps1 the deploy list does "
       "not know) refused")
+
+negative(
+    "N7b", "gave two legs one state home", "tools/guest/run_todos_go.cmd",
+    r"^set XDG_STATE_HOME=C:\\kaya\\legs\\todos_go",
+    "set XDG_STATE_HOME=C:\\\\kaya\\\\legs\\\\todos_rust",
+    "share the state home",
+    "N7b (two legs whose act one empties the other's tree)")
+
+negative(
+    "N7c", "took a leg's state home away", "tools/guest/run_todos_go.cmd",
+    r"^set XDG_STATE_HOME=.*\r?\n", "",
+    "sets no XDG_STATE_HOME",
+    "N7c (a leg sharing the app's one harness tree with every other)")
+
+negative(
+    "N7d", "left the leg's tree from the last run",
+    "tools/guest/run_todos_go.cmd",
+    r"^rmdir /s /q C:\\kaya\\legs\\todos_go 2>nul\r?\n", "",
+    "never clears",
+    "N7d (a leg that reads what the last run left)")
+
+negative(
+    "N8", "took the lane's sampler wait out", "tools/deploy-win.py",
+    r"^if not FR\.lane_end\(\):\n    status = 1\n", "",
+    "waits for no flight-recorder sampler",
+    "N8 (a windows lane that prints a verdict having waited for no "
+    "sampler)")
+
+negative(
+    "N9", "put the verdict ahead of the wait", "tools/deploy-win.py",
+    r"^if not FR\.lane_end\(\):\n    status = 1\nif status == 0:\n"
+    r'    print\("deploy-win: ALL PASS"\)\n',
+    'if status == 0:\n    print("deploy-win: ALL PASS")\n'
+    "if not FR.lane_end():\n    status = 1\n",
+    "prints its verdict before it waits",
+    "N9 (a lane that says ALL PASS and then looks for its sampler)")
+
+negative(
+    "N10", "made the wait a sleep", "tools/lib/flightrec_lane.py",
+    r"-Mode list", "-Mode ghost",
+    "asks the guest what samplers it still has nowhere",
+    "N10 (a wait that never asks the guest what is still polling)")
+
+negative(
+    "N11", "dropped the sampler's pid file",
+    "tools/guest/flightrec.ps1",
+    r'\$pidfile = Join-Path \$dir "sample-\$Run\.pid"',
+    '$pidfile = Join-Path $dir "sample-none.pid"',
+    "writes no pid file for its run",
+    "N11 (a sampler no lane can tell from its neighbour)")
 
 # --- the STAGED GUEST'S SPEC, every branch watched -------------------
 # A compiled guest carries the wire hash its binding was generated from

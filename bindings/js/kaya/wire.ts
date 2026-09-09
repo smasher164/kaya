@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x21005150bc085070n;
+export const SPEC_HASH = 0x605e18f72b2af791n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -106,6 +106,7 @@ export const WPROP_PANES = 6;
 export const WPROP_DIRTY = 7;
 export const WPROP_INSET = 8;
 export const WPROP_APPEARANCE = 9;
+export const WPROP_REMEMBER_FRAME = 10;
 export const EPROP_TITLE = 1;
 export const EPROP_INTERCEPT_BACK = 2;
 export const SPROP_TITLE = 1;
@@ -1257,6 +1258,16 @@ export function tx_set_window_appearance(window: number, appearance: number): Ui
 /** set_window_prop with a signal-bound appearance value; window 0, the primary surface. */
 export function tx_bind_window_appearance(window: number, signal_id: number): Uint8Array {
   return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_APPEARANCE), u32(SOURCE_SIGNAL), u64(signal_id)));
+}
+
+/** set_window_prop with a constant remember_frame value; window 0, the primary surface. */
+export function tx_set_window_remember_frame(window: number, remember_frame: boolean): Uint8Array {
+  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_REMEMBER_FRAME), u32(SOURCE_CONST), enc.value(remember_frame)));
+}
+
+/** set_window_prop with a signal-bound remember_frame value; window 0, the primary surface. */
+export function tx_bind_window_remember_frame(window: number, signal_id: number): Uint8Array {
+  return record(TX_SET_WINDOW_PROP, cat(u64(window), u32(WPROP_REMEMBER_FRAME), u32(SOURCE_SIGNAL), u64(signal_id)));
 }
 
 /** set_entry_prop with a constant title value. */

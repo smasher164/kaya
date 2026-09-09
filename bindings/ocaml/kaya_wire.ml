@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x21005150bc085070L
+let spec_hash = 0x605e18f72b2af791L
 
 let value_bool = 1
 let value_i64 = 2
@@ -129,6 +129,7 @@ let wprop_panes = 6
 let wprop_dirty = 7
 let wprop_inset = 8
 let wprop_appearance = 9
+let wprop_remember_frame = 10
 let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
@@ -1732,6 +1733,22 @@ let tx_bind_window_appearance window signal_id =
   finish tx_kind_set_window_prop (fun b ->
       Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_appearance);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant remember_frame value (window 0, the primary surface). *)
+let tx_set_window_remember_frame window remember_frame =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_remember_frame);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool remember_frame))
+
+(* set_window_prop with a signal-bound remember_frame value (window 0, the primary surface). *)
+let tx_bind_window_remember_frame window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_remember_frame);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 

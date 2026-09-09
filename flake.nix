@@ -44,6 +44,19 @@
             mkdir -p "$out/bin"
             ln -s ${pkgs.llvmPackages_22.clang}/bin/clang "$out/bin/kaya-asan-clang"
           '';
+          # THE WINDOWS CROSS-BUILD'S LIBRARIAN, and only it. cargo-xwin
+          # sets AR_aarch64_pc_windows_msvc=llvm-lib, so the day a C
+          # dependency joins the windows target (rusqlite's bundled
+          # SQLite, docs/tasks-s4-plan.md P7) the build dies with
+          # `failed to find tool "llvm-lib"` -- clang ships the compiler
+          # and none of the binutils. ONE SYMLINK rather than the whole
+          # llvm package: `llvm-ar` behaves like lib.exe only under this
+          # name, and forty other llvm-* on PATH would shadow nothing
+          # anyone asked for.
+          xwinLib = pkgs.runCommand "kaya-llvm-lib" { } ''
+            mkdir -p "$out/bin"
+            ln -s ${pkgs.llvm}/bin/llvm-lib "$out/bin/llvm-lib"
+          '';
           # CPython for the iOS lane (docs/python-mobile-plan.md §D1),
           # pinned HERE rather than by a fetch script: the store's content
           # addressing IS the hash check and the dev-shell fingerprint
@@ -132,6 +145,7 @@
             rust-analyzer
             rust-cbindgen
             cargo-xwin
+            xwinLib
             cargo-ndk
             # hatchling + build serve tools/check-wheel.py: the kaya-gui
             # wheel builds offline from the flake's pinned python, never

@@ -588,29 +588,94 @@ if "0x0" not in (_hide or ""):
           "fail", file=sys.stderr)
     print(f"  as though the backend were wrong. Got: {_hide}", file=sys.stderr)
     sys.exit(1)
-# AND NO NOTIFICATION TOASTS: while one is up SetForegroundWindow FAILS
-# for everything else, so every shortcut-injection leg dies looking like
-# a WinUI bug (docs/traps.md, "A shell toast holds the foreground, and
-# ten legs die of it"). Three values, because the shell has three places
-# to say it.
+# THE AUMIDS KAYA POSTS UNDER, unpackaged: the declared id
+# (crates/kaya/src/winui/mod.rs's `app_aumid`). The packaged ones are
+# `<family>!<app>` and the family is the install's own report, so those
+# rows are written where it is learned (package_rust_guests below).
+NOTIFY_AUMIDS = [app_identity.load(ROOT).id]
+
+# NO NOTIFICATION *BANNER*, AND DELIVERY KEPT. While a banner is up
+# SetForegroundWindow FAILS for everything else, so every shortcut-injection
+# leg dies looking like a WinUI bug (docs/traps.md, "A shell toast holds the
+# foreground, and ten legs die of it") — and the two values this used to
+# write, ToastEnabled and NOC_GLOBAL_SETTING_TOASTS_ENABLED, turn the
+# platform OFF ENTIRELY: with them at 0 `CreateToastNotifier(<aumid>).Setting`
+# answers `DisabledForUser`, `Show()` still returns cleanly, and NOTHING
+# reaches the history every `expect_notification` reads (measured
+# kaya-independently from PowerShell on the guest, 2026-09-09). The notify
+# and tasks legs passed for months only because THE PLATFORM READS THOSE
+# VALUES LAZILY: the lane wrote 0 into a session that went on delivering,
+# until something made it re-read and ten notification legs died at once with
+# `history holds 0 notification(s)` on a machine whose registry, AUMID key,
+# activator and services all read correct.
+#
+# So the two settings are separated the way Windows separates them: the
+# platform stays ON, and the BANNER is refused per app — ShowBanner 0 with
+# ShowInActionCenter 1 under the app's own AUMID, which is what keeps a
+# kaya toast out of the foreground while it still lands in the history.
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
-         'PushNotifications" /v ToastEnabled /t REG_DWORD /d 0 /f >nul')
+         'PushNotifications" /v ToastEnabled /t REG_DWORD /d 1 /f >nul')
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'Notifications\\Settings" /v NOC_GLOBAL_SETTING_TOASTS_ENABLED '
-         '/t REG_DWORD /d 0 /f >nul')
+         '/t REG_DWORD /d 1 /f >nul')
+def notify_banner_off(aumid):
+    """NO BANNER FROM THIS APP, and its notifications still delivered:
+    ShowBanner 0 keeps a kaya toast out of the foreground (the trap above)
+    and ShowInActionCenter 1 keeps it in the history every
+    `expect_notification` reads."""
+    for value, on in (("ShowBanner", 0), ("ShowInActionCenter", 1)):
+        must_ssh(f'reg add "HKCU\\Software\\Microsoft\\Windows\\'
+                 f'CurrentVersion\\Notifications\\Settings\\{aumid}" '
+                 f'/v {value} /t REG_DWORD /d {on} /f >nul')
+
+
+for _aumid in NOTIFY_AUMIDS:
+    notify_banner_off(_aumid)
 must_ssh('reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\'
          'ContentDeliveryManager" /v SubscribedContent-338389Enabled '
          '/t REG_DWORD /d 0 /f >nul')
-_toasts = run_ssh_out('reg query "HKCU\\Software\\Microsoft\\Windows\\'
-                      'CurrentVersion\\PushNotifications" /v ToastEnabled')
-if "0x0" not in (_toasts or ""):
-    print("deploy-win: toasts are still enabled on the guest — a shell toast",
-          file=sys.stderr)
-    print("  holds the foreground and every shortcut-injection leg would "
-          "fail", file=sys.stderr)
-    print(f"  as though WinUI could not raise its own window. Got: {_toasts}",
+# THE PLATFORM RE-READS ON A SERVICE RESTART, and nothing else here can make
+# it: the per-logon `WpnUserService_<luid>` caches what it had. Restarted
+# BEFORE any leg, never during one; the name carries a session suffix, so it
+# is matched by prefix.
+must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
+         'Restart-Service -Force"')
+# AND THE NOTIFICATION SERVICE IS RESTARTED, because it goes DEAF IN PLACE.
+# Measured 2026-09-09: `WpnUserService_<luid>` accepted every toast — the app
+# printed `posted 1`, `Show()` raised nothing, the AUMID key, its IconUri and
+# the activator were all intact, WpnService and WpnUserService both read
+# Running — and recorded NOTHING in the history the shade reads, so every
+# `expect_notification` failed with `history holds 0 notification(s)`. The
+# PUSHED S9 TREE failed the same leg on the same guest, which is what proves
+# it is the machine and not the build, and one Restart-Service turned that
+# leg from FAILED to OK with nothing else moved. Idempotent and about a
+# second; the name carries a per-logon-session suffix, so it is matched by
+# prefix. BEFORE any leg, never during one.
+must_ssh('powershell -NoProfile -Command "Get-Service WpnUserService* | '
+         'Restart-Service -Force"')
+_wpn = (run_ssh_out('powershell -NoProfile -Command "(Get-Service '
+                    'WpnUserService*).Status"') or "").strip()
+if "Running" not in _wpn:
+    print("deploy-win: the guest's notification service is not running after "
+          "a restart —", file=sys.stderr)
+    print(f"  `(Get-Service WpnUserService*).Status` read {_wpn!r}. Every "
+          "notify and", file=sys.stderr)
+    print("  tasks leg asserts a delivered notification against the "
+          "platform's own", file=sys.stderr)
+    print("  history, and a dead service accepts each toast and records "
+          "none of them,", file=sys.stderr)
+    print("  so they would all fail as though kaya had posted nothing.",
           file=sys.stderr)
     sys.exit(1)
+
+# THE PER-LEG STATE HOMES, emptied wholesale before a run rather than left
+# to accumulate: each launcher clears its OWN tree at its own start
+# (`C:\kaya\legs\<leg>`), which is what keeps one leg's act one from
+# emptying another's open database, and this is the once-per-deploy sweep of
+# whatever the last run left. NO `if` IN THE LINE: cmd runs everything after
+# an `&` inside it (tools/check-steps.py's cmd_precedence clause).
+must_ssh('cmd /c "rmdir /s /q C:\\kaya\\legs 2>nul & exit /b 0"')
+
 # THE FOREGROUND LOCK MUST BE OFF (docs/traps.md, "A rebooted Windows VM
 # refuses every shortcut-injection leg"). This write seeds the NEXT
 # logon; the LIVE session is done by the desktop warm-up below, from
@@ -830,6 +895,8 @@ def deploy_artifacts():
                ROOT / "tools/guest/pkg-install.ps1",
                ROOT / "tools/guest/pkg-run.ps1",
                ROOT / "tools/guest/relaunch-com.ps1",
+               ROOT / "tools/guest/relaunch-launch.ps1",
+               ROOT / "tools/guest/notify-ready.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1557,6 +1624,12 @@ def package_rust_guests():
         family = line.partition("pkg-install: family ")[2].strip()
         if family:
             PACKAGE_FAMILY.append(family)
+            # THE PACKAGED AUMIDS' BANNERS, refused the moment the family is
+            # known — the provisioning block above could not name them, and a
+            # packaged leg's toast holds the foreground exactly as an
+            # unpackaged one does.
+            for entry in scenes:
+                notify_banner_off(f"{family}!{entry}")
     if "pkg-install: OK" not in out:
         print("deploy-win: the MSIX did not install, so every packaged leg "
               "would run", file=sys.stderr)
@@ -1621,6 +1694,48 @@ def _release_slot(slot):
 #
 # THE DOOR SCRIPT POLLS the verdict act two writes beside its marker, because
 # a process COM started has no stdout anyone can read.
+def act2_answer(name, door, outfile, log):
+    """Poll the door script's own output for the protocol both doors
+    speak: RELAUNCHDONE when it finished, and the ACT2: line act two's
+    verdict rides. One reader, so the two doors cannot come to disagree
+    about what a second act's answer looks like."""
+    text = ""
+    for _ in range(60):
+        text = run_ssh_out(f"cmd /c type C:\\kaya\\{outfile}", log=log) or ""
+        if "RELAUNCHDONE" in text:
+            break
+        time.sleep(2)
+    print(text, file=log)
+    verdict = ""
+    for line in text.splitlines():
+        if line.startswith("ACT2: "):
+            verdict = line[len("ACT2: "):].strip()
+    if "RELAUNCHDONE" not in text:
+        print(f"{name}: FAIL — the {door} door wrote no RELAUNCHDONE in 120s; "
+              f"the door script itself did not finish", file=log)
+        return False
+    ok = verdict.startswith("KAYA_SELFTEST: OK")
+    print(f"{name}: ACT 1 OK, ACT 2 "
+          f"{'OK' if ok else 'FAILED'} through the {door} door — "
+          f"{verdict or 'no act-two verdict'}", file=log)
+    return ok
+
+
+# THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the same exe, started the way a
+# user starts it, with nothing pending and no KAYA_* telling the process it is
+# a test — the marker act one left is the whole signal
+# (tools/guest/relaunch-launch.ps1 carries the rest).
+def plain_door(name, scene, log):
+    decl = app_identity.load(ROOT)
+    exe = f"{lane.RELAUNCH_LAUNCH_EXE.get(scene, scene)}.exe"
+    outfile = f"out_{name}-act2.txt"
+    run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "
+            f'kaya_{name}_act2 /tr "C:\\kaya\\relaunch-launch.cmd {name} '
+            f'{exe} {decl.id}" /sc once /st 00:00 /it /rl highest /f >nul '
+            f"&& schtasks /run /tn kaya_{name}_act2 >nul", log=log)
+    return act2_answer(name, "launch", outfile, log)
+
+
 def second_act(name, out, log):
     scene = lane.scene_lang(name)[0]
     door = lane.RELAUNCH_DOOR[scene]
@@ -1629,6 +1744,20 @@ def second_act(name, out, log):
               f"the {door} door had nothing to relaunch for. Act one's "
               f"verdict is above; the second act was not attempted.", file=log)
         return False
+    # THE DOOR ACT ONE ASKED FOR against the one this lane pushes. The
+    # harness prints `KAYA_RELAUNCH: door <name>` at the `relaunch` line and
+    # the plain door's word is the scene's own, so a leg wired to the wrong
+    # door here waits out its ceiling naming no cause.
+    if door == "launch" and "KAYA_RELAUNCH: door launch" not in out:
+        asked = [ln.strip() for ln in out.splitlines()
+                 if ln.strip().startswith("KAYA_RELAUNCH:")]
+        print(f"{name}: FAIL — act one never printed `KAYA_RELAUNCH: door "
+              f"launch`, so this lane's plain door is not the one the scene "
+              f"asked for. What it printed: "
+              f"{asked or ['no KAYA_RELAUNCH line at all']}", file=log)
+        return False
+    if door == "launch":
+        return plain_door(name, scene, log)
     decl = app_identity.load(ROOT)
     packaged = name in lane.PACKAGED_LEGS
     family = PACKAGE_FAMILY[0] if PACKAGE_FAMILY else ""
@@ -1651,26 +1780,7 @@ def second_act(name, out, log):
             f'{lane.RELAUNCH_NOTIFICATION} {decl.id} {family_arg}" /sc once '
             f"/st 00:00 /it /rl highest /f >nul && schtasks /run /tn "
             f"kaya_{name}_act2 >nul", log=log)
-    text = ""
-    for _ in range(60):
-        text = run_ssh_out(f"cmd /c type C:\\kaya\\{outfile}", log=log) or ""
-        if "RELAUNCHDONE" in text:
-            break
-        time.sleep(2)
-    print(text, file=log)
-    verdict = ""
-    for line in text.splitlines():
-        if line.startswith("ACT2: "):
-            verdict = line[len("ACT2: "):].strip()
-    if "RELAUNCHDONE" not in text:
-        print(f"{name}: FAIL — the {door} door wrote no RELAUNCHDONE in 120s; "
-              f"tools/guest/relaunch-com.ps1 itself did not finish", file=log)
-        return False
-    ok = verdict.startswith("KAYA_SELFTEST: OK")
-    print(f"{name}: ACT 1 OK, ACT 2 "
-          f"{'OK' if ok else 'FAILED'} through the {door} door — "
-          f"{verdict or 'no act-two verdict'}", file=log)
-    return ok
+    return act2_answer(name, door, outfile, log)
 
 
 def run_one_suite(name, slot, log):
@@ -1930,11 +2040,69 @@ def desk_warm():
     return False
 
 
+def notify_ready():
+    """WILL THIS DESKTOP DELIVER A NOTIFICATION? Asked the way desk_warm
+    asks about the foreground, and for the same reason: the answer is a
+    property of the LOGON SESSION, not of the registry. The platform reads
+    ToastEnabled and NOC_GLOBAL_SETTING_TOASTS_ENABLED lazily, so a lane
+    that checked the values it just wrote would agree with itself while the
+    session went on answering `DisabledForUser` — which is how the notify
+    and tasks legs died on a machine whose every setting read correct
+    (2026-09-09). This asks the PLATFORM, through its own API, under the
+    app's own AUMID (tools/guest/notify-ready.ps1)."""
+    aumid = NOTIFY_AUMIDS[0]
+    run_ssh("del C:\\kaya\\out_notifyready.txt 2>nul & schtasks /create /tn "
+            f'kaya_notifyready /tr "wscript C:\\kaya\\run-hidden-args.vbs '
+            f'notify-ready.cmd {aumid}" /sc once /st 00:00 /it /rl highest /f '
+            ">nul && schtasks /run /tn kaya_notifyready >nul")
+    out = ""
+    for tries in range(61):
+        out = (run_ssh_out("cmd /c type C:\\kaya\\out_notifyready.txt")
+               or "").replace("\r", "")
+        if "NOTIFYREADYDONE" in out:
+            break
+        if tries == 60:
+            print("deploy-win: the notification readiness probe never "
+                  "answered.", file=sys.stderr)
+            print(f"  What it had written: {out!r}", file=sys.stderr)
+            return False
+        time.sleep(0.5)
+    setting = re.search(r"notify-ready\.setting=(\S*)", out)
+    delivered = re.search(r"notify-ready\.delivered=(\d+)", out)
+    setting = setting.group(1) if setting else "?"
+    delivered = int(delivered.group(1)) if delivered else -1
+    if setting == "Enabled" and delivered > 0:
+        print(f"== notifications ready (setting={setting} delivered="
+              f"{delivered}) ==")
+        return True
+    print("deploy-win: THIS DESKTOP WILL NOT DELIVER A NOTIFICATION.",
+          file=sys.stderr)
+    print(f"  The platform answers setting={setting} and put {delivered} of "
+          f"one posted", file=sys.stderr)
+    print(f"  toast into {aumid}'s history. Every notify and tasks leg "
+          f"asserts a", file=sys.stderr)
+    print("  delivered notification against that history, so all of them "
+          "would fail", file=sys.stderr)
+    print("  as though kaya had posted nothing.", file=sys.stderr)
+    if setting == "DisabledForUser":
+        print("  DisabledForUser is ToastEnabled or "
+              "NOC_GLOBAL_SETTING_TOASTS_ENABLED at 0.", file=sys.stderr)
+        print("  This deploy sets both to 1 and restarts WpnUserService so "
+              "the platform", file=sys.stderr)
+        print("  re-reads them; a session that still says otherwise was "
+              "changed after", file=sys.stderr)
+        print("  that, or by policy.", file=sys.stderr)
+    print(f"  What the probe printed: {out.strip()!r}", file=sys.stderr)
+    return False
+
+
 # The diagnostic verbs are exempt: they interrogate a VM that is already
 # sick, and a warm-up refusing them takes away the tool you reach for.
 if not (SUITE.startswith("probe=")
         or SUITE in ("enable-dumps", "crash-report", "analyze-dump")):
     if not desk_warm():
+        sys.exit(1)
+    if not notify_ready():
         sys.exit(1)
 timing("desk-warm")
 
@@ -1983,6 +2151,12 @@ if os.environ.get("KAYA_RECORD"):
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("windows")
+# NO VERDICT OVER A LIVE SAMPLER (docs/deferred.md's LEAK entry): the lane
+# waits for its own flight-recorder sampler to leave the guest and prints
+# what the guest still has. Three matrices shipped one leaked sampler each,
+# every one of them green.
+if not FR.lane_end():
+    status = 1
 if status == 0:
     print("deploy-win: ALL PASS")
 else:

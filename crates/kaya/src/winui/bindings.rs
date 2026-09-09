@@ -4175,6 +4175,34 @@ pub mod Microsoft {
                         .map(|| result__)
                     }
                 }
+                pub fn Position(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Graphics::PointInt32>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Position)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn Size(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Graphics::SizeInt32>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Size)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn Title(&self) -> windows_core::Result<windows_core::HSTRING> {
                     let this = self;
                     unsafe {
@@ -4225,6 +4253,63 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Move(
+                    &self,
+                    position: super::super::super::Windows::Graphics::PointInt32,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Move)(
+                            windows_core::Interface::as_raw(this),
+                            position,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn MoveAndResize(
+                    &self,
+                    rect: super::super::super::Windows::Graphics::RectInt32,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).MoveAndResize)(
+                            windows_core::Interface::as_raw(this),
+                            rect,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn MoveAndResizeRelativeToDisplayArea<P1>(
+                    &self,
+                    rect: super::super::super::Windows::Graphics::RectInt32,
+                    displayarea: P1,
+                ) -> windows_core::Result<()>
+                where
+                    P1: windows_core::Param<DisplayArea>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).MoveAndResizeRelativeToDisplayArea)(
+                            windows_core::Interface::as_raw(this),
+                            rect,
+                            displayarea.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Resize(
+                    &self,
+                    size: super::super::super::Windows::Graphics::SizeInt32,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Resize)(
+                            windows_core::Interface::as_raw(this),
+                            size,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn SetIcon(
                     &self,
                     iconpath: &windows_core::HSTRING,
@@ -4265,6 +4350,26 @@ pub mod Microsoft {
                             activatewindow,
                         )
                         .ok()
+                    }
+                }
+                pub fn Changed<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                where
+                    P0: windows_core::Param<
+                        super::super::super::Windows::Foundation::TypedEventHandler<
+                            AppWindow,
+                            AppWindowChangedEventArgs,
+                        >,
+                    >,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Changed)(
+                            windows_core::Interface::as_raw(this),
+                            handler.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn RemoveChanged(&self, token: i64) -> windows_core::Result<()> {
@@ -4317,6 +4422,20 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn ClientSize(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Graphics::SizeInt32>
+                {
+                    let this = &windows_core::Interface::cast::<IAppWindow2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ClientSize)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn MoveInZOrderAtBottom(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IAppWindow2>(self)?;
                     unsafe {
@@ -4331,6 +4450,19 @@ pub mod Microsoft {
                     unsafe {
                         (windows_core::Interface::vtable(this).MoveInZOrderAtTop)(
                             windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ResizeClient(
+                    &self,
+                    size: super::super::super::Windows::Graphics::SizeInt32,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IAppWindow2>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ResizeClient)(
+                            windows_core::Interface::as_raw(this),
+                            size,
                         )
                         .ok()
                     }
@@ -4469,6 +4601,107 @@ pub mod Microsoft {
             }
             unsafe impl Send for AppWindow {}
             unsafe impl Sync for AppWindow {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct AppWindowChangedEventArgs(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                AppWindowChangedEventArgs,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl AppWindowChangedEventArgs {
+                pub fn DidPositionChange(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DidPositionChange)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn DidPresenterChange(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DidPresenterChange)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn DidSizeChange(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DidSizeChange)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn DidVisibilityChange(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DidVisibilityChange)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn DidZOrderChange(&self) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IAppWindowChangedEventArgs2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DidZOrderChange)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn IsZOrderAtBottom(&self) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IAppWindowChangedEventArgs2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsZOrderAtBottom)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn IsZOrderAtTop(&self) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IAppWindowChangedEventArgs2>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsZOrderAtTop)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for AppWindowChangedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IAppWindowChangedEventArgs>();
+            }
+            unsafe impl windows_core::Interface for AppWindowChangedEventArgs {
+                type Vtable = <IAppWindowChangedEventArgs as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IAppWindowChangedEventArgs as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for AppWindowChangedEventArgs {
+                const NAME: &'static str = "Microsoft.UI.Windowing.AppWindowChangedEventArgs";
+            }
+            unsafe impl Send for AppWindowChangedEventArgs {}
+            unsafe impl Sync for AppWindowChangedEventArgs {}
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct AppWindowTitleBar(windows_core::IUnknown);
@@ -4970,6 +5203,20 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn SetDragRectangles(
+                    &self,
+                    value: &[super::super::super::Windows::Graphics::RectInt32],
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetDragRectangles)(
+                            windows_core::Interface::as_raw(this),
+                            value.len().try_into().unwrap(),
+                            value.as_ptr(),
+                        )
+                        .ok()
+                    }
+                }
                 pub fn PreferredHeightOption(&self) -> windows_core::Result<TitleBarHeightOption> {
                     let this = &windows_core::Interface::cast::<IAppWindowTitleBar2>(self)?;
                     unsafe {
@@ -5031,6 +5278,161 @@ pub mod Microsoft {
             }
             unsafe impl Send for AppWindowTitleBar {}
             unsafe impl Sync for AppWindowTitleBar {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct DisplayArea(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                DisplayArea,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl DisplayArea {
+                pub fn IsPrimary(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsPrimary)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn OuterBounds(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Graphics::RectInt32>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).OuterBounds)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn WorkArea(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Graphics::RectInt32>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).WorkArea)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn Primary() -> windows_core::Result<DisplayArea> {
+                    Self::IDisplayAreaStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Primary)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn FindAll(
+                ) -> windows_core::Result<windows_collections::IVectorView<DisplayArea>>
+                {
+                    Self::IDisplayAreaStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FindAll)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn GetFromPoint(
+                    point: super::super::super::Windows::Graphics::PointInt32,
+                    displayareafallback: DisplayAreaFallback,
+                ) -> windows_core::Result<DisplayArea> {
+                    Self::IDisplayAreaStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetFromPoint)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            displayareafallback,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn GetFromRect(
+                    rect: super::super::super::Windows::Graphics::RectInt32,
+                    displayareafallback: DisplayAreaFallback,
+                ) -> windows_core::Result<DisplayArea> {
+                    Self::IDisplayAreaStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetFromRect)(
+                            windows_core::Interface::as_raw(this),
+                            rect,
+                            displayareafallback,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IDisplayAreaStatics<
+                    R,
+                    F: FnOnce(&IDisplayAreaStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        DisplayArea,
+                        IDisplayAreaStatics,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IDisplayAreaStatics2<
+                    R,
+                    F: FnOnce(&IDisplayAreaStatics2) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        DisplayArea,
+                        IDisplayAreaStatics2,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for DisplayArea {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IDisplayArea>();
+            }
+            unsafe impl windows_core::Interface for DisplayArea {
+                type Vtable = <IDisplayArea as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IDisplayArea as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for DisplayArea {
+                const NAME: &'static str = "Microsoft.UI.Windowing.DisplayArea";
+            }
+            unsafe impl Send for DisplayArea {}
+            unsafe impl Sync for DisplayArea {}
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct DisplayAreaFallback(pub i32);
+            impl DisplayAreaFallback {
+                pub const None: Self = Self(0i32);
+                pub const Primary: Self = Self(1i32);
+                pub const Nearest: Self = Self(2i32);
+            }
+            impl windows_core::TypeKind for DisplayAreaFallback {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for DisplayAreaFallback {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Windowing.DisplayAreaFallback;i4)",
+                    );
+            }
             windows_core::imp::define_interface!(
                 IAppWindow,
                 IAppWindow_Vtbl,
@@ -5060,9 +5462,15 @@ pub mod Microsoft {
                     *mut bool,
                 ) -> windows_core::HRESULT,
                 OwnerWindowId: usize,
-                Position: usize,
+                pub Position: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Graphics::PointInt32,
+                ) -> windows_core::HRESULT,
                 Presenter: usize,
-                Size: usize,
+                pub Size: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Graphics::SizeInt32,
+                ) -> windows_core::HRESULT,
                 pub Title: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
@@ -5079,10 +5487,25 @@ pub mod Microsoft {
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub Hide:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                Move: usize,
-                MoveAndResize: usize,
-                MoveAndResizeRelativeToDisplayArea: usize,
-                Resize: usize,
+                pub Move: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::PointInt32,
+                ) -> windows_core::HRESULT,
+                pub MoveAndResize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::RectInt32,
+                )
+                    -> windows_core::HRESULT,
+                pub MoveAndResizeRelativeToDisplayArea:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::Windows::Graphics::RectInt32,
+                        *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
+                pub Resize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::SizeInt32,
+                ) -> windows_core::HRESULT,
                 pub SetIcon: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
@@ -5101,7 +5524,11 @@ pub mod Microsoft {
                     bool,
                 )
                     -> windows_core::HRESULT,
-                Changed: usize,
+                pub Changed: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
                 pub RemoveChanged:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
                 Closing: usize,
@@ -5128,13 +5555,20 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IAppWindow2_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                ClientSize: usize,
+                pub ClientSize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Graphics::SizeInt32,
+                ) -> windows_core::HRESULT,
                 pub MoveInZOrderAtBottom:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub MoveInZOrderAtTop:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 MoveInZOrderBelow: usize,
-                ResizeClient: usize,
+                pub ResizeClient: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::SizeInt32,
+                )
+                    -> windows_core::HRESULT,
                 pub ShowOnceWithRequestedStartupState:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
             }
@@ -5195,6 +5629,70 @@ pub mod Microsoft {
                     super::IconId,
                 )
                     -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IAppWindowChangedEventArgs,
+                IAppWindowChangedEventArgs_Vtbl,
+                0x2182bc5d_fdac_5c3e_bf37_7d8d684e9d1d
+            );
+            impl windows_core::RuntimeType for IAppWindowChangedEventArgs {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IAppWindowChangedEventArgs_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub DidPositionChange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub DidPresenterChange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub DidSizeChange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub DidVisibilityChange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IAppWindowChangedEventArgs2,
+                IAppWindowChangedEventArgs2_Vtbl,
+                0xa773ab4c_a5ec_50e8_98ac_247fe6cd4227
+            );
+            impl windows_core::RuntimeType for IAppWindowChangedEventArgs2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IAppWindowChangedEventArgs2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub DidZOrderChange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub IsZOrderAtBottom: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub IsZOrderAtTop: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                ZOrderBelowWindowId: usize,
             }
             windows_core::imp::define_interface!(
                 IAppWindowStatics,
@@ -5391,7 +5889,12 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub ResetToDefault:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                SetDragRectangles: usize,
+                pub SetDragRectangles: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u32,
+                    *const super::super::super::Windows::Graphics::RectInt32,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IAppWindowTitleBar2,
@@ -5451,6 +5954,87 @@ pub mod Microsoft {
                     *mut bool,
                 )
                     -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDisplayArea,
+                IDisplayArea_Vtbl,
+                0x5c7e0537_b621_5579_bcae_a84aa8746167
+            );
+            impl windows_core::RuntimeType for IDisplayArea {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDisplayArea_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                DisplayId: usize,
+                pub IsPrimary: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
+                pub OuterBounds: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Graphics::RectInt32,
+                )
+                    -> windows_core::HRESULT,
+                pub WorkArea: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Graphics::RectInt32,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDisplayAreaStatics,
+                IDisplayAreaStatics_Vtbl,
+                0x02ab4926_211e_5d49_8e4b_2af193daed09
+            );
+            impl windows_core::RuntimeType for IDisplayAreaStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDisplayAreaStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Primary: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                CreateWatcher: usize,
+                pub FindAll: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                GetFromWindowId: usize,
+                pub GetFromPoint: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::PointInt32,
+                    DisplayAreaFallback,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub GetFromRect: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Graphics::RectInt32,
+                    DisplayAreaFallback,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDisplayAreaStatics2,
+                IDisplayAreaStatics2_Vtbl,
+                0x7207ad4b_890d_5dd7_bc18_78ffd9544d8f
+            );
+            impl windows_core::RuntimeType for IDisplayAreaStatics2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDisplayAreaStatics2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                GetFromDisplayId: usize,
             }
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -234276,6 +234860,55 @@ pub mod Windows {
         }
         unsafe impl Send for Uri {}
         unsafe impl Sync for Uri {}
+    }
+    pub mod Graphics {
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct PointInt32 {
+            pub X: i32,
+            pub Y: i32,
+        }
+        impl windows_core::TypeKind for PointInt32 {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for PointInt32 {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Graphics.PointInt32;i4;i4)",
+                );
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct RectInt32 {
+            pub X: i32,
+            pub Y: i32,
+            pub Width: i32,
+            pub Height: i32,
+        }
+        impl windows_core::TypeKind for RectInt32 {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for RectInt32 {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Graphics.RectInt32;i4;i4;i4;i4)",
+                );
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct SizeInt32 {
+            pub Width: i32,
+            pub Height: i32,
+        }
+        impl windows_core::TypeKind for SizeInt32 {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for SizeInt32 {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Graphics.SizeInt32;i4;i4)",
+                );
+        }
     }
     pub mod Storage {
         windows_core::imp::define_interface!(

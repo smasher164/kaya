@@ -28,25 +28,41 @@ fn dir(state_root: Option<&Path>) -> Option<PathBuf> {
         Some(root) => root.to_path_buf(),
         None => state_home()?,
     };
-    let id = crate::scene::declared_identity().ok()?.id;
+    let id = crate::scene::declared_id()?;
     Some(root.join("act2").join(id))
 }
 
+/// The state home, for the ONE other thing that lives beside the marker:
+/// the harness's scratch preference store and data directory
+/// (crates/kaya/src/prefs.rs, docs/tasks-s4-plan.md §4). Android answers
+/// `None` here and hands its root in at attach, which is why prefs asks
+/// `crate::android::state_root()` there.
+pub(crate) fn state_home() -> Option<PathBuf> {
+    state_home_impl()
+}
+
 #[cfg(target_os = "ios")]
-fn state_home() -> Option<PathBuf> {
+fn state_home_impl() -> Option<PathBuf> {
     // The one directory an iOS app may write and a runner may read back.
     Some(PathBuf::from(std::env::var_os("HOME")?).join("Documents"))
 }
 
 #[cfg(target_os = "windows")]
-fn state_home() -> Option<PathBuf> {
+fn state_home_impl() -> Option<PathBuf> {
+    // The lane's per-leg override first (docs/traps.md, 2026-09-09), the
+    // machine's own home otherwise.
+    if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
+        if !state.is_empty() {
+            return Some(PathBuf::from(state).join("kaya"));
+        }
+    }
     Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("kaya"))
 }
 
 /// macOS and Linux: the state home every lane already writes to
 /// (tools/lib/exclusive.py, tools/lib/flightrec.py).
 #[cfg(not(any(target_os = "ios", target_os = "windows", target_os = "android")))]
-fn state_home() -> Option<PathBuf> {
+fn state_home_impl() -> Option<PathBuf> {
     if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
         if !state.is_empty() {
             return Some(PathBuf::from(state).join("kaya"));
@@ -59,7 +75,7 @@ fn state_home() -> Option<PathBuf> {
 /// directory and only a Context knows it, so attach hands it in. Nothing
 /// else may guess.
 #[cfg(target_os = "android")]
-fn state_home() -> Option<PathBuf> {
+fn state_home_impl() -> Option<PathBuf> {
     use std::io::Write as _;
     let line = format!(
         "kaya: attach was handed no state root, so the second act has \
@@ -72,56 +88,122 @@ context.filesDir as their second argument \
     None
 }
 
+/// WHICH ACT THIS PROCESS IS (docs/tasks-s4-plan.md §4). ACT ONE is the
+/// process the RUNNER started, with the scene already in its environment;
+/// ACT TWO is the one the platform started through a door, whose ONLY
+/// signal is the marker act one left — the plain door adds nothing to the
+/// environment at all (P5). The difference decides one thing besides the
+/// scene: act one EMPTIES the harness's scratch stores and act two keeps
+/// them, which is what makes a relaunch scene measure persistence rather
+/// than measure the seed twice.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Act {
+    One,
+    Two,
+    NotSelftest,
+}
+
+pub(crate) fn act(selftest_in_env: bool, marker: bool) -> Act {
+    if selftest_in_env {
+        Act::One
+    } else if marker {
+        Act::Two
+    } else {
+        Act::NotSelftest
+    }
+}
+
 /// Called by the core's entry BEFORE the app thread is spawned. Act one
 /// learns where to leave its marker; act two adopts one and becomes a
 /// scene run with no environment of its own.
 pub(crate) fn arm(state_root: Option<&Path>) {
-    if std::env::var_os("KAYA_SELFTEST").is_some() {
-        if let Some(dir) = dir(state_root) {
-            // SAFETY: single-threaded — the app thread does not exist yet.
-            unsafe { std::env::set_var(ENV_DIR, dir) };
+    let selftest = std::env::var_os("KAYA_SELFTEST").is_some();
+    let dir = dir(state_root);
+    // NO ENVIRONMENT AT ALL is the shape of the PLAIN door
+    // (docs/tasks-s4-plan.md P5, `relaunch launch`): the runner starts the
+    // same bundle the way a user would, so the marker on disk is the only
+    // signal a second act exists. Apple's arm used to leave early unless
+    // KAYA_LAUNCH_NOTIFICATION was set, which the plain door never sets;
+    // the cost of reading is one cached manifest read and one stat.
+    let marker = dir.as_ref().map(|dir| dir.join(MARKER));
+    let adopted = if selftest {
+        None
+    } else {
+        marker.as_ref().and_then(|marker| {
+            let text = std::fs::read_to_string(marker).ok()?;
+            // CONSUMED ON READ, so a stale marker cannot serve a later run.
+            let _ = std::fs::remove_file(marker);
+            let (scene, steps) = text.split_once('\n')?;
+            let scene = scene.trim().to_owned();
+            if scene.is_empty() || steps.trim().is_empty() {
+                return None;
+            }
+            Some((scene, steps.to_owned()))
+        })
+    };
+    match act(selftest, adopted.is_some()) {
+        Act::NotSelftest => {}
+        Act::One => {
+            if let Some(dir) = dir {
+                // SAFETY: single-threaded — the app thread does not exist yet.
+                unsafe { std::env::set_var(ENV_DIR, dir) };
+            }
+            // The harness's stores are emptied here, before the app thread
+            // reads them (docs/tasks-s4-plan.md §4).
+            crate::prefs::clear_selftest_scratch();
+            crate::prefs::export_domain();
         }
-        return;
-    }
-    // On Apple the lane's door is the carve-out variable (R6a), so a
-    // shipped app leaves here without touching the disk at all; the other
-    // three are relaunched by the platform with nothing set, and this
-    // module is behind `feature = "harness"` there.
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    if std::env::var_os("KAYA_LAUNCH_NOTIFICATION").is_none() {
-        return;
-    }
-    let Some(dir) = dir(state_root) else { return };
-    let marker = dir.join(MARKER);
-    let Ok(text) = std::fs::read_to_string(&marker) else { return };
-    // CONSUMED ON READ, so a stale marker cannot serve a later run.
-    let _ = std::fs::remove_file(&marker);
-    let Some((scene, steps)) = text.split_once('\n') else { return };
-    let scene = scene.trim();
-    if scene.is_empty() || steps.trim().is_empty() {
-        return;
-    }
-    // THE LINE A RED ACT TWO NEEDS FIRST: what was adopted, and from
-    // where. One write, like gtk.rs's kaya_diag.
-    {
-        use std::io::Write as _;
-        let statements = steps
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .count();
-        let line = format!(
-            "KAYA_ACT2: the marker names scene {scene:?} with {statements} \
+        Act::Two => {
+            let (scene, steps) = adopted.expect("act() said a marker was adopted");
+            let dir = dir.expect("a marker was read out of it");
+            // THE LINE A RED ACT TWO NEEDS FIRST: what was adopted, and
+            // from where. One write, like gtk.rs's kaya_diag.
+            {
+                use std::io::Write as _;
+                let statements = steps
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .count();
+                let line = format!(
+                    "KAYA_ACT2: the marker names scene {scene:?} with {statements} \
 statement(s); consumed from {}\n",
-            marker.display()
-        );
-        let _ = std::io::stderr().write_all(line.as_bytes());
+                    dir.join(MARKER).display()
+                );
+                let _ = std::io::stderr().write_all(line.as_bytes());
+            }
+            // SAFETY: single-threaded — the app thread does not exist yet.
+            unsafe {
+                std::env::set_var("KAYA_SELFTEST", scene);
+                std::env::set_var("KAYA_SELFTEST_SCRIPT", steps);
+                std::env::set_var(ENV_DIR, &dir);
+                std::env::set_var(ENV_VERDICT, dir.join(VERDICT));
+            }
+            // ACT TWO KEEPS WHAT ACT ONE WROTE — the whole point of the
+            // relaunch scenes — so nothing is cleared here; the domain is
+            // exported for the interpreter about to read it back.
+            crate::prefs::export_domain();
+        }
     }
-    // SAFETY: single-threaded — the app thread does not exist yet.
-    unsafe {
-        std::env::set_var("KAYA_SELFTEST", scene);
-        std::env::set_var("KAYA_SELFTEST_SCRIPT", steps);
-        std::env::set_var(ENV_DIR, &dir);
-        std::env::set_var(ENV_VERDICT, dir.join(VERDICT));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn act_one_clears_and_act_two_keeps() {
+        // The runner started this one and put the scene in its
+        // environment: it EMPTIES the scratch stores.
+        assert_eq!(act(true, false), Act::One);
+        // A marker AND the variable is still act one — the variable is
+        // the runner's, and a marker left by a run that died before its
+        // second act must not turn the next act one into an act two.
+        assert_eq!(act(true, true), Act::One);
+        // The platform started this one through a door: no environment,
+        // a marker on disk, and everything act one wrote is KEPT.
+        assert_eq!(act(false, true), Act::Two);
+        // A shipped app.
+        assert_eq!(act(false, false), Act::NotSelftest);
     }
 }

@@ -1,0 +1,66 @@
+# WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md P7, §4). Act one writes
+# a task, a setting, an appearance and a window frame; `relaunch launch`
+# is the PLAIN door — the runner starts the same artifact the way a user
+# would, with nothing pending — and act two reads all four back, each
+# through the mechanism that owns it: the task out of the app's own SQLite
+# document under app_data_dir(), the setting and the appearance out of the
+# preferences store, the frame out of kaya's own window memory.
+#
+# ONE `relaunch` PER SCENE is the rule (docs/tasks-s9-plan.md R6a), so the
+# notification door's second act stays in tasks.steps and the plain door
+# gets this file. The guest is the same task manager (rusthost maps the
+# scene name to tasks::app), and the ids are tasks.steps'.
+#
+# The clock is fixed at Monday 2026-09-07 under the harness, so the seed
+# routes exactly as it does there: two tasks in Inbox.
+expect_title "tasks"
+expect_section "Inbox"
+expect label@inbox_count "2 in inbox"
+
+# THE DATA. A quick-added task is the app's own document's to keep: it
+# lands in Inbox as t10, the first key past the nine the seed minted.
+set_text entry@quick "Water the plants"
+click button@add
+expect label@inbox_count "3 in inbox"
+expect label@title[t10] "Water the plants"
+expect entry@quick ""
+
+# THE SETTINGS, through the Settings screen the View menu pushes. Week
+# starts Sunday is `week_start` = 1 in the preferences store; the
+# appearance choice is the app's, applied process-wide (S2b) and read back
+# from the PLATFORM, never from the prop.
+menu_activate "View>Settings"
+expect_entries 1
+expect label@settings[s] "Week starts Monday; badge shown; completed move to Logbook"
+choose select@week[s] 1
+expect label@settings[s] "Week starts Sunday; badge shown; completed move to Logbook"
+choose select@appearance[s] 2
+expect_appearance "dark"
+back
+expect_entries 0
+
+# THE FRAME. Desktops only — the phones have no window frame and their
+# legs drop this line and its assertion in act two.
+resize_window 900x620
+
+relaunch launch
+
+# ACT TWO runs in the process the runner started, which has none of act
+# one's memory: no scene in its environment, no model, no window.
+expect_title "tasks"
+expect_section "Inbox"
+expect label@inbox_count "3 in inbox"
+expect label@title[t10] "Water the plants"
+expect_appearance "dark"
+menu_activate "View>Settings"
+expect_entries 1
+expect label@settings[s] "Week starts Sunday; badge shown; completed move to Logbook"
+back
+expect_entries 0
+# THE PLATFORM'S OWN STORE, re-read (§4): the suite re-opened on Apple,
+# the preferences file re-read elsewhere — never kaya's memory of its own
+# write. A setting nobody changed was never written, which is what the
+# absent one says.
+expect_pref week_start "1"
+expect_no_pref hide_badge
+expect_window_size 900x620

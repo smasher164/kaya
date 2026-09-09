@@ -143,6 +143,18 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("assetBlob", asset_blob),
         ("assetRelease", asset_release),
         ("assetWhyNot", asset_why_not),
+        // The preference store and the app data directory
+        // (docs/tasks-s4-plan.md §4), the pinned floor's ten.
+        ("appDataDir", app_data_dir),
+        ("prefGetString", pref_get_string),
+        ("prefGetI64", pref_get_i64),
+        ("prefGetF64", pref_get_f64),
+        ("prefGetBool", pref_get_bool),
+        ("prefSetString", pref_set_string),
+        ("prefSetI64", pref_set_i64),
+        ("prefSetF64", pref_set_f64),
+        ("prefSetBool", pref_set_bool),
+        ("prefRemove", pref_remove),
         ("openPicked", open_picked),
         ("pickedRead", picked_read),
         ("pickedWrite", picked_write),
@@ -231,6 +243,22 @@ unsafe fn undefined(env: Env) -> Value {
     let mut out: Value = ptr::null_mut();
     unsafe { (api().napi_get_undefined)(env, &mut out) };
     out
+}
+
+unsafe fn boolean(env: Env, b: bool) -> Value {
+    let mut out: Value = ptr::null_mut();
+    unsafe { (api().napi_get_boolean)(env, b, &mut out) };
+    out
+}
+
+/// `u64_arg`'s signed twin: a pref value may be negative, and i64 and f64
+/// both ride as JS numbers.
+unsafe fn f64_arg(env: Env, v: Value, what: &str) -> Result<f64, String> {
+    let mut d = 0.0f64;
+    if unsafe { (api().napi_get_value_double)(env, v, &mut d) } != NAPI_OK {
+        return Err(format!("kaya: {what} takes a number"));
+    }
+    Ok(d)
 }
 
 unsafe fn null(env: Env) -> Value {
@@ -386,6 +414,116 @@ unsafe extern "C" fn asset_why_not(env: Env, info: CbInfo) -> Value {
     let written = unsafe { capi::kaya_asset_why_not(name.as_ptr(), name.len(), buf.as_mut_ptr(), needed) };
     buf.truncate(written.min(needed));
     unsafe { string(env, &buf) }
+}
+
+// THE PREFERENCE STORE AND THE APP DATA DIRECTORY over the pinned floor
+// (docs/tasks-s4-plan.md §4): mechanical wrappers, `asset_why_not`'s
+// size-then-read shape wherever bytes come back.
+
+/// "" is the Android before-attach answer, which the binding turns into
+/// null.
+unsafe extern "C" fn app_data_dir(env: Env, _info: CbInfo) -> Value {
+    let needed = unsafe { capi::kaya_app_data_dir(ptr::null_mut(), 0) };
+    if needed == 0 {
+        return unsafe { string(env, b"") };
+    }
+    let mut buf = vec![0u8; needed];
+    let written = unsafe { capi::kaya_app_data_dir(buf.as_mut_ptr(), needed) };
+    buf.truncate(written.min(needed));
+    unsafe { string(env, &buf) }
+}
+
+unsafe extern "C" fn pref_get_string(env: Env, info: CbInfo) -> Value {
+    let [k] = unsafe { args::<1>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefGetString") });
+    let mut len = 0usize;
+    if unsafe {
+        capi::kaya_pref_get_string(key.as_ptr(), key.len(), ptr::null_mut(), 0, &mut len)
+    } == 0
+    {
+        return unsafe { undefined(env) };
+    }
+    let mut buf = vec![0u8; len];
+    let mut got = 0usize;
+    unsafe {
+        capi::kaya_pref_get_string(key.as_ptr(), key.len(), buf.as_mut_ptr(), len, &mut got)
+    };
+    buf.truncate(got.min(len));
+    unsafe { string(env, &buf) }
+}
+
+unsafe extern "C" fn pref_get_i64(env: Env, info: CbInfo) -> Value {
+    let [k] = unsafe { args::<1>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefGetI64") });
+    let mut out: i64 = 0;
+    if unsafe { capi::kaya_pref_get_i64(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return unsafe { undefined(env) };
+    }
+    unsafe { number(env, out as f64) }
+}
+
+unsafe extern "C" fn pref_get_f64(env: Env, info: CbInfo) -> Value {
+    let [k] = unsafe { args::<1>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefGetF64") });
+    let mut out: f64 = 0.0;
+    if unsafe { capi::kaya_pref_get_f64(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return unsafe { undefined(env) };
+    }
+    unsafe { number(env, out) }
+}
+
+unsafe extern "C" fn pref_get_bool(env: Env, info: CbInfo) -> Value {
+    let [k] = unsafe { args::<1>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefGetBool") });
+    let mut out: u8 = 0;
+    if unsafe { capi::kaya_pref_get_bool(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return unsafe { undefined(env) };
+    }
+    unsafe { boolean(env, out != 0) }
+}
+
+unsafe extern "C" fn pref_set_string(env: Env, info: CbInfo) -> Value {
+    let [k, v] = unsafe { args::<2>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefSetString key") });
+    let value = try_or_throw!(env, unsafe { string_arg(env, v, "prefSetString value") });
+    unsafe {
+        capi::kaya_pref_set_string(key.as_ptr(), key.len(), value.as_ptr(), value.len())
+    };
+    unsafe { undefined(env) }
+}
+
+unsafe extern "C" fn pref_set_i64(env: Env, info: CbInfo) -> Value {
+    let [k, v] = unsafe { args::<2>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefSetI64 key") });
+    let value = try_or_throw!(env, unsafe { f64_arg(env, v, "prefSetI64 value") });
+    unsafe { capi::kaya_pref_set_i64(key.as_ptr(), key.len(), value as i64) };
+    unsafe { undefined(env) }
+}
+
+unsafe extern "C" fn pref_set_f64(env: Env, info: CbInfo) -> Value {
+    let [k, v] = unsafe { args::<2>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefSetF64 key") });
+    let value = try_or_throw!(env, unsafe { f64_arg(env, v, "prefSetF64 value") });
+    unsafe { capi::kaya_pref_set_f64(key.as_ptr(), key.len(), value) };
+    unsafe { undefined(env) }
+}
+
+/// The bool rides as 0/1 rather than a JS boolean: this file resolves
+/// napi_get_boolean but not napi_get_value_bool, and the binding
+/// (runtime.ts) is the one place that converts.
+unsafe extern "C" fn pref_set_bool(env: Env, info: CbInfo) -> Value {
+    let [k, v] = unsafe { args::<2>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefSetBool key") });
+    let value = try_or_throw!(env, unsafe { u64_arg(env, v, "prefSetBool value") });
+    unsafe { capi::kaya_pref_set_bool(key.as_ptr(), key.len(), u8::from(value != 0)) };
+    unsafe { undefined(env) }
+}
+
+unsafe extern "C" fn pref_remove(env: Env, info: CbInfo) -> Value {
+    let [k] = unsafe { args::<1>(env, info) };
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "prefRemove") });
+    unsafe { capi::kaya_pref_remove(key.as_ptr(), key.len()) };
+    unsafe { undefined(env) }
 }
 
 /// `{raw, seekable}`: raw is a descriptor on unix and a HANDLE on

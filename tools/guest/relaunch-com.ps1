@@ -18,6 +18,7 @@
 # non-ASCII byte inside a string closes it (docs/traps.md; tools/check-steps.py
 # refuses one).
 param(
+    [Parameter(Mandatory = $true)][string]$Leg,
     [Parameter(Mandatory = $true)][string]$Clsid,
     [Parameter(Mandatory = $true)][string]$Aumid,
     [Parameter(Mandatory = $true)][string]$Key,
@@ -32,14 +33,37 @@ $ErrorActionPreference = 'Continue'
 # .cmd's %1..%9 and `kaya=1` arrives as two tokens (measured 2026-09-08).
 $Launch = "$Key=$Notification"
 
+# THE LEG'S OWN STATE HOME, which is where act one left its marker: the
+# harness's scratch is ONE tree per app and this lane pools many legs of one
+# app, so every launcher sets `XDG_STATE_HOME=C:\kaya\legs\<leg>\state`
+# and clears it at its own start. Handed to the process COM starts through
+# THE USER ENVIRONMENT, not through this process's: a LocalServer32 is
+# started by the COM service and takes the session's environment block, so a
+# `$env:` assignment here would not cross. Every relaunch leg runs ALONE
+# (tools/check-steps.py's own clause), which is what makes a user-scoped
+# variable safe to lend for the length of one activation; the finally below
+# puts back whatever was there.
+$state = "C:\kaya\legs\$Leg\state"
+$env:XDG_STATE_HOME = $state
+$hadState = [System.Environment]::GetEnvironmentVariable('XDG_STATE_HOME', 'User')
+[System.Environment]::SetEnvironmentVariable('XDG_STATE_HOME', $state, 'User')
+Write-Output "relaunch-com: lent XDG_STATE_HOME=$state to the user environment (was $(if ($null -eq $hadState) { 'unset' } else { $hadState }))"
+
+# EVERY EXIT PUTS THE USER ENVIRONMENT BACK, including the three that
+# leave through `exit` below (PowerShell runs a finally for those too).
+try {
+
 # THE ACT-TWO LAYOUT, whose one definition is crates/kaya/src/act2.rs
-# (`<state>/act2/<id>`, `<state>` = %LOCALAPPDATA%\kaya here). The runner
+# (`<state>/act2/<id>`, `<state>` = $XDG_STATE_HOME\kaya here). The runner
 # cannot read the started process's KAYA_ACT2_VERDICT, so the path is spelled
 # here and nowhere else on this side.
-$candidates = @((Join-Path $env:LOCALAPPDATA "kaya\act2\$Id\act2.verdict"))
+$candidates = @((Join-Path $state "kaya\act2\$Id\act2.verdict"))
+# AND THE PATHS A PROCESS THAT NEVER SAW THE VARIABLE WOULD USE, polled
+# beside it and NAMED when one answers: a reading is never a guess, and this
+# is how the door says out loud that the variable did not cross.
+$candidates += (Join-Path $env:LOCALAPPDATA "kaya\act2\$Id\act2.verdict")
 if ($Family -ne '') {
-    # A packaged process may see a redirected LOCALAPPDATA; both are polled and
-    # the one that answered is named, so a reading is never a guess.
+    # A packaged process may see a redirected LOCALAPPDATA.
     $candidates += (Join-Path $env:LOCALAPPDATA "Packages\$Family\LocalCache\Local\kaya\act2\$Id\act2.verdict")
 }
 foreach ($c in $candidates) {
@@ -104,6 +128,9 @@ while ((Get-Date) -lt $until) {
             $line = (Get-Content -LiteralPath $c -Encoding UTF8 -ErrorAction SilentlyContinue) -join ' '
             if ($line) {
                 $waited = [int]((Get-Date) - $t0).TotalMilliseconds
+                if ($c -notlike "$state*") {
+                    Write-Output "relaunch-com: the started process did NOT read XDG_STATE_HOME -- it answered from $c, outside the leg's own state home $state"
+                }
                 Write-Output "relaunch-com: act two answered in ${waited}ms from $c"
                 Write-Output "ACT2: $line"
                 Write-Output 'RELAUNCHDONE'
@@ -129,3 +156,11 @@ if ($live.Count -eq 0) {
 }
 Write-Output 'RELAUNCHDONE'
 exit 1
+
+} finally {
+    if ($null -eq $hadState) {
+        [System.Environment]::SetEnvironmentVariable('XDG_STATE_HOME', $null, 'User')
+    } else {
+        [System.Environment]::SetEnvironmentVariable('XDG_STATE_HOME', $hadState, 'User')
+    }
+}

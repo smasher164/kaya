@@ -93,5 +93,35 @@ public final class KayaRing {
      */
     public static native byte[] assetMissSentence(byte[] name);
 
+    /**
+     * The app's own writable directory as UTF-8 bytes; EMPTY means none
+     * yet (docs/tasks-s4-plan.md §4).
+     */
+    public static native byte[] appDataDir();
+
+    /**
+     * The typed preferences store (docs/tasks-s4-plan.md P2/P3). ABSENT
+     * IS A NULL ARRAY and present a one-element one, so a key holding
+     * another type reads exactly like a key that is not there — which
+     * is the store's own semantics.
+     */
+    public static native byte[] prefGetString(byte[] key);
+
+    public static native long[] prefGetI64(byte[] key);
+
+    public static native double[] prefGetF64(byte[] key);
+
+    public static native boolean[] prefGetBool(byte[] key);
+
+    public static native void prefSetString(byte[] key, byte[] value);
+
+    public static native void prefSetI64(byte[] key, long value);
+
+    public static native void prefSetF64(byte[] key, double value);
+
+    public static native void prefSetBool(byte[] key, boolean value);
+
+    public static native void prefRemove(byte[] key);
+
     private KayaRing() {}
 }

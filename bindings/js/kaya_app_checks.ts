@@ -12,6 +12,15 @@ import type * as K from "./kaya/index.ts";
 import type * as W from "./kaya/wire.ts";
 
 if (isMainThread) {
+  // SCRATCH BEFORE THE WORKER EXISTS. The prefs block below writes into
+  // the platform's own store, so `KAYA_SELFTEST` must move the domain to
+  // `<id>.selftest` before anything asks. IT HAS TO BE SET HERE: a
+  // worker's `process.env` is a JS-level COPY (node:worker_threads),
+  // while the main thread's assignment reaches the real environ, which
+  // is the one the core reads through std::env (measured 2026-09-09 —
+  // set inside the worker, the round trips went to the DEVELOPER'S own
+  // domain and only the scratch assertion noticed).
+  process.env["KAYA_SELFTEST"] = "kaya_app_checks";
   const worker = new Worker(new URL(import.meta.url), { workerData: { kayaAppThread: true } });
   worker.on("exit", (code) => process.exit(code));
   worker.on("error", (err) => {
@@ -838,6 +847,118 @@ if (isMainThread) {
   (app as unknown as { _notificationActivation: unknown })._notificationActivation = undefined;
   const droppedSaid = captureStderr(() => { fire(wire.parse_occurrence(notificationBytes(41, 1))); });
   check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
+
+  // THE PREFERENCES STORE AND THE DATA DIRECTORY (docs/tasks-s4-plan.md
+  // P1/P2/P3), through the REAL FLOOR: everything above queues records
+  // and never enters the core, but a pref call reaches the platform's own
+  // store on the spot, so these are the one runtime half of this file.
+  //
+  // `KAYA_SELFTEST` was set on the MAIN thread before this worker was
+  // spawned (see the branch above), so the domain is `<id>.selftest` and
+  // the data directory `<state>/selftest/<id>/data`.
+  const dataDir = kaya.appDataDir();
+  check("appDataDir answers a real directory", dataDir.length > 0);
+  check("and under the harness it is the SCRATCH one, never the app's", dataDir.includes("selftest"));
+
+  // NO RUNTIME CHECK OF appDataDir's REFUSAL HERE, and the reason is the
+  // language: the floor answers "" only on Android before attach, so the
+  // arm has to be reached by making the shim answer absent — and an ESM
+  // module namespace is READ-ONLY, so `runtime.appDataDir` cannot be
+  // replaced the way kaya_app_checks.py replaces its python twin
+  // (measured 2026-09-09: TypeError, Cannot assign to read only property).
+  // The sentence itself is held in all nine by
+  // tools/check-sugar-surface.py's flattened comparison, and the arm is
+  // exercised at runtime in the python checks.
+
+  const prefs = kaya.prefs();
+  prefs.setString("s4_str", "Sunday");
+  prefs.setI64("s4_int", -7);
+  prefs.setF64("s4_float", 1.5);
+  prefs.setBool("s4_bool", true);
+  check("a string round-trips through the platform's own store", prefs.getString("s4_str", "?") === "Sunday");
+  check("an i64 round-trips, sign and all", prefs.getI64("s4_int", 0) === -7);
+  check("an f64 round-trips", prefs.getF64("s4_float", 0) === 1.5);
+  check("a bool round-trips", prefs.getBool("s4_bool", false) === true);
+
+  // THE SIZING CALL IS TWO CALLS, so a value longer than any fixed buffer
+  // comes back WHOLE — the assetWhyNot lesson, one surface over.
+  const longValue = "x".repeat(5000);
+  prefs.setString("s4_long", longValue);
+  check("a 5000-character value comes back whole (the two-call read)", prefs.getString("s4_long", "") === longValue);
+  // BYTES, NOT A C STRING: key and value carry their lengths, so a
+  // multi-byte character survives.
+  prefs.setString("s4_utf8", "Sonnabend — ✓");
+  check("a non-ASCII value round-trips (length-carried, not NUL-terminated)", prefs.getString("s4_utf8", "") === "Sonnabend — ✓");
+  prefs.setString("s4_empty", "");
+  check("an EMPTY string is a value, not an absence", prefs.getString("s4_empty", "fallback") === "");
+
+  // A TYPED GET ON ANOTHER TYPE ANSWERS ABSENT (the semantics, §4):
+  // UserDefaults would coerce and SharedPreferences would throw, and
+  // neither is what kaya promises.
+  check("getI64 on a string key answers the DEFAULT", prefs.getI64("s4_str", 42) === 42);
+  check("getString on an i64 key answers the DEFAULT", prefs.getString("s4_int", "fallback") === "fallback");
+  check("getBool on an f64 key answers the DEFAULT", prefs.getBool("s4_float", false) === false);
+  check("getF64 on a bool key answers the DEFAULT", prefs.getF64("s4_bool", 9.5) === 9.5);
+  check("an absent key answers the DEFAULT", prefs.getString("s4_never_written", "fallback") === "fallback");
+
+  prefs.remove("s4_int");
+  check("remove takes the key back out", prefs.getI64("s4_int", 42) === 42);
+
+  // THE RESERVED PREFIX (P4). Window memory lives under `kaya.`, so a
+  // guest WRITE to one is refused BINDING-SIDE, before the floor call,
+  // with the sentence tools/check-sugar-surface.py freezes across all
+  // nine. THE SENTENCE IS COMPARED WHOLE, not matched loosely: a
+  // near-miss is the failure this exists to catch.
+  const reservedSaid: string[] = [];
+  for (const [what, write] of [
+    ["setString", () => prefs.setString("kaya.window.0.frame", "x")],
+    ["setI64", () => prefs.setI64("kaya.window.0.frame", 1)],
+    ["setF64", () => prefs.setF64("kaya.window.0.frame", 1)],
+    ["setBool", () => prefs.setBool("kaya.window.0.frame", true)],
+    ["remove", () => prefs.remove("kaya.window.0.frame")],
+  ] as Array<[string, () => void]>) {
+    try {
+      write();
+      reservedSaid.push(`${what} accepted a reserved key`);
+    } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      if (said !== `kaya: preference key "kaya.window.0.frame" is reserved (the kaya. prefix is kaya's own)`) {
+        reservedSaid.push(`${what} said ${said}`);
+      }
+    }
+  }
+  check("every write to a reserved key is refused, by the frozen sentence", reservedSaid.length === 0);
+
+  // A READ of a reserved key is NOT refused: P4 reserves the prefix
+  // against a guest WRITE, and kaya's own frame is no secret.
+  check("a READ of a reserved key is allowed", !throws(() => { prefs.getString("kaya.window.0.frame", "unset"); }, /reserved/));
+
+  const emptySaid: string[] = [];
+  for (const [what, call] of [
+    ["getString", () => { prefs.getString("", "d"); }],
+    ["setI64", () => prefs.setI64("", 1)],
+    ["remove", () => prefs.remove("")],
+  ] as Array<[string, () => void]>) {
+    try {
+      call();
+      emptySaid.push(`${what} accepted an empty key`);
+    } catch (e) {
+      const said = e instanceof Error ? e.message : String(e);
+      if (said !== "kaya: a preference key must not be empty") emptySaid.push(`${what} said ${said}`);
+    }
+  }
+  check("an empty key is refused everywhere, by one sentence", emptySaid.length === 0);
+
+  // LEAVE THE SCRATCH DOMAIN AS IT WAS FOUND: these run on a developer's
+  // machine as often as on a lane.
+  for (const key of ["s4_str", "s4_int", "s4_float", "s4_bool", "s4_long", "s4_utf8", "s4_empty"]) prefs.remove(key);
+  check(
+    "the checks leave nothing of their own behind",
+    ["s4_str", "s4_long", "s4_utf8", "s4_empty"].every((k) => prefs.getString(k, "<gone>") === "<gone>") &&
+      prefs.getI64("s4_int", -1) === -1 &&
+      prefs.getF64("s4_float", -1) === -1 &&
+      prefs.getBool("s4_bool", false) === false,
+  );
 
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);

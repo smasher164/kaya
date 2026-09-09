@@ -25,6 +25,10 @@ use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandl
 // the `TitleBar` control sizes its own band and leaves the system's
 // caption buttons where they were (microsoft-ui-xaml#9863).
 use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
+use bindings::Microsoft::UI::Windowing::{
+    AppWindow, AppWindowChangedEventArgs, DisplayArea, DisplayAreaFallback,
+};
+use bindings::Windows::Graphics::{PointInt32, RectInt32, SizeInt32};
 use bindings::Microsoft::UI::Xaml::Controls::{
     AppBarButton, Button, CalendarDatePicker, CalendarDatePickerDateChangedEventArgs,
     CheckBox, ColumnDefinition, ColumnDefinitionCollection, ComboBox,
@@ -524,6 +528,15 @@ struct CoreState {
     aux_windows: HashMap<u64, Window>,
     /// veto_close per window id (primary included; default false).
     window_veto: HashMap<u64, bool>,
+    remember_frame: HashMap<u64, bool>,
+    /// Windows that opened at a remembered frame: memory wins over the
+    /// width/height a launch DECLARES and loses to the first runtime
+    /// request (docs/tasks-s4-plan.md P4). Told apart BY VALUE, never by
+    /// batch — see `frame_memory_yields`.
+    frame_from_memory: std::collections::BTreeSet<u64>,
+    /// The first width and height each such window was told, which is that
+    /// declaration.
+    declared_size: HashMap<u64, (Option<f64>, Option<f64>)>,
     /// App-initiated teardown bypasses the chrome-close grammar:
     /// Window.Close() rides WM_CLOSE, and without this a veto window would
     /// swallow its own confirmed destruction.
@@ -12339,14 +12352,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.window_dirty.insert(window.0, *on);
                     refresh_caption(core, window.0)?;
                 }
+                // A REMEMBERED FRAME OUTRANKS THE LAUNCH DECLARATION and
+                // loses to the first runtime request (frame_memory_yields).
                 (WindowProp::Width, Value::F64(v)) => {
-                    resize_request(&target, Some(*v), None)?
+                    if frame_memory_yields(
+                        &mut core.frame_from_memory,
+                        &mut core.declared_size,
+                        window.0,
+                        Some(*v),
+                        None,
+                    ) {
+                        resize_request(&target, Some(*v), None)?;
+                    }
                 }
                 (WindowProp::Height, Value::F64(v)) => {
-                    resize_request(&target, None, Some(*v))?
+                    if frame_memory_yields(
+                        &mut core.frame_from_memory,
+                        &mut core.declared_size,
+                        window.0,
+                        None,
+                        Some(*v),
+                    ) {
+                        resize_request(&target, None, Some(*v))?;
+                    }
                 }
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
+                }
+                // Opting out FORGETS: a window that keeps a frame from
+                // before the prop would still open remembered.
+                (WindowProp::RememberFrame, Value::Bool(on)) => {
+                    core.remember_frame.insert(window.0, *on);
+                    if !*on {
+                        core.frame_from_memory.remove(&window.0);
+                        crate::prefs::remove(&frame_key(window.0));
+                    }
                 }
                 (WindowProp::Panes, Value::I64(n)) => {
                     core.panes.insert(window.0, *n);
@@ -12367,6 +12407,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // Materializes hidden (never Activated until a mount
             // presents it); the close grammar is installed at birth.
             let aux = Window::new()?;
+            // The frame a previous process left, BEFORE the mount presents
+            // this window (docs/tasks-s4-plan.md P4).
+            if restore_frame(&aux, window.0).is_some() {
+                core.frame_from_memory.insert(window.0);
+            }
+            watch_frame(&aux, window.0)?;
             subclass(&aux, window.0)?;
             core.aux_windows.insert(window.0, aux);
             // A WINDOW BORN AFTER THE DECLARATION still belongs to the
@@ -15009,6 +15055,260 @@ fn resize_request(
     Ok(())
 }
 
+// -------------------------------------------------- window memory (P4) --
+// docs/tasks-s4-plan.md P4. The unit is PHYSICAL PIXELS and the rectangle is
+// the OUTER frame, because that is what `AppWindow.Position`/`Size` and
+// `MoveAndResize` speak and what a user actually dragged; the client area
+// comes back with it, since the chrome delta is the same process to process.
+
+/// `kaya.window.<id>.frame`, the reserved key window memory rides.
+fn frame_key(window: u64) -> String {
+    format!("kaya.window.{window}.frame")
+}
+
+/// What this backend writes: four words, `<x> <y> <w> <h>`.
+fn frame_line(x: i32, y: i32, width: i32, height: i32) -> String {
+    format!("{x} {y} {width} {height}")
+}
+
+/// The stored frame, whoever wrote it: a backend with no window position
+/// writes `-` for the first two words (GTK4 has none at all), and this
+/// restores that line's SIZE with no move.
+fn parse_frame(raw: &str) -> Option<(Option<(i32, i32)>, i32, i32)> {
+    let mut words = raw.split_whitespace();
+    let (rx, ry) = (words.next()?, words.next()?);
+    let width: i32 = words.next()?.parse().ok()?;
+    let height: i32 = words.next()?.parse().ok()?;
+    if words.next().is_some() || width <= 0 || height <= 0 {
+        return None;
+    }
+    let at = match (rx, ry) {
+        ("-", "-") => None,
+        _ => Some((rx.parse().ok()?, ry.parse().ok()?)),
+    };
+    Some((at, width, height))
+}
+
+/// A frame saved on a bigger screen, or on a screen that has since left,
+/// must not open where nobody can reach it (docs/tasks-s4-plan.md §2,
+/// unknown 3). Pure arithmetic over the work area the caller resolved:
+/// the size shrinks to fit, then the origin is pushed inside. A work area
+/// of no extent means no display answered, and an unclamped restore beats
+/// a guessed one.
+fn clamp_frame(
+    frame: (i32, i32, i32, i32),
+    work: (i32, i32, i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = frame;
+    let (wx, wy, ww, wh) = work;
+    if ww <= 0 || wh <= 0 {
+        return frame;
+    }
+    let w = w.min(ww);
+    let h = h.min(wh);
+    let x = x.clamp(wx, wx + ww - w);
+    let y = y.clamp(wy, wy + wh - h);
+    (x, y, w, h)
+}
+
+/// The work area of the display that still holds this rectangle —
+/// `DisplayArea.GetFromRect` with the NEAREST fallback, and the primary
+/// when even that answers nothing. Never a guess: an error is `None` and
+/// the caller restores unclamped.
+fn work_area_for(x: i32, y: i32, width: i32, height: i32) -> Option<(i32, i32, i32, i32)> {
+    let rect = RectInt32 { X: x, Y: y, Width: width, Height: height };
+    let area = DisplayArea::GetFromRect(rect, DisplayAreaFallback::Nearest)
+        .or_else(|_| DisplayArea::Primary())
+        .ok()?;
+    let work = area.WorkArea().ok()?;
+    Some((work.X, work.Y, work.Width, work.Height))
+}
+
+/// The frame this window opens at when a previous process left one.
+fn remembered_frame(window: u64) -> Option<RectInt32> {
+    let crate::prefs::PrefValue::Str(raw) = crate::prefs::get(&frame_key(window))? else {
+        return None;
+    };
+    let (at, width, height) = parse_frame(&raw)?;
+    let (x, y) = at?;
+    let work = work_area_for(x, y, width, height).unwrap_or((0, 0, 0, 0));
+    let (x, y, width, height) = clamp_frame((x, y, width, height), work);
+    Some(RectInt32 { X: x, Y: y, Width: width, Height: height })
+}
+
+/// WHETHER A DECLARED SIZE MAY TAKE A WINDOW THAT OPENED FROM MEMORY.
+/// A remembered frame beats the size the app declares AT LAUNCH and loses
+/// to the first runtime request, and the two are told apart BY VALUE, never
+/// by batch: the width/height props can land BEFORE or AFTER the window
+/// materializes — act one registered them after its batch and act two
+/// before it on the mac arm, and the declaration then clobbered the restore
+/// (`window 960x640, wanted 900x620`, measured 2026-09-09) — so a
+/// batch-scoped veto restores on one ordering and is overwritten on the
+/// other. The FIRST value each window is told is its declaration; the first
+/// one that DIFFERS is a runtime request, takes the window, and ends the
+/// memory's claim.
+fn frame_memory_yields(
+    from_memory: &mut std::collections::BTreeSet<u64>,
+    sizes: &mut HashMap<u64, (Option<f64>, Option<f64>)>,
+    window: u64,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> bool {
+    if !from_memory.contains(&window) {
+        return true;
+    }
+    let declared = sizes.entry(window).or_default();
+    let mut differs = false;
+    if let Some(w) = width {
+        match declared.0 {
+            None => declared.0 = Some(w),
+            Some(first) => differs |= first != w,
+        }
+    }
+    if let Some(h) = height {
+        match declared.1 {
+            None => declared.1 = Some(h),
+            Some(first) => differs |= first != h,
+        }
+    }
+    if differs {
+        from_memory.remove(&window);
+    }
+    differs
+}
+
+/// The opt-out (P4): remembered unless the app said no. Absent means yes —
+/// a window nobody wrote the prop for is remembered.
+fn frame_remembered(remember: &HashMap<u64, bool>, window: u64) -> bool {
+    remember.get(&window) != Some(&false)
+}
+
+/// The restore, at creation and BEFORE the window is ever activated: a
+/// MoveAndResize after the first present is a window that jumped.
+fn restore_frame(window: &Window, id: u64) -> Option<RectInt32> {
+    let frame = remembered_frame(id)?;
+    let app_window = window.AppWindow().ok()?;
+    app_window.MoveAndResize(frame).ok()?;
+    Some(frame)
+}
+
+/// The line a save would write, or None when this window must not be
+/// saved: the app's opt-out (P4), and a frame the platform has not sized
+/// yet. PURE, because it is the decision the save turns on and the guest
+/// that runs winui::tests has no window to ask (tools/deploy-win.py's unit
+/// phase).
+fn frame_to_save(
+    remember: &HashMap<u64, bool>,
+    window: u64,
+    at: PointInt32,
+    size: SizeInt32,
+) -> Option<String> {
+    if !frame_remembered(remember, window) || size.Width <= 0 || size.Height <= 0 {
+        return None;
+    }
+    Some(frame_line(at.X, at.Y, size.Width, size.Height))
+}
+
+/// One frame write, gated on the opt-out and on the window still being
+/// here. DEFERRED rather than skipped when CORE is borrowed: this runs off
+/// an AppWindow.Changed that fires INSIDE apply's own resize_request.
+fn save_frame_now(window: u64) {
+    let borrowed = CORE.with(|slot| {
+        let Ok(core) = slot.try_borrow() else { return true };
+        let Some(core) = core.as_ref() else { return false };
+        let Ok(target) = winui_window(core, window) else {
+            return false;
+        };
+        let Ok(app_window) = target.AppWindow() else { return false };
+        let (Ok(at), Ok(size)) = (app_window.Position(), app_window.Size()) else {
+            return false;
+        };
+        if let Some(line) = frame_to_save(&core.remember_frame, window, at, size) {
+            let key = frame_key(window);
+            // A frame that did not move is not a write: the pump raises
+            // Changed for a presenter, a z-order and a visibility change too.
+            if crate::prefs::get(&key) != Some(crate::prefs::PrefValue::Str(line.clone())) {
+                crate::prefs::set(&key, crate::prefs::PrefValue::Str(line));
+            }
+        }
+        false
+    });
+    if borrowed && let Some(dispatcher) = DISPATCHER.get() {
+        let handler = DispatcherQueueHandler::new(move || {
+            save_frame_now(window);
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
+thread_local! {
+    /// The windows whose frame moved since the last idle write, and whether
+    /// a write is already queued behind the pump.
+    static FRAME_DUE: RefCell<std::collections::BTreeSet<u64>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
+    static FRAME_QUEUED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The frame save, coalesced onto the PUMP ITSELF and never onto a clock.
+/// A time-based debounce loses the last write: the declaration's size fires
+/// the first change and arms the timer, the scene's own `resize_window`
+/// lands inside that window, and the process leaves through `_exit`
+/// (lib.rs's exit_hard — no atexit, no destructor, no hook at the verdict),
+/// so the trailing write never runs and the store keeps the DECLARED size
+/// (measured on the linux arm 2026-09-09; P3 requires a set to be durable
+/// when it returns, and a real app has the same hole on a crash). One write
+/// per window per pump turn.
+///
+/// AT THE POOL'S ORDINARY PRIORITY, which is what makes the last value
+/// safe. `DispatcherQueuePriority::Low` runs only when nothing else is
+/// pending, and the thing pending is the very hop the argument leans on:
+/// with Low, this same scene wrote the DECLARED frame (a second of steps
+/// followed it) and LOST the resize 24ms before `relaunch`, act two opening
+/// at 960x670 where the scene wanted 900x620 (measured on the VM
+/// 2026-09-09, docs/tasks-s4-plan.md P4). The queue is FIFO inside one
+/// priority and every harness step is a Normal-priority hop, so a write
+/// enqueued from the resize runs BEFORE the step that would exit.
+fn schedule_frame_save(window: u64) {
+    FRAME_DUE.with_borrow_mut(|due| due.insert(window));
+    if FRAME_QUEUED.with(|q| q.replace(true)) {
+        return;
+    }
+    let Some(dispatcher) = DISPATCHER.get() else {
+        FRAME_QUEUED.with(|q| q.set(false));
+        return;
+    };
+    let handler = DispatcherQueueHandler::new(|| {
+        FRAME_QUEUED.with(|q| q.set(false));
+        let due = FRAME_DUE.with_borrow_mut(std::mem::take);
+        for window in due {
+            save_frame_now(window);
+        }
+        Ok(())
+    });
+    if dispatcher.0.TryEnqueue(&handler).is_err() {
+        FRAME_QUEUED.with(|q| q.set(false));
+    }
+}
+
+/// The platform's own "this window moved or resized" signal. The PRESENTER,
+/// visibility and z-order changes ride the same event and are not a frame,
+/// so the two flags are read rather than assumed.
+fn watch_frame(window: &Window, id: u64) -> windows_core::Result<()> {
+    let changed = TypedEventHandler::<AppWindow, AppWindowChangedEventArgs>::new(
+        move |_, args| {
+            if let Some(args) = args.as_ref()
+                && (args.DidSizeChange()? || args.DidPositionChange()?)
+            {
+                schedule_frame_save(id);
+            }
+            Ok(())
+        },
+    );
+    window.AppWindow()?.Changed(&changed)?;
+    Ok(())
+}
+
 fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
     let window = Window::new()?;
     // Recording mode tiles parallel legs so per-window captures never
@@ -15043,6 +15343,13 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             );
         }
     }
+
+    // THE FRAME A PREVIOUS PROCESS LEFT, before the Activate below
+    // (docs/tasks-s4-plan.md P4). The primary is window 0; the CoreState
+    // built at the end of this function turns it into the launch
+    // declaration's veto, and the drain clears that after one batch.
+    let restored_frame = restore_frame(&window, 0);
+    watch_frame(&window, 0)?;
 
     // The close grammar (veto/report) rides a WNDPROC subclass; the
     // non-veto primary falls through into the Closed handler below.
@@ -15170,6 +15477,11 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             window_titles: HashMap::new(),
             window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
+            remember_frame: HashMap::new(),
+            frame_from_memory: std::collections::BTreeSet::from_iter(
+                restored_frame.map(|_| 0u64),
+            ),
+            declared_size: HashMap::new(),
             tearing_down: std::collections::HashSet::new(),
             live_alert: None,
             menu_models: HashMap::new(),
@@ -22549,6 +22861,99 @@ mod tests {
     /// (or fallback `Default`) dictionary, which would override the
     /// framework's own contrast arm re-pointing every accent brush at
     /// `SystemColor*`.
+    /// WINDOW MEMORY'S FOUR DECISIONS (docs/tasks-s4-plan.md P4), none of
+    /// which a leg can see separately: `taskspersist.steps` asserts ONE
+    /// size on ONE window and stays green with the opt-out ignored, with
+    /// the clamp gone, with a malformed stored line taken at face value,
+    /// and with a zero-sized frame written over a good one.
+    #[test]
+    fn window_memory_parses_clamps_and_opts_out() {
+        // What this backend writes, and what it reads back: physical
+        // pixels, the OUTER frame, four words.
+        assert_eq!(frame_line(120, 40, 900, 620), "120 40 900 620");
+        assert_eq!(
+            parse_frame(&frame_line(120, 40, 900, 620)),
+            Some((Some((120, 40)), 900, 620))
+        );
+        // A backend with no window position writes `-` twice, and its
+        // line restores a size with no move.
+        assert_eq!(parse_frame("- - 900 620"), Some((None, 900, 620)));
+        assert_eq!(parse_frame("-40 -20 900 620"), Some((Some((-40, -20)), 900, 620)));
+        // Anything else is no frame at all rather than a guessed one.
+        assert_eq!(parse_frame("900 620"), None);
+        assert_eq!(parse_frame("120 40 900 620 7"), None);
+        assert_eq!(parse_frame("120 40 0 620"), None);
+        assert_eq!(parse_frame("120 40 -900 620"), None);
+        assert_eq!(parse_frame("120 40 wide 620"), None);
+        assert_eq!(parse_frame(""), None);
+
+        // The clamp, against a work area that starts at an origin (a
+        // taskbar takes the bottom, a second display starts at 1280).
+        let work = (0, 0, 1280, 760);
+        assert_eq!(clamp_frame((100, 40, 900, 620), work), (100, 40, 900, 620));
+        // Too big for this screen: the size shrinks first.
+        assert_eq!(clamp_frame((0, 0, 1600, 1000), work), (0, 0, 1280, 760));
+        // Saved on a display that has since left: pushed back inside.
+        assert_eq!(clamp_frame((2000, 900, 900, 620), work), (380, 140, 900, 620));
+        assert_eq!(clamp_frame((-300, -200, 400, 300), work), (0, 0, 400, 300));
+        // No display answered: unclamped beats guessed.
+        assert_eq!(
+            clamp_frame((2000, 900, 900, 620), (0, 0, 0, 0)),
+            (2000, 900, 900, 620)
+        );
+
+        // The opt-out, at the decision the save turns on. Absent means
+        // remembered; only `false` refuses; it is per window.
+        let at = PointInt32 { X: 120, Y: 40 };
+        let size = SizeInt32 { Width: 900, Height: 620 };
+        let mut remember = HashMap::new();
+        assert_eq!(
+            frame_to_save(&remember, 0, at, size),
+            Some("120 40 900 620".to_owned())
+        );
+        remember.insert(0, true);
+        assert!(frame_to_save(&remember, 0, at, size).is_some());
+        remember.insert(0, false);
+        assert_eq!(frame_to_save(&remember, 0, at, size), None);
+        assert!(frame_to_save(&remember, 1, at, size).is_some());
+        // A window the platform has not sized yet is not a frame.
+        let no_size = SizeInt32 { Width: 0, Height: 620 };
+        assert_eq!(frame_to_save(&HashMap::new(), 0, at, no_size), None);
+
+        assert_eq!(frame_key(0), "kaya.window.0.frame");
+        assert_eq!(frame_key(7), "kaya.window.7.frame");
+    }
+
+    /// THE DECLARATION IS TOLD FROM A RUNTIME REQUEST BY VALUE, which no
+    /// leg can see: the props land before the window materializes on one
+    /// act and after it on the other, and a scene that passes on one
+    /// ordering says nothing about the other (measured on the mac arm
+    /// 2026-09-09, docs/tasks-s4-plan.md P4).
+    #[test]
+    fn a_remembered_frame_beats_the_declaration_and_yields_to_a_request() {
+        let mut opened = std::collections::BTreeSet::from([0u64]);
+        let mut sizes = HashMap::new();
+        let mut yields = |from: &mut std::collections::BTreeSet<u64>,
+                          sizes: &mut HashMap<u64, (Option<f64>, Option<f64>)>,
+                          window,
+                          w,
+                          h| frame_memory_yields(from, sizes, window, w, h);
+        // A window that did NOT open from memory takes every write.
+        assert!(yields(&mut opened, &mut sizes, 1, Some(700.0), None));
+        // The first value a remembered window is told is its declaration.
+        assert!(!yields(&mut opened, &mut sizes, 0, Some(960.0), None));
+        assert!(!yields(&mut opened, &mut sizes, 0, None, Some(670.0)));
+        // The declaration repeated is still the declaration, however many
+        // batches later it arrives.
+        assert!(!yields(&mut opened, &mut sizes, 0, Some(960.0), Some(670.0)));
+        // The first value that DIFFERS is a runtime request: it takes the
+        // window and ends the memory's claim.
+        assert!(yields(&mut opened, &mut sizes, 0, Some(1024.0), None));
+        assert!(!opened.contains(&0));
+        // ...and everything after it, including the declared size again.
+        assert!(yields(&mut opened, &mut sizes, 0, Some(960.0), None));
+    }
+
     #[test]
     fn the_brand_writes_neither_the_bare_accent_nor_a_contrast_theme() {
         let xaml = brand_dictionary(&crate::brand::derive(0x3584E4, None, None));

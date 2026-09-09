@@ -70,6 +70,9 @@ RUST_SCENES = [
     "notify",
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     "tasks",
+    # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the same
+    # example under taskspersist.steps, act two through the PLAIN door.
+    "taskspersist",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -135,6 +138,15 @@ MODS = {
     # The adaptive breakpoint's phone side: an always-narrow window
     # applies at its first report, no resize ever
     # (docs/adaptive-layout-plan.md §2).
+    # The two window-geometry steps of the persistence scene: this host
+    # commands no window size, and the phone has no frame to remember.
+    # A DROP, NOT A CUT — a tail cut at `resize_window` would take
+    # `relaunch launch` and the whole second act with it, which is the
+    # thing the leg exists for (docs/tasks-s4-plan.md §4).
+    ("rust-swiftui", "taskspersist"): {
+        "drop": (("resize_window", "900x620"),
+                 ("expect_window_size", "900x620")),
+        "keep": "expect_pref expect_no_pref expect_appearance"},
     ("rust-swiftui", "adaptive"): {
         "extra": 'expect_axis row@narrow "vertical"; expect_grid_columns grid@sheet 1; '
                  'expect_grid_columns grid@fit 1',
@@ -150,7 +162,12 @@ SUITES = ("swift", "go", "python", "rust-swiftui")
 # bundle launched again with KAYA_LAUNCH_NOTIFICATION, which the
 # interpreter delivers through the centre delegate's own funnel.
 # tools/check-steps.py reads this against the scenes carrying `relaunch`.
-RELAUNCH_DOOR = {"tasks": "launch-notification"}
+RELAUNCH_DOOR = {"tasks": "launch-notification",
+                 # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): `simctl
+                 # launch` of the same bundle, nothing pending and nothing
+                 # added to the environment — the marker in the app's own
+                 # Documents is the second process's only signal.
+                 "taskspersist": "launch"}
 # Which notification the door hands back: the scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2).
 RELAUNCH_NOTIFICATION = {"tasks": 1}
@@ -167,9 +184,14 @@ def swift_scene(entry):
     return scene, src or scene
 
 
+# Scene -> the cargo example it builds, where the two differ: a scene
+# selects a SCRIPT, never an app.
+RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks"}
+
+
 def rust_example(scene):
     """The cargo example a rust-swiftui scene builds."""
-    return "split" if scene == "listdetail" else scene
+    return RUST_EXAMPLE.get(scene, scene)
 
 
 def suite_legs(suite):

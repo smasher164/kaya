@@ -5,8 +5,8 @@
 //! bindings/java-desktop — and registration matches by name+signature
 //! against whichever loaded; tools/check-jni.py holds the other direction.
 
-use jni::objects::{JByteArray, JClass};
-use jni::sys::{jint, jlong};
+use jni::objects::{JBooleanArray, JByteArray, JClass, JDoubleArray, JLongArray};
+use jni::sys::{jboolean, jdouble, jint, jlong};
 use jni::NativeMethod;
 use jni::JNIEnv;
 
@@ -81,6 +81,61 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 name: "assetMissSentence".into(),
                 sig: "([B)[B".into(),
                 fn_ptr: ring_asset_miss_sentence as *mut _,
+            },
+            // THE PREFERENCE STORE AND THE APP DATA DIRECTORY
+            // (docs/tasks-s4-plan.md §4). THE RING LIST, NOT THE DESKTOP
+            // ONE: prefs are a floor call on Android too, and
+            // tools/check-jni.py is what holds that (docs/deferred.md,
+            // KayaRing.openPicked).
+            NativeMethod {
+                name: "appDataDir".into(),
+                sig: "()[B".into(),
+                fn_ptr: ring_app_data_dir as *mut _,
+            },
+            NativeMethod {
+                name: "prefGetString".into(),
+                sig: "([B)[B".into(),
+                fn_ptr: ring_pref_get_string as *mut _,
+            },
+            NativeMethod {
+                name: "prefGetI64".into(),
+                sig: "([B)[J".into(),
+                fn_ptr: ring_pref_get_i64 as *mut _,
+            },
+            NativeMethod {
+                name: "prefGetF64".into(),
+                sig: "([B)[D".into(),
+                fn_ptr: ring_pref_get_f64 as *mut _,
+            },
+            NativeMethod {
+                name: "prefGetBool".into(),
+                sig: "([B)[Z".into(),
+                fn_ptr: ring_pref_get_bool as *mut _,
+            },
+            NativeMethod {
+                name: "prefSetString".into(),
+                sig: "([B[B)V".into(),
+                fn_ptr: ring_pref_set_string as *mut _,
+            },
+            NativeMethod {
+                name: "prefSetI64".into(),
+                sig: "([BJ)V".into(),
+                fn_ptr: ring_pref_set_i64 as *mut _,
+            },
+            NativeMethod {
+                name: "prefSetF64".into(),
+                sig: "([BD)V".into(),
+                fn_ptr: ring_pref_set_f64 as *mut _,
+            },
+            NativeMethod {
+                name: "prefSetBool".into(),
+                sig: "([BZ)V".into(),
+                fn_ptr: ring_pref_set_bool as *mut _,
+            },
+            NativeMethod {
+                name: "prefRemove".into(),
+                sig: "([B)V".into(),
+                fn_ptr: ring_pref_remove as *mut _,
             },
             NativeMethod {
                 name: "specHash".into(),
@@ -250,6 +305,155 @@ extern "system" fn ring_asset_miss_sentence<'a>(
     }
     env.byte_array_from_slice(&buf)
         .expect("kaya: handing over the asset diagnostic failed")
+}
+
+// THE PREFERENCE STORE over the pinned floor (docs/tasks-s4-plan.md §4).
+// ABSENT IS A NULL ARRAY, PRESENT IS A ONE-ELEMENT ONE: a boxed
+// Long/Double/Boolean would need a class lookup here, and the Java side
+// reads `a == null` at one place per type.
+
+/// The app's data directory as UTF-8 bytes; EMPTY means none yet (Android
+/// before attach). `ring_asset_miss_sentence`'s size-then-read shape.
+extern "system" fn ring_app_data_dir<'a>(env: JNIEnv<'a>, _class: JClass<'a>) -> JByteArray<'a> {
+    let len = unsafe { crate::capi::kaya_app_data_dir(std::ptr::null_mut(), 0) };
+    let mut buf = vec![0u8; len];
+    if len > 0 {
+        unsafe { crate::capi::kaya_app_data_dir(buf.as_mut_ptr(), len) };
+    }
+    env.byte_array_from_slice(&buf)
+        .expect("kaya: handing over the data directory failed")
+}
+
+/// The null object reference every absent answer below returns.
+fn null_ref<T: From<jni::objects::JObject<'static>>>() -> T {
+    T::from(unsafe { jni::objects::JObject::from_raw(std::ptr::null_mut()) })
+}
+
+extern "system" fn ring_pref_get_string<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+) -> JByteArray<'a> {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    let mut len = 0usize;
+    let present = unsafe {
+        crate::capi::kaya_pref_get_string(
+            key.as_ptr(),
+            key.len(),
+            std::ptr::null_mut(),
+            0,
+            &mut len,
+        )
+    };
+    if present == 0 {
+        return null_ref();
+    }
+    let mut buf = vec![0u8; len];
+    let mut got = 0usize;
+    unsafe {
+        crate::capi::kaya_pref_get_string(key.as_ptr(), key.len(), buf.as_mut_ptr(), len, &mut got)
+    };
+    buf.truncate(got.min(len));
+    env.byte_array_from_slice(&buf)
+        .expect("kaya: handing over the pref value failed")
+}
+
+extern "system" fn ring_pref_get_i64<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+) -> JLongArray<'a> {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    let mut out: i64 = 0;
+    if unsafe { crate::capi::kaya_pref_get_i64(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return null_ref();
+    }
+    let arr = env.new_long_array(1).expect("kaya: allocating the pref answer failed");
+    env.set_long_array_region(&arr, 0, &[out]).expect("kaya: writing the pref answer failed");
+    arr
+}
+
+extern "system" fn ring_pref_get_f64<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+) -> JDoubleArray<'a> {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    let mut out: f64 = 0.0;
+    if unsafe { crate::capi::kaya_pref_get_f64(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return null_ref();
+    }
+    let arr = env.new_double_array(1).expect("kaya: allocating the pref answer failed");
+    env.set_double_array_region(&arr, 0, &[out]).expect("kaya: writing the pref answer failed");
+    arr
+}
+
+extern "system" fn ring_pref_get_bool<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+) -> JBooleanArray<'a> {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    let mut out: u8 = 0;
+    if unsafe { crate::capi::kaya_pref_get_bool(key.as_ptr(), key.len(), &mut out) } == 0 {
+        return null_ref();
+    }
+    let arr = env.new_boolean_array(1).expect("kaya: allocating the pref answer failed");
+    env.set_boolean_array_region(&arr, 0, &[jboolean::from(out != 0)])
+        .expect("kaya: writing the pref answer failed");
+    arr
+}
+
+extern "system" fn ring_pref_set_string<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+    value: JByteArray<'a>,
+) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    let value = env.convert_byte_array(&value).expect("kaya: reading the pref value failed");
+    unsafe {
+        crate::capi::kaya_pref_set_string(key.as_ptr(), key.len(), value.as_ptr(), value.len())
+    };
+}
+
+extern "system" fn ring_pref_set_i64<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+    value: jlong,
+) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    unsafe { crate::capi::kaya_pref_set_i64(key.as_ptr(), key.len(), value) };
+}
+
+extern "system" fn ring_pref_set_f64<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+    value: jdouble,
+) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    unsafe { crate::capi::kaya_pref_set_f64(key.as_ptr(), key.len(), value) };
+}
+
+extern "system" fn ring_pref_set_bool<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+    value: jboolean,
+) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    unsafe { crate::capi::kaya_pref_set_bool(key.as_ptr(), key.len(), u8::from(value != 0)) };
+}
+
+extern "system" fn ring_pref_remove<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    key: JByteArray<'a>,
+) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the pref key failed");
+    unsafe { crate::capi::kaya_pref_remove(key.as_ptr(), key.len()) };
 }
 
 /// The desktop bootstrap, and the ONLY symbol the JVM looks up by name

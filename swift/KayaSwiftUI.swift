@@ -9,7 +9,7 @@ import UserNotifications
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x21005150bc085070
+let kayaSpecHash: UInt64 = 0x605e18f72b2af791
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -83,6 +83,7 @@ private let wpropPanes: UInt32 = 6
 private let wpropDirty: UInt32 = 7
 private let wpropInset: UInt32 = 8
 private let wpropAppearance: UInt32 = 9
+private let wpropRememberFrame: UInt32 = 10
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let spropSymbol: UInt32 = 3
@@ -495,6 +496,7 @@ final class KayaWindowModel: Identifiable {
     /// macOS lowers it to NSWindow.isDocumentEdited and nothing else; iOS
     /// lowers it to nothing. The declared title is never rewritten.
     var dirty = false
+    var rememberFrame = true
     /// The window CONTENT INSET (wprop 8; docs/styling-plan.md D3) — LAYOUT,
     /// not appearance: padding inside the mounted root, 16 unless the app says
     /// otherwise, 0 for full bleed. Every render site reads this.
@@ -3679,6 +3681,9 @@ var kayaTearingDown: Set<UInt64> = []
                 // The advisory size may predate the native window (props
                 // apply while a surface is still hidden); honor it now.
                 kayaApplyWindowSize(windowId)
+                // AND THEN THE MEMORY, which wins over the declaration at
+                // launch (docs/tasks-s4-plan.md P4).
+                kayaRestoreWindowFrame(windowId, window)
                 // Same for the dirty flag: it lives on the AppKit object, so
                 // a surface that was marked before it materialized — or one
                 // dismissed and re-opened, which comes back with a FRESH
@@ -3688,9 +3693,187 @@ var kayaTearingDown: Set<UInt64> = []
         }
     }
 
+    // MARK: - Window memory (docs/tasks-s4-plan.md P4)
+    //
+    // macOS only: a phone has no window frame, so the prop is inert there
+    // and this whole block is `#if os(macOS)`. The frame is written under
+    // kaya's own reserved pref key, DEBOUNCED (a drag fires didMove per
+    // frame), and restored at creation clamped onto a screen that still
+    // has it.
+
+    /// Which windows already have a save coalesced onto this run-loop
+    /// turn. NOT A TIMER: a ~250ms delay LOSES the value, measured on the
+    /// linux lane 2026-09-09 — the declaration's set-size arms the timer,
+    /// the scene's own resize lands inside the window, and the process
+    /// leaves through `_exit` (lib.rs's exit_hard: no atexit, no
+    /// destructor), so the trailing write never runs and the store keeps
+    /// the DECLARED size. A real app has the same hole on a crash, which
+    /// P3's "durable before the call returns" forbids. So the save rides
+    /// the toolkit's own idle instead — one write per window per turn,
+    /// deduplicated against what the store already holds — and every
+    /// harness step after a resize is a hop to that loop.
+    nonisolated(unsafe) var kayaFrameCoalesced: Set<UInt64> = []
+
+    /// Which windows are wearing a remembered frame, and the size the app
+    /// had declared when it went on. THE MEMORY WINS OVER THE
+    /// DECLARATION AT LAUNCH — that is what memory means — AND A LATER
+    /// RUNTIME REQUEST WINS OVER THE MEMORY (docs/tasks-s4-plan.md P4).
+    /// The two are told apart by the VALUE: the width and height props of
+    /// the app's launch declaration arrive one at a time and may land
+    /// before OR after the window materializes (measured 2026-09-09: act
+    /// one registered after its batch, act two before it), so the rule
+    /// cannot be "the first application wins" — it is "the size the app
+    /// declared at launch loses, and the first size that differs from it
+    /// is a runtime request and wins".
+    nonisolated(unsafe) var kayaFrameMemory: [UInt64: NSRect] = [:]
+    nonisolated(unsafe) var kayaFrameMemoryDeclared: [UInt64: NSSize] = [:]
+
+    func kayaMemoryHoldsSize(_ windowId: UInt64) -> Bool {
+        guard kayaFrameMemory[windowId] != nil else { return false }
+        guard let w = kayaScene.windows[windowId]?.width,
+            let h = kayaScene.windows[windowId]?.height
+        else {
+            // The declaration is still arriving, one prop at a time.
+            return true
+        }
+        let declared = NSSize(width: w, height: h)
+        guard let first = kayaFrameMemoryDeclared[windowId] else {
+            kayaFrameMemoryDeclared[windowId] = declared
+            return true
+        }
+        if first == declared { return true }
+        kayaFrameMemory[windowId] = nil
+        kayaFrameMemoryDeclared[windowId] = nil
+        return false
+    }
+
+    func kayaWindowFrameText(_ rect: NSRect) -> String {
+        let n = { (v: CGFloat) in String(Int(v.rounded())) }
+        return "\(n(rect.origin.x)) \(n(rect.origin.y)) \(n(rect.width)) \(n(rect.height))"
+    }
+
+    /// `"<x> <y> <w> <h>"`, with `-` accepted in either position: a
+    /// backend with no position to give writes it that way, and this side
+    /// keeps the window where it is.
+    func kayaParseWindowFrame(_ text: String, current: NSRect) -> NSRect? {
+        let parts = text.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 4,
+            let w = Double(parts[2]), let h = Double(parts[3]), w > 0, h > 0
+        else { return nil }
+        let x = Double(parts[0]) ?? Double(current.origin.x)
+        let y = Double(parts[1]) ?? Double(current.origin.y)
+        return NSRect(x: x, y: y, width: w, height: h)
+    }
+
+    /// The remembered frame ONTO A SCREEN THAT STILL HAS IT (§2 unknown 3):
+    /// the screen it overlaps most, with the rect trimmed and slid inside
+    /// that screen's visible area. `nil` when no screen overlaps at all —
+    /// a display that left — and the caller then keeps the app's own
+    /// requested size.
+    func kayaClampFrameToScreens(_ rect: NSRect) -> NSRect? {
+        var best: NSScreen?
+        var bestArea: CGFloat = 0
+        for screen in NSScreen.screens {
+            let hit = screen.visibleFrame.intersection(rect)
+            let area = hit.isNull ? 0 : hit.width * hit.height
+            if area > bestArea {
+                bestArea = area
+                best = screen
+            }
+        }
+        guard let visible = best?.visibleFrame else { return nil }
+        var out = rect
+        out.size.width = min(out.width, visible.width)
+        out.size.height = min(out.height, visible.height)
+        out.origin.x = min(max(out.minX, visible.minX), visible.maxX - out.width)
+        out.origin.y = min(max(out.minY, visible.minY), visible.maxY - out.height)
+        return out
+    }
+
+    /// Called once per window materialization, AFTER the declared size has
+    /// been applied: THE REMEMBERED FRAME WINS OVER THE DECLARATION at
+    /// launch, which is what memory means; a later runtime resize request
+    /// from the app goes through kayaApplyWindowSize again and wins over
+    /// the memory.
+    func kayaRestoreWindowFrame(_ windowId: UInt64, _ window: NSWindow) {
+        guard !kayaFrameMemoryInert else { return }
+        guard kayaScene.windows[windowId]?.rememberFrame != false,
+            let text = KayaHost.windowFrame(windowId),
+            let wanted = kayaParseWindowFrame(text, current: window.frame),
+            let clamped = kayaClampFrameToScreens(wanted)
+        else { return }
+        kayaInvalidateTableGeometry()
+        window.setFrame(clamped, display: false)
+        kayaFrameMemory[windowId] = clamped
+        if let w = kayaScene.windows[windowId]?.width,
+            let h = kayaScene.windows[windowId]?.height
+        {
+            kayaFrameMemoryDeclared[windowId] = NSSize(width: w, height: h)
+        }
+        kayaDiag("windowframe restored wid=\(windowId) \(kayaWindowFrameText(clamped))")
+    }
+
+    /// ONE WRITE PER WINDOW PER TURN. A drag fires didMove per frame and
+    /// each write is a UserDefaults set, so the notifications of one
+    /// run-loop turn coalesce into the single save that follows them.
+    /// RECORDING MODE'S TILE IS THE RUNNER'S GEOMETRY, NOT THE USER'S
+    /// (kayaPlaceWindow): a filmed leg is placed and sized into a grid
+    /// cell so one capture sees every window unoccluded, and remembering
+    /// that would put the runner's 540x330 in the app's store.
+    var kayaFrameMemoryInert: Bool {
+        ProcessInfo.processInfo.environment["KAYA_WIN_SLOT"] != nil
+    }
+
+    func kayaNoteWindowFrame(_ windowId: UInt64, _ window: NSWindow) {
+        guard !kayaFrameMemoryInert else { return }
+        guard kayaScene.windows[windowId]?.rememberFrame != false else { return }
+        guard !kayaFrameCoalesced.contains(windowId) else { return }
+        kayaFrameCoalesced.insert(windowId)
+        DispatchQueue.main.async {
+            kayaFrameCoalesced.remove(windowId)
+            kayaSaveWindowFrame(windowId)
+        }
+    }
+
+    /// The frame as it stands NOW, written only if it differs from what
+    /// the store holds — a frame that did not move costs nothing.
+    func kayaSaveWindowFrame(_ windowId: UInt64) {
+        guard kayaScene.windows[windowId]?.rememberFrame != false,
+            let window = kayaNSWindows[windowId]
+        else { return }
+        let text = kayaWindowFrameText(window.frame)
+        guard KayaHost.windowFrame(windowId) != text else { return }
+        KayaHost.setWindowFrame(windowId, text)
+        kayaDiag("windowframe saved wid=\(windowId) \(text)")
+    }
+
+    /// Every window's frame, now: the last hop before a process that is
+    /// about to leave (act one's `relaunch`, the primary's close). With
+    /// the idle coalescing above this is normally a no-op — the write
+    /// already happened on the turn after the movement — and it costs one
+    /// store read per window when it is.
+    func kayaFlushWindowFrames() {
+        kayaFrameCoalesced.removeAll()
+        for windowId in kayaNSWindows.keys {
+            kayaSaveWindowFrame(windowId)
+        }
+    }
+
     final class KayaWindowDelegate: NSObject, NSWindowDelegate {
         let windowId: UInt64
         weak var original: (any NSWindowDelegate)?
+
+        func windowDidResize(_ notification: Notification) {
+            if let window = notification.object as? NSWindow {
+                kayaNoteWindowFrame(windowId, window)
+            }
+        }
+
+        func windowDidMove(_ notification: Notification) {
+            if let window = notification.object as? NSWindow {
+                kayaNoteWindowFrame(windowId, window)
+            }
+        }
 
         init(windowId: UInt64, original: (any NSWindowDelegate)?) {
             self.windowId = windowId
@@ -3710,6 +3893,7 @@ var kayaTearingDown: Set<UInt64> = []
             if windowId == 0 {
                 // The primary is the process's surface: closing it
                 // exits the app, uniformly with the other desktops.
+                kayaFlushWindowFrames()
                 DispatchQueue.main.async {
                     NSApplication.shared.terminate(nil)
                 }
@@ -3951,6 +4135,26 @@ enum KayaHost {
     /// WHICH SIZE one canvas's raster is — `"track"` or `"viewbox"`, or a
     /// sentence naming all three numbers (§3.2.1). Empty when the id
     /// names no canvas that has been drawn.
+    /// KAYA'S OWN WINDOW MEMORY (docs/tasks-s4-plan.md P4). The reserved
+    /// pref key is the CORE's (crates/kaya/src/prefs.rs) and the guest
+    /// floor refuses it, so these two are the only door.
+    static func windowFrame(_ window: UInt64) -> String? {
+        let needed = Int(api.window_frame(window, UnsafeMutablePointer<UInt8>(nil), 0))
+        if needed == 0 { return nil }
+        var buf = [UInt8](repeating: 0, count: needed)
+        let written = buf.withUnsafeMutableBufferPointer { p in
+            Int(api.window_frame(window, p.baseAddress, UInt(needed)))
+        }
+        return String(decoding: buf.prefix(min(written, needed)), as: UTF8.self)
+    }
+
+    static func setWindowFrame(_ window: UInt64, _ text: String) {
+        var bytes = Array(text.utf8)
+        bytes.withUnsafeMutableBufferPointer { p in
+            api.set_window_frame(window, p.baseAddress, UInt(p.count))
+        }
+    }
+
     static func canvasRasterShape(_ widget: UInt64) -> String {
         guard api != nil else { return "" }
         var buffer = [UInt8](repeating: 0, count: 160)
@@ -4115,6 +4319,21 @@ private func kayaApplyWindowSize(_ windowId: UInt64) {
         let size = NSSize(
             width: model?.width ?? current.width,
             height: model?.height ?? current.height)
+        // THE RUNNER OWNS THE GEOMETRY UNDER A RECORDING TILE
+        // (kayaPlaceWindow): the cells are sized for this backend's
+        // 540x330 windows so one capture sees every leg unoccluded, and a
+        // declared size applied AFTER the tile grows the window out of its
+        // cell and off the screen — measured 2026-09-09, the tasks guest's
+        // 960x640 declaration left the recorder cropping below the display
+        // and every still black. The declaration is the model's either
+        // way; only the apply is held.
+        if kayaFrameMemoryInert {
+            return
+        }
+        if kayaMemoryHoldsSize(windowId) {
+            kayaDiag("applywindowsize wid=\(windowId) held by memory, declared \(Int(size.width))x\(Int(size.height))")
+            return
+        }
         kayaSetWindowContentSize(window, size)
     #endif
 }
@@ -4217,6 +4436,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (wpropDirty, valueBool):
                     model?.dirty = raw[body + 24] != 0
                     kayaApplyWindowDirty(wid)
+                case (wpropRememberFrame, valueBool):
+                    model?.rememberFrame = raw[body + 24] != 0
                 case (wpropInset, valueF64):
                     model?.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
@@ -8177,6 +8398,17 @@ private func kayaRunScript(_ script: String) {
                 // pushes the platform's own relaunch door, and act two runs
                 // them in the process it starts. It leaves through the SAME
                 // verdict path below — one publish, one trace dump, one exit.
+                //
+                // THE DOOR IS THE OPTIONAL ARGUMENT (docs/tasks-s4-plan.md P5):
+                // bare is the notification door, `launch` the plain one. One
+                // line, the same in all three harnesses.
+                print("KAYA_RELAUNCH: door \(parts.count > 1 ? String(parts[1]) : "notification")")
+                // THE DEBOUNCE'S ONE HOLE (P4): this process leaves in a
+                // moment, so a movement inside the window would never be
+                // written and the second act would restore a stale frame.
+                #if os(macOS)
+                    DispatchQueue.main.sync { kayaFlushWindowFrames() }
+                #endif
                 if let why = kayaWriteActTwoMarker(
                     ProcessInfo.processInfo.environment["KAYA_SELFTEST"] ?? "",
                     kayaActTwoSource(script))
@@ -9074,6 +9306,30 @@ private func kayaRunScript(_ script: String) {
                     observed.append("appearance \(wantMode)")
                 } else {
                     failures.append("appearance \(got), wanted \(wantMode)")
+                }
+            case "expect_pref", "expect_no_pref":
+                // THE PLATFORM'S OWN STORE, RE-OPENED (docs/tasks-s4-plan.md
+                // §4): UserDefaults for this process's domain, which the core
+                // names in KAYA_PREF_DOMAIN so the rule `<id>` / `<id>.selftest`
+                // is spelled once (crates/kaya/src/prefs.rs).
+                let prefKey = String(parts[1])
+                let held = kayaPrefRead(prefKey)
+                if parts[0] == "expect_no_pref" {
+                    if let held {
+                        failures.append("pref \(prefKey) \"\(held)\", wanted absent")
+                    } else {
+                        observed.append("pref \(prefKey) absent")
+                    }
+                } else {
+                    let wantPref = kayaQuoted(Array(parts[2...]))
+                    if held == wantPref {
+                        observed.append("pref \(prefKey) \"\(wantPref)\"")
+                    } else if let held {
+                        failures.append(
+                            "pref \(prefKey) \"\(held)\", wanted \"\(wantPref)\"")
+                    } else {
+                        failures.append("pref \(prefKey) absent, wanted \"\(wantPref)\"")
+                    }
                 }
             case "expect_sections_presentation":
                 // THE ARM THE SECTIONS RENDER TOOK — "bar" or "sidebar", read
@@ -13503,17 +13759,54 @@ func kayaInkMatches(_ got: String, _ want: String) -> Bool {
     return "\(mode) " + kayaSampleRGB(cg, wanted)
 }
 
+// MARK: - The preference store's read-back (docs/tasks-s4-plan.md §4)
+
+/// A `PrefValue`'s string form, matching Rust's `{}` Display: an integral
+/// double prints without a fraction, which `String(d)` would spell `1.0`.
+func kayaPrefNumberText(_ d: Double) -> String {
+    if d == d.rounded(), abs(d) < 9_007_199_254_740_992 {
+        return String(Int64(d))
+    }
+    return String(d)
+}
+
+/// What the PLATFORM's store holds for this key, as the string
+/// `expect_pref` compares — nil for absent. The stored object's own type
+/// decides, so nothing here coerces (the uniform semantics: a typed get on
+/// a key holding another type answers absent, and this reads back whatever
+/// type is there).
+func kayaPrefRead(_ key: String) -> String? {
+    guard let domain = ProcessInfo.processInfo.environment["KAYA_PREF_DOMAIN"],
+        let defaults = UserDefaults(suiteName: domain)
+    else { return nil }
+    defaults.synchronize()
+    guard let held = defaults.object(forKey: key) else { return nil }
+    if let text = held as? String { return text }
+    guard let number = held as? NSNumber else { return nil }
+    if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        return number.boolValue ? "true" : "false"
+    }
+    let encoding = String(cString: number.objCType)
+    if encoding == "d" || encoding == "f" {
+        return kayaPrefNumberText(number.doubleValue)
+    }
+    return String(number.int64Value)
+}
+
 // MARK: - The second act (docs/tasks-s9-plan.md R6a)
 
-/// The script's lines after a bare `relaunch` line — the marker's second
-/// half. harness.rs's `act_two_source`, same rule.
+/// The script's lines after a `relaunch` line — the marker's second half.
+/// harness.rs's `act_two_source`, same rule: THE VERB IS THE FIRST WORD,
+/// since the door rides beside it (`relaunch launch`,
+/// docs/tasks-s4-plan.md P5).
 func kayaActTwoSource(_ script: String) -> String? {
     var after: [String] = []
     var found = false
     for line in script.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
         if found {
             after.append(String(line))
-        } else if line.trimmingCharacters(in: .whitespaces) == "relaunch" {
+        } else if trimmed == "relaunch" || trimmed.hasPrefix("relaunch ") {
             found = true
         }
     }

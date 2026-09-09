@@ -5,3 +5,8 @@
  (name abort_check)
  (modules abort_check)
  (libraries kaya_guest_binding))
+
+(executable
+ (name notify_order_check)
+ (modules notify_order_check)
+ (libraries kaya_guest_binding unix))

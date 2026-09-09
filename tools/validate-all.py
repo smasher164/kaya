@@ -50,6 +50,7 @@ LANES_DIR = pathlib.Path(tempfile.mkdtemp())
 # transient nobody can look at is indistinguishable from a bug nobody
 # found. Ordinary passing lanes leave nothing behind.
 KEEP_DIR = ROOT / "target/validate-failures"
+RUN_STAMP = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 LANES_KEEP_DIR = ROOT / "target/validate-lanes"
 atexit.register(lambda: shutil.rmtree(LANES_DIR, ignore_errors=True))
 
@@ -69,6 +70,16 @@ def keep_lane_log(name, where=None):
     try:
         where.mkdir(parents=True, exist_ok=True)
         shutil.copy2(LANES_DIR / f"{name}.log", where / f"{name}.log")
+        # AND ONE COPY PER RUN (2026-09-09): the per-run copy above is
+        # overwritten by the next matrix, so a duration anomaly could not be
+        # read per leg against the matrix before it (the S4 windows reading
+        # had no baseline). Newest 20 runs kept.
+        run_dir = ROOT / "target/validate-lanes/runs" / RUN_STAMP
+        run_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LANES_DIR / f"{name}.log", run_dir / f"{name}.log")
+        runs = sorted((ROOT / "target/validate-lanes/runs").iterdir())
+        for stale in runs[:-20]:
+            shutil.rmtree(stale, ignore_errors=True)
     except OSError:
         print(f"== {name} log could not be kept at "
               f"target/validate-failures/{name}.log ==", file=sys.stderr)
@@ -291,8 +302,16 @@ BUDGETS = {
     # matrix on that roster read 998s (host load 4.7 at launch, the VM's
     # qemu the top consumer at 86%) where the lane standalone the same day
     # read 449s. 1050 is 1.05x over the one contended sample; to be
-    # re-read on the next quiet matrices.
-    "windows": 1100,
+    # re-read on the next quiet matrices. 1200 since 2026-09-09: the
+    # 2026-09-07 band's top (1099) sat one second under 1100, and S4 took
+    # the roster 275 -> 276 with a two-act leg, a once-per-run platform
+    # probe and service restart (desk-warm 3 -> 14) and a per-leg state
+    # home reset; the two S4 matrices read 1192 (suites 1067) and 1139
+    # (suites 1035; five-minute load 78, the VM's qemu at 113%) with every
+    # leg green, and the sum of the 270 pooled leg times was 2166s (median
+    # 6s, p90 16s, max 32s). 1200 is 1.05x over the pair; to be re-read on
+    # the next quiet matrices.
+    "windows": 1200,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg

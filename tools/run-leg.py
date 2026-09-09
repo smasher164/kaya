@@ -112,7 +112,7 @@ env.update(lane.leg_env(ROOT, scene, lang, appearance))
 # the same door.
 second = scene in lane.RELAUNCH_DOOR
 if second:
-    lane.clear_act2(ROOT)
+    lane.clear_act2(ROOT, env)
 print(f"run-leg: {scene}-{lang}: {' '.join(argv)}", flush=True)
 rc = subprocess.run(argv, cwd=ROOT, env=env).returncode
 if second:

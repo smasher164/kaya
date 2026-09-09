@@ -599,6 +599,63 @@ sealed class Draw
         Op(KayaWire.DrawOpText, x, y, (long)paint, (long)align, (long)baseline, s);
 }
 
+/// The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
+/// typed key-value record under the app's id, the platform's own where
+/// the platform has one — UserDefaults on Apple, SharedPreferences on
+/// Android, a key file on Linux and Windows.
+///
+/// A PULL, NOT A SIGNAL: a setting is read when the app builds and
+/// written when the user changes it. Every Get takes the default it
+/// answers when the key is absent OR holds another type. Writes are
+/// durable when they return, and the store may be used from any thread.
+readonly struct PrefsHandle
+{
+    /// A guest may READ any key and WRITE any key kaya has not reserved
+    /// (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`).
+    static string Key(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentException("kaya: a preference key must not be empty");
+        return key;
+    }
+
+    static string WriteKey(string key)
+    {
+        Key(key);
+        if (key.StartsWith("kaya.", StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"kaya: preference key \"{key}\" is reserved "
+                + "(the kaya. prefix is kaya's own)");
+        return key;
+    }
+
+    public string GetString(string key, string def) =>
+        Kaya.PrefGetString(Key(key)) ?? def;
+
+    public long GetI64(string key, long def) =>
+        Kaya.PrefGetI64(Key(key)) ?? def;
+
+    public double GetF64(string key, double def) =>
+        Kaya.PrefGetF64(Key(key)) ?? def;
+
+    public bool GetBool(string key, bool def) =>
+        Kaya.PrefGetBool(Key(key)) ?? def;
+
+    public void SetString(string key, string value) =>
+        Kaya.PrefSetString(WriteKey(key), value);
+
+    public void SetI64(string key, long value) =>
+        Kaya.PrefSetI64(WriteKey(key), value);
+
+    public void SetF64(string key, double value) =>
+        Kaya.PrefSetF64(WriteKey(key), value);
+
+    public void SetBool(string key, bool value) =>
+        Kaya.PrefSetBool(WriteKey(key), value);
+
+    public void Remove(string key) => Kaya.PrefRemove(WriteKey(key));
+}
+
 sealed class KayaApp
 {
     /// This host's capabilities. Constant for the life of the process,
@@ -610,6 +667,58 @@ sealed class KayaApp
             (bits & Kaya.CAP_AUX_WINDOWS) != 0,
             (bits & Kaya.CAP_NOTIFICATIONS) != 0);
     }
+
+    /// The notification_result decision, in a method of its own because
+    /// the ring loop's switch has no seam a test can reach (the ring is
+    /// raw memory) — Go's `notificationResult` for the same reason, and
+    /// tools/checks/csharp-notify drives the three cases through here.
+    /// THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1) and
+    /// tools/check-sugar-surface.py reads it out of this body: the
+    /// one-shot handler bound at the show first, retiring with the
+    /// result; else the process-level one, which does not; else the drop
+    /// is announced.
+    internal void NotificationResult(ulong id, uint outcome)
+    {
+        if (notifications.Remove(id, out var fn))
+            Dispatch(tx => fn(tx, outcome));
+        else if (notificationActivation is { } act)
+            Dispatch(tx => act(tx, id, outcome));
+        else
+        {
+            string word = outcome == KayaWire.NotificationOutcomeActivated
+                ? "activated" : "refused";
+            Console.Error.WriteLine(
+                $"kaya: notification {id} outcome {word} reached no "
+                + "handler — none was bound at the show and no "
+                + "process-level handler is registered "
+                + "(App.OnNotificationActivation)");
+        }
+    }
+
+    /// The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+    /// Application Support/&lt;id&gt; on macOS, Documents on iOS, the files
+    /// directory on Android, $XDG_DATA_HOME/&lt;id&gt; on Linux,
+    /// %LOCALAPPDATA%\&lt;id&gt; on Windows. Created on first ask.
+    ///
+    /// KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the
+    /// app's, written the standard way (Microsoft.Data.Sqlite is the
+    /// recommendation). Settings are small and typed and belong in Prefs.
+    ///
+    /// THROWS where the platform has handed no directory over — an error
+    /// state a guest cannot plan around, so all nine bindings refuse
+    /// rather than answering an absent value (ruled 2026-09-09).
+    public static string AppDataDir()
+    {
+        string dir = Kaya.AppDataDir();
+        if (dir.Length == 0)
+            throw new InvalidOperationException(
+                "kaya: app_data_dir asked before the platform handed one "
+                + "over (Android before attach)");
+        return dir;
+    }
+
+    /// The app's preferences store — one per process.
+    public static PrefsHandle Prefs() => default;
 
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD,
@@ -1272,27 +1381,7 @@ sealed class KayaApp
             }
             else if (kind == KayaWire.OccKindNotificationResult)
             {
-                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
-                // and tools/check-sugar-surface.py reads it out of this
-                // arm: the one-shot handler bound at the show first,
-                // retiring with the result; else the process-level one,
-                // which does not; else the drop is announced. payload is
-                // the parsed u32 outcome.
-                uint outcome = payload is uint o ? o : 0;
-                if (notifications.Remove(id, out var fn))
-                    Dispatch(tx => fn(tx, outcome));
-                else if (notificationActivation is { } act)
-                    Dispatch(tx => act(tx, id, outcome));
-                else
-                {
-                    string word = outcome == KayaWire.NotificationOutcomeActivated
-                        ? "activated" : "refused";
-                    Console.Error.WriteLine(
-                        $"kaya: notification {id} outcome {word} reached no "
-                        + "handler — none was bound at the show and no "
-                        + "process-level handler is registered "
-                        + "(App.OnNotificationActivation)");
-                }
+                NotificationResult(id, payload is uint o ? o : 0);
             }
             else if (kind == KayaWire.OccKindFileDialogResult)
             {
@@ -2719,6 +2808,7 @@ sealed class Tx
     public void Window(
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
+        bool? rememberFrame = null,
         double? inset = null, long? sectionsPresentation = null,
         long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
@@ -2732,6 +2822,10 @@ sealed class Tx
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
         if (panes is { } pn) Records.Add(KayaWire.TxSetWindowPanes(id, pn));
         if (dirty is { } d) Records.Add(KayaWire.TxSetWindowDirty(id, d));
+        // The OPT-OUT from window memory (docs/tasks-s4-plan.md P4);
+        // inert on the phones.
+        if (rememberFrame is { } rf)
+            Records.Add(KayaWire.TxSetWindowRememberFrame(id, rf));
         if (inset is { } ins) Records.Add(KayaWire.TxSetWindowInset(id, ins));
         if (sectionsPresentation is { } sp)
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
@@ -2766,6 +2860,7 @@ sealed class Tx
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, uint? panes = null, bool? dirty = null,
+        bool? rememberFrame = null,
         double? inset = null, long? sectionsPresentation = null,
         long? appearance = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
@@ -2774,7 +2869,8 @@ sealed class Tx
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
-        Window(title, width, height, vetoClose, panes, dirty, inset, sectionsPresentation,
+        Window(title, width, height, vetoClose, panes, dirty, rememberFrame, inset,
+            sectionsPresentation,
             appearance, onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 

@@ -257,7 +257,7 @@ NOTIFICATION_RETIRES = [
     ("csharp", "bindings/csharp/KayaApp.cs",
      r"notifications\.Remove\(id"),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
-     r"notifications\.remove\(occ\.id\)"),
+     r"notifications\.remove\(id\)"),
     ("swift", "bindings/swift/KayaApp.swift",
      r"notifications\.removeValue\(forKey: id\)"),
     ("haskell", "bindings/haskell/KayaApp.hs",
@@ -366,35 +366,39 @@ NOTIFICATION_ORDER = [
      r"if fn := a\.notifications\[id\]; fn != nil \{",
      r"\} else if act := a\.notificationActivation; act != nil \{",
      r"kaya: notification "),
+    # These five joined Go in a METHOD on 2026-09-09: the ring loop's
+    # switch has no seam a runnable proof can reach (the ring is raw
+    # memory in all six), and docs/deferred.md's S9 entry asked for
+    # their three-case proofs. Each arm's own call is held below.
     ("csharp", "bindings/csharp/KayaApp.cs",
-     r"else if \(kind == KayaWire\.OccKindNotificationResult\)",
-     r"else if \(kind == KayaWire\.OccKindFileDialogResult\)",
+     r"^    internal void NotificationResult\(ulong id, uint outcome\)",
+     r"^    /// The app's OWN writable directory",
      r"if \(notifications\.Remove\(id, out var fn\)\)",
      r"else if \(notificationActivation is \{ \} act\)",
      r"kaya: notification "),
     ("java", "bindings/java/dev/kaya/KayaApp.java",
-     r"else if \(occ\.kind == KayaWire\.OCC_KIND_NOTIFICATION_RESULT\)",
-     r"else if \(occ\.kind == KayaWire\.OCC_KIND_FILE_DIALOG_RESULT\)",
-     r"handler = notifications\.remove\(occ\.id\);",
+     r"^    void notificationResult\(long id, int outcome\) \{",
+     r"^    /\*\*\n     \* OPEN AN ASSET",
+     r"handler = notifications\.remove\(id\);",
      r"\} else if \(notificationActivation != null\) \{",
      r"kaya: notification "),
     ("swift", "bindings/swift/KayaApp.swift",
-     r"case \(UInt16\(KAYA_OCCURRENCE_NOTIFICATION_RESULT\), _\):",
-     r"case \(UInt16\(KAYA_OCCURRENCE_CLIPBOARD_RESULT\), _\):",
+     r"^    func notificationResult\(_ id: UInt64, _ choice: UInt32\) \{",
+     r"^    /// The app's OWN writable directory",
      r"if let handler = notifications\.removeValue\(forKey: id\) \{",
      r"\} else if let act = notificationActivation \{",
      r"kaya: notification "),
     ("haskell", "bindings/haskell/KayaApp.hs",
-     r"^      \| kind == W\.occKindNotificationResult -> do",
-     r"^      \| kind == W\.occKindUndone",
+     r"^notificationResult :: App -> Word64 -> Word32 -> IO \(\)",
+     r"^-- \| The app's OWN writable directory",
      r"\(Just handler, _\) -> dispatch \(handler outcome\)",
      r"\(Nothing, Just act\) -> dispatch \(act ident outcome\)",
      r"kaya: notification "),
     ("ocaml", "bindings/ocaml/kaya_app.ml",
-     r"^         else if kind = Kaya_wire\.occ_kind_notification_result then",
-     r"^         else if kind = Kaya_wire\.occ_kind_file_dialog_result then",
-     r"^            \| Some handler, _ ->",
-     r"^            \| None, Some f -> dispatch app",
+     r"^let notification_result app id outcome =",
+     r"^let on_notification_activation app ",
+     r"^  \| Some handler, _ ->",
+     r"^  \| None, Some f -> dispatch app",
      r"kaya: notification "),
     ("js", "bindings/js/kaya/index.ts",
      r"if \(kind === wire\.OCC_NOTIFICATION_RESULT\) \{",
@@ -404,32 +408,66 @@ NOTIFICATION_ORDER = [
      r"kaya: notification "),
 ]
 
-# Go's decision lives in a method, so the SWITCH ARM that reaches it is
-# held separately: a method nothing calls is a rule nothing runs.
-GO_ARM_CALL = (r"^\t\tcase kind == occNotificationResult:\n"
-               r"\t\t\ta\.notificationResult\(id, choice\)$")
+# SIX BINDINGS KEEP THE DECISION IN A METHOD, so the SWITCH ARM that
+# reaches it is held separately in each: a method nothing calls is a rule
+# nothing runs. Go took that shape first (the ring is C memory through
+# cgo and Serve's switch has no seam a test can reach); C#, Java, Swift,
+# OCaml and Haskell joined it 2026-09-09 so their three-case proofs could
+# exist at all (docs/deferred.md's S9 entry).
+# (lang, file, the arm's call, the perturbation that removes it).
+ARM_CALLS = [
+    ("go", "bindings/go/app.go",
+     r"^\t\tcase kind == occNotificationResult:\n"
+     r"\t\t\ta\.notificationResult\(id, choice\)$",
+     r"a\.notificationResult\(id, choice\)", "a.dispatch(func(tx *Tx) {})"),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     r"^            else if \(kind == KayaWire\.OccKindNotificationResult\)\n"
+     r"            \{\n"
+     r"                NotificationResult\(id, payload is uint o \? o : 0\);$",
+     r"NotificationResult\(id, payload is uint o \? o : 0\);", "Dispatch(tx => { });"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"^            \} else if \(occ\.kind == KayaWire\.OCC_KIND_NOTIFICATION_RESULT\) \{\n"
+     r"                notificationResult\(occ\.id, \(Integer\) occ\.payload\);$",
+     r"notificationResult\(occ\.id, \(Integer\) occ\.payload\);", "dispatch(tx -> { });"),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"^            case \(UInt16\(KAYA_OCCURRENCE_NOTIFICATION_RESULT\), _\):\n"
+     r"                notificationResult\(id, choice\)$",
+     r"notificationResult\(id, choice\)", "break"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^         else if kind = Kaya_wire\.occ_kind_notification_result then\n"
+     r"(?:.*\n)?           notification_result app id$",
+     r"           notification_result app id", "           ignore app"),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^      \| kind == W\.occKindNotificationResult -> do\n"
+     r"(?:.*\n)?          notificationResult app ident \$",
+     r"          notificationResult app ident \$", "          const (pure ()) app $"),
+]
 
 
-def go_arm_calls_the_method(text):
-    return re.search(GO_ARM_CALL, text, re.M) is not None
+def arm_calls_the_method(lang, text):
+    for name, _rel, pattern, _pat, _repl in ARM_CALLS:
+        if name == lang:
+            return re.search(pattern, text, re.M) is not None
+    raise KeyError(lang)
 
 
-if not go_arm_calls_the_method(read_rel("bindings/go/app.go")):
-    print("check-sugar-surface: go's occNotificationResult switch arm no "
-          "longer calls a.notificationResult(id, choice) — the order rule "
-          "below is read out of that method, so an arm that stopped "
-          "calling it would leave the rule proven and unused")
-    status = 1
-
-_gutted, _n = sub_count(r"a\.notificationResult\(id, choice\)",
-                        "a.dispatch(func(tx *Tx) {})",
-                        read_rel("bindings/go/app.go"))
-print(f"check-sugar-surface: self-test go's switch arm stopped calling "
-      f"notificationResult, {_n} substitution(s)")
-if _n != 1 or go_arm_calls_the_method(_gutted):
-    selftest_exit("check-sugar-surface: self-test failed — a go switch arm "
-                  "that no longer calls a.notificationResult still passed "
-                  f"({_n} substitution(s))")
+_arm_neg = []
+for _lang, _rel, _pattern, _pat, _repl in ARM_CALLS:
+    _text = read_rel(_rel)
+    if not arm_calls_the_method(_lang, _text):
+        print(f"check-sugar-surface: {_lang}'s notification_result switch "
+              f"arm no longer calls its decision method — the order rule "
+              f"below is read out of that method, so an arm that stopped "
+              f"calling it would leave the rule proven and unused ({_rel})")
+        status = 1
+    _gutted, _n = sub_count(_pat, _repl, _text)
+    _arm_neg.append(f" {_lang}={_n}")
+    if _n < 1 or arm_calls_the_method(_lang, _gutted):
+        selftest_exit(f"check-sugar-surface: self-test failed — a {_lang} "
+                      f"switch arm that no longer calls its decision "
+                      f"method still passed ({_n} substitution(s))")
+print("check-sugar-surface: notification arm-call perturbations applied:"
+      + "".join(_arm_neg))
 
 ORDER_STEPS = ("the one-shot handler bound at the show",
                "the process-level handler",
@@ -859,6 +897,397 @@ cap_lines, cap_ok = cap_numbers()
 if not cap_ok:
     print("\n".join(cap_lines))
     status = 1
+
+
+# --- THE PREFERENCES SURFACE, in all nine ---------------------------
+# `app_data_dir()` and the `prefs()` handle (docs/tasks-s4-plan.md
+# P1/P2/P3) are neither a widget KIND nor a WINDOW PROP nor a wire
+# record — they are C-FLOOR calls, so the spec hash does not move for
+# them and NO generator carries them to a binding. Every sweep above is
+# blind to the whole surface: a binding could ship with the store
+# unreachable and the only red would be a scene nobody wrote yet.
+# FOUR CLAUSES, because each alone passes for the wrong reason: the
+# directory, the HANDLE, the NINE METHODS on it (read out of the handle's
+# OWN BLOCK, since `remove` is also the collection's in six bindings),
+# and the two REFUSAL SENTENCES, byte-frozen and compared flattened.
+def pref_want(lang, rel, what, pattern, findings=None):
+    global status
+    if not grep_file(pattern, rel):
+        msg = (f"check-sugar-surface: {lang} has no preferences "
+               f"{what} (wanted /{pattern}/ in {rel})")
+        if findings is None:
+            print(msg)
+            status = 1
+        else:
+            findings.append(msg)
+
+
+def check_pref_entry(snake, pascal, camel, findings=None):
+    """One process-level entry point, in every binding's own idiom."""
+    pref_want("rust", "crates/kaya/src/app.rs", f"entry '{snake}'",
+              f"^pub fn {snake}\\(\\)", findings)
+    pref_want("python", "bindings/python/kaya/__init__.py",
+              f"entry '{snake}'", f"^def {snake}\\(\\):", findings)
+    pref_want("go", "bindings/go/app.go", f"entry '{snake}'",
+              f"^func {pascal}\\(\\)", findings)
+    pref_want("csharp", "bindings/csharp/KayaApp.cs", f"entry '{snake}'",
+              f"public static [A-Za-z]+ {pascal}\\(\\)", findings)
+    pref_want("java", "bindings/java/dev/kaya/KayaApp.java",
+              f"entry '{snake}'",
+              f"public static [A-Za-z.]+ {camel}\\(\\)", findings)
+    pref_want("swift", "bindings/swift/KayaApp.swift", f"entry '{snake}'",
+              f"static func {camel}\\(\\)", findings)
+    pref_want("haskell", "bindings/haskell/KayaApp.hs", f"entry '{snake}'",
+              f"^{camel} ::", findings)
+    pref_want("ocaml", "bindings/ocaml/kaya_app.ml", f"entry '{snake}'",
+              f"^let {snake} \\(\\)", findings)
+    pref_want("js", "bindings/js/kaya/index.ts", f"entry '{snake}'",
+              f"^export function {camel}\\(\\)", findings)
+
+
+check_pref_entry("app_data_dir", "AppDataDir", "appDataDir")
+check_pref_entry("prefs", "Prefs", "prefs")
+
+fake = []
+check_pref_entry("kaya_fake_entry", "KayaFakeEntry", "kayaFakeEntry",
+                 findings=fake)
+_pref_fake = sum(1 for m in fake if "has no preferences entry" in m)
+if _pref_fake != 9:
+    selftest_exit(f"check-sugar-surface: self-test failed "
+                  f"({_pref_fake}/9 preferences-entry patterns fired for "
+                  f"an entry that exists nowhere)")
+
+# THE HANDLE'S OWN BLOCK, per language. `remove` is the COLLECTION's name
+# too in six of the nine (python line 1114, Go's Tx.Remove, C#'s
+# Tx.Remove, Java's, Swift's, OCaml's `let remove c key`), so a
+# file-wide pattern for the ninth method would be satisfied by a
+# binding whose prefs handle has no `remove` at all. Haskell alone needs
+# no slice — its field names carry a `pref` prefix, a language flavor
+# forced by record fields being top-level selectors beside the
+# collection's exported `remove`.
+PREFS_BLOCKS = {
+    "rust": ("crates/kaya/src/app.rs", "impl Prefs {"),
+    "python": ("bindings/python/kaya/__init__.py", "class Prefs:"),
+    "csharp": ("bindings/csharp/KayaApp.cs", "readonly struct PrefsHandle"),
+    "java": ("bindings/java/dev/kaya/KayaApp.java",
+             "public static final class Prefs {"),
+    "swift": ("bindings/swift/KayaApp.swift", "struct KayaPrefs {"),
+    "ocaml": ("bindings/ocaml/kaya_app.ml", "type prefs = {"),
+    "haskell": ("bindings/haskell/KayaApp.hs", "data Prefs = Prefs"),
+    "js": ("bindings/js/kaya/index.ts", "export type Prefs = {"),
+}
+
+
+def prefs_block(lang, text=None):
+    """The handle's declaration, sliced out. Brace-matched everywhere but
+    python, which is indentation."""
+    rel, opener = PREFS_BLOCKS[lang]
+    text = read_rel(rel) if text is None else text
+    at = text.find(opener)
+    if at < 0:
+        return None
+    if lang == "python":
+        rest = text[at + len(opener):]
+        end = re.search(r"\n(?=\S)", rest)
+        return rest[:end.start()] if end else rest
+    open_at = text.find("{", at)
+    if open_at < 0:
+        return None
+    depth, i = 0, open_at
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_at:i + 1]
+        i += 1
+    return None
+
+
+# Go has no block: a method's RECEIVER is the scope, so `func
+# (PrefsHandle) Remove(` cannot be the collection's.
+PREF_METHOD_PATTERNS = {
+    "rust": lambda s, p, c, h: f"pub fn {s}\\(&self",
+    "python": lambda s, p, c, h: f"def {s}\\(self, ",
+    "csharp": lambda s, p, c, h: f"public [A-Za-z]+ {p}\\(string ",
+    "java": lambda s, p, c, h: f"public [A-Za-z]+ {c}\\(String ",
+    "swift": lambda s, p, c, h: f"func {c}\\(_ name: String",
+    "ocaml": lambda s, p, c, h: f"^  {s} : ",
+    "haskell": lambda s, p, c, h: f"{h} :: String ->",
+    "js": lambda s, p, c, h: f"^  {c}\\(key: string",
+}
+
+PREF_METHODS = ["get_string", "get_i64", "get_f64", "get_bool",
+                "set_string", "set_i64", "set_f64", "set_bool", "remove"]
+
+
+def pref_method_findings(text_for=None):
+    """Every method of the handle, in every binding's own block."""
+    text_for = read_rel if text_for is None else text_for
+    out = []
+    for lang in sorted(PREFS_BLOCKS):
+        rel, opener = PREFS_BLOCKS[lang]
+        block = prefs_block(lang, text_for(rel))
+        if block is None:
+            out.append(f"check-sugar-surface: {lang} declares no prefs "
+                       f"handle at all (wanted {opener!r} in {rel}) — the "
+                       f"method census below has nothing to read")
+            continue
+        for method in PREF_METHODS:
+            parts = method.split("_")
+            pascal = "".join(w[:1].upper() + w[1:] for w in parts)
+            camel = pascal[:1].lower() + pascal[1:]
+            hs = "pref" + pascal
+            pattern = PREF_METHOD_PATTERNS[lang](method, pascal, camel, hs)
+            if not grep_e(pattern, block):
+                out.append(f"check-sugar-surface: {lang}'s prefs handle "
+                           f"has no '{method}' (wanted /{pattern}/ inside "
+                           f"{opener!r} in {rel})")
+    # Go's receiver IS its scope.
+    go = text_for("bindings/go/app.go")
+    for method in PREF_METHODS:
+        pascal = "".join(w[:1].upper() + w[1:] for w in method.split("_"))
+        pattern = f"^func \\(PrefsHandle\\) {pascal}\\("
+        if not grep_e(pattern, go):
+            out.append(f"check-sugar-surface: go's prefs handle has no "
+                       f"'{method}' (wanted /{pattern}/ in "
+                       f"bindings/go/app.go)")
+    return out
+
+
+for _msg in pref_method_findings():
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVE: one method removed from each binding's own copy,
+# with the substitution counted. A census that read the wrong block, or
+# no block, agrees with every binding at once.
+PREF_METHOD_CUTS = {
+    "rust": ("crates/kaya/src/app.rs", r"pub fn get_bool\(&self",
+             "pub fn getBoolXX(&self", "rust's prefs handle has no 'get_bool'"),
+    "python": ("bindings/python/kaya/__init__.py",
+               r"    def set_f64\(self, key", "    def set_f64XX(self, key",
+               "python's prefs handle has no 'set_f64'"),
+    "csharp": ("bindings/csharp/KayaApp.cs",
+               r"public void Remove\(string key\) => Kaya\.PrefRemove",
+               "public void RemoveXX(string key) => Kaya.PrefRemove",
+               "csharp's prefs handle has no 'remove'"),
+    "java": ("bindings/java/dev/kaya/KayaApp.java",
+             r"public long getI64\(String name", "public long getI64XX(String name",
+             "java's prefs handle has no 'get_i64'"),
+    "swift": ("bindings/swift/KayaApp.swift",
+              r"func setString\(_ name: String", "func setStringXX(_ name: String",
+              "swift's prefs handle has no 'set_string'"),
+    "ocaml": ("bindings/ocaml/kaya_app.ml", r"^  get_string : ",
+              "  get_stringXX : ", "ocaml's prefs handle has no 'get_string'"),
+    "haskell": ("bindings/haskell/KayaApp.hs", r"prefSetBool :: String ->",
+                "prefSetBoolXX :: String ->",
+                "haskell's prefs handle has no 'set_bool'"),
+    "js": ("bindings/js/kaya/index.ts", r"^  getF64\(key: string",
+           "  getF64XX(key: string", "js's prefs handle has no 'get_f64'"),
+    "go": ("bindings/go/app.go", r"^func \(PrefsHandle\) SetI64\(",
+           "func (PrefsHandle) SetI64XX(",
+           "go's prefs handle has no 'set_i64'"),
+}
+_pref_cuts = []
+for _lang, (_rel, _pat, _repl, _wanted) in sorted(PREF_METHOD_CUTS.items()):
+    _text = read_rel(_rel)
+    _doctored, _n = sub_count(_pat, _repl, _text, re.M)
+    _pref_cuts.append(f" {_lang}={_n}")
+    if _n < 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — the "
+                      f"{_lang} prefs-method negative changed nothing in "
+                      f"{_rel}")
+    _fired = [m for m in pref_method_findings(
+        lambda rel, _r=_rel, _d=_doctored: _d if rel == _r else read_rel(rel))
+        if _wanted in m]
+    if len(_fired) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — cutting "
+                      f"{_lang}'s method produced {len(_fired)} findings "
+                      f"naming it, not 1")
+    if read_rel(_rel) != _text:
+        selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
+                      f"changed during the prefs-method negative")
+print("check-sugar-surface: prefs-method perturbations applied:"
+      + "".join(_pref_cuts))
+
+# THE TWO REFUSAL SENTENCES, ONE RULE AND NINE COPIES. A guest may READ
+# any key and WRITE any key kaya has not reserved (P4: window memory
+# lives under `kaya.`), and a key must not be empty; both refusals are
+# raised BINDING-SIDE before the floor call, so the sentence a guest sees
+# is the binding's own text and NOTHING compares them but this.
+# QUOTES AND BACKSLASHES ARE STRIPPED, apostrophe included, because nine
+# languages spell one sentence with five quoting conventions — so all
+# nine read `kayas own` here and a comparison of the WORDS is what this
+# clause is.
+PREF_FLATTENERS = [
+    # `$?` matters: JS's `${key}` reaches here first, and a pattern that
+    # ate only the braces left a bare `$` behind (caught by this clause's
+    # own comparison on its first run).
+    (r"\$?\{[A-Za-z_][A-Za-z0-9_.]*(?::[^}]*)?\}", "<v>"),  # rust {key:?}
+    (r"%q", "<v>"),                                       # go
+] + SENTENCE_FLATTENERS
+
+PREF_SENTENCES = {
+    "reserved": ("kaya: preference key", "own)"),
+    "empty": ("kaya: a preference key", "empty"),
+    # RULED 2026-09-09: `app_data_dir` is UNIFORM in all nine. The state
+    # with no directory is an error a guest cannot plan around, so every
+    # binding REFUSES rather than answering its language's absent value —
+    # which is what the eight did until the ruling, and what made the
+    # observable differ from Rust's panic.
+    "nodir": ("kaya: app_data_dir asked", "attach)"),
+}
+
+# Rust composes the reserved sentence in prefs.rs (reserved_refusal) and
+# raises it from app.rs; the eight raise their own where they refuse.
+PREF_SENTENCE_FILES = {
+    "reserved": {
+        "rust": "crates/kaya/src/prefs.rs",
+        "python": "bindings/python/kaya/__init__.py",
+        "go": "bindings/go/app.go",
+        "csharp": "bindings/csharp/KayaApp.cs",
+        "java": "bindings/java/dev/kaya/KayaApp.java",
+        "swift": "bindings/swift/KayaApp.swift",
+        "ocaml": "bindings/ocaml/kaya_app.ml",
+        "haskell": "bindings/haskell/KayaApp.hs",
+        "js": "bindings/js/kaya/index.ts",
+    },
+    "empty": {
+        "rust": "crates/kaya/src/app.rs",
+        "python": "bindings/python/kaya/__init__.py",
+        "go": "bindings/go/app.go",
+        "csharp": "bindings/csharp/KayaApp.cs",
+        "java": "bindings/java/dev/kaya/KayaApp.java",
+        "swift": "bindings/swift/KayaApp.swift",
+        "ocaml": "bindings/ocaml/kaya_app.ml",
+        "haskell": "bindings/haskell/KayaApp.hs",
+        "js": "bindings/js/kaya/index.ts",
+    },
+    "nodir": {
+        "rust": "crates/kaya/src/app.rs",
+        "python": "bindings/python/kaya/__init__.py",
+        "go": "bindings/go/app.go",
+        "csharp": "bindings/csharp/KayaApp.cs",
+        "java": "bindings/java/dev/kaya/KayaApp.java",
+        "swift": "bindings/swift/KayaApp.swift",
+        "ocaml": "bindings/ocaml/kaya_app.ml",
+        "haskell": "bindings/haskell/KayaApp.hs",
+        "js": "bindings/js/kaya/index.ts",
+    },
+}
+
+
+def pref_sentence(text, which):
+    opener, closer = PREF_SENTENCES[which]
+    at = text.find(opener)
+    if at < 0:
+        return None
+    end = text.find(closer, at)
+    if end < 0:
+        return None
+    said = text[at:end + len(closer)]
+    for pattern, repl in PREF_FLATTENERS:
+        said = re.sub(pattern, repl, said)
+    for junk in ("\\", '"', "'"):
+        said = said.replace(junk, "")
+    return re.sub(r"\s+", " ", said).strip()
+
+
+def pref_sentence_findings(text_for=None):
+    text_for = read_rel if text_for is None else text_for
+    out = []
+    for which, files in sorted(PREF_SENTENCE_FILES.items()):
+        said = {}
+        for lang, rel in sorted(files.items()):
+            one = pref_sentence(text_for(rel), which)
+            if one is None:
+                out.append(f"check-sugar-surface: {lang} prints no "
+                           f"{which} refusal in {rel} "
+                           f"(docs/tasks-s4-plan.md P1/P4)")
+                continue
+            said[lang] = one
+        if not said:
+            continue
+        agreed = max(set(said.values()), key=list(said.values()).count)
+        for lang, one in sorted(said.items()):
+            if one != agreed:
+                out.append(f"check-sugar-surface: {lang}'s {which} "
+                           f"refusal is not the frozen one — it says "
+                           f"{one!r}, the other bindings say {agreed!r} "
+                           f"(one sentence, nine copies, compared "
+                           f"flattened)")
+    return out
+
+
+for _msg in pref_sentence_findings():
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVES, the notification pair's two shapes and now one
+# pair PER SENTENCE, in the file that OWNS it: a WORD taken out of one
+# copy (which the flattened comparison must name), and the sentence's
+# OPENING removed (which leaves it unfindable, the other branch — how a
+# binding that stopped refusing would arrive). Rust's reserved sentence
+# lives in prefs.rs and its other two in app.rs, so the earlier loop over
+# ONE file per binding perturbed prefs.rs for all three and applied
+# nothing twice — caught here on this clause's first run with the nodir
+# sentence (a self-test that changes nothing is a FAILED self-test).
+PREF_SENTENCE_NEGATIVES = {
+    "reserved": ((r"the kaya\. prefix is", "the kaya. is"),
+                 (r"kaya: preference key", "kaya: pref key")),
+    "empty": ((r"preference key must not", "preference key must"),
+              (r"kaya: a preference key", "kaya: a pref key")),
+    "nodir": ((r"before the platform handed", "before the platform"),
+              (r"kaya: app_data_dir asked", "kaya: app_data_dir wanted")),
+}
+_pref_said = []
+_pref_skipped = []
+for _which, _files in sorted(PREF_SENTENCE_FILES.items()):
+    (_drop_pat, _drop_repl), (_gone_pat, _gone_repl) = \
+        PREF_SENTENCE_NEGATIVES[_which]
+    for _lang, _rel in sorted(_files.items()):
+        _text = read_rel(_rel)
+        # A sentence that is not there yet has nothing to perturb, and
+        # the clause above has already named it. SKIPPED OUT LOUD: a
+        # silent skip is how a negative goes vacuous.
+        if pref_sentence(_text, _which) is None:
+            _pref_skipped.append(f" {_which}/{_lang}")
+            continue
+        for _what, _pat, _repl, _wanted in (
+                (f"dropped a word from its {_which} refusal",
+                 _drop_pat, _drop_repl,
+                 f"{_which} refusal is not the frozen one"),
+                (f"stopped printing its {_which} refusal at all",
+                 _gone_pat, _gone_repl, f"prints no {_which} refusal"),
+        ):
+            _doctored, _n = sub_count(_pat, _repl, _text)
+            _pref_said.append(f" {_which}/{_lang}={_n}")
+            if _n < 1:
+                selftest_exit(f"check-sugar-surface: self-test failed — "
+                              f"the {_lang} {_which}-sentence negative "
+                              f"changed nothing in {_rel}")
+            _fired = [m for m in pref_sentence_findings(
+                lambda rel, _r=_rel, _d=_doctored: _d if rel == _r
+                else read_rel(rel))
+                if m.startswith(f"check-sugar-surface: {_lang}")
+                and _wanted in m]
+            if not _fired:
+                selftest_exit(f"check-sugar-surface: self-test failed — "
+                              f"{_lang} {_what} produced no finding naming "
+                              f"it ({_wanted!r})")
+            if read_rel(_rel) != _text:
+                selftest_exit(f"check-sugar-surface: self-test failed — "
+                              f"{_rel} changed during the {_which}-sentence "
+                              f"negative")
+print("check-sugar-surface: pref-sentence perturbations applied:"
+      + "".join(_pref_said))
+if _pref_skipped:
+    print("check-sugar-surface: pref-sentence negatives SKIPPED (the "
+          "sentence is absent and the clause above says so):"
+          + "".join(_pref_skipped))
+
 
 # --- THE TABLE SURFACE, in all nine --------------------------------
 # A TABLE IS NOT A KIND — it is a For with a header — so neither sweep
@@ -4731,6 +5160,7 @@ def _haskell_like(s):
 
 
 STRIP = {
+    "rust": _c_like,
     "python": _python_like, "go": _c_like, "csharp": _c_like,
     "java": _c_like, "swift": _c_like, "ocaml": _ocaml_like,
     "haskell": _haskell_like, "js": _c_like,
@@ -4741,6 +5171,7 @@ STRIP = {
 # prop, so it cannot rot into a name a binding later spells in code.
 NONCE = "KayaCommentOnlyNonce"
 PLANT = {
+    "rust": f"/// {NONCE} rides in a doc comment\n",
     "python": (f"# {NONCE} rides in a comment\n"
                + f'"""{NONCE} rides in a docstring"""\n'),
     "go": f"// {NONCE} rides in a comment\n",
@@ -4753,6 +5184,9 @@ PLANT = {
 }
 
 WPROP_FILES = {
+    # Rust joined 2026-09-09 with `remember_frame`: the loop had eight
+    # rows and the ninth binding's window sugar was held by nothing here.
+    "rust": "crates/kaya/src/app.rs",
     "python": "bindings/python/kaya/__init__.py",
     "go": "bindings/go/app.go",
     "csharp": "bindings/csharp/KayaApp.cs",
@@ -4802,18 +5236,26 @@ if not wprops:
                   "generated wire file")
 
 
-def check_wprop(lang, rel, prop, pattern):
+def check_wprop(lang, rel, prop, pattern, code=None, findings=None):
     global status
-    if not grep_e(pattern, stripped_code[lang]):
-        print(f"check-sugar-surface: {lang} has no window-prop sugar "
-              f"for '{prop}' (wanted /{pattern}/ in {rel}, comments "
-              f"stripped)")
-        status = 1
+    code = stripped_code[lang] if code is None else code
+    if not grep_e(pattern, code):
+        msg = (f"check-sugar-surface: {lang} has no window-prop sugar "
+               f"for '{prop}' (wanted /{pattern}/ in {rel}, comments "
+               f"stripped)")
+        if findings is None:
+            print(msg)
+            status = 1
+        else:
+            findings.append(msg)
 
 
 def _camel(name):
     parts = name.split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+_camel_name = _camel
 
 
 def _pascal(name):
@@ -4829,6 +5271,11 @@ for wprop in wprops:
     # rename (WInset by WInsetXX), so a perturbation proves nothing.
     # `\b` holds both edges — `_` is a word character, so a generated
     # `tx_set_window_inset` cannot stand in for the sugar's `inset`.
+    # Rust folds width and height into ONE chained `size(w, h)`, Go's
+    # and Haskell's flavor.
+    rust_pat = (r"\bsize\b" if wprop in ("width", "height")
+                else rf"\b{wprop}\b")
+    check_wprop("rust", "crates/kaya/src/app.rs", wprop, rust_pat)
     check_wprop("python", "bindings/python/kaya/__init__.py", wprop,
                 rf"\b{wprop}\b")
     # Go folds width and height into ONE Size(w, h) chain method, the
@@ -4853,6 +5300,45 @@ for wprop in wprops:
     # JS carries width and height separately, so it needs no flavor row:
     # the camelCase name is the whole rule.
     check_wprop("js", "bindings/js/kaya/index.ts", wprop, rf"\b{camel}\b")
+
+# THE LOOP'S OWN WATCHED NEGATIVE, nine languages one prop each: the
+# NONCE above proves a comment cannot satisfy a row, and this proves the
+# row can still fail at all. Written when the rust row joined
+# (2026-09-09): eight rows had been watched failing for `remember_frame`
+# by the accident of a prop landing before its sugar, and the ninth had
+# no such accident to lean on.
+WPROP_RENAMES = {
+    "rust": (r"pub fn remember_frame\(", "pub fn rememberFrameXX("),
+    "python": (r"\bremember_frame\b", "remember_frameXX"),
+    "go": (r"\bRememberFrame\b", "RememberFrameXX"),
+    "csharp": (r"\brememberFrame\b", "rememberFrameXX"),
+    "java": (r"\brememberFrame\b", "rememberFrameXX"),
+    "swift": (r"\brememberFrame\b", "rememberFrameXX"),
+    "ocaml": (r"\bremember_frame\b", "remember_frameXX"),
+    "haskell": (r"\bWRememberFrame\b", "WRememberFrameXX"),
+    "js": (r"\brememberFrame\b", "rememberFrameXX"),
+}
+_wprop_neg = []
+for _lang, (_pat, _repl) in WPROP_RENAMES.items():
+    _doctored, _n = sub_count(_pat, _repl, stripped_code[_lang])
+    _wprop_neg.append(f" {_lang}={_n}")
+    if _n < 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — the "
+                      f"{_lang} window-prop rename changed nothing in "
+                      f"{WPROP_FILES[_lang]}")
+    _found = []
+    _camel = _camel_name("remember_frame")
+    _want = {"rust": r"\bremember_frame\b", "python": r"\bremember_frame\b",
+             "ocaml": r"\bremember_frame\b", "go": r"\bRememberFrame\b",
+             "haskell": r"\bWRememberFrame\b"}.get(_lang, rf"\b{_camel}\b")
+    check_wprop(_lang, WPROP_FILES[_lang], "remember_frame", _want,
+                code=_doctored, findings=_found)
+    if len(_found) != 1:
+        selftest_exit(f"check-sugar-surface: self-test failed — renaming "
+                      f"{_lang}'s remember_frame sugar produced "
+                      f"{len(_found)} findings, not 1")
+print("check-sugar-surface: window-prop rename negatives:"
+      + "".join(_wprop_neg))
 
 # ─────────────────────────────────────────────────────────────────────
 # THE STYLING SURFACE (docs/styling-plan.md, slice 1). Neither

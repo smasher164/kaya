@@ -64,7 +64,7 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # differ: the listdetail legs run split's guests (a scene selects a
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
-GUEST_STEM = {"listdetail": "split"}
+GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks"}
 
 # The dark half of expect_ink's frozen string, one leg instead of a
 # lane re-run (tools/check-appearance.py holds the leg here): canvas's
@@ -79,7 +79,11 @@ EXCLUSIVE = set()
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
 # editor is a GO app by design, portfolio and varied are PYTHON alone.
-HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python"}
+HAND_QUEUED = {"editor": "go", "portfolio": "python", "varied": "python",
+               # The task manager's second scene (docs/tasks-s4-plan.md
+               # §4): the same rust example under another script, so it
+               # derives no --example of its own.
+               "taskspersist": "rust"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -159,6 +163,12 @@ ORDER = [
     # The notification scene, bundled (BUNDLED_SCENES); rust-only until the
     # breadth slice (docs/tasks-s3-plan.md §6).
     ("notify", ("rust",)),
+    ("drain",),
+    # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4): the tasks
+    # guest again under taskspersist.steps, act two through the PLAIN
+    # door. Alone between drains — act one leaves a marker in the state
+    # home and act two is a second process of the same bundle.
+    ("taskspersist", ("rust",)),
     ("drain",),
     ("adaptive", LANGS),
     ("drain",),
@@ -358,39 +368,56 @@ CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 # KAYA_LAUNCH_NOTIFICATION and the interpreter enters the centre
 # delegate's own funnel one step past the tap. tools/check-steps.py reads
 # this table against the scenes that carry a `relaunch` line.
-RELAUNCH_DOOR = {"tasks": "launch-notification"}
+RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch"}
 # Which notification the door hands back. The scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2), so the tap the
 # runner plays is on 1.
 RELAUNCH_NOTIFICATION = {"tasks": 1}
 
 
-def act2_dir(root):
-    """`<state>/act2/<id>` as crates/kaya/src/act2.rs computes it — the
-    same state home the exclusive token and the flight recorder use, and
-    the identity manifest's `id`, through tools/ONE manifest reader."""
+def act2_dir(root, env=None):
+    """`<state>/act2/<id>` as crates/kaya/src/act2.rs computes it, under
+    the LEG's own state home (leg_env sets one per leg — docs/traps.md,
+    the pooled-scratch race of 2026-09-09) and the identity manifest's
+    `id`, through tools/ONE manifest reader."""
     from packaging.identity import load
-    state = os.environ.get("XDG_STATE_HOME") or os.path.join(
+    source = env if env is not None else os.environ
+    state = source.get("XDG_STATE_HOME") or os.path.join(
         os.path.expanduser("~"), ".local/state")
     return pathlib.Path(state) / "kaya" / "act2" / load(root).id
 
 
-def clear_act2(root):
+def clear_act2(root, env=None):
     """A stale marker or verdict may not serve this run. The core
     consumes the marker on read, so this covers the run that DIED before
     its second act."""
-    d = act2_dir(root)
+    d = act2_dir(root, env)
     for name in ("marker", "act2.verdict"):
         (d / name).unlink(missing_ok=True)
 
 
-def second_act(root, scene, argv, env, log):
+def plain_launch(argv, env, root, lf):
+    """How act two is started when nothing is filming: the same bound the
+    first act runs under."""
+    return subprocess.Popen(["timeout", "120", *argv], cwd=root, env=env,
+                            stdout=lf, stderr=lf).wait()
+
+
+def second_act(root, scene, argv, env, log, launch=None):
     """Push this lane's door and join act two's verdict (R6a). Returns 0
     only when the second process published a green ordinary verdict into
-    `act2.verdict`; every refusal writes its own sentence into `log`."""
-    d = act2_dir(root)
+    `act2.verdict`; every refusal writes its own sentence into `log`.
+
+    TWO DOORS (docs/tasks-s4-plan.md P5). `launch-notification` is the
+    carve-out: macOS has no programmatic tap, so the bundle is started
+    again naming the notification and the interpreter enters the centre
+    delegate's own funnel. `launch` is the PLAIN one — the same bundle
+    started the way a user would, with nothing pending and nothing added
+    to the environment at all, which is why the marker on disk is the
+    only signal the second process has."""
+    d = act2_dir(root, env)
     marker, verdict = d / "marker", d / "act2.verdict"
-    notification = RELAUNCH_NOTIFICATION[scene]
+    door = RELAUNCH_DOOR[scene]
     with open(log, "a", encoding="utf-8", errors="replace") as lf:
         if not marker.is_file():
             lf.write(f"{scene}: act one published ACT 1 OK but left no "
@@ -398,18 +425,23 @@ def second_act(root, scene, argv, env, log):
                      f"wrote nothing, so there is no act two to run\n")
             return 1
         verdict.unlink(missing_ok=True)
-        lf.write(f"== act two: {RELAUNCH_DOOR[scene]} "
-                 f"notification {notification} ==\n")
         act2_env = dict(env)
         # THE SECOND PROCESS HAS NO SCENE IN ITS ENVIRONMENT: the marker
         # is the only source, exactly as the platform's own relaunch
         # would leave it (crates/kaya/src/act2.rs).
         act2_env.pop("KAYA_SELFTEST", None)
         act2_env.pop("KAYA_SELFTEST_SCRIPT", None)
-        act2_env["KAYA_LAUNCH_NOTIFICATION"] = str(notification)
-        proc = subprocess.Popen(["timeout", "120", *argv], cwd=root,
-                                env=act2_env, stdout=lf, stderr=lf)
-        rc = proc.wait()
+        if door == "launch":
+            lf.write(f"== act two: {door} ==\n")
+        else:
+            notification = RELAUNCH_NOTIFICATION[scene]
+            lf.write(f"== act two: {door} notification {notification} ==\n")
+            act2_env["KAYA_LAUNCH_NOTIFICATION"] = str(notification)
+        # RECORDING MODE GIVES THE SECOND PROCESS ITS OWN TILE (P6): the
+        # runner hands a launcher that registers the relaunched pid with
+        # the suite recorder before it waits, so the film covers act one,
+        # the gap and act two, and the stills split at the process.
+        rc = (launch or plain_launch)(argv, act2_env, root, lf)
         line = (verdict.read_text(encoding="utf-8", errors="replace").strip()
                 if verdict.is_file() else "")
         if not line:
@@ -480,6 +512,14 @@ def leg_env(root, scene, lang, appearance=""):
         env["PYTHONPATH"] = str(root / "bindings/python")
     if appearance:
         env["KAYA_APPEARANCE"] = appearance
+    # ONE STATE HOME PER LEG: the harness's scratch stores and the act-two
+    # marker are one tree per APP under it, and the pool runs many legs of
+    # one app at once (docs/traps.md, 2026-09-09: a concurrent leg's act
+    # one emptied the tree under taskspersist's open database).
+    leg = f"{scene}-{lang}" + ("-dark" if appearance else "")
+    state = root / "target/mac-legs" / leg / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    env["XDG_STATE_HOME"] = str(state)
     return env
 
 

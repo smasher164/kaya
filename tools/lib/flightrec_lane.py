@@ -241,6 +241,11 @@ class WinRecorder(LaneRecorder):
         self._ssh_out = None
         self._scp_from = None
         self.skew = 0
+        # This run's token, on the sampler's command line and in its pid
+        # file, so the lane's exit can wait for ITS OWN sampler and tell a
+        # leak from a neighbour's (docs/deferred.md, the LEAK entry).
+        self.run_token = f"{int(time.time())}-{os.getpid()}"
+        self._stopped_clean = False
 
     def bind(self, run_ssh, run_ssh_out, scp_from):
         """run_ssh(cmd)->rc, run_ssh_out(cmd)->text|None,
@@ -262,7 +267,8 @@ class WinRecorder(LaneRecorder):
                   "C:\\kaya\\flightrec\\lane-foreground.txt 2>nul & exit /b 0")
         self.clock_sync()
         self._ssh("schtasks /create /tn kayafr_lane /tr \"wscript "
-                  "C:\\kaya\\run-hidden-args.vbs flightrec.cmd sample lane\" "
+                  "C:\\kaya\\run-hidden-args.vbs flightrec.cmd sample lane "
+                  f"{self.run_token}\" "
                   "/sc once /st 00:00 /it /rl highest /f >nul "
                   "&& schtasks /run /tn kayafr_lane >nul")
 
@@ -278,15 +284,119 @@ class WinRecorder(LaneRecorder):
         self.skew = int(got) - int(time.time()) if got.isdigit() else 0
         print(f"flightrec: the guest's clock is {self.skew}s from this host's")
 
+    # ---------------------------------------------- the sampler's end --
+    # NO `if` IN THE STOP COMMAND. cmd runs everything after an `&` INSIDE
+    # the if, so the older
+    #   if not exist C:\kaya\flightrec mkdir ... & echo stop > ...ALL.stop
+    # wrote the stop file only on a machine where the directory was MISSING
+    # -- which it never is -- and the sampler polled to its own 5400s
+    # deadline: three matrices, three leaks (docs/deferred.md's LEAK entry;
+    # the same trap check-steps' cmd_precedence clause holds, measured
+    # again on the VM 2026-09-09).
+    STOP_CMD = ("mkdir C:\\kaya\\flightrec 2>nul "
+                "& echo stop > C:\\kaya\\flightrec\\ALL.stop & exit /b 0")
+
+    def samplers(self):
+        """Every flight-recorder sampler the guest still has, as the
+        guest's own lines (`sampler run=<token> pid=<n> ...`), or None
+        when the question could not be asked."""
+        if not self._ready():
+            return None
+        out = self._ssh_out(
+            "powershell -NoProfile -ExecutionPolicy Bypass -File "
+            "C:\\kaya\\flightrec.ps1 -Mode list -Leg lane")
+        if out is None:
+            return None
+        return [ln.strip() for ln in out.replace("\r", "").splitlines()
+                if ln.strip()]
+
+    # A sampler whose run cannot be read: `?` is one the process list found
+    # with no pid file, `none` one started from a build of flightrec.ps1
+    # that predates the token (the runner starts the sampler BEFORE it
+    # deploys, so a lane's first run after an edit to that script is always
+    # the previous one). At the END of a lane both are leaks: nothing else
+    # on this guest starts a flight-recorder sampler.
+    UNATTRIBUTED = ("?", "none")
+
+    def mine(self, lines):
+        """The rows of a `samplers()` listing THIS lane must answer for:
+        its own run, and any sampler nobody can attribute. A row carrying
+        another concrete token is a concurrent runner's and is printed
+        rather than refused."""
+        want = [f"run={self.run_token} "] + [f"run={r} " for r in self.UNATTRIBUTED]
+        return [ln for ln in (lines or [])
+                if ln.startswith("sampler ")
+                and any(w in ln + " " for w in want)]
+
+    def stop_samplers(self, ceiling=40):
+        """Drop the stop file and WAIT for this run's sampler to be gone
+        (docs/deferred.md's LEAK entry: the remedy is a wait, not a file
+        dropped on the way out). Returns the lines of this run's samplers
+        that are STILL alive -- empty on the ordinary path."""
+        if not self._ready():
+            return []
+        self._ssh(self.STOP_CMD)
+        deadline = time.monotonic() + ceiling
+        lines = self.samplers()
+        while self.mine(lines) and time.monotonic() < deadline:
+            time.sleep(2)
+            lines = self.samplers()
+        left = self.mine(lines)
+        if not left:
+            self._stopped_clean = True
+            # The task's registration goes with the sampler it started;
+            # the next lane_start recreates it. NOT because it would fire
+            # again — measured 2026-09-09, a `/sc once` task that has run
+            # reads `Next Run Time: N/A` — but so the guest carries no
+            # armed task for a run that is over.
+            self._ssh("schtasks /delete /tn kayafr_lane /f >nul 2>nul "
+                      "& exit /b 0")
+        return left
+
+    def lane_end(self, out=None):
+        """The verdict gate. The lane may not print a verdict while a
+        sampler of its own is still polling the guest: it loads the
+        machine the next lane is timed on, and three matrices shipped
+        one each. Prints the guest's OWN census either way, and answers
+        False when this run left one behind."""
+        if not self._ready():
+            return True
+        out = out if out is not None else sys.stdout
+        left = self.stop_samplers()
+        lines = self.samplers()
+        if lines is None:
+            print("flightrec: the guest could not be asked what samplers "
+                  "it still has (the ssh transport answered nothing), so "
+                  "this lane cannot say it left none", file=out)
+            return True
+        census = [ln for ln in lines if ln.startswith(("sampler ", "stale "))]
+        print(f"flightrec: samplers on the guest after this lane: "
+              f"{len(census) if census else 0} listed, "
+              f"{len(self.mine(lines))} this lane must answer for "
+              f"(run={self.run_token}, plus any unattributed)", file=out)
+        for ln in census:
+            print(f"  {ln}", file=out)
+        if not left:
+            return True
+        print(f"flightrec: THIS LANE LEFT {len(left)} SAMPLER(S) POLLING on "
+              f"the guest -- they load the machine the next lane is timed "
+              f"on, and a verdict is refused until they are gone "
+              f"(docs/deferred.md, the windows sampler LEAK entry). Kill "
+              f"them by the pid above and re-run.", file=out)
+        return False
+
     def cleanup(self):
         """The lane's backstop, from the runner's exit path: no sampler
         outlives the lane and quietly loads the machine the next lane is
-        timed on."""
-        if not self._ready():
+        timed on. lane_end() has usually done this already."""
+        if not self._ready() or self._stopped_clean:
             return
-        self._ssh("if not exist C:\\kaya\\flightrec mkdir C:\\kaya\\flightrec "
-                  ">nul 2>nul & echo stop > C:\\kaya\\flightrec\\ALL.stop "
-                  "& exit /b 0")
+        left = self.stop_samplers(ceiling=20)
+        if left:
+            print("flightrec: samplers of this run were STILL polling the "
+                  "guest when the lane exited:", file=sys.stderr)
+            for ln in left:
+                print(f"  {ln}", file=sys.stderr)
 
     def collect(self, leg):
         """Run the guest-side collection NOW — from the timeout path

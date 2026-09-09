@@ -459,6 +459,115 @@ static class Kaya
         return Encoding.UTF8.GetString(into, 0, System.Math.Min(written, needed));
     }
 
+    // The app's own places (docs/tasks-s4-plan.md §4): the data
+    // directory and the typed preferences store.
+    [DllImport("kaya")]
+    static extern nuint kaya_app_data_dir(byte[]? into, nuint cap);
+
+    [DllImport("kaya")]
+    static extern int kaya_pref_get_string(
+        byte[] key, nuint keyLen, byte[]? into, nuint cap, out nuint len);
+
+    [DllImport("kaya")]
+    static extern int kaya_pref_get_i64(byte[] key, nuint keyLen, out long value);
+
+    [DllImport("kaya")]
+    static extern int kaya_pref_get_f64(byte[] key, nuint keyLen, out double value);
+
+    [DllImport("kaya")]
+    static extern int kaya_pref_get_bool(byte[] key, nuint keyLen, out byte value);
+
+    [DllImport("kaya")]
+    static extern void kaya_pref_set_string(
+        byte[] key, nuint keyLen, byte[] value, nuint valueLen);
+
+    [DllImport("kaya")]
+    static extern void kaya_pref_set_i64(byte[] key, nuint keyLen, long value);
+
+    [DllImport("kaya")]
+    static extern void kaya_pref_set_f64(byte[] key, nuint keyLen, double value);
+
+    [DllImport("kaya")]
+    static extern void kaya_pref_set_bool(byte[] key, nuint keyLen, byte value);
+
+    [DllImport("kaya")]
+    static extern void kaya_pref_remove(byte[] key, nuint keyLen);
+
+    /// The app's own writable directory, "" before one exists. SIZED,
+    /// THEN READ, AssetMissSentence's two-call shape.
+    internal static string AppDataDir()
+    {
+        int needed = (int)kaya_app_data_dir(null, 0);
+        if (needed == 0) return "";
+        byte[] into = new byte[needed];
+        int written = (int)kaya_app_data_dir(into, (nuint)needed);
+        return Encoding.UTF8.GetString(into, 0, System.Math.Min(written, needed));
+    }
+
+    internal static string? PrefGetString(string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        if (kaya_pref_get_string(raw, (nuint)raw.Length, null, 0, out nuint len) == 0)
+            return null;
+        if (len == 0) return "";
+        byte[] into = new byte[(int)len];
+        if (kaya_pref_get_string(raw, (nuint)raw.Length, into, len, out nuint got) == 0)
+            return null;
+        return Encoding.UTF8.GetString(into, 0, System.Math.Min((int)got, (int)len));
+    }
+
+    internal static long? PrefGetI64(string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_pref_get_i64(raw, (nuint)raw.Length, out long value) == 0
+            ? null : value;
+    }
+
+    internal static double? PrefGetF64(string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_pref_get_f64(raw, (nuint)raw.Length, out double value) == 0
+            ? null : value;
+    }
+
+    internal static bool? PrefGetBool(string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_pref_get_bool(raw, (nuint)raw.Length, out byte value) == 0
+            ? null : value != 0;
+    }
+
+    internal static void PrefSetString(string key, string value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        byte[] packed = Encoding.UTF8.GetBytes(value);
+        kaya_pref_set_string(raw, (nuint)raw.Length, packed, (nuint)packed.Length);
+    }
+
+    internal static void PrefSetI64(string key, long value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_pref_set_i64(raw, (nuint)raw.Length, value);
+    }
+
+    internal static void PrefSetF64(string key, double value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_pref_set_f64(raw, (nuint)raw.Length, value);
+    }
+
+    internal static void PrefSetBool(string key, bool value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_pref_set_bool(raw, (nuint)raw.Length, value ? (byte)1 : (byte)0);
+    }
+
+    internal static void PrefRemove(string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_pref_remove(raw, (nuint)raw.Length);
+    }
+
     /// One value at `at`, advancing past it (header plus payload, padded
     /// to eight). A blob is redeemed and RELEASED here, as the generated
     /// ParseClip does it.

@@ -212,6 +212,66 @@ ENTRIES = (
      "foreign_clip_write(mime, bytes);",
      "foreign_clip_write(mime, bytes);\n        "
      "let before = clip_app_view(kind);"),
+    # WINDOW MEMORY'S SIX LINKS (docs/tasks-s4-plan.md P4). The scene,
+    # `taskspersist.steps`, asserts ONE size on ONE window that never opts
+    # out and never writes a width after its build — so it is green with
+    # the opt-out ignored, with the clamp gone, with the launch
+    # declaration beating the memory on the other axis, with the veto
+    # never lifted, and with the primary's notifies wired to the wrong
+    # id. The arithmetic itself is gtk::frame_tests; these are the
+    # callsites that pure test cannot pin.
+    ("the frame save's opt-out",
+     "if !frame_remembered(&core.remember_frame, window) {",
+     "if false {"),
+    ("the restored frame clamped onto this display",
+     "Some(clamp_frame(width, height, widest, tallest))",
+     "Some((width, height))"),
+    # The key is crate::prefs's ONE spelling (its own doc comment: every
+    # backend reaches it through window_frame/set_window_frame rather than
+    # composing the key), so a second copy here is the file-modes trap one
+    # surface over.
+    ("the frame written through the core's own spelling",
+     "crate::prefs::set_window_frame(window, &line);",
+     'crate::prefs::set(&format!("kaya.window.{window}.frame"), '
+     "crate::prefs::PrefValue::Str(line));"),
+    ("the memory outranking a declared width",
+     "if runtime_frame_write(&mut core.frame_memory, window.0, "
+     "|m| &mut m.width, *w) {",
+     "if true {"),
+    ("the memory outranking a declared height",
+     "if runtime_frame_write(&mut core.frame_memory, window.0, "
+     "|m| &mut m.height, *h) {",
+     "if true {"),
+    # THE RULE IS BY VALUE AND NOT BY ORDERING (docs/tasks-s4-plan.md P4):
+    # the width/height props land on either side of the window
+    # materializing — measured on the mac arm, act one after its batch and
+    # act two before it — so a veto keyed on the transaction they arrived
+    # in decides differently on the two backends with every lane green.
+    # The perturbation is that ordering rule, which GTK shipped first.
+    ("the declaration told from a resize by its VALUE",
+     "        Some(first) if first == value => false,",
+     "        Some(_first) => false,"),
+    ("the primary opening at the remembered size",
+     ".default_width(default_w)",
+     ".default_width(540)"),
+    # Wired under another window's id: every save then writes a key no
+    # restore reads, and the primary opens at 540x330 forever.
+    ("the primary's frame notifies wired to window 0",
+     "watch_frame(window.upcast_ref::<gtk4::Window>(), 0);",
+     "watch_frame(window.upcast_ref::<gtk4::Window>(), 1);"),
+    # THE SAVE IS COALESCED ON IDLE AND NOT ON A TIMER, and the
+    # perturbation is the shape that was built first and MEASURED losing
+    # (2026-09-09, in this image): the declaration's own notify arms the
+    # timer at startup, `resize_window` lands inside that window, and the
+    # process leaves through `_exit` with the trailing write pending — the
+    # store held the DECLARED size while the window was at the resized
+    # one. Nothing runs at the exit to flush it.
+    ("the frame save coalesced onto the main loop's idle",
+     "    glib::idle_add_local_once(move || {\n"
+     "        ARMED.with_borrow_mut(|armed| armed.remove(&window));",
+     "    glib::timeout_add_local_once(std::time::Duration::from_millis(250), "
+     "move || {\n"
+     "        ARMED.with_borrow_mut(|armed| armed.remove(&window));"),
 )
 
 
@@ -304,6 +364,10 @@ PY
         && run_exact_test gtk::flex::tests::gtk_table_viewport_rejects_overflow \\
         && run_exact_test gtk::flex::tests::gtk_table_padded_card_convicts_nothing \\
         && run_exact_test gtk::flex::tests::gtk_slider_snaps_clamps_and_derives \\
+        && run_exact_test \\
+            gtk::frame_tests::gtk_frame_memory_parses_clamps_and_opts_out \\
+        && run_exact_test \\
+            gtk::frame_tests::gtk_frame_memory_beats_the_declaration_and_yields_to_a_resize \\
         && run_exact_test \\
             gtk::notify_tests::gtk_notification_timer_parameter_parses_as_the_action_declares \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\

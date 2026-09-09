@@ -1360,29 +1360,37 @@ def scene_script_cut(scene, cut, keep, extra):
 
 
 
-def scene_script_drop(scene, verb, target, keep):
-    """DROP ONE STEP, not a suffix — for a step out of reach on this
-    host while everything AFTER it is expressible. The same two guards
-    the cut carries: a drop that matches no step is STALE, and the
-    `keep` verbs name the assertions the drop may not take with it."""
+def scene_script_drop(scene, drops, keep):
+    """DROP NAMED STEPS, not a suffix — for steps out of reach on this
+    host while everything AFTER them is expressible. `drops` is a
+    sequence of (verb, target) pairs, EACH matching exactly one step: a
+    relaunch scene needs two, because the resize and its assertion sit on
+    either side of the second act and a tail cut would take the whole
+    second act with it (docs/tasks-s4-plan.md §4). The same two guards
+    the cut carries: a drop that matches no step is STALE, and the `keep`
+    verbs name the assertions the drop may not take with it."""
     path = ROOT / f"tools/scenes/{scene}.steps"
     keeps = keep.split()
+    named = ", ".join(f"`{verb} {target}`" for verb, target in drops)
     if not keeps:
-        die(f"run-sim: dropping `{verb} {target}` from {path} with no "
+        die(f"run-sim: dropping {named} from {path} with no "
             f"`keep` verb — say which assertions this drop may not take "
             f"with it, or the leg can be trimmed until it asserts "
             f"nothing")
     lines = [" ".join(line.split()) for line in
              path.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
-    hits = [i for i, line in enumerate(lines)
-            if line.split()[:2] == [verb, target]]
-    if len(hits) != 1:
-        die(f"run-sim: {path} has {len(hits)} `{verb} {target}` steps "
-            f"and this lane drops exactly one — the scene was reshaped "
-            f"and nobody re-read what the phone can express. Fix the "
-            f"leg, do not widen the drop.")
-    kept = lines[:hits[0]] + lines[hits[0] + 1:]
+    cut_at = set()
+    for verb, target in drops:
+        hits = [i for i, line in enumerate(lines)
+                if line.split()[:2] == [verb, target]]
+        if len(hits) != 1:
+            die(f"run-sim: {path} has {len(hits)} `{verb} {target}` steps "
+                f"and this lane drops exactly one — the scene was reshaped "
+                f"and nobody re-read what the phone can express. Fix the "
+                f"leg, do not widen the drop.")
+        cut_at.add(hits[0])
+    kept = [line for i, line in enumerate(lines) if i not in cut_at]
 
     def asserted(seq, v):
         return {line for line in seq if line.split()[:1] == [v]}
@@ -1390,15 +1398,15 @@ def scene_script_drop(scene, verb, target, keep):
     for v in keeps:
         whole, survived = asserted(lines, v), asserted(kept, v)
         if not survived:
-            die(f"run-sim: dropping `{verb} {target}` from {path} leaves "
+            die(f"run-sim: dropping {named} from {path} leaves "
                 f"no `{v}` step at all — the leg would pass without "
                 f"asserting the thing it exists for")
         if survived != whole:
-            die(f"run-sim: dropping `{verb} {target}` from {path} takes "
+            die(f"run-sim: dropping {named} from {path} takes "
                 f"{sorted(whole - survived)} — the drop may not take an "
                 f"assertion of `{v}` with it")
-    print(f"run-sim: NOT RUN on this host (no auxiliary windows): "
-          f"{lines[hits[0]]}", file=sys.stderr)
+    for i in sorted(cut_at):
+        print(f"run-sim: NOT RUN on this host: {lines[i]}", file=sys.stderr)
     return "\n".join(kept)
 
 
@@ -1429,15 +1437,20 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
               f"marker at {marker} — there is no act two to run", file=log)
         return False
     verdict.unlink(missing_ok=True)
-    notification = lane.RELAUNCH_NOTIFICATION[scene]
-    print(f"== act two: {lane.RELAUNCH_DOOR[scene]} "
-          f"notification {notification} ==", file=log)
+    door = lane.RELAUNCH_DOOR[scene]
     act2_env = dict(env)
     # THE SECOND PROCESS HAS NO SCENE IN ITS ENVIRONMENT: the marker is
     # the only source, exactly as a real tap would leave it.
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST", None)
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT", None)
-    act2_env["SIMCTL_CHILD_KAYA_LAUNCH_NOTIFICATION"] = str(notification)
+    if door == "launch":
+        # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the bundle again,
+        # nothing pending, nothing added.
+        print(f"== act two: {door} ==", file=log)
+    else:
+        notification = lane.RELAUNCH_NOTIFICATION[scene]
+        print(f"== act two: {door} notification {notification} ==", file=log)
+        act2_env["SIMCTL_CHILD_KAYA_LAUNCH_NOTIFICATION"] = str(notification)
     got = subprocess.run(
         ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
          udid, bundle_id],
@@ -1457,7 +1470,7 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
 
 
 def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
-                   extra="", cut="", keep="", drop_verb="", drop_target="",
+                   extra="", cut="", keep="", drops=(),
                    appearance="", log=None):
     """Install the bundle on the claimed simulator and launch with the
     scene script from the environment. The picker/clipboard scenes get
@@ -1467,9 +1480,9 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     run in-process at all; both meet the guest through files in the
     app's own data container (docs/traps.md). Started per leg and
     killed with it."""
-    if cut and drop_verb:
+    if cut and drops:
         print(f"run-sim: {name} asks for both a cut at `{cut}` and a "
-              f"drop of `{drop_verb} {drop_target}` — pick one", file=log)
+              f"drop of {drops} — pick one", file=log)
         return False
     run(["xcrun", "simctl", "install", udid, str(app)],
         stdout=log, stderr=log)
@@ -1478,8 +1491,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     rec_start(name, slot)
     if cut:
         script = scene_script_cut(scene, cut, keep, extra)
-    elif drop_verb:
-        script = scene_script_drop(scene, drop_verb, drop_target, keep)
+    elif drops:
+        script = scene_script_drop(scene, drops, keep)
     else:
         script = "\n".join(
             line for line in (ROOT / f"tools/scenes/{scene}.steps")
@@ -2450,9 +2463,27 @@ SDKROOT_SIM = out_of(["xcrun", "-sdk", "iphonesimulator",
 shutil.rmtree(BUNDLES, ignore_errors=True)
 
 
+# THE C COMPILER FOR THIS TARGET IS XCODE'S, NOT THE SHELL'S (the same
+# choice the cgo and pyhost.c builds below already make). The dev shell's
+# `clang` is nix's cc-wrapper: it injects `-mmacos-version-min` and then
+# refuses its own argument beside the simulator's —
+#   clang: error: invalid argument '-mmacos-version-min=14.0' not allowed
+#          with '-mios-simulator-version-min=26.5'
+# — which is what `cc-rs` meets the moment a dependency has C in it
+# (measured 2026-09-09, rusqlite's bundled sqlite3.c; the wrapper prints
+# its own warning saying it is not built for cross targets). cc-rs reads
+# CC_<target> with the dashes and with underscores; both are set.
+CC_SIM = out_of(["xcrun", "-sdk", "iphonesimulator", "-f", "clang"]).strip()
+AR_SIM = out_of(["xcrun", "-sdk", "iphonesimulator", "-f", "ar"]).strip()
+IOS_SIM_TARGET = "aarch64-apple-ios-sim"
+
+
 def cargo_ios(args):
-    if run(["cargo", *args],
-           env=dict(os.environ, SDKROOT=SDKROOT_SIM)).returncode != 0:
+    env = dict(os.environ, SDKROOT=SDKROOT_SIM)
+    for name, tool in (("CC", CC_SIM), ("AR", AR_SIM)):
+        env[f"{name}_{IOS_SIM_TARGET}"] = tool
+        env[f"{name}_{IOS_SIM_TARGET.replace('-', '_')}"] = tool
+    if run(["cargo", *args], env=env).returncode != 0:
         sys.exit(1)
 
 
@@ -2504,12 +2535,16 @@ def queue_scene_leg(suite, scene, name, app, bundle_id, selftest,
     """One leg from the module's tables: the MODS entry supplies the
     cut/drop/keep/extra the leg asserts (tools/lib/lanes/ios.py)."""
     mods = lane.MODS.get((suite, scene), {})
-    drop = mods.get("drop", ("", ""))
+    # ONE PAIR OR A LIST OF THEM: a relaunch scene drops the resize AND
+    # its assertion, which sit on either side of the second act.
+    drop = mods.get("drop", ())
+    drops = tuple(drop) if drop and isinstance(drop[0], (tuple, list)) else (
+        (tuple(drop),) if drop else ())
     extra = lane.PAD_EXTRAS.get(scene, "") if pad else mods.get("extra",
                                                                 "")
     queue_leg(name, app, bundle_id, name, selftest, scene_arg,
               extra, mods.get("cut", ""), mods.get("keep", ""),
-              drop[0], drop[1], appearance, pad=pad)
+              drops, appearance, pad=pad)
 
 
 def suite_end(phase):

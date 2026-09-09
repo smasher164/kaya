@@ -67,9 +67,22 @@ def packaged_inner(leg):
 # library's HKCU registration) or through the package's `com:ExeServer`, and
 # then calls `Activate` with the toast's launch arguments. Measured
 # 2026-09-08 on both routes.
-RELAUNCH_DOOR = {"tasks": "com-activator"}
-# The door script the runner drives (tools/guest/, shipped by the deploy).
+#
+# S4's scenes relaunch with NOTHING PENDING, so they take the PLAIN door
+# (docs/tasks-s4-plan.md P5): the runner starts the same exe the way a user
+# would — no KAYA_* signalling the harness, the act-two marker on disk the
+# only thing that says a second act exists. The word is the scene's own:
+# `relaunch launch` makes the harness print `KAYA_RELAUNCH: door launch`,
+# which the runner requires before it pushes anything.
+RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch"}
+# The door scripts the runner drives (tools/guest/, shipped by the deploy),
+# one per door.
 RELAUNCH_DOOR_SCRIPT = "relaunch-com.ps1"
+RELAUNCH_LAUNCH_SCRIPT = "relaunch-launch.ps1"
+# The exe the plain door starts for a scene whose guest is another scene's
+# (taskspersist runs the tasks app under its own scene name, exactly as the
+# linux lane does).
+RELAUNCH_LAUNCH_EXE = {"taskspersist": "tasks"}
 # The launch string `Activate` is handed, in the two pieces cmd.exe can carry:
 # `=` is an ARGUMENT DELIMITER in a .cmd's %1..%9, so `kaya=1` arrives as two
 # tokens and the door opens with a launch string naming no id (measured
@@ -238,6 +251,14 @@ ORDER = [
     # the same luck spelled differently.
     [
      "taskspkg_rust",
+    ],
+    # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4), the SAME guest
+    # under its own scene: alone because every relaunch leg is (check-steps'
+    # own clause — the door reaches whichever kaya process holds it), and
+    # because the scene resizes the primary window and then reads that frame
+    # back out of a second process.
+    [
+     "taskspersist_rust",
     ],
     # dnd_rust ALONE: the `drag` verb moves the REAL MOUSE across the
     # desktop and presses it (docs/dnd-plan.md D10 — there is no

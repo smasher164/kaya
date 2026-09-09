@@ -13,6 +13,7 @@ dev_shell_or_die()
 
 import atexit
 import hashlib
+import os
 import re
 import subprocess
 
@@ -53,9 +54,9 @@ def run_javac(*args, log=None):
     return r.returncode
 
 
-def run_java(*args, log=None):
+def run_java(*args, log=None, env=None):
     out = subprocess.PIPE if log is not None else None
-    r = subprocess.run([*JAVA, *[str(a) for a in args]], cwd=ROOT,
+    r = subprocess.run([*JAVA, *[str(a) for a in args]], cwd=ROOT, env=env,
                        stdout=out, stderr=subprocess.STDOUT if log
                        is not None else None, check=False)
     if log is not None:
@@ -483,6 +484,84 @@ app_after = hashlib.sha256(
 if app_after != app_before:
     fail("FAIL — bindings/java/dev/kaya/KayaApp.java changed during "
          "the build-once negative. It must only ever doctor the copy "
+         "in the scratch directory.")
+
+# THE LIBRARY THE NOTIFY EXERCISER LOADS: it dispatches through a real
+# transaction, so the natives have to be there (AbortCheck's ring stub is
+# the other choice and it would redden every case for the wrong reason).
+LIBKAYA = ROOT / "target/debug/libkaya.dylib"
+if not LIBKAYA.is_file():
+    print("java-typecheck: build libkaya first "
+          "(cargo build -p kaya --features harness --locked)")
+    raise SystemExit(1)
+NOTIFY_ENV = dict(os.environ, KAYA_LIB=str(LIBKAYA),
+                  KAYA_SELFTEST="java_notify_order")
+
+# THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER, RUN
+# (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry, which asked for
+# exactly this in five bindings): the one-shot handler bound at the show
+# wins, an id this process never showed reaches the process-level one,
+# that one does not retire, and an unclaimed result announces its drop in
+# full. NO LANE CAN SEE ANY OF IT — a scene registers one or the other,
+# never both, and reads the same label back whichever answered.
+(TMP / "notifyclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "notifyclasses",
+             "tools/checks/java-notify/dev/kaya/NotifyOrderCheck.java") != 0:
+    fail("FAIL — the notification-order exerciser did not compile.")
+
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'notifyclasses'}",
+            "dev.kaya.NotifyOrderCheck", env=NOTIFY_ENV) != 0:
+    fail("FAIL — the notification dispatch order is wrong, or the drop "
+         "sentence is not the frozen one (docs/tasks-s9-plan.md R1).")
+
+# ITS WATCHED NEGATIVE, the build-once clause's shape: the ORDER SWAPPED
+# in a COPY — the process-level handler consulted before the one-shot one
+# — with the substitution COUNTED, and the exerciser required to say so.
+(TMP / "swapped").mkdir()
+for p in sorted((ROOT / "bindings" / "java" / "dev" / "kaya").glob("*.java")):
+    (TMP / "swapped" / p.name).write_bytes(p.read_bytes())
+notify_before = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaApp.java").read_bytes()).hexdigest()
+
+swapped = TMP / "swapped" / "KayaApp.java"
+swapped.write_text(
+    g.doctor("notify-order negative consulted the process handler first",
+             swapped.read_text(encoding="utf-8"),
+             r"BiConsumer<Tx, Integer> handler = notifications\.remove\(id\);\n"
+             r"        if \(handler != null\) \{",
+             "BiConsumer<Tx, Integer> handler = notifications.remove(id);\n"
+             "        if (handler != null && notificationActivation == null) {"),
+    encoding="utf-8")
+
+if run_javac("-encoding", "UTF-8", "-d", TMP / "swappedclasses",
+             "bindings/java-desktop/dev/kaya/KayaRing.java",
+             *sorted((TMP / "swapped").glob("*.java")),
+             "tools/checks/java-notify/dev/kaya/NotifyOrderCheck.java") != 0:
+    fail("FAIL — the order-swapped KayaApp copy did not compile.")
+
+if run_java("-cp", str(TMP / "swappedclasses"), "dev.kaya.NotifyOrderCheck",
+            log=TMP / "swapped.log", env=NOTIFY_ENV) == 0:
+    fail("FAIL — the notification-order exerciser PASSED against a "
+         "KayaApp that consults the process-level handler first. It is "
+         "therefore not exercising the order, and the clause above is "
+         "green for some other reason.")
+swapped_log = (TMP / "swapped.log").read_text(encoding="utf-8",
+                                              errors="replace")
+if "the one-shot handler did not answer" not in swapped_log:
+    print("java-typecheck: FAIL — the swapped copy failed, but NOT by "
+          "misrouting the one-shot result, so the negative did not watch "
+          "the order. What it printed:")
+    print(swapped_log)
+    raise SystemExit(1)
+
+notify_after = hashlib.sha256(
+    (ROOT / "bindings" / "java" / "dev" / "kaya"
+     / "KayaApp.java").read_bytes()).hexdigest()
+if notify_after != notify_before:
+    fail("FAIL — bindings/java/dev/kaya/KayaApp.java changed during "
+         "the notify-order negative. It must only ever doctor the copy "
          "in the scratch directory.")
 
 g.verdict()

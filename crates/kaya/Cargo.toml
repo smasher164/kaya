@@ -30,6 +30,16 @@ tiny-skia = "0.12.0"
 harfrust = "0.13.3"
 skrifa = "0.46.2"
 
+[dev-dependencies]
+# THE EXAMPLES' ONLY DEPENDENCY, and the task manager's document
+# (docs/tasks-s4-plan.md P1/P7): guests/rust are examples of this crate,
+# so the app's SQLite binding belongs here. `bundled` compiles the engine
+# in, so every lane and both phones carry the same one and no host's
+# libsqlite3 version decides what the app can do. Not a dependency of the
+# LIBRARY: kaya answers app_data_dir() and has no opinion about the
+# format under it.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
 [build-dependencies]
 # Emits msvc linker directives at build time; no-op for other targets.
 static_vcruntime = "2"

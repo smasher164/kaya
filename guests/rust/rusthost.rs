@@ -184,6 +184,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),
         Ok("tasks") => tasks::app(ctx),
+        Ok("taskspersist") => tasks::app(ctx),
         Ok("notify") => notify::app(ctx),
         // WHICH ROUTE THE CORE TAKES IS THE RUNNER'S CHOICE: this leg
         // arrives with a KAYA_ASSET_DIR and resolves through a directory.

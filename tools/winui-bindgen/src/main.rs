@@ -451,11 +451,24 @@ fn main() {
         // tell the WINDOW what its caption is, so the app must
         // (docs/chrome-plan.md C2's WinUI row and
         // docs/chrome/toolbar-winui.md carry the measurements).
-        // `Window.AppWindow` is the ONLY route. NOT filtered: every other
-        // Windowing type, since kaya sizes its windows through XAML.
+        // `Window.AppWindow` is the ONLY route.
         "Microsoft.UI.Windowing.AppWindow".to_string(),
         "Microsoft.UI.Windowing.AppWindowTitleBar".to_string(),
         "Microsoft.UI.Windowing.TitleBarHeightOption".to_string(),
+        // WINDOW MEMORY (docs/tasks-s4-plan.md P4): a window's POSITION is
+        // the one geometry XAML cannot express, so the frame kaya restores
+        // goes through AppWindow. `Changed` carries DidSizeChange /
+        // DidPositionChange, `MoveAndResize` takes the whole frame at once,
+        // and DisplayArea is the platform's own answer to "is that
+        // rectangle still on a screen". The three Windows.Graphics structs
+        // are those members' parameter and property types, which the filter
+        // does not pull transitively (docs/traps.md).
+        "Microsoft.UI.Windowing.AppWindowChangedEventArgs".to_string(),
+        "Microsoft.UI.Windowing.DisplayArea".to_string(),
+        "Microsoft.UI.Windowing.DisplayAreaFallback".to_string(),
+        "Windows.Graphics.RectInt32".to_string(),
+        "Windows.Graphics.PointInt32".to_string(),
+        "Windows.Graphics.SizeInt32".to_string(),
         // DRAG AND DROP (docs/dnd-plan.md §5 step 5). Until these landed
         // every ADD half of the six drag events was a `usize` vtable PAD
         // while the Remove halves survived on their i64 token, and

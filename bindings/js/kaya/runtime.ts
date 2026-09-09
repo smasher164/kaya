@@ -25,6 +25,16 @@ type Floor = {
   assetBlob(handle: number): number;
   assetRelease(handle: number): void;
   assetWhyNot(name: string): string;
+  appDataDir(): string;
+  prefGetString(key: string): string | undefined;
+  prefGetI64(key: string): number | undefined;
+  prefGetF64(key: string): number | undefined;
+  prefGetBool(key: string): boolean | undefined;
+  prefSetString(key: string, value: string): void;
+  prefSetI64(key: string, value: number): void;
+  prefSetF64(key: string, value: number): void;
+  prefSetBool(key: string, value: number): void;
+  prefRemove(key: string): void;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
   pickedRead(handle: number): Uint8Array;
   pickedWrite(handle: number, bytes: Uint8Array): void;
@@ -164,6 +174,50 @@ export function assetMissSentence(name: string): string {
  * close it with fs.closeSync. node.exe links its C runtime statically,
  * so no descriptor can cross on Windows — this route is refused there
  * and read/write below work everywhere (docs/js-plan.md §6). */
+/** The app's own writable directory, "" before one exists
+ * (docs/tasks-s4-plan.md §4). */
+export function appDataDir(): string {
+  return lib.appDataDir();
+}
+
+export function prefGetString(key: string): string | undefined {
+  return lib.prefGetString(key);
+}
+
+export function prefGetI64(key: string): number | undefined {
+  return lib.prefGetI64(key);
+}
+
+export function prefGetF64(key: string): number | undefined {
+  return lib.prefGetF64(key);
+}
+
+export function prefGetBool(key: string): boolean | undefined {
+  return lib.prefGetBool(key);
+}
+
+export function prefSetString(key: string, value: string): void {
+  lib.prefSetString(key, value);
+}
+
+export function prefSetI64(key: string, value: number): void {
+  lib.prefSetI64(key, value);
+}
+
+export function prefSetF64(key: string, value: number): void {
+  lib.prefSetF64(key, value);
+}
+
+/** The addon reads 0/1: node.rs resolves napi_get_boolean but not
+ * napi_get_value_bool, so this is the one place that converts. */
+export function prefSetBool(key: string, value: boolean): void {
+  lib.prefSetBool(key, value ? 1 : 0);
+}
+
+export function prefRemove(key: string): void {
+  lib.prefRemove(key);
+}
+
 export function openPicked(handle: number, mode: number): { fd: number; seekable: boolean } {
   if (process.platform === "win32") {
     throw new Error(

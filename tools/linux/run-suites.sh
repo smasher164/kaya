@@ -259,6 +259,10 @@ flightrec_start linux
 # shellcheck source=tools/linux/exclusive.sh
 source /work/tools/linux/exclusive.sh
 kaya_exclusive_selftest linux
+# The plain door's own refusals, watched firing before any leg uses them
+# (docs/tasks-s4-plan.md P5): the sentences a taskspersist leg dies with
+# are the ones the next reader chases.
+python3 /work/tools/linux/persist-leg.py --self-test || exit 1
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): kaya's own x11 drag in the witness legs, three sightings
 # under a matrix (docs/deferred.md), and the wayland pastes.
@@ -1120,6 +1124,15 @@ for proto in x11 wayland; do
     run "$proto" tasks-rust env KAYA_SELFTEST=tasks \
         tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tasks"
+    # WHAT SURVIVES A RELAUNCH (docs/tasks-s4-plan.md §4), the SAME guest
+    # under its own scene: the door here is the plain one — the app's
+    # desktop entry through `gio launch`, with nothing pending — so this
+    # leg names its own door and tools/linux/persist-leg.py pushes it.
+    # No a11y bus: the scene asserts no `expect_ax`.
+    export RELAUNCH_DOOR_TASKSPERSIST=launch
+    run "$proto" taskspersist-rust env KAYA_SELFTEST=taskspersist \
+        python3 tools/linux/persist-leg.py \
+        "$CARGO_TARGET_DIR/debug/examples/tasks"
     # THE NOTIFICATION SCENE (docs/tasks-s3-plan.md §5), ONCE PER ROUTE the
     # ruled floor allows — the portal, and GNOME's own org.gtk.Notifications
     # — because kaya's decision has two arms and a lane that ran one of them

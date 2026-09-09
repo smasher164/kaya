@@ -3181,4 +3181,146 @@ check("an unclaimed notification_result announces the drop, naming the id",
           "was bound at the show and no process-level handler is registered "
           "(kaya.on_notification_activation)"))
 
+# THE PREFERENCES STORE AND THE DATA DIRECTORY (docs/tasks-s4-plan.md
+# P1/P2/P3), through the REAL FLOOR: everything above queues records and
+# never enters the core, but a pref call reaches the platform's own store
+# on the spot, so these are the one runtime half of this file.
+#
+# SCRATCH FIRST. `KAYA_SELFTEST` moves the pref domain to `<id>.selftest`
+# and the data directory to `<state>/selftest/<id>/data` (prefs.rs's
+# `domain`/`data_dir_path`), so a gate run cannot touch the developer's
+# own settings. Set HERE and not at the top of the file: the domain is
+# resolved once, on first use, and nothing above this line asks.
+os.environ["KAYA_SELFTEST"] = "kaya_app_checks"
+
+_data_dir = kaya.app_data_dir()
+check("app_data_dir answers a real directory", _data_dir.is_dir())
+check("and under the harness it is the SCRATCH one, never the app's",
+      "selftest" in _data_dir.parts)
+
+# AND IT REFUSES WHERE THERE IS NONE, with the sentence
+# tools/check-sugar-surface.py freezes across all nine (ruled
+# 2026-09-09: the state is an error a guest cannot plan around, so no
+# binding answers an absent value). THE FLOOR CANNOT BE MADE TO SAY 0
+# HERE — only Android before attach does — so the shim is what answers
+# absent; the arm above it is the whole of what this checks.
+_real_dir = kaya.runtime.app_data_dir
+kaya.runtime.app_data_dir = lambda: None
+try:
+    kaya.app_data_dir()
+    check("app_data_dir refuses when the platform handed none over", False)
+except RuntimeError as e:
+    check("app_data_dir refuses when the platform handed none over",
+          str(e) == ("kaya: app_data_dir asked before the platform handed "
+                     "one over (Android before attach)"))
+finally:
+    kaya.runtime.app_data_dir = _real_dir
+
+_prefs = kaya.prefs()
+_prefs.set_string("s4_str", "Sunday")
+_prefs.set_i64("s4_int", -7)
+_prefs.set_f64("s4_float", 1.5)
+_prefs.set_bool("s4_bool", True)
+check("a string round-trips through the platform's own store",
+      _prefs.get_string("s4_str", "?") == "Sunday")
+check("an i64 round-trips, sign and all",
+      _prefs.get_i64("s4_int", 0) == -7)
+check("an f64 round-trips", _prefs.get_f64("s4_float", 0.0) == 1.5)
+check("a bool round-trips", _prefs.get_bool("s4_bool", False) is True)
+
+# THE SIZING CALL IS TWO CALLS, so a value longer than any fixed buffer
+# comes back WHOLE — the asset_miss_sentence lesson, one surface over.
+_long = "x" * 5000
+_prefs.set_string("s4_long", _long)
+check("a 5000-character value comes back whole (the two-call read)",
+      _prefs.get_string("s4_long", "") == _long)
+# BYTES, NOT A C STRING: the key and the value carry their lengths, so a
+# multi-byte character survives and an embedded NUL cannot truncate.
+_prefs.set_string("s4_utf8", "Sonnabend — ✓")
+check("a non-ASCII value round-trips (length-carried, not NUL-terminated)",
+      _prefs.get_string("s4_utf8", "") == "Sonnabend — ✓")
+_prefs.set_string("s4_empty", "")
+check("an EMPTY string is a value, not an absence",
+      _prefs.get_string("s4_empty", "fallback") == "")
+
+# A TYPED GET ON ANOTHER TYPE ANSWERS ABSENT (the semantics, §4):
+# UserDefaults would coerce and SharedPreferences would throw, and
+# neither is what kaya promises.
+check("get_i64 on a string key answers the DEFAULT",
+      _prefs.get_i64("s4_str", 42) == 42)
+check("get_string on an i64 key answers the DEFAULT",
+      _prefs.get_string("s4_int", "fallback") == "fallback")
+check("get_bool on an f64 key answers the DEFAULT",
+      _prefs.get_bool("s4_float", False) is False)
+check("get_f64 on a bool key answers the DEFAULT",
+      _prefs.get_f64("s4_bool", 9.5) == 9.5)
+check("an absent key answers the DEFAULT",
+      _prefs.get_string("s4_never_written", "fallback") == "fallback")
+
+_prefs.remove("s4_int")
+check("remove takes the key back out",
+      _prefs.get_i64("s4_int", 42) == 42)
+
+# THE RESERVED PREFIX (P4). Window memory lives under `kaya.`, so a
+# guest WRITE to one is refused BINDING-SIDE, before the floor call, with
+# the sentence tools/check-sugar-surface.py freezes across all nine.
+_reserved_said = []
+for _what, _write in (
+        ("set_string", lambda: _prefs.set_string("kaya.window.0.frame", "x")),
+        ("set_i64", lambda: _prefs.set_i64("kaya.n", 1)),
+        ("set_f64", lambda: _prefs.set_f64("kaya.f", 1.0)),
+        ("set_bool", lambda: _prefs.set_bool("kaya.b", True)),
+        ("remove", lambda: _prefs.remove("kaya.window.0.frame"))):
+    try:
+        _write()
+        _reserved_said.append(f"{_what} accepted a reserved key")
+    except ValueError as e:
+        if str(e) != ('kaya: preference key "kaya.window.0.frame" is '
+                      "reserved (the kaya. prefix is kaya's own)") \
+                and _what in ("set_string", "remove"):
+            _reserved_said.append(f"{_what} said {str(e)!r}")
+check("every write to a reserved key is refused, by name",
+      _reserved_said == [])
+try:
+    _prefs.set_string("kaya.window.0.frame", "x")
+    check("the reserved refusal names the key and the prefix", False)
+except ValueError as e:
+    check("the reserved refusal names the key and the prefix",
+          str(e) == ('kaya: preference key "kaya.window.0.frame" is '
+                     "reserved (the kaya. prefix is kaya's own)"))
+
+# A READ of a reserved key is NOT refused: P4 reserves the prefix against
+# a guest WRITE, and kaya's own frame is no secret.
+try:
+    _prefs.get_string("kaya.window.0.frame", "unset")
+    check("a READ of a reserved key is allowed", True)
+except ValueError:
+    check("a READ of a reserved key is allowed", False)
+
+_empty_said = []
+for _what, _call in (
+        ("get_string", lambda: _prefs.get_string("", "d")),
+        ("set_i64", lambda: _prefs.set_i64("", 1)),
+        ("remove", lambda: _prefs.remove(""))):
+    try:
+        _call()
+        _empty_said.append(f"{_what} accepted an empty key")
+    except ValueError as e:
+        if str(e) != "kaya: a preference key must not be empty":
+            _empty_said.append(f"{_what} said {str(e)!r}")
+check("an empty key is refused everywhere, by one sentence",
+      _empty_said == [])
+
+# LEAVE THE SCRATCH DOMAIN AS IT WAS FOUND: these run on a developer's
+# machine as often as on a lane.
+for _key in ("s4_str", "s4_int", "s4_float", "s4_bool", "s4_long",
+             "s4_utf8", "s4_empty"):
+    _prefs.remove(_key)
+check("the checks leave nothing of their own behind",
+      all(_prefs.get_string(k, "<gone>") == "<gone>"
+          for k in ("s4_str", "s4_long", "s4_utf8", "s4_empty"))
+      and _prefs.get_i64("s4_int", -1) == -1
+      and _prefs.get_f64("s4_float", -1.0) == -1.0
+      and _prefs.get_bool("s4_bool", False) is False)
+
 sys.exit(1 if failures else 0)

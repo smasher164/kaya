@@ -15,6 +15,11 @@ static class Program
             AbortCheck.Run();
             System.Environment.Exit(0);
         }
+        if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "notify")
+        {
+            NotifyOrderCheck.Run();
+            System.Environment.Exit(0);
+        }
         switch (System.Environment.GetEnvironmentVariable("KAYA_SELFTEST"))
         {
             case "a11y": A11yScene.Run(); break;

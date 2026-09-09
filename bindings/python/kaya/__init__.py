@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import io
 import operator
+import pathlib
 import sys
 import threading
 import traceback
@@ -2772,6 +2773,100 @@ def capabilities():
         notifications=bool(bits & runtime.CAP_NOTIFICATIONS))
 
 
+def app_data_dir():
+    """The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+    Application Support/<id> on macOS, Documents on iOS, the files
+    directory on Android, $XDG_DATA_HOME/<id> on Linux,
+    %LOCALAPPDATA%\\<id> on Windows. Created on first ask; None where
+    the host has not handed one over yet.
+
+    KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the
+    app's, written the standard way (sqlite3 is the recommendation).
+    Settings are small and typed and belong in `prefs()`.
+
+    REFUSES where the platform has handed no directory over — an error
+    state a guest cannot plan around, so all nine bindings raise rather
+    than answering an absent value (ruled 2026-09-09).
+    """
+    answer = runtime.app_data_dir()
+    if answer is None:
+        raise RuntimeError(
+            "kaya: app_data_dir asked before the platform handed one "
+            "over (Android before attach)")
+    return pathlib.Path(answer)
+
+
+def _pref_key(key):
+    key = str(key)
+    if not key:
+        raise ValueError("kaya: a preference key must not be empty")
+    return key
+
+
+def _pref_write_key(key):
+    """A guest may READ any key and WRITE any key kaya has not reserved
+    (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`)."""
+    key = _pref_key(key)
+    if key.startswith("kaya."):
+        raise ValueError(
+            f'kaya: preference key "{key}" is reserved '
+            "(the kaya. prefix is kaya's own)")
+    return key
+
+
+class Prefs:
+    """The app's preferences store (docs/tasks-s4-plan.md P2/P3): a
+    small typed key-value record under the app's id, the platform's own
+    where the platform has one — UserDefaults on Apple,
+    SharedPreferences on Android, a key file on Linux and Windows.
+
+    A PULL, NOT A SIGNAL: a setting is read when the app builds and
+    written when the user changes it. Every get takes the default it
+    answers when the key is absent OR holds another type. Writes are
+    durable when they return, and the store may be used from any
+    thread.
+    """
+
+    def get_string(self, key, default):
+        value = runtime.pref_get_string(_pref_key(key))
+        return default if value is None else value
+
+    def get_i64(self, key, default):
+        value = runtime.pref_get_i64(_pref_key(key))
+        return default if value is None else value
+
+    def get_f64(self, key, default):
+        value = runtime.pref_get_f64(_pref_key(key))
+        return default if value is None else value
+
+    def get_bool(self, key, default):
+        value = runtime.pref_get_bool(_pref_key(key))
+        return default if value is None else value
+
+    def set_string(self, key, value):
+        runtime.pref_set_string(_pref_write_key(key), str(value))
+
+    def set_i64(self, key, value):
+        runtime.pref_set_i64(_pref_write_key(key), int(value))
+
+    def set_f64(self, key, value):
+        runtime.pref_set_f64(_pref_write_key(key), float(value))
+
+    def set_bool(self, key, value):
+        runtime.pref_set_bool(_pref_write_key(key), bool(value))
+
+    def remove(self, key):
+        runtime.pref_remove(_pref_write_key(key))
+
+
+_PREFS = Prefs()
+
+
+def prefs():
+    """The app's preferences store — one per process."""
+    return _PREFS
+
+
 def signal(initial):
     handle = Signal(_app._next("signal"), initial)
     # By id, for the undo path: a restored value arrives as a signal id
@@ -3714,7 +3809,8 @@ def when(sig):
 
 
 def _window_props(window, title, width, height, veto_close, dirty,
-                  panes, sections_presentation, appearance, inset):
+                  panes, sections_presentation, appearance, inset,
+                  remember_frame):
     """The window construct's props — ONE place, so the scene scope and
     the live call cannot drift apart."""
     records = _records()
@@ -3726,6 +3822,9 @@ def _window_props(window, title, width, height, veto_close, dirty,
     # without the other (App.window).
     if dirty is not None:
         records.append(wire.tx_set_window_dirty(window, bool(dirty)))
+    if remember_frame is not None:
+        records.append(wire.tx_set_window_remember_frame(
+            window, bool(remember_frame)))
     if panes is not None:
         records.append(wire.tx_set_window_panes(window, int(panes)))
     if sections_presentation is not None:
@@ -3770,7 +3869,7 @@ class _LiveWindow:
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
                  window=0, create=False, veto_close=None, dirty=None,
-                 panes=None,
+                 remember_frame=None, panes=None,
                  sections_presentation=None, appearance=None,
                  inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
@@ -3791,6 +3890,7 @@ class _TxScope:
         self._create = create
         self._veto_close = veto_close
         self._dirty = dirty
+        self._remember_frame = remember_frame
         self._panes = panes
         self._sections_presentation = sections_presentation
         self._appearance = appearance
@@ -3893,7 +3993,8 @@ class _TxScope:
         _window_props(
             self._window, self._title, self._width, self._height,
             self._veto_close, self._dirty, self._panes,
-            self._sections_presentation, self._appearance, self._inset)
+            self._sections_presentation, self._appearance, self._inset,
+            self._remember_frame)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -4062,7 +4163,8 @@ class App:
             self._redone[int(window_id)] = on_redone
 
     def create_window(self, window_id, title=None, width=None, height=None,
-                      veto_close=None, dirty=None, panes=None,
+                      veto_close=None, dirty=None, remember_frame=None,
+                      panes=None,
                       sections_presentation=None, appearance=None,
                       inset=None,
                       on_close_requested=None, on_closed=None,
@@ -4084,12 +4186,13 @@ class App:
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
-            dirty=dirty, panes=panes,
+            dirty=dirty, remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
             appearance=appearance, inset=inset)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
-               dirty=None, panes=None, sections_presentation=None,
+               dirty=None, remember_frame=None, panes=None,
+               sections_presentation=None,
                appearance=None,
                inset=None, on_close_requested=None, on_closed=None,
                on_undone=None, on_redone=None, window_id=0):
@@ -4119,6 +4222,11 @@ class App:
         NOTHING (D3): "unsaved changes, close anyway?" is `veto_close`
         plus `kaya.show_alert`. NOTHING INFERS IT.
 
+        `remember_frame` is the OPT-OUT from window memory
+        (docs/tasks-s4-plan.md P4): a desktop window reopens at the
+        frame the previous process left unless this is False. Inert on
+        the phones, which have no window frame.
+
         THE LIVE SPELLING IS THIS SAME CONSTRUCT, CALLED AGAIN, without
         the `with` (DESIGN.md, Binding conventions).
 
@@ -4140,12 +4248,13 @@ class App:
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
                           dirty, panes, sections_presentation, appearance,
-                          inset)
+                          inset, remember_frame)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
             title=title, width=width, height=height,
-            veto_close=veto_close, dirty=dirty, panes=panes,
+            veto_close=veto_close, dirty=dirty,
+            remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
             appearance=appearance, inset=inset)
 

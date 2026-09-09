@@ -288,6 +288,121 @@ func assetMissSentence(name string) string {
 	return string(out[:min(written, needed)])
 }
 
+// appDataDir is the app's own writable directory, "" before one exists
+// (docs/tasks-s4-plan.md §4). SIZED, THEN READ, assetMissSentence's
+// two-call shape.
+func appDataDir() string {
+	needed := int(C.kaya_app_data_dir(nil, 0))
+	if needed == 0 {
+		return ""
+	}
+	out := make([]byte, needed)
+	written := int(C.kaya_app_data_dir(
+		(*C.uint8_t)(unsafe.Pointer(&out[0])), C.size_t(needed)))
+	return string(out[:min(written, needed)])
+}
+
+// withKey hands the core a pointer plus a length for the WHOLE call and
+// no longer — the Haskell binding's withName, and the reason a helper
+// that RETURNED the pointer would be wrong under cgo's rules. Not
+// NUL-terminated; an empty string still needs a valid pointer.
+func withKey(key string, body func(*C.uint8_t, C.size_t)) {
+	raw := []byte(key)
+	var zero C.uint8_t
+	p := &zero
+	if len(raw) > 0 {
+		p = (*C.uint8_t)(unsafe.Pointer(&raw[0]))
+	}
+	body(p, C.size_t(len(raw)))
+	runtime.KeepAlive(raw)
+}
+
+func prefGetString(key string) (value string, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var length C.size_t
+		if C.kaya_pref_get_string(p, n, nil, 0, &length) == 0 {
+			return
+		}
+		if length == 0 {
+			present = true
+			return
+		}
+		out := make([]byte, int(length))
+		if C.kaya_pref_get_string(p, n,
+			(*C.uint8_t)(unsafe.Pointer(&out[0])), length, &length) == 0 {
+			return
+		}
+		value, present = string(out[:int(length)]), true
+	})
+	return
+}
+
+func prefGetI64(key string) (value int64, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.int64_t
+		if C.kaya_pref_get_i64(p, n, &out) != 0 {
+			value, present = int64(out), true
+		}
+	})
+	return
+}
+
+func prefGetF64(key string) (value float64, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.double
+		if C.kaya_pref_get_f64(p, n, &out) != 0 {
+			value, present = float64(out), true
+		}
+	})
+	return
+}
+
+func prefGetBool(key string) (value bool, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.uint8_t
+		if C.kaya_pref_get_bool(p, n, &out) != 0 {
+			value, present = out != 0, true
+		}
+	})
+	return
+}
+
+func prefSetString(key, value string) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		withKey(value, func(v *C.uint8_t, vn C.size_t) {
+			C.kaya_pref_set_string(p, n, v, vn)
+		})
+	})
+}
+
+func prefSetI64(key string, value int64) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_pref_set_i64(p, n, C.int64_t(value))
+	})
+}
+
+func prefSetF64(key string, value float64) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_pref_set_f64(p, n, C.double(value))
+	})
+}
+
+func prefSetBool(key string, value bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var raw C.uint8_t
+		if value {
+			raw = 1
+		}
+		C.kaya_pref_set_bool(p, n, raw)
+	})
+}
+
+func prefRemove(key string) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_pref_remove(p, n)
+	})
+}
+
 // Name is what Tx.Asset was given, not a path: there is no path to hand
 // back on Android at all, so no binding offers one.
 func (a *Asset) Name() string { return a.name }

@@ -3285,6 +3285,17 @@ struct CoreState {
     /// surfaces this window asks for. How many it GETS is GNOME's
     /// answer, resolved in refresh_nav's breakpoints.
     panes: HashMap<u64, i64>,
+    /// Window memory's opt-out per window (wprop 10; absent means
+    /// remembered — docs/tasks-s4-plan.md P4).
+    remember_frame: HashMap<u64, bool>,
+    /// Windows that opened from the store, and the width/height each one's
+    /// app DECLARED — the by-VALUE rule (docs/tasks-s4-plan.md P4): memory
+    /// beats the launch declaration, and the first write whose value
+    /// DIFFERS from it is a runtime request and takes the window out of
+    /// this map for good. Ordering cannot decide it (the mac arm measured
+    /// the props landing on either side of materialization), so neither
+    /// backend uses ordering.
+    frame_memory: HashMap<u64, FrameMemory>,
     /// The presentation refresh_nav ACTUALLY rendered, per window — stamped
     /// by the arm that ran, never derived from the ceiling or the width.
     split_presentation: HashMap<u64, &'static str>,
@@ -3611,6 +3622,182 @@ fn gtk_window_read(core: &CoreState, id: u64) -> Option<gtk4::Window> {
     } else {
         core.aux_windows.get(&id).cloned()
     }
+}
+
+/// What this backend WRITES. GTK4 CARRIES NO WINDOW POSITION AT ALL —
+/// `GtkWindow` has `default_size`/`set_default_size` and no move, no
+/// position, no getter, on either session type — so both x11 and wayland
+/// store `"- - <w> <h>"` and only the size comes back
+/// (docs/tasks-s4-plan.md §4).
+fn frame_line(width: i32, height: i32) -> String {
+    format!("- - {width} {height}")
+}
+
+/// The stored frame's SIZE, whoever wrote it: a platform that records a
+/// position writes four words and this reads the last two.
+fn parse_frame(raw: &str) -> Option<(i32, i32)> {
+    let mut words = raw.split_whitespace();
+    let (_x, _y) = (words.next()?, words.next()?);
+    let width: i32 = words.next()?.parse().ok()?;
+    let height: i32 = words.next()?.parse().ok()?;
+    if words.next().is_some() || width <= 0 || height <= 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
+/// A frame saved on a bigger screen must not open past this one
+/// (docs/tasks-s4-plan.md §2, unknown 3). `widest`/`tallest` of 0 means
+/// no monitor answered, and an unclamped restore beats a guessed one.
+fn clamp_frame(width: i32, height: i32, widest: i32, tallest: i32) -> (i32, i32) {
+    if widest <= 0 || tallest <= 0 {
+        return (width, height);
+    }
+    (width.min(widest), height.min(tallest))
+}
+
+/// The largest geometry any monitor of this display reports. GTK4's
+/// `GdkMonitor` publishes `geometry()` and NO workarea, so this is the
+/// available extent the clamp can actually see.
+fn monitor_extent() -> (i32, i32) {
+    let Some(display) = gdk::Display::default() else {
+        return (0, 0);
+    };
+    let monitors = display.monitors();
+    let (mut widest, mut tallest) = (0, 0);
+    for i in 0..gtk4::gio::prelude::ListModelExt::n_items(&monitors) {
+        let Some(monitor) = gtk4::gio::prelude::ListModelExt::item(&monitors, i)
+            .and_then(|m| m.downcast::<gdk::Monitor>().ok())
+        else {
+            continue;
+        };
+        let area = monitor.geometry();
+        widest = widest.max(area.width());
+        tallest = tallest.max(area.height());
+    }
+    (widest, tallest)
+}
+
+/// The size this window opens at when a previous process left one.
+fn remembered_frame(window: u64) -> Option<(i32, i32)> {
+    let (width, height) = parse_frame(&crate::prefs::window_frame(window)?)?;
+    let (widest, tallest) = monitor_extent();
+    Some(clamp_frame(width, height, widest, tallest))
+}
+
+/// The width and height a restored window's app DECLARED, per axis, as
+/// they arrive (docs/tasks-s4-plan.md P4).
+#[derive(Default)]
+struct FrameMemory {
+    width: Option<f64>,
+    height: Option<f64>,
+}
+
+/// Is this width/height write a RUNTIME request — one to apply — or the
+/// declaration a remembered frame outranks?
+///
+/// BY VALUE, NEVER BY ORDERING: the props may land on either side of the
+/// window materializing (measured on the mac arm, where act one registered
+/// after its batch and act two before it), so a rule keyed on which
+/// transaction they arrived in decides differently on the two backends and
+/// the observable diverges. The first value a restored window is asked for
+/// is its declaration and is refused; that same value again is the same
+/// declaration; the first DIFFERENT value is the app resizing itself, and
+/// it ends the memory for good. A window that opened at its own default has
+/// no entry here and every write applies.
+fn runtime_frame_write(
+    memory: &mut HashMap<u64, FrameMemory>,
+    window: u64,
+    axis: impl Fn(&mut FrameMemory) -> &mut Option<f64>,
+    value: f64,
+) -> bool {
+    let Some(entry) = memory.get_mut(&window) else {
+        return true;
+    };
+    let declared = axis(entry);
+    match *declared {
+        None => {
+            *declared = Some(value);
+            false
+        }
+        Some(first) if first == value => false,
+        Some(_) => {
+            memory.remove(&window);
+            true
+        }
+    }
+}
+
+/// The opt-out (docs/tasks-s4-plan.md P4): remembered unless the app said
+/// no. Absent means yes — a window nobody wrote the prop for is remembered.
+fn frame_remembered(remember: &HashMap<u64, bool>, window: u64) -> bool {
+    remember.get(&window) != Some(&false)
+}
+
+/// One frame write, gated on the opt-out and on the window still being
+/// here. Re-armed rather than skipped when CORE is borrowed: this runs off
+/// a `notify` that can fire INSIDE an apply's `set_default_size`.
+fn save_frame_now(window: u64) {
+    CORE.with(|slot| {
+        let Ok(core) = slot.try_borrow() else {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(8), move || {
+                save_frame_now(window);
+            });
+            return;
+        };
+        let Some(core) = core.as_ref() else { return };
+        if !frame_remembered(&core.remember_frame, window) {
+            return;
+        }
+        let Some(target) = gtk_window_read(core, window) else {
+            return;
+        };
+        let (width, height) = gtk4::prelude::GtkWindowExt::default_size(&target);
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        // AGAINST WHAT THE STORE ALREADY HOLDS: this runs on every
+        // configure of a live resize drag and the write is a durable one
+        // (temp file, fsync, rename, fsync the directory — 0.74ms median,
+        // 2.0ms p95, measured in the lane's own container 2026-09-09).
+        let line = frame_line(width, height);
+        if crate::prefs::window_frame(window).as_deref() == Some(line.as_str()) {
+            return;
+        }
+        crate::prefs::set_window_frame(window, &line);
+    });
+}
+
+/// The frame save, coalesced onto the main loop's IDLE — one write per
+/// window per main-loop turn, however many notifies that turn carried.
+///
+/// NOT A 250ms TIMER, though docs/tasks-s4-plan.md P4 says "debounced":
+/// measured 2026-09-09 in the container, a timer LOSES THE SCENE'S OWN
+/// RESIZE. `taskspersist` resizes and then relaunches, the process leaves
+/// through `_exit` with no atexit and no destructor (crates/kaya/src/
+/// lib.rs's `exit_hard`), and the trailing write is still pending — the
+/// store held `- - 640 400`, the declared size, with the window at
+/// 900x620. An idle source cannot lose it: every step after the resize is
+/// a hop to this loop.
+fn schedule_frame_save(window: u64) {
+    thread_local! {
+        static ARMED: RefCell<BTreeSet<u64>> = const { RefCell::new(BTreeSet::new()) };
+    }
+    if !ARMED.with_borrow_mut(|armed| armed.insert(window)) {
+        return;
+    }
+    glib::idle_add_local_once(move || {
+        ARMED.with_borrow_mut(|armed| armed.remove(&window));
+        save_frame_now(window);
+    });
+}
+
+/// Both notifies, on any toplevel this backend holds. GTK4 has no move
+/// signal (and no position), so a frame changes here or nowhere.
+fn watch_frame(window: &gtk4::Window, id: u64) {
+    use gtk4::prelude::GtkWindowExt;
+    window.connect_default_width_notify(move |_| schedule_frame_save(id));
+    window.connect_default_height_notify(move |_| schedule_frame_save(id));
 }
 
 /// The APPLY flavor: same lookup, but a miss is a bug and says so. THE
@@ -9194,13 +9381,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // The advisory size request. GTK4's one public size verb is
                 // set_default_size; the WM keeps the last word — exactly the
                 // request semantics (DESIGN.md, Presentation contexts).
+                // A REMEMBERED FRAME OUTRANKS THE LAUNCH DECLARATION and
+                // loses to the first write that asks for something else
+                // (docs/tasks-s4-plan.md P4).
                 (WindowProp::Width, Value::F64(w)) => {
-                    let (_, h) = target.default_size();
-                    target.set_default_size(*w as i32, h);
+                    if runtime_frame_write(&mut core.frame_memory, window.0, |m| &mut m.width, *w) {
+                        let (_, h) = target.default_size();
+                        target.set_default_size(*w as i32, h);
+                    }
                 }
                 (WindowProp::Height, Value::F64(h)) => {
-                    let (w, _) = target.default_size();
-                    target.set_default_size(w, *h as i32);
+                    if runtime_frame_write(&mut core.frame_memory, window.0, |m| &mut m.height, *h) {
+                        let (w, _) = target.default_size();
+                        target.set_default_size(w, *h as i32);
+                    }
                 }
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.borrow_mut().insert(window.0, *on);
@@ -9219,6 +9413,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .get(&window.0)
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
+                }
+                // Opting out FORGETS: a window that keeps a frame from
+                // before the prop would still open remembered.
+                (WindowProp::RememberFrame, Value::Bool(on)) => {
+                    core.remember_frame.insert(window.0, *on);
+                    if !*on {
+                        core.frame_memory.remove(&window.0);
+                        crate::prefs::remove(&crate::prefs::window_frame_key(window.0));
+                    }
                 }
                 (WindowProp::Appearance, Value::I64(raw)) => {
                     // Process-wide from the default window (docs/tasks-s2b-plan.md R1).
@@ -9259,10 +9462,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // Materializes hidden; mounting a root presents it. The
             // normalized 540x330 default rides the primary's paths.
             use gtk4::prelude::GtkWindowExt;
+            // The frame a previous process left, BEFORE the first present
+            // (docs/tasks-s4-plan.md P4).
+            let remembered = remembered_frame(window.0);
+            let (aux_w, aux_h) = remembered.unwrap_or((540, 330));
+            if remembered.is_some() {
+                core.frame_memory.insert(window.0, FrameMemory::default());
+            }
             let aux = gtk4::Window::builder()
-                .default_width(540)
-                .default_height(330)
+                .default_width(aux_w)
+                .default_height(aux_h)
                 .build();
+            watch_frame(&aux, window.0);
             // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
             // (docs/app-identity-plan.md I9). Written into `window_titles`
             // too, because that map is what navigation fallbacks restore from.
@@ -12090,6 +12301,93 @@ fn recorder_held() -> Vec<(String, String, String, String)> {
 }
 
 #[cfg(test)]
+mod frame_tests {
+    use super::{
+        FrameMemory, clamp_frame, frame_line, frame_remembered, parse_frame,
+        runtime_frame_write,
+    };
+    use std::collections::HashMap;
+
+    /// WINDOW MEMORY'S THREE DECISIONS, none of which any leg can see
+    /// separately: `taskspersist.steps` asserts one size on one window and
+    /// is green with the opt-out ignored, with the clamp gone, and with a
+    /// malformed stored line taken at face value. The callsites that reach
+    /// this arithmetic are pinned by name in tools/check-gtk.py.
+    #[test]
+    fn gtk_frame_memory_parses_clamps_and_opts_out() {
+        // What this backend writes, and what it reads back.
+        assert_eq!(frame_line(900, 620), "- - 900 620");
+        assert_eq!(parse_frame(&frame_line(900, 620)), Some((900, 620)));
+        // A platform that records a position writes four words; the size
+        // is the last two either way.
+        assert_eq!(parse_frame("120 40 900 620"), Some((900, 620)));
+        // Anything else is no frame at all rather than a guessed one.
+        assert_eq!(parse_frame("900 620"), None);
+        assert_eq!(parse_frame("- - 900 620 7"), None);
+        assert_eq!(parse_frame("- - 0 620"), None);
+        assert_eq!(parse_frame("- - -900 620"), None);
+        assert_eq!(parse_frame("- - wide 620"), None);
+        assert_eq!(parse_frame(""), None);
+
+        // A frame saved on a bigger screen opens inside this one.
+        assert_eq!(clamp_frame(900, 620, 800, 600), (800, 600));
+        assert_eq!(clamp_frame(900, 620, 1600, 1000), (900, 620));
+        // No monitor answered: unclamped beats guessed.
+        assert_eq!(clamp_frame(900, 620, 0, 0), (900, 620));
+
+        // The opt-out. Absent means remembered; only `false` refuses.
+        let mut remember = HashMap::new();
+        assert!(frame_remembered(&remember, 0));
+        remember.insert(0, true);
+        assert!(frame_remembered(&remember, 0));
+        remember.insert(0, false);
+        assert!(!frame_remembered(&remember, 0));
+        // Per window, never process-wide.
+        assert!(frame_remembered(&remember, 1));
+
+        // The key is crate::prefs's ONE spelling, never composed here.
+        assert_eq!(crate::prefs::window_frame_key(0), "kaya.window.0.frame");
+        assert_eq!(crate::prefs::window_frame_key(7), "kaya.window.7.frame");
+    }
+
+    /// THE BY-VALUE RULE (docs/tasks-s4-plan.md P4), which no scene can
+    /// see: `taskspersist.steps` writes no width after its build, so a
+    /// backend that let the declaration clobber the restore — or that let
+    /// a real runtime resize be refused forever — is green on every lane.
+    #[test]
+    fn gtk_frame_memory_beats_the_declaration_and_yields_to_a_resize() {
+        let mut memory: HashMap<u64, FrameMemory> = HashMap::new();
+
+        // A window that opened at its own default: every write applies.
+        assert!(runtime_frame_write(&mut memory, 0, |m| &mut m.width, 960.0));
+
+        // A window restored from the store.
+        memory.insert(0, FrameMemory::default());
+        // The launch declaration is refused, whichever side of
+        // materialization it lands on.
+        assert!(!runtime_frame_write(&mut memory, 0, |m| &mut m.width, 960.0));
+        assert!(!runtime_frame_write(&mut memory, 0, |m| &mut m.height, 640.0));
+        // The SAME declaration again is still the declaration — a rebuild
+        // re-declaring its size is not the app resizing itself.
+        assert!(!runtime_frame_write(&mut memory, 0, |m| &mut m.width, 960.0));
+        // Per axis: height's declaration is not width's.
+        assert!(!runtime_frame_write(&mut memory, 0, |m| &mut m.height, 640.0));
+        // A different value IS the app resizing itself, and it wins.
+        assert!(runtime_frame_write(&mut memory, 0, |m| &mut m.width, 1200.0));
+        // ...and the memory is over for that window, on BOTH axes: a
+        // window the app has resized once is the app's from then on.
+        assert!(!memory.contains_key(&0));
+        assert!(runtime_frame_write(&mut memory, 0, |m| &mut m.height, 640.0));
+        assert!(runtime_frame_write(&mut memory, 0, |m| &mut m.width, 960.0));
+
+        // Per window, never process-wide.
+        memory.insert(1, FrameMemory::default());
+        assert!(!runtime_frame_write(&mut memory, 1, |m| &mut m.width, 800.0));
+        assert!(runtime_frame_write(&mut memory, 2, |m| &mut m.width, 800.0));
+    }
+}
+
+#[cfg(test)]
 mod notify_tests {
     use super::{notification_id_of, notification_target, scheduled_command, shell_line};
     use gtk4::glib;
@@ -12176,11 +12474,16 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let Some((occ_tx, tx_rx)) = ends.borrow_mut().take() else {
             return;
         };
+        // The frame a previous process left, BEFORE the first present
+        // (docs/tasks-s4-plan.md P4). The primary is window 0; the drain
+        // below turns `restored_frame` into the launch declaration's veto.
+        let restored_frame = remembered_frame(0);
+        let (default_w, default_h) = restored_frame.unwrap_or((540, 330));
         let window = gtk4::ApplicationWindow::builder()
             .application(app)
             .title("kaya milestone 2")
-            .default_width(540)
-            .default_height(330)
+            .default_width(default_w)
+            .default_height(default_h)
             .build();
         // THE BREAKPOINT CHANNEL (docs/adaptive-layout-plan.md D3): the
         // window's content size, into THIS BACKEND'S OWN scene — the capi
@@ -12188,10 +12491,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // scene this backend never reads. SCHEDULED, never inline: the notify
         // fires inside resize_window's on_main with CORE borrowed.
         {
-            use gtk4::prelude::GtkWindowExt;
+            use gtk4::prelude::{Cast, GtkWindowExt};
             window.connect_default_width_notify(|_| schedule_window_metrics());
             window.connect_default_height_notify(|_| schedule_window_metrics());
             schedule_window_metrics();
+            watch_frame(window.upcast_ref::<gtk4::Window>(), 0);
         }
         // The normalized root inset: 16 units INSIDE the root, via the CSS box
         // (padding sits inside the allocation, so the root still fills its
@@ -12392,6 +12696,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 nav_entries: HashMap::new(),
                 nav_stacks: HashMap::new(),
                 panes: HashMap::new(),
+                remember_frame: HashMap::new(),
+                frame_memory: HashMap::from_iter(
+                    restored_frame.map(|_| (0u64, FrameMemory::default())),
+                ),
                 inner_splits: HashMap::new(),
                 split_presentation: HashMap::new(),
                 split_views: HashMap::new(),

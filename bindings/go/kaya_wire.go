@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x21005150bc085070
+	SpecHash uint64 = 0x605e18f72b2af791
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -113,6 +113,7 @@ const (
 	WpropDirty = 7
 	WpropInset = 8
 	WpropAppearance = 9
+	WpropRememberFrame = 10
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	SpropTitle = 1
@@ -2072,6 +2073,26 @@ func TxBindWindowAppearance(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropAppearance)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetWindowRememberFrame: set_window_prop with a constant remember_frame value (window 0, the primary surface).
+func TxSetWindowRememberFrame(window uint64, rememberFrame bool) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropRememberFrame)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, rememberFrame)
+	return endRecord(b)
+}
+
+// TxBindWindowRememberFrame: set_window_prop with a signal-bound remember_frame value (window 0, the primary surface).
+func TxBindWindowRememberFrame(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropRememberFrame)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

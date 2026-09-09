@@ -1425,7 +1425,174 @@ struct KayaCapabilities {
     let notifications: Bool
 }
 
+/// The app's preferences store (docs/tasks-s4-plan.md P2/P3): a small
+/// typed key-value record under the app's id, the platform's own where
+/// the platform has one — UserDefaults on Apple, SharedPreferences on
+/// Android, a key file on Linux and Windows.
+///
+/// A PULL, NOT A SIGNAL: a setting is read when the app builds and
+/// written when the user changes it. Every get takes the default it
+/// answers when the key is absent OR holds another type. Writes are
+/// durable when they return, and the store may be used from any thread.
+struct KayaPrefs {
+    /// A guest may READ any key and WRITE any key kaya has not reserved
+    /// (docs/tasks-s4-plan.md P4: window memory lives under `kaya.`).
+    private static func key(_ name: String) -> [UInt8] {
+        precondition(!name.isEmpty, "kaya: a preference key must not be empty")
+        return Array(name.utf8)
+    }
+
+    private static func writeKey(_ name: String) -> [UInt8] {
+        let raw = key(name)
+        precondition(
+            !name.hasPrefix("kaya."),
+            "kaya: preference key \"\(name)\" is reserved "
+                + "(the kaya. prefix is kaya's own)")
+        return raw
+    }
+
+    func getString(_ name: String, _ def: String) -> String {
+        let raw = KayaPrefs.key(name)
+        var len = UInt(0)
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_string(k.baseAddress, UInt(k.count), nil, 0, &len)
+        }
+        if present == 0 { return def }
+        if len == 0 { return "" }
+        var out = [UInt8](repeating: 0, count: Int(len))
+        let ok = out.withUnsafeMutableBufferPointer { buf -> Int32 in
+            raw.withUnsafeBufferPointer { k in
+                kaya_pref_get_string(
+                    k.baseAddress, UInt(k.count), buf.baseAddress, len, &len)
+            }
+        }
+        if ok == 0 { return def }
+        return String(decoding: out[0..<Int(len)], as: UTF8.self)
+    }
+
+    func getI64(_ name: String, _ def: Int64) -> Int64 {
+        let raw = KayaPrefs.key(name)
+        var out: Int64 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_i64(k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    func getF64(_ name: String, _ def: Double) -> Double {
+        let raw = KayaPrefs.key(name)
+        var out: Double = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_f64(k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    func getBool(_ name: String, _ def: Bool) -> Bool {
+        let raw = KayaPrefs.key(name)
+        var out: UInt8 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_pref_get_bool(k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out != 0
+    }
+
+    func setString(_ name: String, _ value: String) {
+        let raw = KayaPrefs.writeKey(name)
+        let packed = Array(value.utf8)
+        raw.withUnsafeBufferPointer { k in
+            packed.withUnsafeBufferPointer { v in
+                kaya_pref_set_string(
+                    k.baseAddress, UInt(k.count), v.baseAddress, UInt(v.count))
+            }
+        }
+    }
+
+    func setI64(_ name: String, _ value: Int64) {
+        let raw = KayaPrefs.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_pref_set_i64(k.baseAddress, UInt(k.count), value)
+        }
+    }
+
+    func setF64(_ name: String, _ value: Double) {
+        let raw = KayaPrefs.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_pref_set_f64(k.baseAddress, UInt(k.count), value)
+        }
+    }
+
+    func setBool(_ name: String, _ value: Bool) {
+        let raw = KayaPrefs.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_pref_set_bool(k.baseAddress, UInt(k.count), value ? 1 : 0)
+        }
+    }
+
+    func remove(_ name: String) {
+        let raw = KayaPrefs.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_pref_remove(k.baseAddress, UInt(k.count))
+        }
+    }
+}
+
 final class KayaApp {
+    /// The notification_result decision, in a method of its own because
+    /// the ring loop's switch has no seam a test can reach (the ring is
+    /// C memory) — Go's `notificationResult` for the same reason, and
+    /// tools/checks/swift-notify drives the three cases through here.
+    /// THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1) and
+    /// tools/check-sugar-surface.py reads it out of this body: the
+    /// one-shot handler bound at the show first, retiring with the
+    /// result; else the process-level one, which does not; else the drop
+    /// is announced.
+    func notificationResult(_ id: UInt64, _ choice: UInt32) {
+        if let handler = notifications.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, choice) } }
+        } else if let act = notificationActivation {
+            dispatch { try build { tx in try act(tx, id, choice) } }
+        } else {
+            let outcome = choice == UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)
+                ? "activated" : "refused"
+            FileHandle.standardError.write(Data((
+                "kaya: notification \(id) outcome \(outcome) reached no "
+                + "handler — none was bound at the show and no "
+                + "process-level handler is registered "
+                + "(KayaApp.onNotificationActivation)\n").utf8))
+        }
+    }
+
+    /// The app's OWN writable directory (docs/tasks-s4-plan.md P1):
+    /// Application Support/<id> on macOS, Documents on iOS, the files
+    /// directory on Android, $XDG_DATA_HOME/<id> on Linux,
+    /// %LOCALAPPDATA%\<id> on Windows. Created on first ask.
+    ///
+    /// KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the
+    /// app's, written the standard way (GRDB is the recommendation).
+    /// Settings are small and typed and belong in `prefs()`.
+    ///
+    /// SIZED, THEN READ, `KayaAsset.missSentence`'s two-call shape.
+    /// REFUSES where the platform has handed no directory over — an
+    /// error state a guest cannot plan around, so all nine bindings
+    /// refuse rather than answering an absent value (ruled 2026-09-09).
+    static func appDataDir() -> String {
+        let len = kaya_app_data_dir(nil, 0)
+        if len == 0 {
+            preconditionFailure(
+                "kaya: app_data_dir asked before the platform handed one "
+                    + "over (Android before attach)")
+        }
+        var out = [UInt8](repeating: 0, count: Int(len))
+        let written = out.withUnsafeMutableBufferPointer { buf in
+            kaya_app_data_dir(buf.baseAddress, len)
+        }
+        return String(decoding: out[0..<Int(min(written, len))], as: UTF8.self)
+    }
+
+    /// The app's preferences store — one per process.
+    static func prefs() -> KayaPrefs { KayaPrefs() }
+
     /// This host's capabilities, constant for the life of the process.
     /// `KAYA_CAP_AUX_WINDOWS` is the CORE'S OWN `#define`, imported
     /// through the bridging header, never a copied number.
@@ -2277,25 +2444,7 @@ final class KayaApp {
                     dispatch { try build { tx in try handler(tx, choice) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_RESULT), _):
-                // THE ORDER IS THE SEMANTICS (docs/tasks-s9-plan.md R1),
-                // and tools/check-sugar-surface.py reads it out of this
-                // arm: the one-shot handler bound at the show first,
-                // retiring with the result; else the process-level one,
-                // which does not; else the drop is announced. The
-                // outcome rides the same u32 slot the choice does.
-                if let handler = notifications.removeValue(forKey: id) {
-                    dispatch { try build { tx in try handler(tx, choice) } }
-                } else if let act = notificationActivation {
-                    dispatch { try build { tx in try act(tx, id, choice) } }
-                } else {
-                    let outcome = choice == UInt32(KAYA_NOTIFICATION_OUTCOME_ACTIVATED)
-                        ? "activated" : "refused"
-                    FileHandle.standardError.write(Data((
-                        "kaya: notification \(id) outcome \(outcome) reached no "
-                        + "handler — none was bound at the show and no "
-                        + "process-level handler is registered "
-                        + "(KayaApp.onNotificationActivation)\n").utf8))
-                }
+                notificationResult(id, choice)
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
                 // One-shot. EMPTY IS THE UNIVERSAL NO and arrives as
                 // nil — denied, unfocused, absent and nothing-we-accept
@@ -3819,6 +3968,7 @@ final class KayaAppTx {
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
+        rememberFrame: Bool? = nil,
         panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
         appearance: Int64? = nil,
         inset: Double? = nil,
@@ -3831,7 +3981,8 @@ final class KayaAppTx {
         tx.createWindow(id)
         window(
             id, title: title, width: width, height: height,
-            vetoClose: vetoClose, dirty: dirty, panes: panes,
+            vetoClose: vetoClose, dirty: dirty, rememberFrame: rememberFrame,
+            panes: panes,
             sectionsPresentation: sectionsPresentation,
             appearance: appearance, inset: inset,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
@@ -3849,6 +4000,7 @@ final class KayaAppTx {
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
+        rememberFrame: Bool? = nil,
         panes: UInt32? = nil, sectionsPresentation: Int64? = nil,
         appearance: Int64? = nil,
         inset: Double? = nil,
@@ -3863,6 +4015,9 @@ final class KayaAppTx {
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
         if let dirty { tx.setWindowDirty(id, dirty) }
+        // The OPT-OUT from window memory (docs/tasks-s4-plan.md P4);
+        // inert on the phones.
+        if let rememberFrame { tx.setWindowRememberFrame(id, rememberFrame) }
         if let panes { tx.setWindowPanes(id, Int64(panes)) }
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)

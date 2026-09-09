@@ -13,6 +13,16 @@ module KayaRuntime
     Asset,
     openAsset,
     assetMissSentence,
+    appDataDir,
+    prefGetString,
+    prefGetI64,
+    prefGetF64,
+    prefGetBool,
+    prefSetString,
+    prefSetI64,
+    prefSetF64,
+    prefSetBool,
+    prefRemove,
     assetBytes,
     assetBlob,
     assetClose,
@@ -36,7 +46,7 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, mkWeakIORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32, Int64)
 import Data.Word (Word16, Word32, Word64, Word8)
-import Foreign.C.Types (CBool (..), CSize (..))
+import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekByteOff, poke)
@@ -120,6 +130,40 @@ foreign import ccall unsafe "kaya_asset_release"
 
 foreign import ccall unsafe "kaya_asset_why_not"
   c_kaya_asset_why_not :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
+
+-- The app's own places (docs/tasks-s4-plan.md §4): the data directory
+-- and the typed preferences store. `unsafe` for the same reason the
+-- asset calls are: none of these parks.
+foreign import ccall unsafe "kaya_app_data_dir"
+  c_kaya_app_data_dir :: Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_pref_get_string"
+  c_kaya_pref_get_string ::
+    Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr CSize -> IO CInt
+
+foreign import ccall unsafe "kaya_pref_get_i64"
+  c_kaya_pref_get_i64 :: Ptr Word8 -> CSize -> Ptr Int64 -> IO CInt
+
+foreign import ccall unsafe "kaya_pref_get_f64"
+  c_kaya_pref_get_f64 :: Ptr Word8 -> CSize -> Ptr Double -> IO CInt
+
+foreign import ccall unsafe "kaya_pref_get_bool"
+  c_kaya_pref_get_bool :: Ptr Word8 -> CSize -> Ptr Word8 -> IO CInt
+
+foreign import ccall unsafe "kaya_pref_set_string"
+  c_kaya_pref_set_string :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO ()
+
+foreign import ccall unsafe "kaya_pref_set_i64"
+  c_kaya_pref_set_i64 :: Ptr Word8 -> CSize -> Int64 -> IO ()
+
+foreign import ccall unsafe "kaya_pref_set_f64"
+  c_kaya_pref_set_f64 :: Ptr Word8 -> CSize -> Double -> IO ()
+
+foreign import ccall unsafe "kaya_pref_set_bool"
+  c_kaya_pref_set_bool :: Ptr Word8 -> CSize -> Word8 -> IO ()
+
+foreign import ccall unsafe "kaya_pref_remove"
+  c_kaya_pref_remove :: Ptr Word8 -> CSize -> IO ()
 
 foreign import ccall unsafe "kaya_occurrence_blob"
   c_kaya_occurrence_blob :: Word64 -> Ptr CSize -> IO (Ptr Word8)
@@ -213,6 +257,79 @@ assetMissSentence name = do
   allocaBytes (fromIntegral len) $ \out -> do
     _ <- withName name $ \p n -> c_kaya_asset_why_not p n out len
     GHCF.peekCStringLen utf8 (castPtr out, fromIntegral len)
+
+-- | The app's own writable directory, @""@ before one exists. SIZED,
+-- THEN READ, 'assetMissSentence''s two-call shape.
+appDataDir :: IO String
+appDataDir = do
+  len <- c_kaya_app_data_dir nullPtr 0
+  if len == 0
+    then return ""
+    else allocaBytes (fromIntegral len) $ \out -> do
+      written <- c_kaya_app_data_dir out len
+      GHCF.peekCStringLen utf8 (castPtr out, fromIntegral (min written len))
+
+-- | The stored string, or 'Nothing' when the key is absent or holds
+-- another type.
+prefGetString :: String -> IO (Maybe String)
+prefGetString key =
+  withName key $ \k n -> alloca $ \lenPtr -> do
+    poke lenPtr 0
+    present <- c_kaya_pref_get_string k n nullPtr 0 lenPtr
+    if present == 0
+      then return Nothing
+      else do
+        len <- peek lenPtr
+        if len == 0
+          then return (Just "")
+          else allocaBytes (fromIntegral len) $ \out -> do
+            ok <- c_kaya_pref_get_string k n out len lenPtr
+            if ok == 0
+              then return Nothing
+              else do
+                got <- peek lenPtr
+                Just
+                  <$> GHCF.peekCStringLen
+                    utf8
+                    (castPtr out, fromIntegral (min got len))
+
+prefGetI64 :: String -> IO (Maybe Int64)
+prefGetI64 key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_pref_get_i64 k n out
+    if present == 0 then return Nothing else Just <$> peek out
+
+prefGetF64 :: String -> IO (Maybe Double)
+prefGetF64 key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_pref_get_f64 k n out
+    if present == 0 then return Nothing else Just <$> peek out
+
+prefGetBool :: String -> IO (Maybe Bool)
+prefGetBool key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_pref_get_bool k n out
+    if present == 0 then return Nothing else Just . (/= 0) <$> peek out
+
+prefSetString :: String -> String -> IO ()
+prefSetString key value =
+  withName key $ \k n -> withName value $ \v vn -> c_kaya_pref_set_string k n v vn
+
+prefSetI64 :: String -> Int64 -> IO ()
+prefSetI64 key value = withName key $ \k n -> c_kaya_pref_set_i64 k n value
+
+prefSetF64 :: String -> Double -> IO ()
+prefSetF64 key value = withName key $ \k n -> c_kaya_pref_set_f64 k n value
+
+prefSetBool :: String -> Bool -> IO ()
+prefSetBool key value =
+  withName key $ \k n -> c_kaya_pref_set_bool k n (if value then 1 else 0)
+
+prefRemove :: String -> IO ()
+prefRemove key = withName key $ \k n -> c_kaya_pref_remove k n
 
 -- The name as UTF-8 bytes plus its length. NOT NUL-terminated: the core
 -- reads exactly the length handed to it.

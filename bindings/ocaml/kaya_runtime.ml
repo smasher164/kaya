@@ -73,6 +73,130 @@ let kaya_asset_why_not =
   foreign ~from:lib "kaya_asset_why_not"
     (string @-> size_t @-> ptr char @-> size_t @-> returning size_t)
 
+(* The app's own places (docs/tasks-s4-plan.md §4): the data directory
+   and the typed preferences store. [string] carries bytes with the
+   length beside them; no NUL terminator is involved. *)
+let kaya_app_data_dir =
+  foreign ~from:lib "kaya_app_data_dir"
+    (ptr char @-> size_t @-> returning size_t)
+
+let kaya_pref_get_string =
+  foreign ~from:lib "kaya_pref_get_string"
+    (string @-> size_t @-> ptr char @-> size_t @-> ptr size_t
+    @-> returning int)
+
+let kaya_pref_get_i64 =
+  foreign ~from:lib "kaya_pref_get_i64"
+    (string @-> size_t @-> ptr int64_t @-> returning int)
+
+let kaya_pref_get_f64 =
+  foreign ~from:lib "kaya_pref_get_f64"
+    (string @-> size_t @-> ptr double @-> returning int)
+
+let kaya_pref_get_bool =
+  foreign ~from:lib "kaya_pref_get_bool"
+    (string @-> size_t @-> ptr uint8_t @-> returning int)
+
+let kaya_pref_set_string =
+  foreign ~from:lib "kaya_pref_set_string"
+    (string @-> size_t @-> string @-> size_t @-> returning void)
+
+let kaya_pref_set_i64 =
+  foreign ~from:lib "kaya_pref_set_i64"
+    (string @-> size_t @-> int64_t @-> returning void)
+
+let kaya_pref_set_f64 =
+  foreign ~from:lib "kaya_pref_set_f64"
+    (string @-> size_t @-> double @-> returning void)
+
+let kaya_pref_set_bool =
+  foreign ~from:lib "kaya_pref_set_bool"
+    (string @-> size_t @-> uint8_t @-> returning void)
+
+let kaya_pref_remove =
+  foreign ~from:lib "kaya_pref_remove" (string @-> size_t @-> returning void)
+
+(* The app's own writable directory, [None] before one exists. SIZED,
+   THEN READ, [asset_miss_sentence]'s two-call shape. *)
+let app_data_dir () =
+  let len =
+    Unsigned.Size_t.to_int
+      (kaya_app_data_dir
+         (Ctypes.from_voidp Ctypes.char Ctypes.null)
+         (Unsigned.Size_t.of_int 0))
+  in
+  if len = 0 then None
+  else begin
+    let buf = CArray.make char len in
+    let written =
+      Unsigned.Size_t.to_int
+        (kaya_app_data_dir (CArray.start buf) (Unsigned.Size_t.of_int len))
+    in
+    Some (String.init (min written len) (fun i -> CArray.get buf i))
+  end
+
+let pref_get_string key =
+  let n = Unsigned.Size_t.of_int (String.length key) in
+  let len = allocate size_t (Unsigned.Size_t.of_int 0) in
+  if
+    kaya_pref_get_string key n
+      (Ctypes.from_voidp Ctypes.char Ctypes.null)
+      (Unsigned.Size_t.of_int 0) len
+    = 0
+  then None
+  else
+    let want = Unsigned.Size_t.to_int !@len in
+    if want = 0 then Some ""
+    else begin
+      let buf = CArray.make char want in
+      if
+        kaya_pref_get_string key n (CArray.start buf)
+          (Unsigned.Size_t.of_int want) len
+        = 0
+      then None
+      else
+        let got = min (Unsigned.Size_t.to_int !@len) want in
+        Some (String.init got (fun i -> CArray.get buf i))
+    end
+
+let pref_get_i64 key =
+  let out = allocate int64_t 0L in
+  if kaya_pref_get_i64 key (Unsigned.Size_t.of_int (String.length key)) out = 0
+  then None
+  else Some !@out
+
+let pref_get_f64 key =
+  let out = allocate double 0.0 in
+  if kaya_pref_get_f64 key (Unsigned.Size_t.of_int (String.length key)) out = 0
+  then None
+  else Some !@out
+
+let pref_get_bool key =
+  let out = allocate uint8_t Unsigned.UInt8.zero in
+  if kaya_pref_get_bool key (Unsigned.Size_t.of_int (String.length key)) out = 0
+  then None
+  else Some (Unsigned.UInt8.to_int !@out <> 0)
+
+let pref_set_string key value =
+  kaya_pref_set_string key
+    (Unsigned.Size_t.of_int (String.length key))
+    value
+    (Unsigned.Size_t.of_int (String.length value))
+
+let pref_set_i64 key value =
+  kaya_pref_set_i64 key (Unsigned.Size_t.of_int (String.length key)) value
+
+let pref_set_f64 key value =
+  kaya_pref_set_f64 key (Unsigned.Size_t.of_int (String.length key)) value
+
+let pref_set_bool key value =
+  kaya_pref_set_bool key
+    (Unsigned.Size_t.of_int (String.length key))
+    (Unsigned.UInt8.of_int (if value then 1 else 0))
+
+let pref_remove key =
+  kaya_pref_remove key (Unsigned.Size_t.of_int (String.length key))
+
 let kaya_occurrence_blob =
   foreign ~from:lib "kaya_occurrence_blob"
     (uint64_t @-> ptr size_t @-> returning (ptr char))

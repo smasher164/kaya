@@ -1341,7 +1341,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     print(out, file=log)
     if two_act:
         act_one = out
-        out = (act_two(serial, name, package, dump, log)
+        out = (act_two(serial, name, package, component, dump, log)
                if "KAYA_SELFTEST: ACT 1 OK" in act_one else "")
         # ONE LEG, TWO VERDICTS: the leg is PASS only when act one left
         # cleanly and the process the platform started answered. Act one
@@ -1703,6 +1703,19 @@ def drop_block(lines, specs, keep):
     return kept, [lines[i] for i in at]
 
 
+def drop_blocks(lines, blocks):
+    """Every block of a lane's `drop`, in the table's order and each
+    refused on its own terms — the blocks of one scene need not be
+    contiguous with each other (taskspersist's two sit on opposite sides
+    of the `relaunch`). Pure, so the sequencing's own refusal can be
+    watched firing at import."""
+    taken = []
+    for specs, keep, why in blocks:
+        lines, gone = drop_block(lines, specs, keep)
+        taken.append((why, gone))
+    return lines, taken
+
+
 def drop_block_selftest():
     """The refusals above, watched firing on every launch — the runner
     is the only wall a lane's cut has, and a guard nobody has seen fail
@@ -1732,13 +1745,29 @@ def drop_block_selftest():
     if len(kept) != 3 or len(gone) != 2:
         die("run-emulator: SELF-TEST FAIL — drop_block refused the real "
             f"shape ({len(kept)} kept, {len(gone)} dropped)")
+    # THE SEQUENCE: a second block is read against what the first LEFT, so
+    # one that names a step already taken must be refused rather than
+    # quietly dropping nothing.
+    two = [(good, "expect_order", "the foreign source"),
+           (("drag label#0",), "expect_order", "the local drag")]
+    kept, taken = drop_blocks(list(sample), two)
+    if len(kept) != 2 or len(taken) != 2:
+        die(f"run-emulator: SELF-TEST FAIL — drop_blocks refused two real "
+            f"blocks ({len(kept)} kept, {len(taken)} block(s) taken)")
+    try:
+        drop_blocks(list(sample), [two[0], two[0]])
+    except ValueError:
+        reds += 1
+    else:
+        die("run-emulator: SELF-TEST FAIL — drop_blocks accepted a second "
+            "block naming the step the first had already taken")
     print(f"run-emulator: drop_block refused {reds} bad drops", flush=True)
 
 
 drop_block_selftest()
 
 
-def scene_script_drop(scene, specs, keep, why):
+def scene_script_drop(scene, blocks):
     """A BLOCK OUT OF THE MIDDLE, where a CUT can only take a tail: the
     identity scene's `expect_title window#1` reads the declared NAME off
     a window this host has not got, and below it sit the live widgets
@@ -1755,19 +1784,26 @@ def scene_script_drop(scene, specs, keep, why):
     SAME GRAMMAR — two mobile lanes, one question, and two answers is
     how lanes drift — and tools/ios/run-sim.py's own drop still names
     ONE step by (verb, target): it takes this shape when it next needs a
-    block, which is the same `drag_file` cut (docs/dnd-plan.md D9)."""
+    block, which is the same `drag_file` cut (docs/dnd-plan.md D9).
+
+    SEVERAL BLOCKS, in the table's order, each refused on its own terms:
+    taskspersist's two desktop-only steps sit on opposite sides of the
+    `relaunch` (the resize in act one, the frame assertion in act two), so
+    no one contiguous block names them and a CUT would take the whole
+    second act with it (docs/tasks-s4-plan.md §4, the phone cut)."""
     path = ROOT / f"tools/scenes/{scene}.steps"
     lines = [" ".join(line.split()) for line in
              path.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
     try:
-        kept, gone = drop_block(lines, specs, keep)
+        lines, taken = drop_blocks(lines, blocks)
     except ValueError as e:
         die(f"run-emulator: {path}: {e}")
-    for line in gone:
-        print(f"run-emulator: NOT RUN on this host ({why}): {line}",
-              file=sys.stderr)
-    return ";".join(kept) + ";"
+    for why, gone in taken:
+        for line in gone:
+            print(f"run-emulator: NOT RUN on this host ({why}): {line}",
+                  file=sys.stderr)
+    return ";".join(lines) + ";"
 
 
 # Every leg's script is PRECOMPUTED here, so a refused cut or drop — or
@@ -1784,8 +1820,7 @@ def script_for(scene):
             verb, keep, extra = mods["cut"]
             text = scene_script_cut(scene, verb, keep, extra)
         elif "drop" in mods:
-            specs, keep, why = mods["drop"]
-            text = scene_script_drop(scene, specs, keep, why)
+            text = scene_script_drop(scene, mods["drop"])
         else:
             text = scene_script(scene)
         _scripts[scene] = text + mods.get("append", "")
@@ -1799,9 +1834,11 @@ for _scene in sorted({lane.scene_of(_leg) for _leg in lane.legs()}):
 def relaunch_count(script_text):
     """The `relaunch` statements in a leg's script — the interpreter's own
     flattening, one level simpler: this text is already `;`-joined and no
-    quoted string can spell a bare statement."""
+    quoted string can spell a bare statement. THE VERB, not the whole
+    statement: the door rides as one argument (docs/tasks-s4-plan.md P5),
+    so `relaunch launch` counts and `relaunch_soon` still does not."""
     return sum(1 for s in re.split(r"[;\n]", script_text)
-               if s.strip() == "relaunch")
+               if s.split()[:1] == ["relaunch"])
 
 
 def relaunch_count_selftest():
@@ -1815,6 +1852,8 @@ def relaunch_count_selftest():
         ("a;relaunch;b;relaunch;c", 2, "two acts, which the arm refuses"),
         ("expect label#0 \"relaunch\"", 0, "the word inside a quoted string"),
         ("relaunch_soon;expect_entries 1", 0, "a longer verb starting with it"),
+        ("expect_title \"t\";relaunch launch;expect_entries 1", 1,
+         "the plain door, whose argument is the door name"),
         ("  relaunch  \n expect_entries 1", 1, "spaces and a real newline"),
     )
     for text, want, why in cases:
@@ -1931,28 +1970,31 @@ def app_pid(serial, package):
     return adb_out(serial, "shell", "pidof", package).strip()
 
 
-def act_two(serial, name, package, dump, log):
-    """THE PLATFORM'S OWN DOOR (docs/tasks-s9-plan.md R6, R7). Act one
-    has published its verdict and left, so the tap this makes on the
-    notification's row in the shade starts a COLD process — the tap a
-    user makes on a reminder for an app that is no longer running — and
-    the marker act one wrote is what tells that process which scene it is
-    finishing. Returns act two's verdict line, or "" with the reason
-    printed."""
-    door = re.search(r"KAYA_RELAUNCH: door notify_tap notification=(\d+) "
-                     r"title=(.*)", dump)
-    if door is None:
+def act_two(serial, name, package, component, dump, log):
+    """THE PLATFORM'S OWN DOOR (docs/tasks-s9-plan.md R6, R7;
+    docs/tasks-s4-plan.md P5). Act one has published its verdict and left,
+    so the door this opens starts a COLD process — the tap a user makes on
+    a reminder for an app that is no longer running, or the app started
+    again the way a user starts it — and the marker act one wrote is what
+    tells that process which scene it is finishing. Returns act two's
+    verdict line, or "" with the reason printed."""
+    tap = re.search(r"KAYA_RELAUNCH: door notify_tap notification=(\d+) "
+                    r"title=(.*)", dump)
+    plain = "KAYA_RELAUNCH: door launch" in dump
+    if tap is None and not plain:
         print(f"{name}: act one published ACT 1 OK and named no door — "
-              f"its log carries no KAYA_RELAUNCH line, so there is no row "
-              f"to tap", file=log)
+              f"its log carries no KAYA_RELAUNCH line, so there is nothing "
+              f"to open", file=log)
         return ""
-    nid, title = door.group(1), door.group(2).rstrip("\r")
+    nid, title = (tap.group(1), tap.group(2).rstrip("\r")) if tap else ("", "")
     # THE PROCESS MUST BE GONE FIRST: a tap into a live app is an
     # onNewIntent, which is S3's warm activation and not S9's. AND
-    # `am force-stop` IS NOT THE FALLBACK — it takes the app's own
-    # notifications out of the shade with it, so the door would go with
-    # the process; a process still standing here is act one's clean exit
-    # failing, and is reported as that.
+    # `am force-stop` IS NOT THE FALLBACK ON THE TAP DOOR — it takes the
+    # app's own notifications out of the shade with it, so the door would
+    # go with the process; a process still standing here is act one's
+    # clean exit failing, and is reported as that. The PLAIN door has no
+    # notification to lose and still reports it, because a live process
+    # there means the same defect.
     deadline = time.monotonic() + ACT2_GONE_S
     pid = app_pid(serial, package)
     while pid and time.monotonic() < deadline:
@@ -1960,19 +2002,37 @@ def act_two(serial, name, package, dump, log):
         pid = app_pid(serial, package)
     if pid:
         print(f"{name}: act one's process {pid} was still alive "
-              f"{ACT2_GONE_S:.0f}s after its verdict, so a tap now would "
+              f"{ACT2_GONE_S:.0f}s after its verdict, so the door would "
               f"reach the LIVE app; force-stop is not the fallback here "
-              f"because it cancels the app's notifications and the door "
-              f"with them", file=log)
+              f"because it cancels the app's notifications and the tap "
+              f"door with them", file=log)
         return ""
-    print(f"{name}: act one's process is gone; the door is notification "
-          f"{nid} {title!r}", file=log)
-    told = tap_notification(serial, title, log)
-    print(f"{name}: door notify_tap -> {told}", file=log)
-    if not told.startswith("tapped"):
-        # NOTHING WAS TAPPED, so nothing will arrive: the poll below would
-        # spend its whole budget proving what this sentence already says.
-        return ""
+    if plain:
+        # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the same package
+        # started with NO extras and nothing pending, which is what a
+        # user's tap on the launcher icon is. force-stop after the wait
+        # above — the process is already gone, and this drops the task
+        # record so the start below cannot bring a stale task forward
+        # with the previous leg's intent extras on it.
+        print(f"{name}: act one's process is gone; the door is a plain "
+              f"launch of {component}", file=log)
+        adb(serial, "shell", "am", "force-stop", package, stdout=log,
+            stderr=log)
+        started = adb(serial, "shell", "am", "start", "-W", "-n", component,
+                      stdout=subprocess.DEVNULL, stderr=log).returncode
+        print(f"{name}: door launch -> am start exit {started}", file=log)
+        if started != 0:
+            return ""
+    else:
+        print(f"{name}: act one's process is gone; the door is notification "
+              f"{nid} {title!r}", file=log)
+        told = tap_notification(serial, title, log)
+        print(f"{name}: door notify_tap -> {told}", file=log)
+        if not told.startswith("tapped"):
+            # NOTHING WAS TAPPED, so nothing will arrive: the poll below
+            # would spend its whole budget proving what this sentence
+            # already says.
+            return ""
     deadline = time.monotonic() + ACT2_VERDICT_S
     while time.monotonic() < deadline:
         # THE ANSWER IS A VERDICT LINE, never merely output: `adb
@@ -2533,16 +2593,87 @@ def build_suite(suite):
     return stage_suite_apk(suite, apk, package, targets)
 
 
+# ONE LEG BY HAND (CLAUDE.md: validate a change with single-leg runs, not
+# a whole lane). A PREFIX, the linux lane's own spelling and semantics
+# (tools/linux/run-suites.sh): `KAYA_ONLY=taskspersist` takes every suite's
+# taskspersist leg. A filter that selects NOTHING is refused below rather
+# than printing ALL PASS over an empty run, and the verdict names the
+# filter so a probe can never be read as a lane.
+ONLY = os.environ.get("KAYA_ONLY", "")
+_selected = 0
+
+
+def selected_legs(suite):
+    legs = lane.suite_legs(suite)
+    return [leg for leg in legs if leg.startswith(ONLY)] if ONLY else legs
+
+
+# ---------------------------------------- the real preferences domain
+# NO LEG MAY WRITE THE APP'S OWN SETTINGS (docs/tasks-s4-plan.md §4).
+# Under KAYA_SELFTEST the store is `<id>.selftest`, and the shipped
+# domain is the USER's — a lane that wrote it would be changing the
+# settings of the app on the machine. NOTHING ELSE CAN SEE THIS: every
+# scene reads back through the scratch domain, so a backing that ignored
+# the harness would pass every leg while quietly writing the real file.
+# One `run-as ls` per device at the end of a suite, which is where a leg
+# of that suite would have left it.
+REAL_PREFS_FILE = f"{DECLARED.id}.xml"
+
+
+def real_prefs_written(listings, real):
+    """(serial, file) for every device whose shared_prefs holds the real
+    domain. Pure, so its refusal can be watched firing at import."""
+    return [(serial, real) for serial, names in listings if real in names]
+
+
+def real_prefs_selftest():
+    scratch = [f"{DECLARED.id}.selftest.xml"]
+    if real_prefs_written([("emulator-1", scratch)], REAL_PREFS_FILE):
+        die("run-emulator: SELF-TEST FAIL — the real-domain census named "
+            "a device holding only the scratch store")
+    leaked = [("emulator-1", scratch), ("emulator-2", [REAL_PREFS_FILE])]
+    if len(real_prefs_written(leaked, REAL_PREFS_FILE)) != 1:
+        die("run-emulator: SELF-TEST FAIL — the real-domain census missed "
+            f"a device holding {REAL_PREFS_FILE}")
+    print("run-emulator: the real-domain census refuses a leaked store",
+          flush=True)
+
+
+real_prefs_selftest()
+
+
+def check_real_prefs(suite, package, targets):
+    global status
+    listings = []
+    for serial in targets:
+        listing, _rc = run_as(serial, package, "ls", "shared_prefs")
+        listings.append((serial, listing.replace("\r", "").split()))
+    leaked = real_prefs_written(listings, REAL_PREFS_FILE)
+    if not leaked:
+        print(f"prefs-{suite}: OK (the real domain {REAL_PREFS_FILE} is on "
+              f"none of {len(targets)} device(s))")
+        return
+    for serial, real in leaked:
+        print(f"run-emulator: a leg of the {suite} suite wrote the app's "
+              f"REAL preferences domain on {serial} "
+              f"(shared_prefs/{real}) — under KAYA_SELFTEST the store is "
+              f"{DECLARED.id}.selftest and the shipped domain is the "
+              f"user's (docs/tasks-s4-plan.md §4)", file=sys.stderr)
+    status = 1
+
+
 def run_suite_legs(suite):
     """Every leg from the lane module's roster, in its order, one drain
     at the end. The bare suite legs launch with KAYA_SELFTEST=1 (the
     unprefixed milestone2 arm); everything else passes its scene name.
     The tablet leg, the remount legs and the per-leg extras are
     lanes/android.py's FLAGS."""
+    global _selected
     apk_rel, package, activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
     component = f"{package}/{activity}"
-    for leg in lane.suite_legs(suite):
+    for leg in selected_legs(suite):
+        _selected += 1
         flags = lane.FLAGS.get(leg, {})
         scene = lane.scene_of(leg)
         selftest = "1" if leg in lane.SUITES else scene
@@ -2566,10 +2697,10 @@ def run_suite_legs(suite):
         # a leg that would wait out its ceiling for a tap nobody makes.
         two_act = relaunch_count(script_text) > 0
         door = lane.RELAUNCH_DOOR.get(scene)
-        if two_act and door != "notify_tap":
+        if two_act and door not in ("notify_tap", "launch"):
             die(f"run-emulator: {scene}.steps carries a `relaunch` and "
                 f"lanes/android.py names its door {door!r}; this runner "
-                f"opens \"notify_tap\" and nothing else")
+                f"opens \"notify_tap\" and \"launch\" and nothing else")
         if door and not two_act:
             die(f"run-emulator: lanes/android.py names a relaunch door "
                 f"for {scene}, whose scene script has no `relaunch`")
@@ -2578,15 +2709,25 @@ def run_suite_legs(suite):
                    two_act),
                   tablet=bool(flags.get("tablet")))
     drain()
+    check_real_prefs(suite, package,
+                     [*SERIALS, TABLET_SERIAL] if suite == "compose"
+                     else list(SERIALS))
     timing(f"legs-{suite}")
 
 
 for _suite in lane.SUITES:
     if SUITE not in (_suite, "all"):
         continue
+    if ONLY and not selected_legs(_suite):
+        continue
     if not build_suite(_suite):
         sys.exit(1)
     run_suite_legs(_suite)
+
+if ONLY and _selected == 0:
+    die(f"run-emulator: KAYA_ONLY={ONLY!r} matched no leg of "
+        f"{'every suite' if SUITE == 'all' else SUITE} — a filter that "
+        f"selects nothing would print a verdict over a run of nothing")
 
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer: a killed lane otherwise reads exactly like
@@ -2594,6 +2735,8 @@ for _suite in lane.SUITES:
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
 exclusive.summary("android")
+if ONLY:
+    print(f"run-emulator: filtered run — KAYA_ONLY={ONLY}, {_selected} leg(s)")
 if status == 0:
     print("run-emulator: ALL PASS")
 else:

@@ -792,6 +792,7 @@ pub const KAYA_WPROP_DIRTY: u32 = 7;
 /// not part of it and are not removed by it.
 pub const KAYA_WPROP_INSET: u32 = 8;
 pub const KAYA_WPROP_APPEARANCE: u32 = 9;
+pub const KAYA_WPROP_REMEMBER_FRAME: u32 = 10;
 
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -978,6 +979,7 @@ const _: () = assert!(
         && KAYA_WPROP_DIRTY == wire::WPROP_DIRTY
         && KAYA_WPROP_INSET == wire::WPROP_INSET
         && KAYA_WPROP_APPEARANCE == wire::WPROP_APPEARANCE
+        && KAYA_WPROP_REMEMBER_FRAME == wire::WPROP_REMEMBER_FRAME
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -1146,7 +1148,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 9,
+    crate::spec::WINDOW_PROPS.len() == 10,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -1423,6 +1425,177 @@ unsafe fn borrowed_str(ptr: *const u8, len: usize) -> Option<String> {
     }
     let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
     std::str::from_utf8(slice).ok().map(|s| s.to_owned())
+}
+
+// --- THE PREFERENCE STORE AND THE APP DATA DIRECTORY --------------------
+//
+// docs/tasks-s4-plan.md §4: a floor API, no wire change — a pref read is
+// synchronous and wanted at build time, so every binding wraps these ten
+// and the spec hash does not move. The semantics is ONE in all nine
+// (crates/kaya/src/prefs.rs's module docs): a `kaya.` key is kaya's own
+// and a guest write to one is refused; a typed get on a key holding
+// another type answers ABSENT; a set is durable when it returns; any
+// thread may call.
+
+/// The bytes of the app's data directory (§4), created on first ask.
+/// Returns the FULL length and writes min(len, cap) bytes, so a caller
+/// sizes with `cap` 0 and asks again — `kaya_fault`'s shape. 0 means
+/// there is none yet (Android before attach).
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_app_data_dir(out: *mut u8, cap: usize) -> usize {
+    let Some(dir) = crate::prefs::app_data_dir() else { return 0 };
+    let text = dir.to_string_lossy().into_owned();
+    unsafe { fill(text.as_bytes(), out, cap) }
+}
+
+/// Copy out at most `cap` bytes and answer the true length.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+unsafe fn fill(bytes: &[u8], out: *mut u8, cap: usize) -> usize {
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+/// A guest's write to one of kaya's own keys is refused HERE, at the
+/// floor, so the nine bindings' refusals are nine spellings of one rule
+/// rather than nine rules. Reported through `fault` rather than panicked:
+/// this frame cannot unwind (crates/kaya/src/fault.rs), so a watched
+/// harness reddens the leg with the sentence and an unwatched app dies
+/// legibly, sentence first.
+fn guest_may_write(key: &str) -> bool {
+    if !crate::prefs::is_reserved(key) {
+        return true;
+    }
+    crate::fault::report(crate::prefs::reserved_refusal(key));
+    false
+}
+
+/// 1 = present, with `*len` the full length and min(len, cap) bytes
+/// written into `out`; 0 = absent, which includes a key holding another
+/// type.
+///
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` null or valid for `cap`;
+/// `len` null or valid for one `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_get_string(
+    key: *const u8,
+    key_len: usize,
+    out: *mut u8,
+    cap: usize,
+    len: *mut usize,
+) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::Str(text)) = crate::prefs::get(&key) else { return 0 };
+    let full = unsafe { fill(text.as_bytes(), out, cap) };
+    if !len.is_null() {
+        unsafe { *len = full };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one `i64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_get_i64(key: *const u8, key_len: usize, out: *mut i64) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::I64(value)) = crate::prefs::get(&key) else { return 0 };
+    if !out.is_null() {
+        unsafe { *out = value };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one `double`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_get_f64(key: *const u8, key_len: usize, out: *mut f64) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::F64(value)) = crate::prefs::get(&key) else { return 0 };
+    if !out.is_null() {
+        unsafe { *out = value };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one byte.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_get_bool(key: *const u8, key_len: usize, out: *mut u8) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::Bool(value)) = crate::prefs::get(&key) else { return 0 };
+    if !out.is_null() {
+        unsafe { *out = u8::from(value) };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes and `value` for `value_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_set_string(
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    let Some(value) = (unsafe { borrowed_str(value, value_len) }) else { return };
+    if !guest_may_write(&key) {
+        return;
+    }
+    crate::prefs::set(&key, crate::prefs::PrefValue::Str(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_set_i64(key: *const u8, key_len: usize, value: i64) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    if !guest_may_write(&key) {
+        return;
+    }
+    crate::prefs::set(&key, crate::prefs::PrefValue::I64(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_set_f64(key: *const u8, key_len: usize, value: f64) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    if !guest_may_write(&key) {
+        return;
+    }
+    crate::prefs::set(&key, crate::prefs::PrefValue::F64(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_set_bool(key: *const u8, key_len: usize, value: u8) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    if !guest_may_write(&key) {
+        return;
+    }
+    crate::prefs::set(&key, crate::prefs::PrefValue::Bool(value != 0));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_pref_remove(key: *const u8, key_len: usize) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    if !guest_may_write(&key) {
+        return;
+    }
+    crate::prefs::remove(&key);
 }
 
 /// Fetch a blob's bytes by the handle an apply record carried. Returns

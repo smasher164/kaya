@@ -11,5 +11,5 @@ rem from this task and not from ssh (docs/traps.md, "ssh has no window
 rem station"; measured 2026-09-08, session 1 with a window).
 set KAYA_RELAUNCH_FAMILY=%~7
 if "%~7"=="-" set KAYA_RELAUNCH_FAMILY=
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\kaya\relaunch-com.ps1 -Clsid "%~2" -Aumid "%~3" -Key "%~4" -Notification "%~5" -Id "%~6" -Family "%KAYA_RELAUNCH_FAMILY%" > C:\kaya\out_%~1-act2.txt 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\kaya\relaunch-com.ps1 -Leg "%~1" -Clsid "%~2" -Aumid "%~3" -Key "%~4" -Notification "%~5" -Id "%~6" -Family "%KAYA_RELAUNCH_FAMILY%" > C:\kaya\out_%~1-act2.txt 2>&1
 echo RELAUNCHEXIT=%ERRORLEVEL% >> C:\kaya\out_%~1-act2.txt

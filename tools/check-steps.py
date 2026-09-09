@@ -1772,6 +1772,11 @@ if wired():
 # and then the second process would consume nothing and the runner would
 # poll a file nobody writes — with every lane green on act one.
 RELAUNCH = "relaunch"
+# The verb's one optional argument (docs/tasks-s4-plan.md P5). Bare is the
+# notification door; `launch` is the plain one — the runner starts the same
+# artifact the way a user would, with nothing pending. Held here so the
+# grammar and the three harnesses' parsers cannot drift apart.
+RELAUNCH_DOORS = {"launch"}
 # The env names the core exports and each harness reads; the state roots
 # it alone may spell.
 ACT2_ENV = ("KAYA_ACT2_DIR", "KAYA_ACT2_VERDICT")
@@ -1837,7 +1842,19 @@ def relaunch_scenes(step_files):
             line = raw.strip()
             if line.startswith("#"):
                 continue
-            if line == RELAUNCH:
+            # THE VERB IS THE FIRST WORD, and the DOOR may ride beside it
+            # (docs/tasks-s4-plan.md P5): bare `relaunch` is the
+            # notification door, `relaunch launch` the plain one. Both
+            # harnesses split the script on the same first-word rule.
+            words = line.split()
+            if words[:1] == [RELAUNCH]:
+                if len(words) > 2 or (len(words) == 2
+                                      and words[1] not in RELAUNCH_DOORS):
+                    bad.append(f"{path}:{n + 1}: `relaunch` takes no "
+                               f"argument (the notification door) or one "
+                               f"of {sorted(RELAUNCH_DOORS)} (the plain "
+                               f"one), not {line!r}")
+                    continue
                 at.append(n)
             elif re.search(r"(^|;)\s*relaunch\b", line):
                 bad.append(f"{path}:{n + 1}: `relaunch` shares its line "
@@ -1978,9 +1995,18 @@ if not _relaunch:
 
 # WATCHED NEGATIVES, counts printed: each is a shape that would ship a
 # second act nobody runs.
-_ONE = [("tasks.steps", "expect_entries 0\nrelaunch\nexpect_entries 1\n")]
-if relaunch_scenes(_ONE)[1]:
-    selftest_fail("the real `relaunch` shape was refused")
+_ONE = [("tasks.steps", "expect_entries 0\nrelaunch\nexpect_entries 1\n"),
+        # THE PLAIN DOOR'S SHAPE, from the other side: taskspersist.steps
+        # carries it, and a clause that only ever read the bare form would
+        # have refused the whole file (docs/tasks-s4-plan.md P5).
+        ("taskspersist.steps",
+         "expect_entries 0\nrelaunch launch\nexpect_pref week_start \"1\"\n")]
+_one_scenes, _one_bad = relaunch_scenes(_ONE)
+if _one_bad:
+    selftest_fail(f"the real `relaunch` shapes were refused: {_one_bad}")
+if sorted(_one_scenes) != ["tasks", "taskspersist"]:
+    selftest_fail(f"the two real `relaunch` scenes did not both parse: "
+                  f"{sorted(_one_scenes)}")
 for _label, _files, _want in (
         ("two relaunch lines", [("x.steps", "expect_entries 0\nrelaunch\n"
                                  "expect_entries 1\nrelaunch\nexpect_entries 2\n")],
@@ -1991,6 +2017,10 @@ for _label, _files, _want in (
         ("an empty act two",
          [("x.steps", "expect_entries 0\nrelaunch\n# nothing\n")],
          "act \ntwo would be empty".replace("\n", "")),
+        ("a door no runner has",
+         [("x.steps", "expect_entries 0\nrelaunch sideways\n"
+                      "expect_entries 1\n")],
+         "takes no argument"),
 ):
     _out = relaunch_scenes(_files)[1]
     if not any(_want in f for f in _out):
@@ -3246,19 +3276,20 @@ def js_launchers(files, node_version):
 # staging). Statements are read whole (a python string continues across
 # lines), so a shape split over two source lines is still one command.
 STRING_PIECE = re.compile(r"'([^']*)'|\"([^\"]*)\"")
-SSH_STATEMENT = re.compile(r"(?:must_ssh|run_ssh)\((?:[^()]|\([^()]*\))*\)")
+SSH_STATEMENT = re.compile(
+    r"(?:must_ssh|run_ssh|self\._ssh|self\._ssh_out)\((?:[^()]|\([^()]*\))*\)")
 
 
-def cmd_precedence(text):
+def cmd_precedence(text, rel="tools/deploy-win.py"):
     bad = []
     for m in SSH_STATEMENT.finditer(text):
         pieces = [a or b for a, b in STRING_PIECE.findall(m.group(0))]
         stmt = "".join(pieces)
-        if "if exist" in stmt and " & " in stmt:
+        if ("if exist" in stmt or "if not exist" in stmt) and " & " in stmt:
             line = text[:m.start()].count("\n") + 1
-            bad.append(f"tools/deploy-win.py:{line}: `if exist … & …` in "
+            bad.append(f"{rel}:{line}: `if [not] exist … & …` in "
                        f"one cmd string — the tail runs inside the if; "
-                       f"split it into two must_ssh calls")
+                       f"split it into two ssh calls")
     return bad
 
 
@@ -3275,12 +3306,20 @@ if cmd_precedence(SPLIT_PAIR):
                   "precedence clause")
 if not cmd_precedence(TWO_LINES):
     selftest_fail("a one-string shape split over two source lines passed")
-out = cmd_precedence(read_rel("tools/deploy-win.py"))
-if out:
-    print("check-steps: cmd runs the tail of `if exist … & …` inside the "
-          "if (docs/traps.md, 2026-09-01):", file=sys.stderr)
-    print("\n".join(out), file=sys.stderr)
-    status = 1
+# The sampler leak's own line (docs/traps.md, 2026-09-09): `if not exist`
+# through the recorder's self._ssh, which the first three shapes never saw.
+NOT_EXIST = ("self._ssh('if not exist C:\\\\x mkdir C:\\\\x & echo stop > "
+             "C:\\\\x\\\\ALL.stop')\n")
+if not cmd_precedence(NOT_EXIST, "tools/lib/flightrec_lane.py"):
+    selftest_fail("the sampler leak's `if not exist … & echo` through "
+                  "self._ssh passed the cmd precedence clause")
+for _rel in ("tools/deploy-win.py", "tools/lib/flightrec_lane.py"):
+    out = cmd_precedence(read_rel(_rel), _rel)
+    if out:
+        print("check-steps: cmd runs the tail of `if [not] exist … & …` inside "
+              "the if (docs/traps.md, 2026-09-01 and 2026-09-09):", file=sys.stderr)
+        print("\n".join(out), file=sys.stderr)
+        status = 1
 
 _deploy_text = read_rel("tools/deploy-win.py")
 _node_version = re.search(r'^NODE_VERSION = "([0-9.]+)"$', _deploy_text, re.M)

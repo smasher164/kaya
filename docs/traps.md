@@ -10305,6 +10305,202 @@ bytes where it wanted 8240. Both take `OUT_TABLE` now and the R3 test
 drains what it pushed. A test that touches the ring is never the only one
 that does.
 
+## A debounced window-frame save loses the frame the scene came to read (2026-09-09)
+
+kaya's harness leaves through `_exit` (lib.rs's `exit_hard`) — no atexit,
+no destructor, and no Stage hook at the verdict — so any timer-delayed
+write pending at the verdict never happens, and a real app has the same
+hole on a crash. Measured on GTK with a 250ms glib timeout: the
+declaration's own `set_default_size` at startup armed the timer,
+`resize_window` landed ~197ms later inside that window, and the
+preference store kept `- - 640 400` (the declared size) with the window
+at 900x620. A leading edge does not fix it — the arm was already held.
+AND A LOWER-PRIORITY IDLE HAS THE SAME HOLE: WinUI's Low-priority
+`TryEnqueue` lost the same resize on the VM, because the relaunch step's
+Normal-priority hop ran first, wrote the marker and left. The rule
+(docs/tasks-s4-plan.md §4): coalesce the save onto the toolkit's own
+queue AT THE HOPS' PRIORITY — glib's idle, a plain `TryEnqueue`,
+`DispatchQueue.main.async` — one write per window per loop turn,
+deduplicated against the stored value so a live drag costs one write per
+distinct size (a durable keyfile write measured median 0.737ms, p95
+2.019ms in the linux container).
+
+## GTK4 has no window position, at all (2026-09-09)
+
+`GtkWindow` carries `default_size`/`set_default_size` and nothing else —
+upstream dropped `gtk_window_move` and `gtk_window_get_position` in GTK4,
+and `GdkMonitor` has `geometry()` and no workarea. So kaya's Linux window
+memory writes `"- - <w> <h>"` on BOTH session types and clamps to the
+monitors' geometry. A position readable on X11 through Xlib is one
+nothing could restore.
+
+## A wire regeneration moves the spec hash; the two hand-copied interpreter constants do not (2026-09-09)
+
+`tools/gen-header.py` + `gen-bindings.py` + `gen-guests.py` rewrite
+every generated file with the new hash, and KayaCompose.kt's `SPEC_HASH`
+and swift/KayaSwiftUI.swift's `kayaSpecHash` are NOT generated. After
+the `remember_frame` window prop joined WINDOW_PROPS, every android leg
+died at onCreate with `kaya: stale Compose interpreter — its spec hash
+21005150bc085070 does not match the core's 605e18f72b2af791` (read from
+the flight-recorder bundle first; the SwiftUI lane would have said the
+same). The runtime assert is the wall doing its job and it cost one leg;
+the STATIC wall is tools/check-verbs.py's spec-hash clause, which was red
+on both — run it right after any regeneration, before anything is
+launched against the tree. ALSO FOUND THE SAME HOUR: growing the `wprop`
+EnumSpec alone does not grow spec::WINDOW_PROPS, which is the table the
+generator loops over for the per-prop setters and the one spec.rs's own
+test and capi.rs's pin count — the constant regenerates without its
+setter and `cargo test` is red on the count.
+
+## SharedPreferences has no double, and its float is 32-bit (2026-09-09)
+
+`putFloat` would answer `0.1` back as `0.10000000149011612` on Android
+alone — a silent wrong value — and `putLong(doubleToRawLongBits)` is
+exact but reads back as an i64 where the ruled semantics say ABSENT. The
+Android backing (android/kaya/src/main/kotlin/dev/kaya/KayaPrefs.kt)
+stores an f64 as a one-element `Set<String>` holding Rust's own Display
+text: exact both ways, discriminable from a string by its Java type, and
+legible in the store's XML. The type dispatch reads `getAll()[key]` and
+switches on the Java type, so no typed getter is ever called on a key of
+unknown type and no `ClassCastException` can be left pending at the JNI
+boundary (a missed `ExceptionClear` detonates at the next unrelated JNI
+call). KayaPrefsTest holds the rules no leg reaches.
+
+## A node worker's `process.env` is a copy (2026-09-09)
+
+Assigning `process.env.X` inside a node:worker_threads worker changes
+only that worker's JS-level object; the real environ, which Rust reads
+through `std::env`, is untouched, so a native library keeps seeing the
+old value. Measured in bindings/js/kaya_app_checks.ts: `KAYA_SELFTEST`
+set inside the worker left the pref domain at the developer's REAL `<id>`
+while every round-trip assertion passed — only the assertion about WHICH
+domain was in use caught it (the checks now assert the `.selftest`
+domain by name). Set such a variable on the main thread before the worker
+is spawned.
+
+## `dotnet build` leaves a Roslyn compiler server behind (2026-09-09)
+
+Every `dotnet build` starts a VBCSCompiler server that outlives the
+build, so tools/check-abort.py's csharp arm has always left one running
+and a process audit after any gate sweep will list it. It is idle and
+harmless; `dotnet build-server shutdown` stops it, and an agent that must
+prove "nothing left running" after building C# should run that first
+rather than reporting the server as its own leak.
+
+## cc-rs cannot compile C for the iOS simulator inside the dev shell (2026-09-09)
+
+nix's cc-wrapper injects `-mmacos-version-min` into every clang call, and
+clang refuses it beside the `-mios-simulator-version-min` cc-rs adds for
+`aarch64-apple-ios-sim`, so the first C dependency to join an iOS build
+(rusqlite's bundled sqlite3.c) died in the wrapper with no sqlite problem
+at all. `cargo_ios` in tools/lib/lanes/ios.py exports `CC_<target>` from
+`xcrun -sdk iphonesimulator -f clang`, the route cgo and pyhost.c already
+take; without it the iOS lane dies on its first `--example tasks`.
+
+## cargo-xwin ships the compiler and none of LLVM's binutils (2026-09-09)
+
+The first C crate to join the Windows cross-build died with `cc-rs: failed
+to find tool "llvm-lib"`: cargo-xwin sets `AR_aarch64_pc_windows_msvc=
+llvm-lib` and the dev shell had never needed a librarian for that target
+because nothing C had ever joined it. flake.nix's `xwinLib` symlinks that
+ONE name from `${pkgs.llvm}/bin` into the shell (`llvm-ar` behaves like
+lib.exe only under that name, and the whole llvm package on PATH would add
+forty binaries nobody asked for). sqlite3.c itself needed nothing — no
+`_CRT_SECURE_NO_WARNINGS`, no header miss. A flake edit moves the
+dev-shell fingerprint: `nix develop -c` picks it up, a long-lived shell
+must be re-entered.
+
+## A window's declared size applies before OR after the window materializes (2026-09-09)
+
+Measured on the two acts of one scene, 19 ms apart: in one act the width
+and height props landed before the window existed and in the other after
+it. Anything that must beat the declaration — window memory's restore —
+cannot key on ORDER (a drain boundary, "before the first transaction");
+it keys on VALUE (docs/tasks-s4-plan.md §4, the by-value rule).
+
+## Recording mode's tile races the declared size, and a crop outside the film is black, not an error (2026-09-09)
+
+A window that grows out of its tile falls off the display and every
+still is black; the runner owns the geometry under `KAYA_WIN_SLOT`. And
+harness-extract's crop rectangle is not checked against the film's frame,
+so a rect outside it yields black stills with no error — the two together
+cost an hour before a hand extraction at the same rect showed act two's
+window perfectly. The stills' OTHER black cause is on the ledger: sparse
+VFR against the covering-frame rule.
+
+## The sampler leak was the cmd-precedence trap in the recorder's own cleanup line (2026-09-09)
+
+`WinRecorder.cleanup()` sent `if not exist C:\kaya\flightrec mkdir … & echo
+stop > C:\kaya\flightrec\ALL.stop` as ONE cmd string, and cmd runs
+everything after the `&` inside the if — the directory always exists, so
+the stop file was never written and every matrix's sampler polled to its
+own 5400s deadline (three sightings on the ledger). Measured on the VM by
+running the exact string with the directory present (`File Not Found`)
+and the split spelling present and absent (ALL.stop both times). The
+clause that guards the shape had been blind on three counts: it matched
+`if exist` only, read tools/deploy-win.py only, and matched `must_ssh` /
+`run_ssh` only, while this line was `if not exist` through `self._ssh` in
+tools/lib/flightrec_lane.py — all three widened, with the shipped line as
+a fourth self-test. AND A CENSUS KEYED ON PID FILES ALONE WOULD HAVE
+PASSED THE LEAK: the runner starts the sampler before it ships the
+artifacts, so the first run after an edit to flightrec.ps1 runs the
+previous script, which writes no pid file; the guest-side listing reads
+the live process list too and the lane refuses on an unattributed
+sampler as well as its own.
+
+## Windows reads a notification setting lazily, so the registry is not the setting in use (2026-09-09)
+
+tools/deploy-win.py had written `ToastEnabled=0` and
+`NOC_GLOBAL_SETTING_TOASTS_ENABLED=0` at top level on every deploy (the
+foreground-stealing shell toast trap) and every notify leg passed for
+months, because the logon session went on delivering against the value
+it had read earlier. Something made the session re-read, and from that
+moment `expect_notification` failed with `history holds 0` on a machine
+whose registry, AUMID key, activator and services all read correct; the
+pushed S9 tree failed identically (a worktree bisect), and a
+kaya-independent PowerShell probe named it: `notifier setting =
+DisabledForUser`. The same lazy read makes a bisect incoherent — a leg
+passes right after the toggles are flipped to 0 because the flip has not
+taken. So a lane never reads a Windows notification setting back from
+the registry: `notify_ready()` posts a toast under the app's own AUMID,
+reads the history and removes it, and refuses the run unless the platform
+says `setting=Enabled delivered=1`; `Get-Service WpnUserService* |
+Restart-Service -Force` before any leg makes the platform re-read what
+was just written.
+
+## The banner is a per-app knob; delivery is the platform's (2026-09-09)
+
+What the foreground trap wanted was no BANNER, not no notifications:
+`ShowBanner=0` with `ShowInActionCenter=1` under each AUMID kaya posts
+under (the declared id at provisioning, the packaged `<family>!<app>` ids
+the moment the install reports the family) keeps every toast out of the
+shell's foreground and in the history the harness reads. With delivery
+on, menus_rust (the shortcut-injection class the banner killed) stays
+green.
+
+## The harness's scratch is one tree per APP, and a pooled lane runs many legs of one app at once (2026-09-09)
+
+Every guest on a lane declares the same identity, so `<state>/act2/<id>`,
+`<state>/selftest/<id>/data` and the `<id>.selftest` preference domain
+are ONE tree for every leg of the lane — and a lane's pool starts legs
+while others run. Any leg's act one EMPTIES that tree (that is the rule
+that makes a relaunch scene measure persistence), so under the first S4
+matrix a concurrently starting mac leg removed the directory under
+taskspersist's open SQLite document: `tasks: the document would not be
+written: attempt to write a readonly database` in act one's log, and act
+two read `2 in inbox`. Hand runs never see it (one leg at a time) and
+the linux lane never saw it because notify-leg.sh and persist-leg.py
+already give each leg its own XDG homes; Android and iOS isolate per
+device. The rule: A RUNNER GIVES EVERY LEG ITS OWN STATE HOME — the mac
+lane's leg_env sets `XDG_STATE_HOME=target/mac-legs/<leg>/state`, act2.rs
+honors the variable on Windows as it did on macOS and Linux, and the
+core's preference domain under the harness carries a tag derived from
+that home (`<id>.selftest.<fnv64>`), since a UserDefaults suite has no
+directory to live under; a plain relaunch inherits the leg's environment
+and lands in the same suite. The act-two marker moves with it, which is
+also what keeps `tasks` and `taskspersist` — two relaunch scenes of one
+app — from consuming each other's marker in the pool.
+
 ## `=` is an argument delimiter in a .cmd (2026-09-09)
 
 `schtasks /tr "C:\kaya\relaunch-com.cmd <leg> <clsid> <aumid> kaya=1 <id>"`

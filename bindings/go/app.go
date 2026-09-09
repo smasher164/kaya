@@ -113,6 +113,110 @@ func Capabilities() Caps {
 	}
 }
 
+// AppDataDir answers the app's OWN writable directory
+// (docs/tasks-s4-plan.md P1): Application Support/<id> on macOS,
+// Documents on iOS, the files directory on Android, $XDG_DATA_HOME/<id>
+// on Linux, %LOCALAPPDATA%\<id> on Windows. Created on first ask.
+//
+// KAYA OWNS THE PLACE AND NOTHING ELSE: the app's document is the app's,
+// written the standard way (database/sql over a SQLite driver is the
+// recommendation). Settings are small and typed and belong in Prefs.
+//
+// PANICS where the platform has handed no directory over — an error
+// state a guest cannot plan around, so all nine bindings refuse rather
+// than answering an absent value (ruled 2026-09-09).
+func AppDataDir() string {
+	dir := appDataDir()
+	if dir == "" {
+		panic("kaya: app_data_dir asked before the platform handed one " +
+			"over (Android before attach)")
+	}
+	return dir
+}
+
+// PrefsHandle is the app's preferences store
+// (docs/tasks-s4-plan.md P2/P3): a small typed key-value record under
+// the app's id, the platform's own where the platform has one —
+// UserDefaults on Apple, SharedPreferences on Android, a key file on
+// Linux and Windows.
+//
+// A PULL, NOT A SIGNAL: a setting is read when the app builds and
+// written when the user changes it. Every Get takes the default it
+// answers when the key is absent OR holds another type. Writes are
+// durable when they return, and the store may be used from any thread.
+type PrefsHandle struct{}
+
+// Prefs answers the store — one per process.
+func Prefs() PrefsHandle { return PrefsHandle{} }
+
+// prefKey refuses the key no store may hold. A guest may READ any key
+// and WRITE any key kaya has not reserved (docs/tasks-s4-plan.md P4:
+// window memory lives under `kaya.`).
+func prefKey(key string) string {
+	if key == "" {
+		panic("kaya: a preference key must not be empty")
+	}
+	return key
+}
+
+func prefWriteKey(key string) string {
+	prefKey(key)
+	if strings.HasPrefix(key, "kaya.") {
+		panic(fmt.Sprintf(
+			"kaya: preference key %q is reserved (the kaya. prefix is kaya's own)",
+			key))
+	}
+	return key
+}
+
+func (PrefsHandle) GetString(key, def string) string {
+	if v, ok := prefGetString(prefKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (PrefsHandle) GetI64(key string, def int64) int64 {
+	if v, ok := prefGetI64(prefKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (PrefsHandle) GetF64(key string, def float64) float64 {
+	if v, ok := prefGetF64(prefKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (PrefsHandle) GetBool(key string, def bool) bool {
+	if v, ok := prefGetBool(prefKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (PrefsHandle) SetString(key, value string) {
+	prefSetString(prefWriteKey(key), value)
+}
+
+func (PrefsHandle) SetI64(key string, value int64) {
+	prefSetI64(prefWriteKey(key), value)
+}
+
+func (PrefsHandle) SetF64(key string, value float64) {
+	prefSetF64(prefWriteKey(key), value)
+}
+
+func (PrefsHandle) SetBool(key string, value bool) {
+	prefSetBool(prefWriteKey(key), value)
+}
+
+func (PrefsHandle) Remove(key string) {
+	prefRemove(prefWriteKey(key))
+}
+
 // App owns the id counters, the dispatch tables and the collection
 // model. The collection IS the model, the only copy: every mutation
 // edits it and queues the wire delta in the same call.
@@ -3200,6 +3304,14 @@ func (w WindowRef) Panes(ceiling uint32) WindowRef {
 // is VetoClose plus a dialog, which is yours to compose.
 func (w WindowRef) Dirty(on bool) WindowRef {
 	w.tx.emit(TxSetWindowDirty(w.id, on))
+	return w
+}
+
+// RememberFrame is the OPT-OUT from window memory
+// (docs/tasks-s4-plan.md P4): a desktop window reopens at the frame the
+// previous process left unless this is false. Inert on the phones.
+func (w WindowRef) RememberFrame(on bool) WindowRef {
+	w.tx.emit(TxSetWindowRememberFrame(w.id, on))
 	return w
 }
 

@@ -87,6 +87,38 @@ _lib.kaya_asset_why_not.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
                                     ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_asset_why_not.restype = ctypes.c_size_t
 
+# The app's own places (docs/tasks-s4-plan.md §4): the data directory
+# and the typed preferences store.
+_lib.kaya_app_data_dir.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_app_data_dir.restype = ctypes.c_size_t
+_lib.kaya_pref_get_string.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_pref_get_string.restype = ctypes.c_int
+_lib.kaya_pref_get_i64.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                   ctypes.POINTER(ctypes.c_int64)]
+_lib.kaya_pref_get_i64.restype = ctypes.c_int
+_lib.kaya_pref_get_f64.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                   ctypes.POINTER(ctypes.c_double)]
+_lib.kaya_pref_get_f64.restype = ctypes.c_int
+_lib.kaya_pref_get_bool.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                    ctypes.POINTER(ctypes.c_uint8)]
+_lib.kaya_pref_get_bool.restype = ctypes.c_int
+_lib.kaya_pref_set_string.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                      ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_pref_set_string.restype = None
+_lib.kaya_pref_set_i64.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                   ctypes.c_int64]
+_lib.kaya_pref_set_i64.restype = None
+_lib.kaya_pref_set_f64.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                   ctypes.c_double]
+_lib.kaya_pref_set_f64.restype = None
+_lib.kaya_pref_set_bool.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                    ctypes.c_uint8]
+_lib.kaya_pref_set_bool.restype = None
+_lib.kaya_pref_remove.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_pref_remove.restype = None
+
 # CAP_AUX_WINDOWS is the core's number written again — ctypes has no
 # header to read it out of; tools/check-sugar-surface.py holds it to
 # crates/kaya/src/scene.rs.
@@ -269,3 +301,86 @@ def open_picked(handle, mode):
         fd = raw.value
     modes = {0: "rb", 1: "wb", 2: "r+b"}
     return os.fdopen(fd, modes[mode]), bool(seekable.value)
+
+
+def app_data_dir():
+    """The app's own writable directory, or None before one exists
+    (docs/tasks-s4-plan.md §4). SIZED, THEN READ, asset_miss_sentence's
+    two-call shape."""
+    needed = _lib.kaya_app_data_dir(None, 0)
+    if needed == 0:
+        return None
+    out = ctypes.create_string_buffer(needed)
+    written = _lib.kaya_app_data_dir(out, needed)
+    return out.raw[:min(written, needed)].decode("utf-8", "replace")
+
+
+def _key(key):
+    raw = key.encode("utf-8")
+    return raw, len(raw)
+
+
+def pref_get_string(key):
+    """The stored string, or None when the key is absent or holds
+    another type."""
+    raw, n = _key(key)
+    length = ctypes.c_size_t(0)
+    if not _lib.kaya_pref_get_string(raw, n, None, 0, ctypes.byref(length)):
+        return None
+    if length.value == 0:
+        return ""
+    out = ctypes.create_string_buffer(length.value)
+    if not _lib.kaya_pref_get_string(raw, n, out, length.value,
+                                     ctypes.byref(length)):
+        return None
+    return out.raw[:length.value].decode("utf-8", "replace")
+
+
+def pref_get_i64(key):
+    raw, n = _key(key)
+    out = ctypes.c_int64(0)
+    if not _lib.kaya_pref_get_i64(raw, n, ctypes.byref(out)):
+        return None
+    return out.value
+
+
+def pref_get_f64(key):
+    raw, n = _key(key)
+    out = ctypes.c_double(0.0)
+    if not _lib.kaya_pref_get_f64(raw, n, ctypes.byref(out)):
+        return None
+    return out.value
+
+
+def pref_get_bool(key):
+    raw, n = _key(key)
+    out = ctypes.c_uint8(0)
+    if not _lib.kaya_pref_get_bool(raw, n, ctypes.byref(out)):
+        return None
+    return out.value != 0
+
+
+def pref_set_string(key, value):
+    raw, n = _key(key)
+    packed = value.encode("utf-8")
+    _lib.kaya_pref_set_string(raw, n, packed, len(packed))
+
+
+def pref_set_i64(key, value):
+    raw, n = _key(key)
+    _lib.kaya_pref_set_i64(raw, n, value)
+
+
+def pref_set_f64(key, value):
+    raw, n = _key(key)
+    _lib.kaya_pref_set_f64(raw, n, value)
+
+
+def pref_set_bool(key, value):
+    raw, n = _key(key)
+    _lib.kaya_pref_set_bool(raw, n, 1 if value else 0)
+
+
+def pref_remove(key):
+    raw, n = _key(key)
+    _lib.kaya_pref_remove(raw, n)

@@ -8,4 +8,7 @@ rem
 rem Launched through run-hidden-args.vbs so no console window appears: the
 rem sample mode is measuring which window holds the foreground, and its own
 rem console would be the answer.
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\kaya\flightrec.ps1 -Mode %1 -Leg %2
+rem %3 IS THE LANE RUN'S TOKEN (docs/deferred.md, the sampler LEAK
+rem entry): the sampler names its run in a pid file so the lane's exit
+rem can wait for ITS OWN. Empty for a collect, where it means nothing.
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\kaya\flightrec.ps1 -Mode %1 -Leg %2 -Run "%~3"

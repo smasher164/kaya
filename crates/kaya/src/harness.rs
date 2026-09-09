@@ -391,7 +391,20 @@ pub enum Step {
     /// `KAYA_SELFTEST: ACT 1 …`, and this process exits; the runner then
     /// pushes the platform's own relaunch door and the second process
     /// runs the rest. At most one per scene (tools/check-steps.py).
-    Relaunch,
+    ///
+    /// THE DOOR IS THE ARGUMENT (docs/tasks-s4-plan.md P5): bare
+    /// `relaunch` is the notification door and `relaunch launch` the
+    /// plain one — the runner starts the same artifact the way a user
+    /// would, with nothing pending. `None` is the bare form.
+    Relaunch(Option<String>),
+    /// The PLATFORM's own preference store for this process's domain
+    /// holds this key with this value, compared as the string form
+    /// (`true`/`false`, `{}` Display) — a fresh read, never the core's
+    /// memory of what it wrote (docs/tasks-s4-plan.md §4).
+    ExpectPref(String, String),
+    /// The same store does NOT hold that key. Also the answer for a key
+    /// holding another type, which the semantics calls absent.
+    ExpectNoPref(String),
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
@@ -660,7 +673,9 @@ impl Step {
             | Step::ExpectNoNotification(..)
             | Step::ExpectNoTarget(..)
             | Step::NotificationActivate(..)
-            | Step::Relaunch
+            | Step::Relaunch(..)
+            | Step::ExpectPref(..)
+            | Step::ExpectNoPref(..)
             | Step::ExpectAlerts(..)
             | Step::ExpectEntries(..)
             | Step::Back(..)
@@ -757,7 +772,9 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::NotificationActivate { .. } => false,
-            Step::Relaunch => false,
+            Step::Relaunch(..) => false,
+            Step::ExpectPref { .. } => true,
+            Step::ExpectNoPref { .. } => true,
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
             Step::Back { .. } => false,
@@ -1329,6 +1346,11 @@ fn split_statements(line: &str) -> Vec<&str> {
     out
 }
 
+/// `relaunch`'s one optional argument: the PLAIN door
+/// (docs/tasks-s4-plan.md P5), beside the bare form's notification one.
+/// tools/check-steps.py holds the same word from the scene side.
+pub(crate) const PLAIN_DOOR: &str = "launch";
+
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     // Comments are whole newline-delimited lines; only the statements
@@ -1752,14 +1774,39 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::NotificationActivate(id)
             }
             "relaunch" => {
-                if !rest.trim().is_empty() {
+                // ONE OPTIONAL ARGUMENT, THE DOOR (docs/tasks-s4-plan.md
+                // P5): bare is the notification door, `launch` the plain
+                // one. Every runner names its own doors in RELAUNCH_DOOR
+                // and tools/check-steps.py holds the two sides equal.
+                // NOT A `match` ON THE DOOR: tools/check-verbs.py reads
+                // this function's `"<word>" =>` arms as the grammar, and a
+                // door spelled that way would be demanded of both
+                // interpreters as a VERB.
+                let door = rest.trim();
+                if door.is_empty() {
+                    Step::Relaunch(None)
+                } else if door == PLAIN_DOOR {
+                    Step::Relaunch(Some(door.to_owned()))
+                } else {
                     return Err(format!(
-                        "relaunch takes no argument — the platform's own door is \
-                         the runner's, and the steps after this line are act two: \
-                         {line:?}"
+                        "relaunch takes no argument (the notification door) or \
+                         `{PLAIN_DOOR}` (the plain one — the runner starts the same \
+                         artifact the way a user would), not {door:?}: {line:?}"
                     ));
                 }
-                Step::Relaunch
+            }
+            "expect_pref" => {
+                let (key, rest) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_pref wants a key and a quoted value: {line:?}")
+                })?;
+                Step::ExpectPref(key.to_owned(), parse_string(rest)?)
+            }
+            "expect_no_pref" => {
+                let key = rest.trim();
+                if key.is_empty() {
+                    return Err(format!("expect_no_pref wants a key: {line:?}"));
+                }
+                Step::ExpectNoPref(key.to_owned())
             }
             "expect_file_dialog" => {
                 // `expect_file_dialog <dir> <name>...`: bare names, so
@@ -2670,16 +2717,24 @@ pub struct ActTwo {
     steps: String,
 }
 
-/// The script's lines after a bare `relaunch` line, or `None` when the
-/// scene has none. Line-oriented on purpose: check-steps holds `relaunch`
-/// to a line of its own, so a `;`-folded transport cannot hide one.
+/// The script's lines after a `relaunch` line, or `None` when the scene
+/// has none. Line-oriented on purpose: check-steps holds `relaunch` to a
+/// line of its own, so a `;`-folded transport cannot hide one. THE VERB IS
+/// THE FIRST WORD, since the door rides beside it (`relaunch launch`,
+/// docs/tasks-s4-plan.md P5) — matching the whole line would split nothing
+/// for the plain door and the step would fail with "no act two".
+fn is_relaunch_line(line: &str) -> bool {
+    let line = line.trim();
+    line == "relaunch" || line.starts_with("relaunch ")
+}
+
 fn act_two_source(script: &str) -> Option<String> {
     let mut after: Vec<&str> = Vec::new();
     let mut found = false;
     for line in script.split('\n') {
         if found {
             after.push(line);
-        } else if line.trim() == "relaunch" {
+        } else if is_relaunch_line(line) {
             found = true;
         }
     }
@@ -3058,7 +3113,15 @@ fn run_with_log(
         // answers with an outcome and this one ends the run
         // (docs/tasks-s9-plan.md R6a). It leaves through the SAME verdict
         // path below — one publish, one trace dump, one exit.
-        if matches!(step, Step::Relaunch) {
+        if let Step::Relaunch(door) = step {
+            // THE DOOR ON THE RECORD, one line every runner greps
+            // (docs/tasks-s4-plan.md P5): a scene whose act two never ran
+            // is read from this line and the lane's RELAUNCH_DOOR table.
+            let line = format!("KAYA_RELAUNCH: door {}", door.as_deref().unwrap_or("notification"));
+            println!("{line}");
+            if let Some((log, _)) = log {
+                log(&line);
+            }
             if let Err(why) = write_marker(act_two.as_ref()) {
                 if let Some((log, _)) = log {
                     log(&format!("KAYA_HARNESS: step-failed {why}"));
@@ -3582,7 +3645,30 @@ fn run_with_log(
                 None
             }
             // Answered above, before the dispatch: this arm cannot run.
-            Step::Relaunch => None,
+            Step::Relaunch(..) => None,
+            // THE PLATFORM'S OWN STORE, READ FRESH (docs/tasks-s4-plan.md
+            // §4): crate::prefs::read_back re-reads the key file / re-opens
+            // the suite, so a backend that answered out of the core's cache
+            // would be reporting kaya's memory of its own write.
+            Step::ExpectPref(key, want) => Some(poll(|| {
+                match crate::prefs::read_back(key) {
+                    Some(value) if value.display() == *want => {
+                        Ok(format!("pref {key} {want:?}"))
+                    }
+                    Some(value) => Err(format!(
+                        "pref {key} {:?}, wanted {want:?}",
+                        value.display()
+                    )),
+                    None => Err(format!("pref {key} absent, wanted {want:?}")),
+                }
+            })),
+            Step::ExpectNoPref(key) => Some(poll(|| match crate::prefs::read_back(key) {
+                None => Ok(format!("pref {key} absent")),
+                Some(value) => Err(format!(
+                    "pref {key} {:?}, wanted absent",
+                    value.display()
+                )),
+            })),
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result — the alert_result
@@ -5115,6 +5201,18 @@ mod tests {
         // two with no STATEMENT is check-steps' clause, not the
         // harness's.
         assert_eq!(act_two_source("expect_entries 0\nrelaunch\n\n  \n"), None);
+        // THE DOOR RIDES BESIDE THE VERB (docs/tasks-s4-plan.md P5): a
+        // whole-line match would split nothing here and the step would
+        // fail with "relaunch ran with no act two" — measured on the
+        // linux lane 2026-09-09, before this line existed.
+        assert_eq!(
+            act_two_source("expect_entries 0\nrelaunch launch\nexpect_entries 1\n"),
+            Some("expect_entries 1\n".to_string())
+        );
+        assert_eq!(
+            act_two_source("  relaunch launch  \nexpect_pref week_start \"1\""),
+            Some("expect_pref week_start \"1\"".to_string())
+        );
         assert!(act_two_source("expect_entries 0\nrelaunch\n#done\n").is_some());
     }
 

@@ -8,6 +8,207 @@ use std::collections::BTreeMap;
 
 use kaya::WindowId;
 
+/// THE APP'S OWN DOCUMENT (docs/tasks-s4-plan.md P1/P7): a SQLite database
+/// under `kaya::app_data_dir()`, through rusqlite with the engine compiled
+/// in. kaya answers the directory and nothing else — the format is the
+/// app's, and this module is the whole of it.
+mod store {
+    use std::collections::BTreeMap;
+
+    use rusqlite::Connection;
+
+    use super::TaskRow;
+
+    /// Everything that survives a relaunch. `caption` is derived from the
+    /// other fields and the project names, so it is not stored.
+    #[derive(Clone, Default, PartialEq)]
+    pub(super) struct Snapshot {
+        pub tasks: BTreeMap<String, TaskRow>,
+        pub projects: BTreeMap<String, String>,
+        pub order: BTreeMap<String, Vec<String>>,
+    }
+
+    const SCHEMA: &str = "
+        CREATE TABLE IF NOT EXISTS tasks (
+            key      TEXT PRIMARY KEY,
+            title    TEXT NOT NULL,
+            notes    TEXT NOT NULL,
+            project  TEXT NOT NULL,
+            when_on  TEXT NOT NULL,
+            deadline TEXT NOT NULL,
+            reminder TEXT NOT NULL,
+            done     INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+            key  TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_order (
+            project  TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            task     TEXT NOT NULL,
+            PRIMARY KEY (project, position)
+        );";
+
+    /// The open database and whether it is NEW — the seed runs only for a
+    /// database that did not exist, which is what makes a relaunch show
+    /// the user's own tasks rather than the sample ones again.
+    pub(super) struct Store {
+        conn: Connection,
+        pub fresh: bool,
+    }
+
+    pub(super) fn open() -> Option<Store> {
+        let path = kaya::app_data_dir().join("tasks.sqlite");
+        let fresh = !path.exists();
+        let conn = match Connection::open(&path) {
+            Ok(conn) => conn,
+            Err(e) => {
+                // A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED: the
+                // path and sqlite's own sentence, which names the cause.
+                eprintln!("tasks: {} could not be opened: {e}", path.display());
+                return None;
+            }
+        };
+        if let Err(e) = conn.execute_batch(SCHEMA) {
+            eprintln!("tasks: {} has no usable schema: {e}", path.display());
+            return None;
+        }
+        Some(Store { conn, fresh })
+    }
+
+    impl Store {
+        pub fn load(&self) -> Snapshot {
+            let mut snap = Snapshot::default();
+            let mut rows = match self.conn.prepare(
+                "SELECT key, title, notes, project, when_on, deadline, reminder, done \
+                 FROM tasks",
+            ) {
+                Ok(stmt) => stmt,
+                Err(e) => {
+                    eprintln!("tasks: the tasks table would not read: {e}");
+                    return snap;
+                }
+            };
+            let mapped = rows.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    TaskRow {
+                        title: row.get(1)?,
+                        caption: String::new(),
+                        done: row.get::<_, i64>(7)? != 0,
+                        notes: row.get(2)?,
+                        when: row.get(4)?,
+                        deadline: row.get(5)?,
+                        reminder: row.get(6)?,
+                        project: row.get(3)?,
+                    },
+                ))
+            });
+            if let Ok(mapped) = mapped {
+                for row in mapped.flatten() {
+                    snap.tasks.insert(row.0, row.1);
+                }
+            }
+            if let Ok(mut stmt) = self.conn.prepare("SELECT key, name FROM projects") {
+                if let Ok(mapped) = stmt
+                    .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                {
+                    for (key, name) in mapped.flatten() {
+                        snap.order.entry(key.clone()).or_default();
+                        snap.projects.insert(key, name);
+                    }
+                }
+            }
+            if let Ok(mut stmt) = self
+                .conn
+                .prepare("SELECT project, task FROM project_order ORDER BY project, position")
+            {
+                if let Ok(mapped) = stmt
+                    .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                {
+                    for (project, task) in mapped.flatten() {
+                        snap.order.entry(project).or_default().push(task);
+                    }
+                }
+            }
+            snap
+        }
+
+        /// ONE TRANSACTION PER SAVE, and the whole model in it: this
+        /// document is ten rows, so the delta bookkeeping a bigger one
+        /// would need buys nothing and can disagree with the model.
+        pub fn save(&mut self, snap: &Snapshot) {
+            let write = |tx: &rusqlite::Transaction| -> rusqlite::Result<()> {
+                tx.execute("DELETE FROM tasks", [])?;
+                tx.execute("DELETE FROM projects", [])?;
+                tx.execute("DELETE FROM project_order", [])?;
+                for (key, row) in &snap.tasks {
+                    tx.execute(
+                        "INSERT INTO tasks (key, title, notes, project, when_on, deadline, \
+                         reminder, done) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        rusqlite::params![
+                            key,
+                            row.title,
+                            row.notes,
+                            row.project,
+                            row.when,
+                            row.deadline,
+                            row.reminder,
+                            i64::from(row.done),
+                        ],
+                    )?;
+                }
+                for (key, name) in &snap.projects {
+                    tx.execute(
+                        "INSERT INTO projects (key, name) VALUES (?1, ?2)",
+                        rusqlite::params![key, name],
+                    )?;
+                }
+                for (project, keys) in &snap.order {
+                    for (at, task) in keys.iter().enumerate() {
+                        tx.execute(
+                            "INSERT INTO project_order (project, position, task) \
+                             VALUES (?1, ?2, ?3)",
+                            rusqlite::params![project, at as i64, task],
+                        )?;
+                    }
+                }
+                Ok(())
+            };
+            let result = self
+                .conn
+                .transaction()
+                .and_then(|tx| write(&tx).and_then(|()| tx.commit()));
+            if let Err(e) = result {
+                eprintln!("tasks: the document would not be written: {e}");
+            }
+        }
+    }
+}
+
+/// The settings' preference keys (docs/tasks-s4-plan.md P7). `week_start`
+/// is 0 Monday / 1 Sunday; the appearance is the word, so `defaults read`
+/// and the key file both say what the user chose.
+const PREF_WEEK_START: &str = "week_start";
+const PREF_HIDE_BADGE: &str = "hide_badge";
+const PREF_KEEP_DONE: &str = "keep_done";
+const PREF_APPEARANCE: &str = "appearance";
+
+const APPEARANCE_WORDS: [&str; 3] = ["system", "light", "dark"];
+
+fn appearance_index(word: &str) -> usize {
+    APPEARANCE_WORDS.iter().position(|w| *w == word).unwrap_or(0)
+}
+
+fn appearance_mode(index: usize) -> kaya::Appearance {
+    match index {
+        1 => kaya::Appearance::Light,
+        2 => kaya::Appearance::Dark,
+        _ => kaya::Appearance::System,
+    }
+}
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct TaskRow {
     title: String,
@@ -237,6 +438,11 @@ struct App {
     appearance: usize,
     hide_badge: bool,
     keep_done: bool,
+    /// The app's own document and the last thing written to it: the loop
+    /// saves after a handler's transaction has committed, and only when
+    /// the snapshot moved (docs/tasks-s4-plan.md P7).
+    store: Option<store::Store>,
+    saved: store::Snapshot,
 }
 
 impl App {
@@ -442,6 +648,32 @@ impl App {
         }
     }
 
+    /// What survives a relaunch. Read out of the model rather than kept
+    /// beside it: undo and redo rewrite `tasks` wholesale (resync), and a
+    /// second copy would go stale exactly there.
+    fn snapshot(&self) -> store::Snapshot {
+        store::Snapshot {
+            tasks: self.tasks.iter().map(|(k, (_, row))| (k.clone(), row.clone())).collect(),
+            projects: self.projects.clone(),
+            order: self.order.clone(),
+        }
+    }
+
+    /// AFTER THE TRANSACTION COMMITS, once per message: the loop calls
+    /// this at the bottom of every handler, and a snapshot that did not
+    /// move writes nothing — a keystroke in the quick-add field is not a
+    /// document change.
+    fn save(&mut self) {
+        let snap = self.snapshot();
+        if snap == self.saved {
+            return;
+        }
+        if let Some(store) = self.store.as_mut() {
+            store.save(&snap);
+        }
+        self.saved = snap;
+    }
+
     /// Mirror the settings into the open screen's row, if one is open.
     fn write_settings(&self, ctx: &kaya::AppCtx) {
         let Some(screen) = self.settings_screen.clone() else { return };
@@ -462,12 +694,30 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let today = today();
 
+    // THE SETTINGS, BEFORE THE FIRST BUILD (docs/tasks-s4-plan.md P7):
+    // the window's appearance is declared in the first transaction below,
+    // so the choice has to be in hand before it.
+    let prefs = kaya::prefs();
+    let week_start = prefs.get_i64(PREF_WEEK_START, 0).clamp(0, 1) as usize;
+    let hide_badge = prefs.get_bool(PREF_HIDE_BADGE, false);
+    let keep_done = prefs.get_bool(PREF_KEEP_DONE, false);
+    let appearance = appearance_index(&prefs.get_string(PREF_APPEARANCE, "system"));
+    // AND THE DOCUMENT, before the seed: a database that already exists
+    // is the user's own tasks, and the seed is the empty app's furniture.
+    let store = store::open();
+    let loaded = store.as_ref().map(|s| s.load()).unwrap_or_default();
+    let seed_wanted = store.as_ref().is_none_or(|s| s.fresh);
+
     let (lists, projects_coll, quick, counts, today_badge) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
-            // default is 540x330); advisory on the phones.
+            // default is 540x330); advisory on the phones, and beaten at
+            // launch by the frame kaya remembered (P4).
             .size(960.0, 640.0)
+            // The choice the last run left, applied process-wide before
+            // the first frame (S2b R1, P7).
+            .appearance(appearance_mode(appearance))
             .sections_presentation(kaya::SectionsPresentation::Sidebar)
             .menu("Edit", |m| {
                 m.item("Undo").role(kaya::MenuRole::Undo).id();
@@ -627,52 +877,98 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         settings_screen: None,
         draft: String::new(),
         pdraft: String::new(),
-        week_start: 0,
-        appearance: 0,
-        hide_badge: false,
-        keep_done: false,
+        week_start,
+        appearance,
+        hide_badge,
+        keep_done,
+        store,
+        saved: store::Snapshot::default(),
     };
 
-    // The seed, against the fixed clock (docs/tasks-plan.md §1).
-    ctx.apply(|tx| {
-        for (key, name) in [("kitchen", "Kitchen"), ("thesis", "Thesis"), ("trip", "Trip")] {
-            app.projects.insert(key.to_string(), name.to_string());
-            app.order.insert(key.to_string(), Vec::new());
-            tx.insert(&app.projects_coll, key, ProjectRow { name: name.into(), count: "0 tasks".into() });
-        }
-        let seed: [(&str, &str, Option<kaya::Date>, Option<kaya::Date>, &str, bool); 9] = [
-            ("Buy milk", "", None, None, "", false),
-            ("Call the plumber", "", None, None, "", false),
-            ("Draft chapter 3", "Aim for twelve pages.", Some(date(2026, 9, 7)), None, "thesis", false),
-            ("Water the plants", "", Some(date(2026, 9, 7)), None, "", false),
-            ("Book the flights", "", Some(date(2026, 9, 9)), None, "trip", false),
-            ("Renew passport", "", None, Some(date(2026, 9, 30)), "trip", false),
-            ("Sharpen knives", "", None, None, "kitchen", false),
-            ("Read reviewer comments", "", Some(date(2026, 9, 12)), None, "thesis", false),
-            ("Fix the leaking tap", "", None, None, "kitchen", true),
-        ];
-        for (title, notes, when, deadline, project, done) in seed {
-            let key = format!("t{}", app.next);
-            app.next += 1;
-            let row = TaskRow {
-                title: title.into(),
-                caption: String::new(),
-                done,
-                notes: notes.into(),
-                when: date_field(when),
-                deadline: date_field(deadline),
-                reminder: String::new(),
-                project: project.into(),
-            };
-            if !project.is_empty() {
-                app.order.get_mut(project).unwrap().push(key.clone());
+    // THE DOCUMENT, OR THE SEED — never both (docs/tasks-s4-plan.md P7).
+    // A database that already exists holds the user's own tasks; the seed
+    // is what an empty app comes with, against the fixed clock
+    // (docs/tasks-plan.md §1).
+    if seed_wanted {
+        ctx.apply(|tx| {
+            for (key, name) in [("kitchen", "Kitchen"), ("thesis", "Thesis"), ("trip", "Trip")] {
+                app.projects.insert(key.to_string(), name.to_string());
+                app.order.insert(key.to_string(), Vec::new());
+                tx.insert(&app.projects_coll, key, ProjectRow { name: name.into(), count: "0 tasks".into() });
             }
-            app.place(tx, &key, row);
-        }
-        for project in ["kitchen", "thesis", "trip"] {
-            app.project_count(tx, project);
-        }
-    });
+            let seed: [(&str, &str, Option<kaya::Date>, Option<kaya::Date>, &str, bool); 9] = [
+                ("Buy milk", "", None, None, "", false),
+                ("Call the plumber", "", None, None, "", false),
+                ("Draft chapter 3", "Aim for twelve pages.", Some(date(2026, 9, 7)), None, "thesis", false),
+                ("Water the plants", "", Some(date(2026, 9, 7)), None, "", false),
+                ("Book the flights", "", Some(date(2026, 9, 9)), None, "trip", false),
+                ("Renew passport", "", None, Some(date(2026, 9, 30)), "trip", false),
+                ("Sharpen knives", "", None, None, "kitchen", false),
+                ("Read reviewer comments", "", Some(date(2026, 9, 12)), None, "thesis", false),
+                ("Fix the leaking tap", "", None, None, "kitchen", true),
+            ];
+            for (title, notes, when, deadline, project, done) in seed {
+                let key = format!("t{}", app.next);
+                app.next += 1;
+                let row = TaskRow {
+                    title: title.into(),
+                    caption: String::new(),
+                    done,
+                    notes: notes.into(),
+                    when: date_field(when),
+                    deadline: date_field(deadline),
+                    reminder: String::new(),
+                    project: project.into(),
+                };
+                if !project.is_empty() {
+                    app.order.get_mut(project).unwrap().push(key.clone());
+                }
+                app.place(tx, &key, row);
+            }
+            for project in ["kitchen", "thesis", "trip"] {
+                app.project_count(tx, project);
+            }
+        });
+    } else {
+        ctx.apply(|tx| {
+            for (key, name) in &loaded.projects {
+                app.projects.insert(key.clone(), name.clone());
+                app.order
+                    .insert(key.clone(), loaded.order.get(key).cloned().unwrap_or_default());
+                tx.insert(
+                    &app.projects_coll,
+                    key.clone(),
+                    ProjectRow { name: name.clone(), count: "0 tasks".into() },
+                );
+            }
+            // KEYS ARE `t<n>` AND THE COUNTER RESUMES PAST THE HIGHEST:
+            // a task's key is also its notification id (S9 R2), so a
+            // reused one would re-post under an existing reminder.
+            let mut keys: Vec<(u32, &String)> = loaded
+                .tasks
+                .keys()
+                .map(|k| (k.trim_start_matches('t').parse::<u32>().unwrap_or(0), k))
+                .collect();
+            keys.sort();
+            for (n, key) in keys {
+                app.next = app.next.max(n + 1);
+                app.place(tx, key, loaded.tasks[key].clone());
+            }
+            let projects: Vec<String> = app.projects.keys().cloned().collect();
+            for project in projects {
+                app.project_count(tx, &project);
+            }
+        });
+    }
+    if seed_wanted {
+        // The seed IS the document's first content; `saved` is still the
+        // empty default, so this writes it.
+        app.save();
+    } else {
+        // What the model holds IS what the document holds, so the first
+        // handler's save writes only what the user changed.
+        app.saved = app.snapshot();
+    }
 
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
@@ -909,27 +1205,31 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::ProjectPopped => app.open_project = None,
             Msg::WeekStart(index) => {
                 app.week_start = index as usize;
+                // ONE SETTING PER WRITE (docs/tasks-s4-plan.md P7): a
+                // setting nobody changed was never written, which is what
+                // taskspersist.steps' `expect_no_pref hide_badge` says.
+                kaya::prefs().set_i64(PREF_WEEK_START, app.week_start as i64);
                 app.write_settings(&ctx);
             }
             Msg::HideBadge(on) => {
                 app.hide_badge = on;
+                kaya::prefs().set_bool(PREF_HIDE_BADGE, on);
                 app.write_settings(&ctx);
                 ctx.apply(|tx| app.update_count(tx, List::Today));
             }
             Msg::Appearance(index) => {
                 app.appearance = index as usize;
+                kaya::prefs()
+                    .set_string(PREF_APPEARANCE, APPEARANCE_WORDS[app.appearance]);
                 app.write_settings(&ctx);
-                let mode = match index as usize {
-                    1 => kaya::Appearance::Light,
-                    2 => kaya::Appearance::Dark,
-                    _ => kaya::Appearance::System,
-                };
+                let mode = appearance_mode(app.appearance);
                 ctx.apply(|tx| {
                     tx.window(kaya::DEFAULT_WINDOW).appearance(mode);
                 });
             }
             Msg::KeepDone(on) => {
                 app.keep_done = on;
+                kaya::prefs().set_bool(PREF_KEEP_DONE, on);
                 let done: Vec<(String, TaskRow)> = app
                     .tasks
                     .iter()
@@ -1044,6 +1344,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::SettingsPopped => app.settings_screen = None,
             Msg::Resync => ctx.apply(|tx| app.resync(tx)),
         }
+        // AFTER THE HANDLER'S TRANSACTION HAS COMMITTED (P7): every
+        // `ctx.apply` above has returned, so the model and the document
+        // agree at every point a process could be killed. A snapshot that
+        // did not move writes nothing.
+        app.save();
     }
 }
 

@@ -246,6 +246,9 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // window (docs/tasks-s2b-plan.md R1-R3): system (the default) defers
     // to KAYA_APPEARANCE and then the OS; light and dark win over both.
     ("appearance", 9, PropKind::Enum("appearance")),
+    // WHETHER THE DESKTOPS REMEMBER THIS WINDOW'S FRAME across launches
+    // (docs/tasks-s4-plan.md P4). Defaults to true; inert on the phones.
+    ("remember_frame", 10, PropKind::Bool),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -2820,6 +2823,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("dirty", 7),
                 ("inset", 8),
                 ("appearance", 9),
+                ("remember_frame", 10),
             ],
         },
         EnumSpec {
@@ -3513,6 +3517,7 @@ mod tests {
                     ("wprop", "inset") => wire::WPROP_INSET,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("wprop", "appearance") => wire::WPROP_APPEARANCE,
+                    ("wprop", "remember_frame") => wire::WPROP_REMEMBER_FRAME,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("sprop", "title") => wire::SPROP_TITLE,

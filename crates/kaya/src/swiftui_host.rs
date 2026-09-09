@@ -283,6 +283,36 @@ pub struct KayaHostApi {
     pub frame: extern "C" fn(f64),
     pub harness_frame: extern "C" fn(),
     pub canvas_raster_shape: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    /// KAYA'S OWN WINDOW MEMORY (docs/tasks-s4-plan.md P4). The key is
+    /// RESERVED, so the guest floor (`kaya_pref_set_string`) refuses it and
+    /// the backend reaches the store through these two instead — which is
+    /// also what keeps `kaya.window.<id>.frame` spelled once, in
+    /// crates/kaya/src/prefs.rs. `window_frame` answers 0 for none.
+    pub window_frame: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    pub set_window_frame: unsafe extern "C" fn(u64, *const u8, usize),
+}
+
+/// # Safety
+/// `out` must be null or valid for `cap` bytes.
+unsafe extern "C" fn window_frame(window: u64, out: *mut u8, cap: usize) -> usize {
+    let Some(text) = crate::prefs::window_frame(window) else { return 0 };
+    let bytes = text.as_bytes();
+    if !out.is_null() && cap > 0 {
+        let n = bytes.len().min(cap);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, n) };
+    }
+    bytes.len()
+}
+
+/// # Safety
+/// `frame` must be valid for `len` bytes.
+unsafe extern "C" fn set_window_frame(window: u64, frame: *const u8, len: usize) {
+    if frame.is_null() || len == 0 {
+        return;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(frame, len) };
+    let Ok(text) = std::str::from_utf8(bytes) else { return };
+    crate::prefs::set_window_frame(window, text);
 }
 
 unsafe extern "C" {
@@ -402,6 +432,8 @@ pub(crate) fn run() -> i32 {
         frame: crate::capi::kaya_frame,
         harness_frame: crate::capi::kaya_harness_frame,
         canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,
+        window_frame,
+        set_window_frame,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather
