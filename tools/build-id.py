@@ -121,6 +121,9 @@ GATES = {
     "check-empty-child": ["crates", "swift", "android"],
     "check-pane-ladder": ["crates", "swift", "docs"],
     "check-table-tier": ["crates", "swift", "docs"],
+    # NOT an artifact gate: it compiles the interpreter's own source with
+    # its probe and links nothing. tools/checks/ rides every key already.
+    "check-window-memory": ["swift"],
     # check-keyed's fixture. A REAL entry on purpose: a self-test stamping
     # under a live gate's name would make the next KAYA_FAST run skip it.
     "keyed-selftest": [],

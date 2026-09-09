@@ -584,6 +584,41 @@ in docs/deferred.md.
    reason that must still match a real site. The watched shadows remove
    each link separately. What no gate holds is whether a PHYSICAL device
    reports the size class the simulator did),
+   `tools/check-window-memory.py` (THE MACOS WINDOW MEMORY, which no scene
+   can see: `taskspersist.steps` asserts ONE size on ONE window and stays
+   green with the by-value rule inverted, with the clamp gone, with a
+   malformed stored line taken at face value and with the opt-out ignored.
+   GTK and WinUI each hold that rule in a unit test (gtk::frame_tests,
+   winui::tests::window_memory_parses_clamps_and_opts_out) and the mac had
+   none. The static clause holds the SAVE to the toolkit's own queue —
+   `DispatchQueue.main.async`, never a timer and never a run-loop idle
+   observer, because a save on a clock LOSES the value: the process leaves
+   through `_exit` with the trailing write unrun (measured on the linux
+   lane 2026-09-09, docs/traps.md) — deduplicated twice over, once per
+   run-loop turn and once against what the store already holds; and it
+   holds the RESTORE to the accessor's own register(), the window's
+   materialization, after the declaration it beats and with
+   `display: false`, since anywhere later is after the first frame. The
+   runtime clause is check-pane-ladder's shape one file over: the
+   interpreter's own `// MARK: - Window memory` block is CUT OUT by the
+   gate and compiled with tools/checks/swiftui-window-memory.swift, so
+   nothing is factored out of the interpreter and there is no second copy
+   of the rule to drift — the probe supplies doubles for the five names
+   the block reaches outside itself, and its store COUNTS its writes,
+   which is the only thing that tells one coalesced save from three. It
+   drives the six by-value cases (no memory takes every write; a restored
+   window's first size is its declaration and is refused; the same
+   declaration again is still the declaration; a declaration still
+   ARRIVING one prop at a time holds the memory; the first DIFFERENT size
+   applies and ends the memory on BOTH axes; per window, never
+   process-wide), both frame spellings and six malformed lines answering
+   nil, the clamp against a REAL NSScreen (inside, off every screen,
+   partly on, bigger than the screen), the save's one-write-per-turn
+   coalescing and its dedup, the restore, and `remember_frame(false)`
+   saving and restoring nothing. 19 watched negatives, counts printed —
+   five doctoring the static census, fourteen recompiling a doctored copy
+   of the cut and demanding the probe's OWN sentence back, since a half of
+   the probe nobody has seen go red is a sentence nobody has seen print),
    `tools/check-canvas-blit.py` (KAYA RASTERIZES, BACKENDS BLIT — the
    canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
    three places NO SCENE CAN FAIL. A backend that interpreted a draw op

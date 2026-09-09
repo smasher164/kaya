@@ -119,6 +119,11 @@ GATES = [
     # device can name the one that drew it (docs/traps.md). The rule is a
     # pure function, driven here through its whole truth table.
     ("check-table-tier", ["tools/check-table-tier.py"], True, ""),
+    # The macOS window memory: GTK and WinUI each hold the by-value rule in
+    # a unit test and the mac had none. No scene can see any of it —
+    # taskspersist.steps asserts one size on one window
+    # (docs/tasks-s4-plan.md §4).
+    ("check-window-memory", ["tools/check-window-memory.py"], True, ""),
     # KAYA RASTERIZES, BACKENDS BLIT (docs/canvas-plan.md §1.1): a
     # backend that interpreted an op would draw the same picture, a wrong
     # pixel format survives a symmetric probe point, and a rounded scale
@@ -314,6 +319,7 @@ WEIGHT = {
     "check-table-tier": 136, "swift-typecheck": 57, "check-sugar-surface": 23,
     "check-abort": 18, "check-assets": 15, "check-harness-ceiling": 12,
     "check-empty-child": 10, "check-pane-ladder": 10, "check-pins": 10,
+    "check-window-memory": 15,
     "check-canvas-blit": 9, "gen-guests": 8, "check-verbs": 7,
     "check-app-identity": 6, "check-keyed": 6, "check-steps": 5,
 }
