@@ -12698,7 +12698,7 @@ private fun kayaDrawableSamples(icon: Drawable, what: String): String {
 /**
  * `RRGGBB/RRGGBB/RRGGBB/RRGGBB` — top-left, top-right, bottom-left,
  * bottom-right, every backend's reading order. CENTRES AND NOT CORNERS:
- * any rescale between the declared 64x64 PNG and the size a platform
+ * any rescale between the declared PNG and the size a platform
  * rasterizes at blurs the quadrant BOUNDARIES, and Android does rescale
  * (an unqualified mipmap is mdpi, and the emulator's 320dpi doubles it).
  */

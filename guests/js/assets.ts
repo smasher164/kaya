@@ -8,6 +8,11 @@ const MISSING = "icons/nope.png";
 
 const MARK = "icons/kaya-mark.png";
 
+// SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+// layout and the DECLARED mark is a user-supplied source of any size
+// (the images/ family's README). The mark is still opened.
+const PICTURE = "images/a11y-logo.png";
+
 // 111400 bytes: a reader that truncated into a fixed buffer shows here.
 const FONT = "fonts/sora-wght.ttf";
 
@@ -20,6 +25,7 @@ function firstLine(sentence: string): string {
 
 app.window({ title: "assets", width: 480, height: 360 }, () => {
   const mark = kaya.asset(MARK);
+  const picture = kaya.asset(PICTURE);
   const font = kaya.asset(FONT);
   try {
     const census = firstLine(kaya.assetMissSentence(MISSING));
@@ -36,13 +42,17 @@ app.window({ title: "assets", width: 480, height: 360 }, () => {
     kaya.column(() => {
       kaya.label("assets"); // label#0
       // THE BYTES, not the blob handle.
-      kaya.image(mark.bytes()); // image#0
+      kaya.image(picture.bytes()); // image#0
       kaya.label(census); // label#1
       // A number renders with no separator and no padding, everywhere.
-      kaya.label(`${FONT}: ${font.length} bytes, ${verdict}`); // label#2
+      const present = mark.length > 0 ? "present" : "missing";
+      kaya.label(
+        `${MARK} ${present}, ${FONT}: ${font.length} bytes, ${verdict}`,
+      ); // label#2
     });
   } finally {
     font.close();
+    picture.close();
     mark.close();
   }
 });

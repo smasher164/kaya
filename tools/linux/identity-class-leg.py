@@ -27,12 +27,17 @@ script's, unless a clause above fails.
 import concurrent.futures
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
 import threading
 import time
-import tomllib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "tools/lib"))
+
+from packaging import identity as app_identity  # noqa: E402
 
 # TWO POLL INTERVALS, MEASURED: at a flat 1.0s a 3-second identity leg
 # took exactly ONE usable sample — the windows appear ~1.2s in, behind
@@ -49,24 +54,15 @@ def fail(*words):
 
 
 def declared_name():
-    """The app's declared name, from the ONE file that declares it."""
-    path = os.environ.get("KAYA_IDENTITY_MANIFEST", "/work/guests/assets/identity.toml")
+    """The app's declared name, through the ONE reader in tools/
+    (tools/lib/packaging/identity.py; docs/packaging-plan.md P1). A
+    declaration this cannot read is a refusal rather than a guess, and
+    the sentence is the reader's own."""
     try:
-        with open(path, "rb") as handle:
-            name = tomllib.load(handle).get("name", "")
-    except OSError as why:
-        fail(
-            f"cannot read the identity manifest {path} ({why}), so it does not know",
-            "what class to expect — refusing rather than guessing.",
-        )
-    if not name:
-        name = ""
-    if not name.strip():
-        fail(
-            f"{path} declares no non-empty name, so this reader would accept any",
-            "class at all — refusing.",
-        )
-    return name
+        return app_identity.load(ROOT).name
+    except app_identity.Undeclared as why:
+        fail(str(why), "so this reader does not know what class to expect —",
+             "refusing rather than guessing.")
 
 
 def run(argv):

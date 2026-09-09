@@ -8,6 +8,11 @@ let missingName = "icons/nope.png"
 
 let markName = "icons/kaya-mark.png"
 
+/// SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+/// layout and the DECLARED mark is a user-supplied source of any size
+/// (the images/ family's README). The mark is still opened.
+let pictureName = "images/a11y-logo.png"
+
 /// 111400 bytes, so a reader that truncated into a fixed buffer shows here.
 let fontName = "fonts/sora-wght.ttf"
 
@@ -21,10 +26,13 @@ try app.build { tx in
     tx.window(title: "assets", width: 480, height: 360)
 
     let mark = try KayaAsset(markName)
+    let picture = try KayaAsset(pictureName)
     let font = try KayaAsset(fontName)
-    let markBytes = mark.bytes
+    let markLength = mark.bytes.count
+    let pictureBytes = picture.bytes
     let fontLength = font.bytes.count
     mark.close()
+    picture.close()
     font.close()
 
     // The open SUCCEEDING never happens on a healthy lane, so that arm says
@@ -42,11 +50,13 @@ try app.build { tx in
     let title = tx.signal(.str("assets"))
     let found = tx.signal(.str(census))
     // An Int interpolates through `description`, which consults no locale.
-    let sizes = tx.signal(.str("\(fontName): \(fontLength) bytes, \(verdict)"))
+    let present = markLength > 0 ? "present" : "missing"
+    let sizes = tx.signal(
+        .str("\(markName) \(present), \(fontName): \(fontLength) bytes, \(verdict)"))
 
     let root = tx.column {
         tx.label(bind: title)  // label#0
-        tx.image(markBytes)  // image#0
+        tx.image(pictureBytes)  // image#0
         tx.label(bind: found)  // label#1
         tx.label(bind: sizes)  // label#2
     }

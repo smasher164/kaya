@@ -12,6 +12,13 @@ public final class Assets {
 
     private static final String MARK = "icons/kaya-mark.png";
 
+    /**
+     * SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+     * layout and the DECLARED mark is a user-supplied source of any size
+     * (the images/ family's README). The mark is still opened.
+     */
+    private static final String PICTURE = "images/a11y-logo.png";
+
     /** 111400 bytes, so a reader that truncated into a fixed buffer shows here. */
     private static final String FONT = "fonts/sora-wght.ttf";
 
@@ -22,6 +29,7 @@ public final class Assets {
             tx.window(0).title("assets").size(480.0, 360.0);
 
             try (KayaApp.Asset mark = KayaApp.asset(MARK);
+                    KayaApp.Asset picture = KayaApp.asset(PICTURE);
                     KayaApp.Asset font = KayaApp.asset(FONT)) {
                 String census = firstLine(KayaApp.assetMissSentence(MISSING));
                 String complaint = KayaApp.assetMissSentence(FONT);
@@ -32,11 +40,12 @@ public final class Assets {
                 // Concatenation, not String.format: compared byte-for-byte
                 // against eight other languages, with no locale in the contract.
                 KayaApp.Signal<String> sizes = tx.signal(
-                        FONT + ": " + font.bytes().length + " bytes, " + verdict);
+                        MARK + (mark.bytes().length > 0 ? " present, " : " missing, ")
+                                + FONT + ": " + font.bytes().length + " bytes, " + verdict);
 
                 tx.mount(tx.column(() -> {
                     tx.label(title); // label#0
-                    tx.image(mark.bytes()); // image#0
+                    tx.image(picture.bytes()); // image#0
                     tx.label(found); // label#1
                     tx.label(sizes); // label#2
                 }));

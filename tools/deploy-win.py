@@ -45,6 +45,7 @@ import time
 import os
 
 from lanes import win as lane
+from packaging import windows as win_package
 import exclusive
 import flightrec_lane
 
@@ -312,6 +313,22 @@ SCENES = lane.SCENES
 DEPTH_SCENES = lane.depth_scenes()
 GO_ONLY_SCENES = lane.GO_ONLY_SCENES
 PY_ONLY_SCENES = lane.PY_ONLY_SCENES
+
+# A LEG THAT AIMS AT SCREEN COORDINATES IS NEVER POOLED (tools/lib/lanes/
+# win.py's POINTER_VERBS). Refused HERE, before anything is built, because the
+# pool's placement is what breaks it and the failure reads like a backend bug:
+# `drag: the source's box (271.0, 918.0, ...) is off a 1280x800 screen`.
+_pooled_pointer = lane.pooled_pointer_legs(ROOT / "tools/scenes")
+if _pooled_pointer:
+    for _leg, _verb in sorted(_pooled_pointer.items()):
+        print(f"deploy-win: leg {_leg} runs `{_verb}`, which aims at SCREEN "
+              f"COORDINATES, and the roster POOLS it. Tile slots 4 and 5 sit "
+              f"at y=786 on this VM's 800-tall screen, so the pool can put "
+              f"that window's rows off the bottom and the verb refuses "
+              f"naming a box nobody can see. Give {_leg} a block of its own "
+              f"in tools/lib/lanes/win.py — a leg that runs alone always "
+              f"draws slot 0.", file=sys.stderr)
+    sys.exit(1)
 
 SCENE_EXES = [TARGET / f"examples/{s}.exe" for s in SCENES + DEPTH_SCENES]
 SCENE_PYS = ([ROOT / f"guests/python/{s}.py" for s in SCENES]
@@ -809,6 +826,8 @@ def deploy_artifacts():
                ROOT / "tools/guest/wait-exit.ps1",
                ROOT / "tools/guest/fetch-zip.ps1",
                ROOT / "tools/guest/flightrec.ps1",
+               ROOT / "tools/guest/pkg-install.ps1",
+               ROOT / "tools/guest/pkg-run.ps1",
                ROOT / "tools/guest/dnd-witness.ps1"])
 
 
@@ -1499,6 +1518,47 @@ def run_probe(spec):
         time.sleep(2)
     print("probe: no PROBEDONE after 60 polls", file=sys.stderr)
     return False
+
+
+# THE MSIX, BUILT FROM THE ONE DECLARATION AND INSTALLED
+# (docs/packaging-plan.md P3). The staging directory is the GENERATOR's, the
+# same tools/lib/packaging/windows.py output `tools/package.py windows` writes
+# — the lane must run the artifact the generator makes, not a lane-shaped
+# lookalike (invariant 4).
+#
+# INSTALLED THROUGH schtasks /it, never over ssh: deployment initializes the
+# Process Lifetime Manager, which session 0 has none of, and the refusal is a
+# bare 0x80070005 (measured 2026-09-08; docs/traps.md).
+def package_rust_guests():
+    scenes = sorted(set(lane.PACKAGED_LEGS.values()))
+    staging = ROOT / "target/win-package"
+    print(f"== packaging {', '.join(scenes)} as one MSIX ==", flush=True)
+    win_package.stage(ROOT, [TARGET / f"examples/{s}.exe" for s in scenes],
+                      staging)
+    must_ssh('cmd /c "if exist C:\\kaya\\pkgstage rmdir /s /q '
+             'C:\\kaya\\pkgstage"')
+    if scp_dir_to(staging, "C:/kaya/pkgstage") != 0:
+        die("deploy-win: could not ship the package staging directory")
+    if not run_guest_oneshot("pkg-install.cmd", "out_pkginstall.txt",
+                             "PKGINSTALLDONE"):
+        die("deploy-win: the package install never finished — "
+            "tools/guest/pkg-install.ps1 wrote no PKGINSTALLDONE")
+    out = run_ssh_out("cmd /c type C:\\kaya\\out_pkginstall.txt") or ""
+    if "pkg-install: OK" not in out:
+        print("deploy-win: the MSIX did not install, so every packaged leg "
+              "would run", file=sys.stderr)
+        print("  nothing and wait out its whole deadline. The install runs "
+              "in the", file=sys.stderr)
+        print("  CONSOLE session through schtasks and signs with a "
+              "self-signed", file=sys.stderr)
+        print("  certificate whose subject is the manifest's Publisher "
+              "(docs/packaging-plan.md §3.1).", file=sys.stderr)
+        sys.exit(1)
+
+
+if SUITE == "all" or SUITE in lane.PACKAGED_LEGS:
+    package_rust_guests()
+timing("package")
 
 
 # Suites run in a pool KAYA_WIN_JOBS wide (default 6, the VM's -smp;

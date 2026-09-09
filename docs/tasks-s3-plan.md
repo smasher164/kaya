@@ -467,6 +467,9 @@ about a past time.
   through one funnel — zero provisioning, measured green with the VM's
   global toast toggle OFF (the banner is suppressed; the platform's record,
   which N5 reads, is there either way).
+  PACKAGING DOES NOT ANSWER IT (measured 2026-09-08, docs/packaging-plan.md
+  §3.4): a packaged kaya app resolves the same framework packages and the 2.x
+  family has no Singleton, so the ruling stands as written.
   RULING OWED (Akhil): a click on a CLOSED app (S9's Windows piece) needs
   either the App SDK route with the Main+Singleton runtime packages deployed
   on every machine that runs a kaya app, or protocol activation of a

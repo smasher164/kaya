@@ -1,13 +1,17 @@
 # docs/assets-plan.md. An IMAGE, because iOS depth-stubs
 # `expect_typeface` and iOS is the lane whose asset delivery IS the
-# shipped packaging mechanism. THE MISS SENTENCE names what the package
+# shipped packaging mechanism. THE PICTURE IS SCENERY (the images/
+# family, whose README says why): the DECLARED mark is a user-supplied
+# source of any size and an image widget's intrinsic size drives layout,
+# so this scene reports the mark's bytes as PRESENT and shows the small
+# one. THE MISS SENTENCE names what the package
 # CARRIES, so it passes only on a lane that staged the WHOLE root
 # (tools/check-assets.py holds it equal to that root's listing), and its
 # quoted `;` is the wall holding the three statement splitters equal.
 expect label#0 "assets"
-expect image#0 "64x64"
+expect image#0 "2x2"
 expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, images/README.md, images/a11y-logo.png, market/README.md, market/prices.csv, market/transactions.csv, win/README.md, win/minimal-resources.pri"
 # 111400 is the vendored font's WHOLE size, so a reader that truncated
 # into a fixed buffer fails here. "no complaint" is the query's positive
 # answer (the empty string) rendered.
-expect label#2 "fonts/sora-wght.ttf: 111400 bytes, no complaint"
+expect label#2 "icons/kaya-mark.png present, fonts/sora-wght.ttf: 111400 bytes, no complaint"

@@ -14,6 +14,7 @@ check-gates read the runner BODY, which is behaviour, not a table).
 """
 
 import os
+import pathlib
 
 # THE scene list: every mechanical per-scene surface derives from it
 # (cross-build examples, exe/python shipping, taskkill). Adding a
@@ -44,6 +45,20 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify"]
 
+# THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
+# out of an installed MSIX instead of out of C:\kaya, because a kaya app is
+# either a packaged process or it is not and users will do both. leg -> the
+# scene, which is also the exe's stem and the package's `<Application Id>`.
+# The launchers are a PAIR — run_<leg>.cmd hands the leg to
+# tools/guest/pkg-run.ps1 and pkg_<leg>.cmd runs inside the package, since
+# the caller's environment does not cross Invoke-CommandInDesktopPackage.
+PACKAGED_LEGS = {"notifypkg_rust": "notify", "taskspkg_rust": "tasks"}
+
+
+def packaged_inner(leg):
+    """The launcher that runs INSIDE the package for a packaged leg."""
+    return f"pkg_{leg}.cmd"
+
 
 def depth_scenes():
     env = os.environ.get("KAYA_WIN_DEPTH_SCENES")
@@ -64,6 +79,42 @@ PY_ONLY_SCENES = ["portfolio", "varied"]
 # mirror the python ones leg for leg (2026-09-01): pooled where python
 # is pooled, alone where python is alone, absent where python is absent.
 MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
+
+# THE VERBS THAT AIM AT SCREEN COORDINATES, and the ONE placement rule they
+# force. A tile slot is a position on the desktop: this VM's slots 4 and 5 sit
+# at y=786 on an 800-tall screen, so a window there puts a drag's source off
+# the bottom and the verb refuses by name — measured 2026-09-08, `drag: the
+# source's box (271.0, 918.0, 97.8, 18.6) is off a 1280x800 screen`, when a
+# packaged tasks leg drew slot 4. Every other verb drives or reads a CONTROL
+# and does not care where the window is. A leg that runs ALONE always gets
+# slot 0 (deploy-win's `_release_slot` sorts the free list), so the rule is
+# simply: a pointer leg is never pooled. tools/deploy-win.py refuses the
+# roster and tools/check-steps.py holds it.
+POINTER_VERBS = ("drag", "drag_file")
+
+
+def pointer_scenes(scenes_dir):
+    """{scene: the first pointer verb its script uses}, READ OUT OF THE
+    SCENE SCRIPTS. Never a hand list of legs: a hand list is what goes
+    stale the day a scene grows a drag."""
+    found = {}
+    for path in sorted(pathlib.Path(scenes_dir).glob("*.steps")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            head = line.strip().split(" ")[0] if line.strip() else ""
+            if head in POINTER_VERBS:
+                found[path.stem] = head
+                break
+    return found
+
+
+def pooled_pointer_legs(scenes_dir):
+    """{leg: verb} for every leg that drives the real pointer and is NOT
+    alone in its block — the pool may place any of them on a tile that
+    leaves the screen."""
+    pointer = pointer_scenes(scenes_dir)
+    return {leg: pointer[scene_lang(leg)[0]] for leg in legs()
+            if scene_lang(leg)[0] in pointer and not alone(leg)}
+
 
 # THE ROSTER AND ITS ORDER. A list of BLOCKS: each block's legs run in
 # the WIDTH-wide slot pool and the pool DRAINS between blocks, so a
@@ -126,8 +177,6 @@ ORDER = [
     # canvas.exe under KAYA_APPEARANCE=dark.
     [
      "windowed_rust",
-     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
-     "tasks_rust",
      # The notification conformance scene (docs/tasks-s3-plan.md N5). POOLED:
      # the platform keys a notification by the AUMID `Register()` derives from
      # the EXE, so this leg's history is its own, and a toast banner neither
@@ -144,6 +193,32 @@ ORDER = [
      "identity_rust", "identity_python", "identity_js", "identity_go", "identity_csharp", "identity_java",
      "toolbar_rust", "toolbar_python", "toolbar_js", "toolbar_go", "toolbar_csharp", "toolbar_java",
      "assets_rust", "assets_python", "assets_js", "assets_go", "assets_csharp", "assets_java",
+     # THE NOTIFY GUEST, PACKAGED (docs/packaging-plan.md P3, PACKAGED_LEGS
+     # above). Pooled beside its unpackaged twin for notify_rust's own reason
+     # and one more: the package's AUMID is the platform's `<family>!<app>`
+     # and the unpackaged one is the declared id, so the two processes'
+     # notification histories are separate stores and neither can read the
+     # other's. LAST in the block, so no leg before it changes tile slot.
+     "notifypkg_rust",
+    ],
+    # THE TASK MANAGER, BOTH WAYS, EACH ALONE. A RUST app by design
+    # (docs/tasks-plan.md §0), and its scene `drag`s real screen pixels, which
+    # is the POINTER_VERBS rule above: a pooled pointer leg can draw a tile
+    # that leaves the screen. tasks_rust was pooled SECOND and passed on that
+    # luck for a milestone; the packaged twin, pooled fifth, drew slot 4 and
+    # the drag refused by name.
+    [
+     "tasks_rust",
+    ],
+    # taskspkg_rust ALONE, and the reason is a MEASURED one: the tasks scene
+    # `drag`s real screen pixels, and the tiling's slots 4 and 5 sit at y=786
+    # on this VM's 800-tall screen. Pooled fifth it drew slot 4 and the drag
+    # refused with `the source's box (271.0, 918.0, ...) is off a 1280x800
+    # screen`. A leg that runs alone always gets slot 0 (deploy-win's
+    # `_release_slot` sorts). Its unpackaged twin is pooled SECOND, which is
+    # the same luck spelled differently.
+    [
+     "taskspkg_rust",
     ],
     # dnd_rust ALONE: the `drag` verb moves the REAL MOUSE across the
     # desktop and presses it (docs/dnd-plan.md D10 — there is no
@@ -345,9 +420,13 @@ def legs():
 
 
 def scene_lang(leg):
-    """(scene, language) for a leg name; milestone2's five are bare."""
+    """(scene, language) for a leg name; milestone2's five are bare, and a
+    packaged leg's scene is the scene it runs (docs/packaging-plan.md P3 —
+    the package is a runtime situation, not another scene)."""
     if leg in MILESTONE2_LEGS:
         return "milestone2", leg
+    if leg in PACKAGED_LEGS:
+        return PACKAGED_LEGS[leg], "rust"
     scene, _, lang = leg.rpartition("_")
     return scene, lang
 

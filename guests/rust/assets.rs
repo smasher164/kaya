@@ -6,6 +6,13 @@ const MISSING: &str = "icons/nope.png";
 
 const MARK: &str = "icons/kaya-mark.png";
 
+/// SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+/// layout and the DECLARED mark is a user-supplied source of any size
+/// (the images/ family's README records the viewport cliff a big one
+/// lands on). The mark is still opened — its bytes are what the package
+/// has to carry — and reported beside the font.
+const PICTURE: &str = "images/a11y-logo.png";
+
 /// 111400 bytes: a reader that truncated into a fixed buffer shows here.
 const FONT: &str = "fonts/sora-wght.ttf";
 
@@ -14,6 +21,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW).title("assets").size(480.0, 360.0);
 
         let mark = tx.asset(MARK);
+        let picture = tx.asset(PICTURE);
         let font = tx.asset(FONT);
 
         let miss = tx.asset_miss_sentence(MISSING);
@@ -28,13 +36,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
         let title = tx.signal("assets");
         let census = tx.signal(first);
-        let sizes = tx.signal(format!("{FONT}: {} bytes, {verdict}", font.len()));
+        let present = if mark.len() > 0 { "present" } else { "missing" };
+        let sizes = tx.signal(format!(
+            "{MARK} {present}, {FONT}: {} bytes, {verdict}",
+            font.len()
+        ));
 
         let root = tx
             .column(|tx| {
                 tx.label(title); // label#0
                 // THE BYTES, not the blob handle.
-                tx.image(mark.bytes()); // image#0
+                tx.image(picture.bytes()); // image#0
                 tx.label(census); // label#1
                 tx.label(sizes); // label#2
             })

@@ -604,10 +604,13 @@ fi
 
 # THE IDENTITY LEGS' ASSET, VERIFIED BEFORE ANY LEG RUNS: without the
 # mark an identity guest dies inside its build closure on seven legs at
-# once. THE PATH IS READ FROM THE DECLARATION, never retyped —
-# tools/check-app-identity.py fails a tools/ script that names the mark
-# without reading it (docs/app-identity-plan.md ruling 4).
-identity_icon="$(python3 -c 'import tomllib; print(tomllib.load(open("guests/assets/identity.toml","rb"))["icon"])' 2>&1)"
+# once. THE PATH COMES OFF THE ONE READER, never retyped and never
+# parsed here (tools/lib/packaging/identity.py; docs/packaging-plan.md
+# P1, tools/check-app-identity.py C6 and C9).
+identity_icon="$(python3 -c 'import sys
+sys.path.insert(0, "/work/tools/lib")
+from packaging.identity import load
+print(load("/work").icon)' 2>&1)"
 identity_rc=$?
 if [ "$identity_rc" -ne 0 ]; then
     echo "run-suites: guests/assets/identity.toml could not be read: $identity_icon" >&2

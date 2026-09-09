@@ -36,6 +36,37 @@ dev_shell_or_die()
 #       to the declared icon or in EXCLUDED with a reason.
 #   C6  A PACKAGING CONSUMER READS THE MANIFEST. The .cmd launchers are
 #       exempt and C3 covers them: a batch file cannot read TOML.
+#   C9  ONE MANIFEST READER IN tools/. Every packaging step goes
+#       through tools/lib/packaging/identity.py, so a file that parses
+#       the declaration ITSELF is the second reader ruling 4 exists to
+#       prevent — C6 says a consumer must READ the declaration and this
+#       says WHICH reader. Two files are exempt by name with reasons.
+#   C10 EVERY ARM READS THE DECLARATION. A module under
+#       tools/lib/packaging/ that is not one of the shared halves must
+#       name the reader: an arm that does not is retyping something.
+#   C11 THE COMMITTED SOURCE IS THE DESCRIPTION'S OWN PICTURE, and
+#       NOTHING PACKAGES BY RENDERING (docs/packaging-plan.md P2, as
+#       ruled 2026-09-08). A packager works from the FILE the manifest
+#       names, the way a user's app would; a renderer that knows kaya's
+#       mark could only ever package kaya's app. So the example asset is
+#       held BYTE-IDENTICAL to `mark.render_png()` — a regeneration
+#       guard — and `render_png(` is refused under tools/ outside the
+#       renderer, its regeneration script and this gate.
+#   C12 ONE GENERATOR PER PLATFORM (P4, P5). The tools each arm uses to
+#       assemble an identity artifact — the mac icon set's compiler, the
+#       Linux desktop entry's own header — appear under tools/ in the
+#       arm alone; a second copy anywhere else is the lane wrapper the
+#       generator replaced, coming back.
+#   C13 A BACKEND SENTENCE A LEG PARSES IS AN INTERFACE. The GTK
+#       identity lowering's own words are grepped by
+#       tools/linux/identity-wayland-witness.sh to tell a lowering that
+#       RAN and cannot be read back on wayland from one that was
+#       SKIPPED — a version note against a carve-out
+#       (docs/app-identity-plan.md I4a) — and nothing in the sentence
+#       says so. tools/lib/identity_phrases.py owns the phrase, the
+#       witness reads it from there, and this holds the backend to
+#       still printing it. HERE AND NOT IN tools/check-gtk.py because
+#       that gate needs docker and sits outside the fast sweep.
 #   C7  THE LAUNCH SLOT IS DECLARED ONCE AND HONOURED WHERE THE
 #       PLATFORM HAS ONE (docs/tasks-s2-plan.md T4). `[launch]` names a
 #       colour and a picture; the iOS bundle turns them into
@@ -54,6 +85,7 @@ dev_shell_or_die()
 # The self-test runs the real checker over a shadow root of symlinks
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
+import importlib.util
 import os
 import re
 import struct
@@ -87,6 +119,56 @@ CMD_LAUNCHERS = "tools/guest/"
 
 SOURCE_ROOTS = ("guests", "tools", "android", "swift", "crates",
                 "bindings")
+
+# C9. The only files under tools/ that may parse the declaration
+# themselves, each with its reason. This list only shrinks.
+MANIFEST_PARSER_EXEMPT = {
+    "tools/lib/packaging/identity.py":
+        "IS the one reader (docs/packaging-plan.md P1); every other "
+        "tools/ consumer imports it",
+    "tools/check-app-identity.py":
+        "this gate is the declaration's own static half — it reads the "
+        "manifest to hold every other reader to it, and a gate that "
+        "asked the shared reader would be checking that reader with "
+        "itself",
+}
+PARSES_TOML = re.compile(r"\b(?:import\s+tomllib|from\s+tomllib\s+import"
+                         r"|import\s+toml\b|tomllib\.load)")
+
+# C10/C11/C12. The arms and the two halves every arm shares.
+# C13. Where the parsed phrases live, and the file that must print each.
+PHRASE_SITES = {"GTK_ICON_LOWERED": "crates/kaya/src/gtk.rs"}
+PACKAGING_DIR = "tools/lib/packaging"
+SHARED_HALVES = {"identity.py", "mark.py", "__init__.py"}
+
+# C11. Who may call the description's renderer. Every other consumer of
+# the mark RESAMPLES the declared file, which is the whole difference
+# between packaging an app and packaging THIS app.
+RENDER_CALLERS = {
+    f"{PACKAGING_DIR}/mark.py": "defines it",
+    "tools/regen-mark.py":
+        "the example asset's one writer (guests/assets/icons/README.md)",
+    "tools/check-app-identity.py":
+        "this gate, which holds the committed file to what it renders",
+}
+
+# C12. The generators' own tools, refused under tools/ outside the arms.
+# SPELLED IN HALVES because THIS FILE IS IN THE TREE THE CHECKER READS —
+# the rule reaches every file under tools/, this one included, and a
+# literal here would make the gate refuse itself (the asset-name and
+# launch-colour clauses solved the same problem by forbidding the
+# comment; a table cannot be forbidden, so it is assembled instead).
+ONE_GENERATOR = {
+    "icon" + "util":
+        "the mac bundle's icon set is built by tools/lib/packaging/"
+        "mac.py alone (docs/packaging-plan.md P4): one code path for the "
+        "lane and for a shipped bundle, or the lane's plist and a real "
+        "one drift with nothing to notice",
+    "[Desktop " + "Entry]":
+        "the Linux desktop entry is written by tools/lib/packaging/"
+        "linux.py alone (P5), so the notify leg runs what an installed "
+        "app has rather than a hand-written entry beside it",
+}
 
 
 def tree_walk(base):
@@ -365,6 +447,36 @@ def check(root):
             # drift.
             prose = (rel.endswith(".md")
                      or rel.startswith("tools/scenes/"))
+            # ------------------------------------------------- C9, C12
+            if rel.startswith("tools/") and not prose:
+                if (MANIFEST in text and PARSES_TOML.search(text)
+                        and rel not in MANIFEST_PARSER_EXEMPT):
+                    bad.append(
+                        f"{rel}: parses {MANIFEST} itself. There is ONE "
+                        f"reader in tools/ ({PACKAGING_DIR}/identity.py, "
+                        f"docs/packaging-plan.md P1) and every packaging "
+                        f"step goes through it — a second parser is a "
+                        f"second set of refusals for a half-spelled "
+                        f"declaration, which is how one mark on five "
+                        f"platforms breaks quietly. Import it: "
+                        f"`from packaging.identity import load`")
+                if not rel.startswith(PACKAGING_DIR + "/"):
+                    for tool, why in sorted(ONE_GENERATOR.items()):
+                        if tool in text:
+                            bad.append(
+                                f"{rel}: names {tool!r}, which belongs to "
+                                f"one arm alone — {why}")
+                if "render_png(" in text and rel not in RENDER_CALLERS:
+                    bad.append(
+                        f"{rel}: calls render_png — the description's "
+                        f"renderer draws THIS repo's example mark, and a "
+                        f"packaging step that used it would package "
+                        f"kaya's picture for every app that ever declares "
+                        f"one. Resample the declared file instead: "
+                        f"`mark.resample(declared.icon_path.read_bytes(), "
+                        f"px)` (docs/packaging-plan.md P2, ruled "
+                        f"2026-09-08). The callers that may are "
+                        f"{sorted(RENDER_CALLERS)}")
             # C3, THE ASSET FORM'S OWN HALF, asked BEFORE the
             # is-this-a-namer question: a file opening the WRONG file
             # out of the mark's family names none of the three accepted
@@ -523,6 +635,107 @@ def check(root):
                 f"one picture is the picture on all five platforms, so "
                 f"a packaging step reads the declared file or it is "
                 f"showing something else")
+
+    # ------------------------------------------------------------ C10
+    # EVERY ARM READS THE DECLARATION. C6 says a tools/ consumer must
+    # read it; this says the arms in particular do, and it is the clause
+    # that grows by itself — a new platform's module joins this census
+    # the moment it is written, with nothing to remember to add.
+    arms_dir = root / PACKAGING_DIR
+    arms = sorted(p for p in arms_dir.glob("*.py")
+                  if p.name not in SHARED_HALVES) if arms_dir.is_dir() \
+        else []
+    if not arms:
+        bad.append(
+            f"{PACKAGING_DIR}: carries no platform arm at all — the "
+            f"generator is one module per platform beside the shared "
+            f"reader and renderer (docs/packaging-plan.md §2), so this "
+            f"clause read nothing and would agree with anything")
+    for arm in arms:
+        rel = arm.relative_to(root).as_posix()
+        text = arm.read_text(encoding="utf-8")
+        reads = (re.search(r"from \.identity import [^\n]*\bload\b", text)
+                 is not None or "identity.load(" in text)
+        if not reads:
+            bad.append(
+                f"{rel}: never names the shared reader's `load` — an arm "
+                f"that does not read {MANIFEST} is writing a name, a "
+                f"picture or an id it got from somewhere else, which is "
+                f"the second source of truth ruling 4 exists to prevent")
+
+    # ------------------------------------------------------------ C11
+    # THE COMMITTED SOURCE IS WHAT THE DESCRIPTION RENDERS — a
+    # REGENERATION guard, not a packaging one: the arms resample this
+    # file and never draw it. Loaded out of the tree BEING CHECKED, so a
+    # doctored description is what the negative exercises.
+    mark_rel = f"{PACKAGING_DIR}/mark.py"
+    mark_py = root / mark_rel
+    if not mark_py.is_file():
+        bad.append(
+            f"{mark_rel}: is gone, so nothing resizes the declared file "
+            f"and no platform's slot can be filled from it "
+            f"(docs/packaging-plan.md P2)")
+    elif icon_bytes:
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "kaya_mark_under_check", mark_py)
+            renderer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(renderer)
+            drawn = renderer.render_png()
+        except Exception as exc:                          # noqa: BLE001
+            drawn = None
+            bad.append(
+                f"{mark_rel}: could not be run against {icon_rel} "
+                f"({exc}) — the committed source and the description are "
+                f"held equal HERE, and a comparison that cannot run is "
+                f"not a pass")
+        if drawn is not None and drawn != icon_bytes:
+            w, h, _pixel = decode_png(icon_bytes)
+            dw, dh, _dpixel = decode_png(drawn)
+            bad.append(
+                f"{icon_rel}: is {w}x{h} and {len(icon_bytes)} bytes, "
+                f"and {mark_rel} renders {dw}x{dh} and {len(drawn)} "
+                f"bytes. The committed picture is the EXAMPLE the "
+                f"description writes (guests/assets/icons/README.md): "
+                f"run tools/regen-mark.py, and remember that its bytes "
+                f"ride the wire and every packaged copy comes down from "
+                f"them")
+
+    # ------------------------------------------------------------ C13
+    # THE SENTENCES A LEG PARSES, still printed by the backend that owns
+    # them. Read out of the tree BEING CHECKED, so a doctored backend is
+    # what the negative exercises.
+    phrases_rel = "tools/lib/identity_phrases.py"
+    phrases_py = root / phrases_rel
+    if not phrases_py.is_file():
+        bad.append(
+            f"{phrases_rel}: is gone, so the witness that greps a backend "
+            f"sentence and the backend that prints it have no shared "
+            f"copy of the words and can drift with nothing noticing")
+    else:
+        spec = importlib.util.spec_from_file_location(
+            "kaya_phrases_under_check", phrases_py)
+        phrases = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(phrases)
+        for name, site in sorted(PHRASE_SITES.items()):
+            phrase = getattr(phrases, name, "")
+            src = root / site
+            if not phrase:
+                bad.append(f"{phrases_rel}: declares no {name}")
+            elif not src.is_file():
+                bad.append(f"{site}: is gone, and {name} names it as the "
+                           f"file that prints that phrase")
+            elif phrase not in src.read_text(encoding="utf-8"):
+                bad.append(
+                    f"{site}: no longer prints \"{phrase}\" ({name} in "
+                    f"{phrases_rel}). A LEG PARSES THAT SENTENCE — "
+                    f"tools/linux/identity-wayland-witness.sh reads it to "
+                    f"tell a lowering that RAN from one that was SKIPPED, "
+                    f"which is a version note against a carve-out "
+                    f"(docs/app-identity-plan.md I4a) — so rewording it "
+                    f"reds a leg for a reason the leg cannot name. Reword "
+                    f"AROUND the phrase, or move it here and in the "
+                    f"backend together")
 
     # ------------------------------------------------------------- C7
     launch = manifest.get("launch")
@@ -1088,7 +1301,88 @@ doctor_shadow("the uncalled apk_launch_verify", s,
 g.negative("a lane that packages the slot and never checks it",
            lambda p=s: check(p), want="define and CALL apk_launch_verify")
 
-g.negatives_ran(20)
+# ---------------------------------------------------- C9, C10, C11, C12
+# N17 — THE DESCRIPTION DRIFTING FROM THE COMMITTED SOURCE (P2): the
+# example asset is what `render_png` writes, and a colour changed in the
+# table without a regeneration leaves the two disagreeing about what this
+# repo's own app looks like. DERIVED, not retyped: the perturbation reads
+# the table's first entry out of the file rather than spelling a quadrant
+# here.
+s = fresh("markdrift")
+doctor_shadow("the drifted mark description", s,
+              f"{PACKAGING_DIR}/mark.py",
+              r'QUADRANTS = \("[0-9A-Fa-f]{6}"',
+              'QUADRANTS = ("00FF00"')
+g.negative("a renderer whose description left the committed source behind",
+           lambda p=s: check(p), want="run tools/regen-mark.py")
+
+# N17a — C11'S OTHER HALF: an arm that DRAWS the mark instead of
+# resampling the declared file. It would package this repo's own picture
+# for every app that ever declares one, and no lane could see it — the
+# example app's declared mark and the description's output are the same
+# picture on purpose.
+s = fresh("rendering-arm")
+(s / PACKAGING_DIR / "zz_selftest_render.py").write_text(
+    '"""An arm that draws instead of resampling."""\n'
+    "from .identity import load\n"
+    "from . import mark\n\n"
+    "def package(root, executable, out_dir):\n"
+    "    load(root)\n"
+    "    return mark.render_png(64)\n",
+    encoding="utf-8")
+g.negative("a packaging arm that renders the mark instead of resampling "
+           "the declared file", lambda p=s: check(p),
+           want="calls render_png")
+
+# N17b — C13'S OWN NEGATIVE, and it is MY OWN DEFECT spliced back in:
+# the lowering sentence reworded THROUGH the phrase the wayland witness
+# greps. It reddened identity-witness-rust-wayland on 2026-09-08 with a
+# sentence that says, in words, exactly what the witness said it could
+# not find.
+s = fresh("rewordedphrase")
+doctor_shadow("the reworded lowering sentence", s,
+              PHRASE_SITES["GTK_ICON_LOWERED"],
+              r"gdk_toplevel_set_icon_list with it on window \\\n",
+              "gdk_toplevel_set_icon_list with the texture on window \\\n")
+g.negative("a backend that reworded the sentence a leg parses",
+           lambda p=s: check(p), want="no longer prints")
+
+# N18 — C9'S OWN NEGATIVE: a second parser of the declaration. Silent
+# until the day a half-spelled manifest reaches two readers with two sets
+# of refusals.
+s = fresh("secondreader")
+(s / "tools" / "zz-selftest-reader.py").write_text(
+    "import tomllib\n"
+    f'print(tomllib.loads(open("{MANIFEST}").read())["name"])\n',
+    encoding="utf-8")
+g.negative("a tools/ script that parses the declaration itself",
+           lambda p=s: check(p), want="There is ONE reader in tools/")
+
+# N19 — C10'S OWN NEGATIVE: an arm that writes an identity artifact
+# without reading the declaration, which is where a retyped name gets in.
+s = fresh("blindarm")
+(s / PACKAGING_DIR / "zz_selftest_arm.py").write_text(
+    '"""A platform arm that reads nothing."""\n'
+    "def package(root, executable, out_dir):\n"
+    "    return out_dir\n",
+    encoding="utf-8")
+g.negative("a packaging arm that never reads the declaration",
+           lambda p=s: check(p),
+           want="never names the shared reader's `load`")
+
+# N20/N21 — C12'S OWN NEGATIVES, one per generator in the table, so a
+# platform added to it brings its own watched negative with it: a second
+# copy of an arm's own tool is the lane wrapper the generator replaced,
+# coming back.
+for _n, _tool in enumerate(sorted(ONE_GENERATOR)):
+    s = fresh(f"secondgen{_n}")
+    (s / "tools" / f"zz-selftest-gen{_n}").write_text(
+        f"# a second generator, assembling an identity artifact of its own\n"
+        f"{_tool}\n", encoding="utf-8")
+    g.negative(f"a second copy of {_tool!r} outside the arms",
+               lambda p=s: check(p), want="belongs to one arm alone")
+
+g.negatives_ran(27)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

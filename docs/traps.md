@@ -10034,3 +10034,129 @@ shown `t='tasks'`; SwiftUI re-titles after the first appearance. Setting
 the caption now, like every other presentation; the bundled tasks leg is
 the guard, since only a display-named bundle can tell the two apart.
 
+## AAPT2 renames a density directory inside the APK (2026-09-08)
+
+A density-qualified resource directory is stamped with the API level its
+qualifier was introduced at: `res/mipmap-hdpi/` on disk is
+`res/mipmap-hdpi-v4/` inside the APK, and `mipmap-xxhdpi` becomes
+`mipmap-xxhdpi-v4`. A byte check keyed on the source directory's name
+finds nothing and reports a missing launcher icon for a build that packaged
+one correctly, which is what the packaging arm's first APK verify did. Key
+the verify on the qualifier with its `-v4` suffix, or list the entries and
+match the density by prefix.
+
+AND THE MERGE IS INCREMENTAL over the generated `res/` directory: the
+unqualified `res/mipmap/kaya_mark.png` (the old 64px file) was still inside
+the APK two builds after the arm stopped writing it. A generator that writes
+into that directory removes it whole first (`write_res` does), and the APK
+verify refuses an entry nothing wrote.
+
+## An MSIX installs only in the console session, and only signed (2026-09-08)
+
+Two readings from the Windows VM (Win 11 Pro 26200) while building the
+packaging arm. `Add-AppxPackage` over ssh fails 0x80070005 and the AppX
+event log says why: "Failed to initialize PLM with error 0x80070005" — the
+Process Lifetime Manager is per-session and the ssh session has none, so
+the install goes through `schtasks /it /rl highest`, the same door a WinUI
+guest goes through (docs/traps.md, "A WinUI guest cannot be run over
+ssh"). And the unsigned route does not exist on this build: `-AllowUnsigned`
+is refused with 0x80080204 ("must be valid as per publisher naming rules")
+for every publisher spelling including Microsoft's own documented sample,
+with Developer Mode on or off, byte-identical. The lane's package is signed
+with a self-signed `CN=kaya` certificate installed once into
+`Cert:\LocalMachine\TrustedPeople`; the manifest's Publisher and the
+certificate's Subject must be equal or deployment refuses.
+
+## A packaged process launched without -PreventBreakaway has no identity (2026-09-08)
+
+`Invoke-CommandInDesktopPackage` is how the lane runs a packaged guest with
+its own environment (KAYA_SELFTEST and the rest). Without `-PreventBreakaway`
+the launched process runs as an ordinary exe: `Package.Current` throws
+0x80073D54, and every packaged leg would pass while testing nothing
+packaged. check-steps holds the flag on the launcher shape with a watched
+negative.
+
+## A guest .ps1 or .cmd is read in the machine's ANSI code page (2026-09-08)
+
+`[Text.Encoding]::Default` on the Windows VM is Windows-1252, so a BOM-less
+UTF-8 em dash in a shipped script arrives as three characters whose last,
+0x94, is a right double quotation mark. In a comment it is inert — forty
+checked-in payloads carry one — but inside a STRING it closes the string,
+and PowerShell reports the error twelve lines further down at whatever it
+chokes on next ("The '<' operator is reserved for future use").
+tools/guest/pkg-run.ps1 died that way, and because its outer launcher had
+no failure route the packaged leg waited out its 298s deadline in silence.
+check-steps refuses a non-ASCII byte outside a comment in any tools/guest
+.ps1 or .cmd (four watched negatives plus the shipped defect spliced back
+in), and a packaged leg's outer .cmd must keep an invoke log and write
+`EXIT=1` when the invoker fails, which turned the next occurrence into a
+named parse error in two seconds.
+
+## A megapixel is not an X11 icon (2026-09-08)
+
+When the declared mark became a 1024x1024 source, the linux lane's eight
+x11 identity legs went red on one cause: GDK turns
+`gdk_toplevel_set_icon_list` into `_NET_WM_ICON`, a CARDINAL array on the
+toplevel, and a 1024x1024 texture is a megapixel of 32-bit words — the
+property never lands, with no error anywhere. The harness's own diagnostic
+named it in one reading ("no _NET_WM_ICON on any of this display's 5
+toplevels … kaya decoded the declared blob to a 1024x1024 texture and
+called gdk_toplevel_set_icon_list with it"), which is why it cost one look
+and not a session. The wayland legs passed: it is the X11 property alone.
+The GTK arm now scales the decoded texture to at most 128 (the largest
+size a titlebar, switcher or taskbar draws) through the platform's own
+`Pixbuf::from_stream_at_scale`, and the lowering sentence says it scaled and
+to what. The same question is per platform — a large declared icon is a
+SOURCE every consumer comes down from — and macOS and Android answered it
+fine by hand, and Windows answered it with all six identity legs green: the
+WinUI arm hands the ENCODED bytes to the platform's decoder and asks for an
+HICON, so the scaling is Windows's own, where GDK's property carries RAW
+pixels on the X wire, which is where a megapixel is dropped.
+
+## A backend sentence a leg parses is an interface (2026-09-08)
+
+tools/linux/identity-wayland-witness.sh tells "the lowering ran and cannot
+be read back on wayland" from "the lowering was skipped" by grepping the
+GTK arm's lowering sentence for the literal `gdk_toplevel_set_icon_list
+with it on window`. Rewording that sentence to say the texture had been
+scaled ("… with the 128x128 texture on window #0, #1") made the witness
+read a skip, correctly by its own lights, and the wayland identity leg went
+red with the icon lowering working. The sentence carried no mark that a leg
+parsed it. The frozen phrase lives in one place both sides read now
+(tools/lib/identity_phrases.py), the witness refuses if it cannot read it,
+and tools/check-app-identity.py's C13 holds every phrase site to it — in the
+fast sweep rather than docker-only check-gtk, since a wall you must remember
+to walk into is barely a wall — with the reworded sentence as the watched
+negative; the comment beside the sentence names the gate. Any sentence a lane greps gets the same treatment before it is
+reworded.
+
+## The iOS bundle's 1x icon is the declared file's bytes (2026-09-08)
+
+swift/KayaSwiftUI.swift's `kayaIOSAppIconWhyNot` refuses with "the bundle's
+icon and the declared icon are different pictures" unless the bundled icon
+equals the declared blob BYTE for byte. So when the packaging arm began
+resampling the icon family, the CFBundleIconFiles 1x entry had to stay a
+copy of the declared file and only the @2x/@3x entries may be resampled.
+Making the observation compare pictures rather than bytes is a semantics
+change to that read and a maintainer's ruling, not a packaging convenience.
+
+## The bootstrapper refuses to run in a packaged process (2026-09-08)
+
+`MddBootstrapInitialize2` answers 0x80070032 (ERROR_NOT_SUPPORTED) when the
+process has package identity. A packaged app gets the Windows App Runtime
+from its package graph instead, through a manifest `<PackageDependency>` on
+the framework (`Microsoft.WindowsAppRuntime.2`, MinVersion 2.2.0.0, the
+Microsoft publisher), whose major.minor IS `WASDK_MAJOR_MINOR` in
+crates/kaya/src/winui/mod.rs, held equal by check-steps. The backend
+returns early from `bootstrap_windows_app_runtime()` when `packaged()`.
+
+## Installing an MSIX raises a shell toast the toast toggle does not suppress (2026-09-08)
+
+The deploy turns toasts off in three registry places, and the deployment's
+own "installed" notification appears anyway: the desk warm-up a second after
+the install was measured LOSING the foreground to
+`Windows.UI.Core.CoreWindow "New notification" (ShellExperienceHost)` through
+both of its remedies, 88 tries over 3020ms. tools/guest/pkg-install.ps1
+stops ShellExperienceHost after the install; the shell restarts it on demand
+and the warm-up then wins in 65 tries.
+

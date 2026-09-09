@@ -37,9 +37,10 @@ import subprocess
 import tempfile
 import threading
 import time
-import tomllib
 import urllib.parse
 
+from packaging import identity as app_identity
+from packaging import ios as packaging_ios
 from lanes import ios as lane
 import exclusive
 import scene_cut
@@ -159,29 +160,13 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-# THE DECLARED APP IDENTITY, READ ONCE, FROM THE ONE PLACE IT IS
-# WRITTEN (docs/app-identity-plan.md ruling 4) — never retyped;
-# check-app-identity C6 holds this file to it.
-KAYA_IDENTITY_MANIFEST = ROOT / "guests/assets/identity.toml"
-if not KAYA_IDENTITY_MANIFEST.is_file():
-    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} is missing — the app identity "
-        f"is declared there and this lane's bundles read their icon and "
-        f"display name from it (docs/app-identity-plan.md ruling 4)")
-_decl = tomllib.loads(KAYA_IDENTITY_MANIFEST.read_text(encoding="utf-8"))
-for _key in ("icon", "name"):
-    if not isinstance(_decl.get(_key), str) or not _decl[_key].strip():
-        die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares no `{_key}`, so "
-            f"the bundles this lane assembles would carry half an identity")
-ICON_REL = _decl["icon"]
-IDENTITY_NAME = _decl["name"]
-ICON_SRC = ROOT / ICON_REL
-ICON_IN_BUNDLE = pathlib.Path(ICON_REL).name
-if not ICON_SRC.is_file():
-    die(f"run-sim: the declared app mark {ICON_REL} is missing from this "
-        f"tree")
-
-# THE LAUNCH SLOT, OUT OF THE SAME DECLARATION (docs/tasks-s2-plan.md T4).
-# `UILaunchScreen`'s two keys name ASSET-CATALOG entries. MEASURED
+# THE DECLARED APP IDENTITY, THROUGH THE ONE READER
+# (tools/lib/packaging/identity.py; docs/packaging-plan.md P1) — every
+# refusal below is that reader's, so a half-spelled declaration reads the
+# same here, in the mac bundle generator and in the MSIX manifest.
+#
+# THE LAUNCH SLOT comes off the same declaration (docs/tasks-s2-plan.md
+# T4). `UILaunchScreen`'s two keys name ASSET-CATALOG entries. MEASURED
 # 2026-09-07 on kaya-sim-2, `simctl launch --wait-for-debugger` holding
 # the slot on screen: `UIImageName` DOES resolve a loose PNG in the
 # bundle root, but `UIColorName` naming a colour that is in no compiled
@@ -189,34 +174,22 @@ if not ICON_SRC.is_file():
 # loose-file spelling of a named colour. So the colour forces the
 # catalog, and the picture rides in beside it rather than depending on
 # the icon's opt-in copy.
-_launch = _decl.get("launch")
-if not isinstance(_launch, dict):
-    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares no `[launch]` table, "
-        f"so every bundle this lane assembles would show the system's "
-        f"plain ground between the tap and the first frame "
-        f"(docs/tasks-s2-plan.md T4)")
-LAUNCH_BG = _launch.get("background")
-if not isinstance(LAUNCH_BG, str) or not re.fullmatch(
-        r"#[0-9A-Fa-f]{6}", LAUNCH_BG):
-    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares `[launch] background "
-        f"= {LAUNCH_BG!r}`, which is not #RRGGBB — a colour asset takes "
-        f"components, and nothing here can guess what a half-spelled one "
-        f"meant")
-# `image` DEFAULTS TO `icon`: one picture in the launcher and on the way
-# in.
-LAUNCH_IMAGE_REL = _launch.get("image", ICON_REL)
-if not isinstance(LAUNCH_IMAGE_REL, str) or not LAUNCH_IMAGE_REL.strip():
-    die(f"run-sim: {KAYA_IDENTITY_MANIFEST} declares an empty `[launch] "
-        f"image`; leave it out to take the declared icon")
-LAUNCH_IMAGE_SRC = ROOT / LAUNCH_IMAGE_REL
-if not LAUNCH_IMAGE_SRC.is_file():
-    die(f"run-sim: the declared launch image {LAUNCH_IMAGE_REL} is "
-        f"missing from this tree")
+KAYA_IDENTITY_MANIFEST = ROOT / app_identity.MANIFEST
+try:
+    DECLARED = app_identity.load(ROOT)
+except app_identity.Undeclared as _exc:
+    die(f"run-sim: {_exc}")
+IDENTITY_NAME = DECLARED.name
+LAUNCH_BG = DECLARED.launch_background
+LAUNCH_IMAGE_REL = DECLARED.launch_image
 # The two names the plist keys spell; check-app-identity reads them back
 # out of this file.
 LAUNCH_COLOR_NAME = "KayaLaunchBackground"
 LAUNCH_IMAGE_NAME = "KayaLaunchMark"
 LAUNCH_CAR = ROOT / "target/ios-launch/Assets.car"
+# The bytes the arm produces for the slot; the catalog's rendition is
+# held to THESE and not to the source, since the arm resizes.
+LAUNCH_ART = packaging_ios.launch_image(ROOT)
 
 
 def build_launch_catalog():
@@ -244,9 +217,12 @@ def build_launch_catalog():
             }],
             "info": {"author": "kaya", "version": 1},
         }, indent=2) + "\n", encoding="utf-8")
+    # THE SLOT'S PICTURE IS THE ARM'S, resampled from the declared file
+    # to the size a centred launch mark reads at
+    # (tools/lib/packaging/ios.py LAUNCH_PX): the declaration is a
+    # 1024px source and UILaunchScreen draws it centred, not tiled.
     art = pathlib.Path(LAUNCH_IMAGE_REL).name
-    shutil.copy2(LAUNCH_IMAGE_SRC,
-                 src / f"{LAUNCH_IMAGE_NAME}.imageset" / art)
+    (src / f"{LAUNCH_IMAGE_NAME}.imageset" / art).write_bytes(LAUNCH_ART)
     src.joinpath(f"{LAUNCH_IMAGE_NAME}.imageset/Contents.json").write_text(
         json.dumps({
             "images": [{"filename": art, "idiom": "universal",
@@ -299,17 +275,16 @@ def launch_catalog_verify():
         die(f"run-sim: {LAUNCH_CAR} carries the launch colour "
             f"{'#%02X%02X%02X' % got if len(got) == 3 else got}, and "
             f"{KAYA_IDENTITY_MANIFEST} declares {LAUNCH_BG}")
-    with open(LAUNCH_IMAGE_SRC, "rb") as fh:
-        head = fh.read(24)
+    head = LAUNCH_ART[:24]
     if head[:8] != b"\x89PNG\r\n\x1a\n":
-        die(f"run-sim: {LAUNCH_IMAGE_REL} is not a PNG, so its declared "
-            f"size cannot be read here and the catalog's rendition is "
-            f"held to nothing")
+        die(f"run-sim: the launch arm produced no PNG from "
+            f"{LAUNCH_IMAGE_REL}, so the catalog's rendition is held to "
+            f"nothing")
     w, h = struct.unpack(">II", head[16:24])
     if (image.get("PixelWidth"), image.get("PixelHeight")) != (w, h):
         die(f"run-sim: {LAUNCH_CAR} carries a launch picture "
             f"{image.get('PixelWidth')}x{image.get('PixelHeight')} and "
-            f"{LAUNCH_IMAGE_REL} is {w}x{h}")
+            f"the arm drew {w}x{h} from {LAUNCH_IMAGE_REL}")
     if image.get("RenditionName") != pathlib.Path(LAUNCH_IMAGE_REL).name:
         die(f"run-sim: {LAUNCH_CAR} carries the launch picture "
             f"{image.get('RenditionName')!r}, and "
@@ -378,15 +353,18 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
     app = BUNDLES / f"{name}.app"
     shutil.rmtree(app, ignore_errors=True)
     app.mkdir(parents=True)
-    icon_keys = ""
+    icon_base = ""
     if identity:
-        shutil.copy2(ICON_SRC, app / ICON_IN_BUNDLE)
-        icon_keys = ICON_IN_BUNDLE
+        # THE ICON FAMILY, THROUGH THE GENERATOR'S iOS ARM
+        # (tools/lib/packaging/ios.py, docs/packaging-plan.md P6): the 1x
+        # file is the declaration's own bytes and @2x/@3x are RENDERED at
+        # the sizes the Home Screen draws.
+        icon_base = packaging_ios.write_icon_family(ROOT, app)
     tpl = (ROOT / "tools/ios/Info.plist.in").read_text(encoding="utf-8")
     # The icon file name carries its extension in the bundle and NOT in
     # CFBundleIconFiles: iOS matches the entry by BASE NAME, which lets
     # one entry stand for the @2x/@3x family.
-    block = "" if not icon_keys else (
+    block = "" if not icon_base else (
         "<key>CFBundleDisplayName</key>\n"
         f"    <string>{IDENTITY_NAME}</string>\n"
         "    <key>CFBundleIcons</key>\n"
@@ -395,7 +373,7 @@ def make_bundle(name, bundle_id, executable_path, identity=""):
         "        <dict>\n"
         "            <key>CFBundleIconFiles</key>\n"
         "            <array>\n"
-        f"                <string>{icon_keys.rsplit('.', 1)[0]}</string>\n"
+        f"                <string>{icon_base}</string>\n"
         "            </array>\n"
         "        </dict>\n"
         "    </dict>")

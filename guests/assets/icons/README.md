@@ -1,9 +1,17 @@
 # The vendored app mark
 
-`kaya-mark.png` — 64x64, 8-bit RGB, no alpha, 156 bytes. Written by this
-repo, for this repo: there is no upstream and no licence to carry, which
-is the one hygiene question a vendored binary asks and the reason it is
-answered here rather than left to be looked up.
+`kaya-mark.png` — 1024x1024, 8-bit RGB, no alpha, 5993 bytes. Written by
+this repo, for this repo: there is no upstream and no licence to carry,
+which is the one hygiene question a vendored binary asks and the reason
+it is answered here rather than left to be looked up.
+
+IT IS A SOURCE, AND THAT IS WHY IT IS 1024 (docs/packaging-plan.md P2,
+as ruled 2026-09-08). Every packaging step resamples it DOWN to the size
+a platform's slot wants — the mac icns rungs, the Linux hicolor set, the
+APK mipmap densities, the iOS icon family, the Windows tiles — through
+tools/lib/packaging/mark.py, which knows nothing about what is in the
+picture and REFUSES to enlarge one. An app supplies its own source the
+same way; this file is the example.
 
 THIS FAMILY IS THE MARK'S ALONE: tools/check-app-identity.py reads any
 `icons/...` asset open as a reference to the declared mark and refuses
@@ -58,12 +66,21 @@ that arrive with no `KAYA_ASSET_DIR` exercise.
 ## How to regenerate it
 
 `kaya-mark.png` is written by this repo, so unlike the vendored typeface
-beside it there is something to run. Four flat quadrants, 64x64, 8-bit
-truecolour, no alpha, no ancillary chunks:
+beside it there is something to run:
+
+    tools/regen-mark.py
+
+That is the description's ONE writer — tools/lib/packaging/mark.py's
+`render_png`, whose only caller it is (tools/check-app-identity.py holds
+this file byte-identical to it and refuses any other caller under
+tools/, because an arm that RENDERED instead of resampling could only
+ever package this repo's own app). The picture it writes is four flat
+quadrants, 1024x1024, 8-bit truecolour, no alpha, no ancillary chunks —
+the same bytes this does:
 
     python3 - <<'PY'
     import struct, zlib
-    W = H = 64
+    W = H = 1024
     Q = [(0xE0,0x1B,0x24), (0x33,0xD1,0x7A), (0x1C,0x71,0xD8), (0xF6,0xD3,0x2D)]
     rows = []
     for y in range(H):
@@ -80,8 +97,10 @@ truecolour, no alpha, no ancillary chunks:
         + chunk(b"IEND", b""))
     PY
 
-Regenerating changes the file's BYTES if zlib's output differs, and the
-byte-equality rule (tools/check-app-identity.py) holds every packaged
-copy identical to this one — so a regeneration is a tree-wide change and
-the gate will say so. The four colours themselves are frozen: they are
-`expect_app_icon`'s expectation in tools/scenes/identity.steps.
+Regenerating changes the file's BYTES if zlib's output differs, and that
+is a tree-wide change: the wire sends these bytes, every packaged copy
+is resampled DOWN from them, and tools/check-app-identity.py holds this
+file to what the description renders. The four colours themselves are
+frozen — they are `expect_app_icon`'s expectation in
+tools/scenes/identity.steps, and a box filter over flat quadrants
+reproduces them exactly at every size a slot asks for.

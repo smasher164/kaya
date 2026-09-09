@@ -95,6 +95,15 @@ windows = { version = "0.62", features = [
     # (docs/canvas-plan.md §8) — a classic COM interface out of
     # robuffer.h, so it comes from here and not from tools/winui-bindgen.
     "Win32_System_WinRT",
+    # WHICH OF THE TWO RUNTIME SITUATIONS THIS PROCESS IS IN
+    # (docs/packaging-plan.md P3): GetCurrentPackageFullName is the only
+    # question that tells a packaged process from an unpackaged one, and
+    # the answer decides whether the library registers an identity at all.
+    "Win32_Storage_Packaging_Appx",
+    # The unpackaged half of P3: HKCU\Software\Classes\AppUserModelId\<id>
+    # is where Windows looks for an unpackaged app's name and icon, and
+    # without it the shell draws no toast for the app.
+    "Win32_System_Registry",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"

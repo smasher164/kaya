@@ -13963,6 +13963,14 @@ fn bootstrap_shutdown() {
 }
 
 fn bootstrap_windows_app_runtime() {
+    // A PACKAGED PROCESS ALREADY HAS THE RUNTIME, in its package graph, and
+    // the bootstrapper refuses to run in one: MddBootstrapInitialize2 answers
+    // 0x80070032, ERROR_NOT_SUPPORTED (measured 2026-09-08). What puts the
+    // framework in that graph is the manifest's <PackageDependency>, which
+    // tools/lib/packaging/windows.py writes (docs/packaging-plan.md P3).
+    if packaged() {
+        return;
+    }
     // TODO: resolve the bootstrap DLL relative to kaya's own module path
     // (GetModuleHandleExW with FROM_ADDRESS) instead of the default search
     // order, so foreign hosts (python.exe) need not have kaya's directory
@@ -20642,8 +20650,166 @@ fn app_aumid() -> windows_core::Result<HSTRING> {
     })
 }
 
+/// WHICH OF THE TWO RUNTIME SITUATIONS THIS PROCESS IS IN
+/// (docs/packaging-plan.md P3). PACKAGED, the identity is the package's — the
+/// AUMID is `<PackageFamilyName>!<Application Id>`, which no process may
+/// overwrite, and the platform's notifier and history are the caller's own;
+/// UNPACKAGED, the process names an AUMID for itself and the shell has to be
+/// told what that AUMID is called. Asked once.
+fn packaged() -> bool {
+    static PACKAGED: OnceLock<bool> = OnceLock::new();
+    *PACKAGED.get_or_init(|| {
+        // A packaged process answers with the length it needs; an unpackaged
+        // one answers APPMODEL_ERROR_NO_PACKAGE.
+        let mut len: u32 = 0;
+        let answer = unsafe {
+            windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName(&mut len, None)
+        };
+        answer == windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER
+    })
+}
+
 fn toast_notifier() -> windows_core::Result<ToastNotifier> {
-    ToastNotificationManager::CreateToastNotifierWithId(&app_aumid()?)
+    if packaged() {
+        ToastNotificationManager::CreateToastNotifier()
+    } else {
+        ToastNotificationManager::CreateToastNotifierWithId(&app_aumid()?)
+    }
+}
+
+/// The mark on disk, where an `IconUri` can point at it. Idempotent: bytes
+/// that are already there are not rewritten.
+fn mark_under_local_app_data(id: &str, icon: &[u8]) -> Result<std::path::PathBuf, String> {
+    let base = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "LOCALAPPDATA is not set for this process".to_owned())?;
+    let dir = std::path::PathBuf::from(base).join("kaya").join(id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join("icon.png");
+    if std::fs::read(&path).ok().as_deref() != Some(icon) {
+        std::fs::write(&path, icon).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(path)
+}
+
+/// `HKCU\Software\Classes\AppUserModelId\<id>` — the ONE place Windows looks
+/// for an unpackaged app's display name and icon.
+fn aumid_key_path(id: &str) -> String {
+    format!("Software\\Classes\\AppUserModelId\\{id}")
+}
+
+fn wide_z(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// One REG_SZ under HKCU, or `None` when the key or the value is absent.
+fn hkcu_string(key: &str, name: &str) -> Option<String> {
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_SZ,
+    };
+    let mut handle = HKEY::default();
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            windows_core::PCWSTR(wide_z(key).as_ptr()),
+            None,
+            KEY_READ,
+            &mut handle,
+        )
+    };
+    if opened.is_err() {
+        return None;
+    }
+    let mut kind = REG_SZ;
+    let mut bytes: u32 = 0;
+    let name_w = wide_z(name);
+    let sized = unsafe {
+        RegQueryValueExW(
+            handle,
+            windows_core::PCWSTR(name_w.as_ptr()),
+            None,
+            Some(&mut kind),
+            None,
+            Some(&mut bytes),
+        )
+    };
+    let value = if sized.is_ok() && kind == REG_SZ && bytes > 0 {
+        let mut buffer = vec![0u8; bytes as usize];
+        let mut got = bytes;
+        let read = unsafe {
+            RegQueryValueExW(
+                handle,
+                windows_core::PCWSTR(name_w.as_ptr()),
+                None,
+                Some(&mut kind),
+                Some(buffer.as_mut_ptr()),
+                Some(&mut got),
+            )
+        };
+        read.is_ok().then(|| {
+            let units: Vec<u16> = buffer[..got as usize]
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .take_while(|unit| *unit != 0)
+                .collect();
+            String::from_utf16_lossy(&units)
+        })
+    } else {
+        None
+    };
+    let _ = unsafe { RegCloseKey(handle) };
+    value
+}
+
+/// Write REG_SZ values under an HKCU key, creating it. ONLY a value that
+/// differs is written, which is what makes a second launch a no-op.
+/// `RegSetKeyValueW` creates the subkey itself, so no key handle is opened.
+fn hkcu_write_strings(key: &str, values: &[(&str, &str)]) -> Result<bool, String> {
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    if values
+        .iter()
+        .all(|(name, want)| hkcu_string(key, name).as_deref() == Some(*want))
+    {
+        return Ok(false);
+    }
+    let key_w = wide_z(key);
+    for (name, value) in values {
+        let name_w = wide_z(name);
+        let data = wide_z(value);
+        let bytes = data.len() * 2;
+        let set = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                windows_core::PCWSTR(key_w.as_ptr()),
+                windows_core::PCWSTR(name_w.as_ptr()),
+                REG_SZ.0,
+                Some(data.as_ptr().cast()),
+                bytes as u32,
+            )
+        };
+        if set.is_err() {
+            return Err(format!("HKCU\\{key}\\{name} could not be written: {set:?}"));
+        }
+    }
+    Ok(true)
+}
+
+/// THE UNPACKAGED HALF OF P3, run once before the app thread: the declared
+/// identity in the one place Windows looks for it. Without this key the shell
+/// draws NO toast for the app at all — measured 2026-09-08, which is what the
+/// S3 review page's Windows capture found. A packaged process writes nothing:
+/// its name and icon are the manifest's, and its HKCU is virtualized anyway.
+///
+/// `Ok(true)` means something was written, `Ok(false)` that the key already
+/// said this — the second launch of an app is a no-op.
+fn register_unpackaged_identity(declaration: &crate::scene::Declaration) -> Result<bool, String> {
+    let icon = mark_under_local_app_data(&declaration.id, &declaration.icon)?;
+    hkcu_write_strings(
+        &aumid_key_path(&declaration.id),
+        &[
+            ("DisplayName", declaration.name.as_str()),
+            ("IconUri", &icon.to_string_lossy()),
+        ],
+    )
 }
 
 /// ON THE APARTMENT: can this process post, and take the declared identity
@@ -20651,8 +20817,8 @@ fn toast_notifier() -> windows_core::Result<ToastNotifier> {
 /// a declared id with no registry key of its own, and the toast it posts is in
 /// the platform's history a moment later.
 fn notification_ready() -> bool {
-    let id = match declared_app_id() {
-        Ok(id) => id,
+    let declaration = match crate::scene::declared_identity() {
+        Ok(declaration) => declaration,
         Err(why) => {
             // The core's own sentence, which names the file and the key: a
             // Windows notification is filed under an application id and there
@@ -20661,19 +20827,37 @@ fn notification_ready() -> bool {
             return false;
         }
     };
-    // THE PROCESS WEARS THE DECLARED IDENTITY TOO (N4): the toast is filed
-    // under this id, so the taskbar grouping and the activation callback have
-    // to agree with it.
-    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
-    if let Err(e) = unsafe {
-        windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
-            windows_core::PCWSTR(wide.as_ptr()),
-        )
-    } {
-        eprintln!(
-            "kaya: winui could not take the declared app id {id:?} for this process: {}",
-            e.message()
-        );
+    let id = declaration.id.clone();
+    if packaged() {
+        // The package IS the identity (P3): the AUMID is the platform's, the
+        // name and the mark are the manifest's, and taking an app id of our
+        // own here would be refused.
+    } else {
+        // THE PROCESS WEARS THE DECLARED IDENTITY TOO (N4): the toast is filed
+        // under this id, so the taskbar grouping and the activation callback
+        // have to agree with it.
+        let wide: Vec<u16> = wide_z(&id);
+        if let Err(e) = unsafe {
+            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+                windows_core::PCWSTR(wide.as_ptr()),
+            )
+        } {
+            eprintln!(
+                "kaya: winui could not take the declared app id {id:?} for this process: {}",
+                e.message()
+            );
+        }
+        match register_unpackaged_identity(&declaration) {
+            Ok(true) => eprintln!(
+                "kaya: winui registered the declared identity under HKCU\\{}",
+                aumid_key_path(&id)
+            ),
+            Ok(false) => {}
+            Err(why) => eprintln!(
+                "kaya: winui could not register the declared identity — {why}. The shell draws \
+                 no toast for an app id it has no DisplayName for."
+            ),
+        }
     }
     match toast_notifier() {
         Ok(_) => true,
@@ -20760,8 +20944,16 @@ fn filetime_of_unix_seconds(at: u64) -> i64 {
 fn notification_forget(id: u64) {
     let tag = notification_tag(id);
     NOTIFY_LIVE.lock().unwrap().retain(|(held, _)| *held != id);
-    if let Ok(aumid) = app_aumid() {
-        if let Ok(history) = ToastNotificationManager::History() {
+    if let Ok(history) = ToastNotificationManager::History() {
+        // The `…WithId` overloads take the AUMID an UNPACKAGED process named
+        // for itself; a packaged process owns the platform's own and may not
+        // name another (docs/packaging-plan.md P3).
+        if packaged() {
+            let _ = history.RemoveGroupedTag(
+                &HSTRING::from(tag.as_str()),
+                &HSTRING::from(NOTIFICATION_GROUP),
+            );
+        } else if let Ok(aumid) = app_aumid() {
             let _ = history.RemoveGroupedTagWithId(
                 &HSTRING::from(tag.as_str()),
                 &HSTRING::from(NOTIFICATION_GROUP),
@@ -20811,7 +21003,13 @@ fn delivered_notification_title(id: u64) -> Option<String> {
         return None;
     }
     let delivered = ToastNotificationManager::History()
-        .and_then(|history| history.GetHistoryWithId(&app_aumid()?))
+        .and_then(|history| {
+            if packaged() {
+                history.GetHistory()
+            } else {
+                history.GetHistoryWithId(&app_aumid()?)
+            }
+        })
         .ok()?;
     let tag = notification_tag(id);
     let mut seen = Vec::new();
@@ -20891,6 +21089,76 @@ fn notification_miss_census(id: u64, seen: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reg_delete_tree(key: &str) {
+        use windows::Win32::System::Registry::{RegDeleteTreeW, HKEY_CURRENT_USER};
+        let _ = unsafe {
+            RegDeleteTreeW(HKEY_CURRENT_USER, windows_core::PCWSTR(wide_z(key).as_ptr()))
+        };
+    }
+
+    /// THE UNPACKAGED SELF-REGISTRATION (docs/packaging-plan.md P3), read back
+    /// off the machine that has a registry. NO LANE CAN SEE THIS: what the key
+    /// changes is whether the SHELL draws a banner, and the platform's own
+    /// history — which is every notification observable a scene has — holds
+    /// the toast with or without it. The review page's Windows capture is what
+    /// found the gap, and a capture is not a guard.
+    #[test]
+    fn the_unpackaged_registration_writes_the_declared_identity_once() {
+        let id = "dev.kaya.aurora.notes.unittest";
+        let mark = b"\x89PNG\r\n\x1a\nkaya-unit-test".to_vec();
+        let declaration = crate::scene::Declaration {
+            name: "Aurora Notes Unit Test".to_owned(),
+            icon: mark.clone(),
+            id: id.to_owned(),
+        };
+        let key = aumid_key_path(id);
+        reg_delete_tree(&key);
+
+        let wrote = register_unpackaged_identity(&declaration).expect("the registration");
+        assert!(wrote, "the first registration writes the key");
+        assert_eq!(
+            hkcu_string(&key, "DisplayName").as_deref(),
+            Some("Aurora Notes Unit Test"),
+            "the shell reads the app's name out of DisplayName"
+        );
+        let icon_uri = hkcu_string(&key, "IconUri").expect("IconUri");
+        assert!(
+            icon_uri.ends_with(&format!("kaya\\{id}\\icon.png")),
+            "IconUri points under LocalAppData, got {icon_uri:?}"
+        );
+        assert_eq!(
+            std::fs::read(&icon_uri).expect("the mark IconUri names"),
+            mark,
+            "IconUri names a file holding the declared mark's own bytes"
+        );
+
+        // IDEMPOTENT: the second launch of an app compares and writes nothing.
+        let again = register_unpackaged_identity(&declaration).expect("the second registration");
+        assert!(!again, "a registration that already says this writes nothing");
+
+        // AND A CHANGED DECLARATION IS STILL WRITTEN — an "idempotence" that
+        // never wrote again would pass the clause above and ship a stale name
+        // for the life of the machine.
+        let renamed = crate::scene::Declaration {
+            name: "Aurora Notes Renamed".to_owned(),
+            icon: mark,
+            id: id.to_owned(),
+        };
+        assert!(
+            register_unpackaged_identity(&renamed).expect("the renamed registration"),
+            "a declaration that differs from the key is written"
+        );
+        assert_eq!(
+            hkcu_string(&key, "DisplayName").as_deref(),
+            Some("Aurora Notes Renamed")
+        );
+
+        reg_delete_tree(&key);
+        if let Ok(base) = std::env::var("LOCALAPPDATA") {
+            let _ = std::fs::remove_dir_all(std::path::Path::new(&base).join("kaya").join(id));
+        }
+    }
 
     /// THE DEFERRED RE-STAMP PUTS EVERY CHILD ON THE TRACK THE EAGER ONE DID,
     /// once per container per batch. `reindex` rebuilds every track and

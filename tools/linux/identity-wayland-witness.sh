@@ -36,7 +36,24 @@ verdict="$(grep -c '^KAYA_SELFTEST: ' "$log")"
 failed="$(grep -c 'KAYA_HARNESS: step-failed' "$log")"
 icons="$(grep -c "KAYA_HARNESS: step-failed app icon <no icon read on this display" "$log")"
 wayland="$(grep -c "GDK's display object here is GdkWayland" "$log")"
-lowered="$(grep -c 'gdk_toplevel_set_icon_list with it on window' "$log")"
+# THE PHRASE IS READ, NEVER SPELLED HERE (tools/lib/identity_phrases.py):
+# a backend sentence a leg greps is an interface with nothing marking it
+# as one, and rewording it reddened this leg once already (2026-09-08).
+kaya_tools="${KAYA_TOOLS_DIR:-/work/tools}"
+lowered_phrase="$(KAYA_TOOLS="$kaya_tools" python3 -c 'import os, sys
+sys.path.insert(0, os.path.join(os.environ["KAYA_TOOLS"], "lib"))
+from identity_phrases import GTK_ICON_LOWERED
+print(GTK_ICON_LOWERED)')"
+phrase_rc=$?
+if [ "$phrase_rc" -ne 0 ] || [ -z "$lowered_phrase" ]; then
+    echo "identity-wayland-witness: cannot read the lowering phrase out of" \
+        "$kaya_tools/lib/identity_phrases.py, so this witness cannot tell a" \
+        "lowering that ran from one that was skipped — refusing rather than" \
+        "guessing." >&2
+    rm -f "$log"
+    exit 1
+fi
+lowered="$(grep -cF "$lowered_phrase" "$log")"
 rm -f "$log"
 
 if [ "$verdict" -lt 1 ]; then

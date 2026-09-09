@@ -63,72 +63,21 @@ if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -n "${WAYLAND_DISPLAY:-}" ]; then
 fi
 export XDG_RUNTIME_DIR="$kaya_run_dir"
 
-# THE APP ID IS READ, NEVER SPELLED (docs/tasks-s3-plan.md N4): the same
-# declaration the core reads at startup decides what the desktop remembers
-# this app's notifications under, so the activation files cannot name a
-# different app from the one that posts.
-kaya_app_id="$(KAYA_IDENTITY_MANIFEST="${KAYA_IDENTITY_MANIFEST:-/work/guests/assets/identity.toml}" \
-    python3 -c 'import os, sys, tomllib
-path = os.environ["KAYA_IDENTITY_MANIFEST"]
-with open(path, "rb") as handle:
-    app_id = tomllib.load(handle).get("id", "")
-if not app_id:
-    sys.exit(f"notify-leg: {path} declares no top-level `id`")
-print(app_id)')"
+# THE ACTIVATION FILES ARE THE GENERATOR'S (docs/packaging-plan.md P5),
+# so this leg runs what an installed app has: tools/linux/install-desktop.py
+# stages `<id>.desktop`, the D-Bus service file naming the same id, and the
+# mark in the hicolor theme into this leg's own XDG_DATA_HOME, and prints
+# the declared app id — read, never spelled (docs/tasks-s3-plan.md N4), so
+# the activation files cannot name a different app from the one that posts.
+kaya_app_id="$(python3 /work/tools/linux/install-desktop.py \
+    "$XDG_DATA_HOME" "$@")"
 kaya_id_rc=$?
 if [ "$kaya_id_rc" -ne 0 ] || [ -z "$kaya_app_id" ]; then
-    echo "notify-leg: the identity manifest declares no reverse-DNS id, so" \
-        "this leg has no name to install activation files under." >&2
+    echo "notify-leg: the app's desktop entry could not be installed, so" \
+        "this leg has no activation route and no name to post under." >&2
     rm -rf "$kaya_home"
     exit 1
 fi
-
-# THE TWO ACTIVATION FILES. Exec names the guest binary, which is what the
-# portal launches when a click arrives with nothing of ours running — AND
-# IT MUST BE ABSOLUTE: GLib refuses to build a GDesktopAppInfo whose Exec
-# program it cannot resolve, and the portal then answers a Register with
-# "App info not found for '<id>'" (measured 2026-09-08, when this lane
-# passed a relative wrapper path: every reminder in the tasks scene went
-# unposted because the capability read false, and the guest said so in its
-# own words rather than naming a cause).
-kaya_exec="$(python3 - "$@" <<'KAYA_ABS'
-import os
-import shutil
-import sys
-
-argv = list(sys.argv[1:])
-if not os.path.isabs(argv[0]):
-    # NOT `shutil.which` ALONE: a name with a slash in it is checked in
-    # place and returned AS GIVEN, so `tools/linux/a11y-leg.sh` came back
-    # relative and the portal refused the app id all the same.
-    found = None if os.sep in argv[0] else shutil.which(argv[0])
-    argv[0] = os.path.abspath(found or argv[0])
-if not os.path.isabs(argv[0]) or not os.path.exists(argv[0]):
-    sys.exit(f"notify-leg: {argv[0]} is not an absolute path that exists, "
-             f"so the desktop entry's Exec would name a program the portal "
-             f"cannot resolve")
-print(" ".join(argv))
-KAYA_ABS
-)"
-kaya_exec_rc=$?
-if [ "$kaya_exec_rc" -ne 0 ] || [ -z "$kaya_exec" ]; then
-    echo "notify-leg: could not build an absolute Exec line for $*" >&2
-    rm -rf "$kaya_home"
-    exit 1
-fi
-cat >"$XDG_DATA_HOME/applications/$kaya_app_id.desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=kaya notification leg
-Exec=$kaya_exec
-DBusActivatable=true
-NoDisplay=true
-DESKTOP
-cat >"$XDG_DATA_HOME/dbus-1/services/$kaya_app_id.service" <<SERVICE
-[D-BUS Service]
-Name=$kaya_app_id
-Exec=$kaya_exec
-SERVICE
 
 # AND THE ENTRY IS ASSERTED THROUGH THE SAME READER THE PORTAL USES: an
 # entry GLib will not load leaves the guest with no route at all, which

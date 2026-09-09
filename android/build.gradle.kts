@@ -18,6 +18,8 @@ data class KayaIdentity(
     val icon: File,
     val launchBackground: String,
     val launchIcon: File,
+    /** Where it was all declared, so a refusal below can name it once. */
+    val manifest: File,
 )
 
 fun kayaReadIdentity(repoRoot: File): KayaIdentity {
@@ -114,7 +116,7 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "is not there."
         )
     }
-    return KayaIdentity(name, icon, background, launchIcon)
+    return KayaIdentity(name, icon, background, launchIcon, manifest)
 }
 
 val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
@@ -177,11 +179,24 @@ subprojects {
         packagedAssets.deleteRecursively()
         kayaAssetRoot.copyRecursively(packagedAssets, overwrite = true)
 
-        val generatedRes = layout.buildDirectory.dir("generated/kaya-identity/res").get().asFile
-        val mipmap = File(generatedRes, "mipmap")
-        mipmap.mkdirs()
-        val packaged = File(mipmap, "kaya_mark.png")
-        kayaIdentity.icon.copyTo(packaged, overwrite = true)
+        // THE LAUNCHER MIPMAPS ARE RESAMPLED, NEVER STRETCHED
+        // (docs/packaging-plan.md P6): an unqualified mipmap is mdpi and every
+        // denser device blew it up. tools/lib/packaging/android.py resamples
+        // one density set from the DECLARED FILE and the lane runs it before
+        // every assemble. Gradle packages what is there and says what to run
+        // when it is not: this build has no python of its own, and a silently
+        // skipped icon set is an APK with the system's default launcher mark.
+        val generatedRes = File(rootDir.parentFile, "target/android-identity/res")
+        if (!File(generatedRes, "mipmap-mdpi/kaya_mark.png").isFile) {
+            throw GradleException(
+                "kaya: ${generatedRes.path} carries no mipmap-mdpi/kaya_mark.png, so this " +
+                    "APK would have no launcher icon at all. The mark is resampled at every " +
+                    "density from ${kayaIdentity.manifest.path} (docs/packaging-plan.md P6): " +
+                    "run `tools/package.py android --out ${generatedRes.path}` first. The " +
+                    "android lane does it for you in tools/android/run-emulator.py's " +
+                    "gradle_assemble."
+            )
+        }
 
         extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
             defaultConfig {

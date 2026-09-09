@@ -25,8 +25,9 @@ import subprocess
 import tempfile
 import threading
 import time
-import tomllib
 
+from packaging import android as packaging_android
+from packaging import identity as app_identity
 from lanes import android as lane
 import exclusive
 import scene_cut
@@ -846,39 +847,27 @@ def asset_hashes_agree(serial, listing_text):
     return True
 
 
-KAYA_IDENTITY_MANIFEST = ROOT / "guests/assets/identity.toml"
-if not KAYA_IDENTITY_MANIFEST.is_file():
-    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} is missing — the app "
-        f"identity is declared there and the APK reads its icon and "
-        f"label from it (docs/app-identity-plan.md ruling 4)")
-ICON_REL = tomllib.loads(KAYA_IDENTITY_MANIFEST.read_text(
-    encoding="utf-8")).get("icon")
-if not isinstance(ICON_REL, str) or not ICON_REL.strip():
-    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares no `icon`, "
-        f"so there is no mark to push to any device")
-# Derived rather than retyped: apk_icon_verify hashes it against what
-# gradle packaged.
-ICON_SRC = ROOT / ICON_REL
+# THE DECLARED APP IDENTITY AND ITS LAUNCH SLOT, THROUGH THE ONE READER
+# (tools/lib/packaging/identity.py; docs/packaging-plan.md P1). Every
+# refusal is that reader's, so a half-spelled declaration reads the same
+# in every packaging step. apk_icon_verify and apk_launch_verify hold
+# what gradle packaged against these.
+KAYA_IDENTITY_MANIFEST = ROOT / app_identity.MANIFEST
+try:
+    DECLARED = app_identity.load(ROOT)
+except app_identity.Undeclared as _exc:
+    die(f"run-emulator: {_exc}")
+ICON_REL = DECLARED.icon
+ICON_SRC = DECLARED.icon_path
+LAUNCH_BG = DECLARED.launch_background
+LAUNCH_IMAGE_REL = DECLARED.launch_image
+LAUNCH_IMAGE_SRC = DECLARED.launch_image_path
 
-# THE LAUNCH SLOT, out of the same declaration (docs/tasks-s2-plan.md
-# T4). apk_launch_verify holds what gradle packaged to both halves.
-_LAUNCH = tomllib.loads(KAYA_IDENTITY_MANIFEST.read_text(
-    encoding="utf-8")).get("launch")
-if not isinstance(_LAUNCH, dict):
-    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares no `[launch]` "
-        f"table, so every APK this lane builds would show the platform's "
-        f"window background between the tap and the first frame")
-LAUNCH_BG = _LAUNCH.get("background")
-if not isinstance(LAUNCH_BG, str) or not re.fullmatch(
-        r"#[0-9A-Fa-f]{6}", LAUNCH_BG):
-    die(f"run-emulator: {KAYA_IDENTITY_MANIFEST} declares `[launch] "
-        f"background = {LAUNCH_BG!r}`, which is not #RRGGBB")
-# `image` DEFAULTS TO `icon`.
-LAUNCH_IMAGE_REL = _LAUNCH.get("image", ICON_REL)
-LAUNCH_IMAGE_SRC = ROOT / LAUNCH_IMAGE_REL
-if not LAUNCH_IMAGE_SRC.is_file():
-    die(f"run-emulator: the declared launch image {LAUNCH_IMAGE_REL} is "
-        f"missing from this tree")
+# WHERE THE RENDERED LAUNCHER MIPMAPS GO (docs/packaging-plan.md P6).
+# android/build.gradle.kts adds this as a res source set and REFUSES a
+# build without it, naming this runner: the densities are rendered by
+# python (tools/lib/packaging/android.py) and gradle only packages them.
+IDENTITY_RES = ROOT / "target/android-identity/res"
 
 
 def assets_prepare(serial):
@@ -1919,39 +1908,48 @@ def kaya_write_compose_marker():
 
 
 def apk_icon_verify(apk):
-    """The bytes INSIDE the apk gradle just wrote against the bytes
-    guests/assets/identity.toml declares. HERE AND NOT IN A GATE, so the
-    wall is on the path nobody can avoid (invariant 3). The entry name
-    is android/build.gradle.kts's, which pins isCrunchPngs = false so
-    aapt cannot re-encode behind this."""
-    if run(["unzip", "-l", str(apk), "res/mipmap/kaya_mark.png"],
-           stdout=subprocess.DEVNULL,
-           stderr=subprocess.DEVNULL).returncode != 0:
-        print(f"run-emulator: {apk} carries no res/mipmap/kaya_mark.png "
-              f"— the app", file=sys.stderr)
-        print("  identity's picture never reached the package, so its "
-              "launcher icon", file=sys.stderr)
-        print("  is whatever Android draws for an app that declares "
-              "none", file=sys.stderr)
-        print(f"  (android/build.gradle.kts is the reader; {ICON_REL} "
-              f"is the source)", file=sys.stderr)
-        return False
-    declared = hashlib.sha256(ICON_SRC.read_bytes()).hexdigest()
-    packaged_bytes = subprocess.run(
-        ["unzip", "-p", str(apk), "res/mipmap/kaya_mark.png"],
-        stdout=subprocess.PIPE, check=False).stdout
-    packaged = hashlib.sha256(packaged_bytes).hexdigest()
-    if declared != packaged:
-        print(f"run-emulator: the mark inside {apk} is not the declared "
-              f"one.", file=sys.stderr)
-        print(f"  declared ({ICON_REL}): {declared}", file=sys.stderr)
-        print(f"  packaged (res/mipmap/kaya_mark.png): {packaged}",
-              file=sys.stderr)
-        print("  One picture is the picture on all five platforms "
-              "(ruling 1); two", file=sys.stderr)
-        print("  readers that disagree is the failure ruling 4 exists "
-              "to prevent.", file=sys.stderr)
-        return False
+    """The bytes INSIDE the apk gradle just wrote against the bytes the
+    ARM produced (tools/lib/packaging/android.py `apk_entries`, which is
+    also what wrote them). HERE AND NOT IN A GATE, so the wall is on the
+    path nobody can avoid (invariant 3). android/build.gradle.kts pins
+    isCrunchPngs = false so aapt cannot re-encode behind this.
+
+    EVERY DENSITY, not the unqualified entry alone (docs/packaging-plan.md
+    P6): the launcher draws the density that matches the device, so a
+    rendered set that half arrived would be invisible to a check that read
+    only the fallback."""
+    want = packaging_android.apk_entries(ROOT)
+    for entry, data in sorted(want.items()):
+        if run(["unzip", "-l", str(apk), entry],
+               stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL).returncode != 0:
+            print(f"run-emulator: {apk} carries no {entry} — the app",
+                  file=sys.stderr)
+            print("  identity's picture never reached the package, so its "
+                  "launcher icon", file=sys.stderr)
+            print("  is whatever Android draws for an app that declares "
+                  "none", file=sys.stderr)
+            print(f"  (android/build.gradle.kts packages what "
+                  f"{IDENTITY_RES} holds; {ICON_REL} is the source)",
+                  file=sys.stderr)
+            return False
+        declared = hashlib.sha256(data).hexdigest()
+        packaged = hashlib.sha256(subprocess.run(
+            ["unzip", "-p", str(apk), entry],
+            stdout=subprocess.PIPE, check=False).stdout).hexdigest()
+        if declared != packaged:
+            print(f"run-emulator: the mark inside {apk} is not the one "
+                  f"the arm rendered.", file=sys.stderr)
+            print(f"  rendered from {ICON_REL}: {declared}",
+                  file=sys.stderr)
+            print(f"  packaged ({entry}): {packaged}", file=sys.stderr)
+            print("  One picture is the picture on all five platforms "
+                  "(ruling 1); two", file=sys.stderr)
+            print("  readers that disagree is the failure ruling 4 exists "
+                  "to prevent.", file=sys.stderr)
+            return False
+    print(f"identity: {len(want)} launcher mipmaps inside "
+          f"{apk.name}, every one the arm's own bytes")
     return True
 
 
@@ -2250,6 +2248,12 @@ def fresh_jnilibs(path):
 
 
 def gradle_assemble(module):
+    """THE ONE ASSEMBLE FUNNEL, and where the launcher mipmaps are
+    rendered (docs/packaging-plan.md P6): every suite's build comes
+    through here, so a density set cannot be missed by one of them.
+    Gradle only packages what this wrote — it refuses a build whose
+    IDENTITY_RES is absent, naming this runner."""
+    packaging_android.write_res(ROOT, IDENTITY_RES)
     return run(["gradle", "--console=plain", "-q",
                 f":{module}:assembleDebug"],
                cwd=ROOT / "android").returncode == 0

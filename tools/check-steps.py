@@ -2310,7 +2310,87 @@ VERB_TRACE_EXEMPT = {
 }
 
 
-def launcher_problems(leg, text):
+# THE PACKAGED LEGS' LAUNCHER PAIR (docs/packaging-plan.md P3). A packaged
+# leg does not run an exe out of C:\kaya: the outer .cmd hands the leg to
+# tools/guest/pkg-run.ps1, which gives the process package identity, and the
+# INNER .cmd is what sets the harness environment and runs the package's own
+# exe — because the caller's environment does NOT cross
+# Invoke-CommandInDesktopPackage (measured 2026-09-08). Two things no leg can
+# fail on its own: a `set KAYA_SELFTEST=` in the OUTER would be inert and the
+# leg would run the default scene, and an inner that left KAYA_ASSET_DIR alone
+# would read the deploy's asset root instead of the package's own, so the
+# package could ship no assets at all and the leg would still pass.
+def packaged_problems(leg, outer, inner):
+    scene = win_lane.PACKAGED_LEGS[leg]
+    inner_name = win_lane.packaged_inner(leg)
+    outer = outer.replace("\r\n", "\n")
+    bad = []
+    # The package carries the exe, so no launcher names one out of C:\kaya and
+    # check-staging's `<name>.exe` census cannot see it: the scene has to be a
+    # scene the deploy BUILDS, or the package would ship nothing to run.
+    if scene not in set(win_lane.SCENES) | set(win_lane.DEPTH_SCENES):
+        bad.append(
+            f"tools/lib/lanes/win.py: PACKAGED_LEGS maps {leg} to {scene!r}, "
+            f"which is in neither SCENES nor DEPTH_SCENES — the deploy never "
+            f"builds that exe, so the package would carry nothing to run")
+    for want, why in (
+        ("pkg-run.ps1",
+         "does not go through tools/guest/pkg-run.ps1, so nothing gives the "
+         "process package identity"),
+        (f"-AppId {scene}",
+         f"names no -AppId {scene} — Invoke-CommandInDesktopPackage needs the "
+         f"manifest's <Application Id>"),
+        (f"-Inner {inner_name}",
+         f"names no -Inner {inner_name}, so no launcher runs inside the "
+         f"package"),
+        (f"out_{leg}-invoke.txt",
+         "keeps no invoke log — a pkg-run.ps1 that fails starts nothing and "
+         "the runner then waits out its whole deadline in silence (measured "
+         "2026-09-08: 298s and not one sentence)"),
+        (f"echo EXIT=1 >> C:\\kaya\\out_{leg}.txt",
+         "writes no EXIT= when the invoke fails, so the leg dies of the "
+         "runner's timeout instead of naming its cause"),
+    ):
+        if want not in outer:
+            bad.append(f"tools/guest/{win_lane.launcher(leg)}: {why}")
+    if "set KAYA_SELFTEST=" in outer:
+        bad.append(
+            f"tools/guest/{win_lane.launcher(leg)}: sets KAYA_SELFTEST, which "
+            f"never reaches the packaged process — the caller's environment "
+            f"does not cross Invoke-CommandInDesktopPackage, so the leg would "
+            f"run the default scene while this line said otherwise")
+    if inner is None:
+        bad.append(
+            f"tools/guest/{inner_name}: does not exist — the packaged leg "
+            f"would start nothing and wait out its whole deadline")
+        return bad
+    inner = inner.replace("\r\n", "\n")
+    for want, why in (
+        (verb_trace_line(leg),
+         "lacks the verb-trace line — a failed verdict inside the package "
+         "dumps no trace for the flight recorder to pull"),
+        (f"set KAYA_SELFTEST={scene}\n",
+         f"does not set KAYA_SELFTEST={scene}; the environment reaches the "
+         f"packaged process from HERE and nowhere else"),
+        ("set KAYA_ASSET_DIR=\n",
+         "does not CLEAR KAYA_ASSET_DIR — the deploy sets it machine-wide "
+         "with setx and a packaged process inherits it, so the leg would read "
+         "the deploy's asset root and the package could ship none at all"),
+        (f'"%~1\\{scene}.exe"',
+         f"does not run %~1\\{scene}.exe — the package's own copy, under the "
+         f"install location pkg-run.ps1 passes as %1"),
+        (f"out_{leg}.txt",
+         f"writes no C:\\kaya\\out_{leg}.txt, which is the file the runner "
+         f"waits on"),
+    ):
+        if want not in inner:
+            bad.append(f"tools/guest/{inner_name}: {why}")
+    return bad
+
+
+def launcher_problems(leg, text, inner=None):
+    if leg in win_lane.PACKAGED_LEGS:
+        return packaged_problems(leg, text, inner)
     if leg in VERB_TRACE_EXEMPT:
         if "set KAYA_SELFTEST=" in text:
             return [f"tools/guest/{win_lane.launcher(leg)}: exempt from the "
@@ -2337,8 +2417,14 @@ def launchers():
                   f"in silence", file=sys.stderr)
             failed = 1
             continue
+        inner = None
+        if leg in win_lane.PACKAGED_LEGS:
+            inner_path = ROOT / "tools" / "guest" / win_lane.packaged_inner(leg)
+            if inner_path.is_file():
+                inner = inner_path.read_text(encoding="utf-8", errors="replace")
         for problem in launcher_problems(
-                leg, path.read_text(encoding="utf-8", errors="replace")):
+                leg, path.read_text(encoding="utf-8", errors="replace"),
+                inner):
             print(f"check-steps: {problem}", file=sys.stderr)
             failed = 1
     return failed
@@ -2357,6 +2443,243 @@ if not launcher_problems("todos_rust", _cut):
     selftest_fail("a launcher without its verb-trace line passed")
 if launcher_problems("todos_rust", _launcher_text):
     selftest_fail("the real todos_rust launcher was refused")
+
+# A GUEST PAYLOAD IS READ AS ANSI, SO A NON-ASCII BYTE OUTSIDE A COMMENT IS A
+# PARSE ERROR WAITING (measured 2026-09-08, docs/traps.md). PowerShell 5.1 and
+# cmd.exe read a BOM-less file in the machine's ANSI code page, which on this
+# guest is Windows-1252: an em dash's three UTF-8 bytes become three
+# characters and the last of them, 0x94, is a RIGHT DOUBLE QUOTATION MARK. In
+# a comment that is inert, which is why forty checked-in payloads carry one
+# happily; inside a STRING it CLOSES the string, and the rest of the file
+# parses as something else — tools/guest/pkg-run.ps1 died that way with the
+# error reported twelve lines below the em dash, and the leg it broke waited
+# out its whole 298s deadline saying nothing.
+def ansi_payload_problems(name, text):
+    comment = {"ps1": "#", "cmd": ("rem", "::")}["ps1" if name.endswith(".ps1")
+                                                  else "cmd"]
+    bad = []
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.lstrip()
+        lowered = stripped.lower()
+        if isinstance(comment, tuple):
+            if lowered.startswith("::") or lowered.startswith("rem "):
+                continue
+        elif stripped.startswith(comment):
+            continue
+        stray = [ch for ch in line if ord(ch) > 127]
+        if stray:
+            bad.append(
+                f"tools/guest/{name}:{number}: {stray[0]!r} outside a comment "
+                f"— the guest reads this file in its ANSI code page, where an "
+                f"em dash ends in 0x94, a closing double quote, and the "
+                f"parse of everything after it is somebody else's problem")
+    return bad
+
+
+_ansi_ok = "Write-Output 'fine'\n# an em dash — in a comment is inert\n"
+_ansi_bad = "Write-Output 'an em dash — in a string is not'\n"
+if ansi_payload_problems("probe.ps1", _ansi_ok):
+    selftest_fail("an em dash in a comment was refused")
+if not ansi_payload_problems("probe.ps1", _ansi_bad):
+    selftest_fail("an em dash in a string passed")
+if ansi_payload_problems("probe.cmd", "rem an em dash — in a rem is inert\n"):
+    selftest_fail("an em dash in a rem was refused")
+if not ansi_payload_problems("probe.cmd", "echo an em dash — is not\n"):
+    selftest_fail("an em dash in an echo passed")
+# And the shipped defect itself: pkg-run.ps1's own sentence before the fix.
+_shipped = (ROOT / "tools/guest/pkg-run.ps1").read_text(encoding="utf-8")
+_broken, _n = sub_count(r"is missing - the package was never staged",
+                        "is missing \u2014 the package was never staged",
+                        _shipped)
+print(f"check-steps: self-test the ANSI payload rule against pkg-run.ps1's "
+      f"own shipped defect, {_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the ANSI payload negative perturbed nothing")
+if not ansi_payload_problems("pkg-run.ps1", _broken):
+    selftest_fail("the em dash that broke pkg-run.ps1's parse passed")
+
+_ansi = []
+for _p in sorted((ROOT / "tools/guest").glob("*.ps1")) + sorted(
+        (ROOT / "tools/guest").glob("*.cmd")):
+    _ansi += ansi_payload_problems(
+        _p.name, _p.read_text(encoding="utf-8", errors="replace"))
+print(f"check-steps: {len(list((ROOT / 'tools/guest').glob('*.ps1')))} guest "
+      f".ps1 and {len(list((ROOT / 'tools/guest').glob('*.cmd')))} .cmd read "
+      f"for non-ASCII outside a comment")
+if _ansi:
+    status = 1
+    print("\n".join(f"check-steps: {problem}" for problem in _ansi),
+          file=sys.stderr)
+
+
+# THE PACKAGED APP'S RUNTIME COMES FROM ITS PACKAGE GRAPH, and the version it
+# asks for is spelled twice. A packaged process cannot use the bootstrapper —
+# MddBootstrapInitialize2 answers 0x80070032, ERROR_NOT_SUPPORTED — so
+# crates/kaya/src/winui/mod.rs's WASDK_MAJOR_MINOR governs the UNPACKAGED half
+# and the manifest's <PackageDependency MinVersion> the packaged one. Bump one
+# and every packaged leg dies at its first line with no runtime.
+def runtime_version_drift(backend, arm):
+    packed = re.search(r"WASDK_MAJOR_MINOR: u32 = 0x([0-9A-Fa-f_]+)", backend)
+    declared = re.search(r'RUNTIME_MIN_VERSION = "(\d+)\.(\d+)\.', arm)
+    if not packed:
+        return ["crates/kaya/src/winui/mod.rs declares no WASDK_MAJOR_MINOR — "
+                "the constant this clause pins moved"]
+    if not declared:
+        return ["tools/lib/packaging/windows.py declares no "
+                "RUNTIME_MIN_VERSION — the manifest's framework dependency "
+                "moved"]
+    value = int(packed.group(1).replace("_", ""), 16)
+    want = (value >> 16, value & 0xFFFF)
+    got = (int(declared.group(1)), int(declared.group(2)))
+    if want != got:
+        return [f"the bootstrapper asks for Windows App SDK "
+                f"{want[0]}.{want[1]} (WASDK_MAJOR_MINOR) and the package "
+                f"manifest declares a dependency on {got[0]}.{got[1]} "
+                f"(RUNTIME_MIN_VERSION) — the unpackaged and packaged halves "
+                f"of one app would load different runtimes"]
+    return []
+
+
+_backend = (ROOT / "crates/kaya/src/winui/mod.rs").read_text(encoding="utf-8")
+_arm = (ROOT / "tools/lib/packaging/windows.py").read_text(encoding="utf-8")
+if runtime_version_drift(_backend, _arm):
+    selftest_fail("the real WASDK version pair was refused")
+_drifted, _n = sub_count(r'RUNTIME_MIN_VERSION = "2\.2\.',
+                         'RUNTIME_MIN_VERSION = "2.9.', _arm)
+print(f"check-steps: self-test the packaged runtime version drifted, "
+      f"{_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the runtime-version negative perturbed nothing")
+if not runtime_version_drift(_backend, _drifted):
+    selftest_fail("a drifted packaged runtime version passed")
+if not runtime_version_drift("", _arm):
+    selftest_fail("a backend with no WASDK_MAJOR_MINOR passed")
+for problem in runtime_version_drift(_backend, _arm):
+    status = 1
+    print(f"check-steps: {problem}", file=sys.stderr)
+
+
+# A POINTER LEG IS NEVER POOLED (tools/lib/lanes/win.py's POINTER_VERBS). The
+# tile a pooled leg draws is a POSITION: slots 4 and 5 sit at y=786 on the
+# VM's 800-tall screen, and a `drag` from a window there aims below the
+# desktop. The roster read is the LANE MODULE's own, so the gate and the
+# runner cannot disagree, and the negative is the shipped defect itself — the
+# packaged tasks leg folded back into the pool it failed in.
+def load_win_lane_from(text):
+    import importlib.util
+    scratch = tempfile.mkdtemp()
+    path = pathlib.Path(scratch) / "win.py"
+    path.write_text(text, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("kaya_win_pointer", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    shutil.rmtree(scratch, ignore_errors=True)
+    return module
+
+
+_lane_text = (ROOT / "tools/lib/lanes/win.py").read_text(encoding="utf-8")
+_scenes_dir = ROOT / "tools/scenes"
+if not win_lane.pointer_scenes(_scenes_dir):
+    selftest_fail("no scene uses a pointer verb — the census reads nothing "
+                  "and would agree with anything")
+_pooled = win_lane.pooled_pointer_legs(_scenes_dir)
+if _pooled:
+    status = 1
+    for _leg, _verb in sorted(_pooled.items()):
+        print(f"check-steps: the win lane pools leg {_leg}, whose scene runs "
+              f"`{_verb}` — a verb that aims at SCREEN COORDINATES. Tile "
+              f"slots 4 and 5 leave this VM's screen, so the pool can place "
+              f"that window where the drag's source does not exist. Give it "
+              f"a block of its own.", file=sys.stderr)
+_folded, _n1 = sub_count(r'    \[\n     "taskspkg_rust",\n    \],\n', "",
+                         _lane_text)
+_folded, _n2 = sub_count(r'(\n     "notifypkg_rust",\n)',
+                         '\\1     "taskspkg_rust",\n', _folded)
+print(f"check-steps: self-test the packaged tasks leg folded back into the "
+      f"pool, {_n1} removal(s), {_n2} insertion(s)")
+if _n1 != 1 or _n2 != 1:
+    selftest_fail("the pooled-pointer negative perturbed nothing")
+_doctored = load_win_lane_from(_folded)
+if not _doctored.pooled_pointer_legs(_scenes_dir):
+    selftest_fail("a pooled drag leg passed")
+print(f"check-steps: {len(win_lane.pointer_scenes(_scenes_dir))} pointer "
+      f"scene(s), no leg of one pooled")
+
+
+# THE PACKAGE INVOKER'S ONE LOAD-BEARING FLAG. Without -PreventBreakaway the
+# process Invoke-CommandInDesktopPackage launches has NO package identity at
+# all — measured 2026-09-08 on the VM, `Package.Current` throws 0x80073D54 and
+# GetCurrentApplicationUserModelId answers APPMODEL_ERROR_NO_APPLICATION — so
+# every packaged leg would run as an ordinary exe out of the install directory
+# and PASS while proving nothing about packaging.
+def packaged_invoker(text):
+    # THE CALL, NOT THE PROSE: this file's own header explains why the flag is
+    # there, and a comment saying so is not the flag (check-appearance's
+    # lesson).
+    text = "\n".join("" if line.lstrip().startswith("#") else line
+                     for line in text.splitlines())
+    bad = []
+    for want, why in (
+        ("Invoke-CommandInDesktopPackage",
+         "no longer invokes anything in the package"),
+        ("-PreventBreakaway",
+         "does not pass -PreventBreakaway, so the launched process has no "
+         "package identity and every packaged leg would pass while running "
+         "as an ordinary exe"),
+    ):
+        if want not in text:
+            bad.append(f"tools/guest/pkg-run.ps1: {why}")
+    return bad
+
+
+_invoker = (ROOT / "tools/guest/pkg-run.ps1").read_text(encoding="utf-8")
+if packaged_invoker(_invoker):
+    selftest_fail("the real pkg-run.ps1 was refused")
+_invoker_code = "\n".join("" if line.lstrip().startswith("#") else line
+                          for line in _invoker.splitlines())
+_cut, _n = sub_count(r"-PreventBreakaway", "", _invoker_code)
+print(f"check-steps: self-test pkg-run.ps1's -PreventBreakaway cut, "
+      f"{_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the -PreventBreakaway negative perturbed nothing")
+if not packaged_invoker(_cut):
+    selftest_fail("a pkg-run.ps1 without -PreventBreakaway passed")
+if packaged_invoker(_invoker):
+    status = 1
+    print("check-steps: tools/guest/pkg-run.ps1 strays from the shape a "
+          "packaged leg needs", file=sys.stderr)
+
+# Watched: every clause of the packaged pair, each perturbed on a COPY of the
+# real files with the substitution count printed.
+_pkg_leg = "notifypkg_rust"
+_pkg_outer = (ROOT / "tools/guest" / win_lane.launcher(_pkg_leg)).read_text(
+    encoding="utf-8", errors="replace")
+_pkg_inner = (ROOT / "tools/guest" / win_lane.packaged_inner(_pkg_leg)).read_text(
+    encoding="utf-8", errors="replace")
+if launcher_problems(_pkg_leg, _pkg_outer, _pkg_inner):
+    selftest_fail("the real packaged launcher pair was refused")
+if not launcher_problems(_pkg_leg, _pkg_outer, None):
+    selftest_fail("a packaged leg with no inner launcher passed")
+for _what, _pattern, _repl, _half in (
+    ("the inner's KAYA_ASSET_DIR clear", r"set KAYA_ASSET_DIR=\r?\n", "", "inner"),
+    ("the inner's verb-trace line",
+     re.escape(verb_trace_line(_pkg_leg)) + r"\r?\n", "", "inner"),
+    ("the inner's KAYA_SELFTEST", r"set KAYA_SELFTEST=notify",
+     "set KAYA_SELFTEST=todos", "inner"),
+    ("the inner's own exe", r"%~1\\notify\.exe", "%~1\\todos.exe", "inner"),
+    ("the outer's invoker", r"pkg-run\.ps1", "pkg-walk.ps1", "outer"),
+    ("a KAYA_SELFTEST added to the outer", r"cd /d C:\\kaya\r?\n",
+     "cd /d C:\\\\kaya\nset KAYA_SELFTEST=notify\n", "outer"),
+):
+    _base = _pkg_inner if _half == "inner" else _pkg_outer
+    _doctored, _n = sub_count(_pattern, _repl, _base)
+    print(f"check-steps: self-test {_what}, {_n} substitution(s)")
+    if _n != 1:
+        selftest_fail(f"the packaged negative for {_what} perturbed nothing")
+    _outer = _pkg_outer if _half == "inner" else _doctored
+    _inner = _doctored if _half == "inner" else _pkg_inner
+    if not launcher_problems(_pkg_leg, _outer, _inner):
+        selftest_fail(f"a packaged pair with {_what} broken passed")
 
 if launchers():
     status = 1

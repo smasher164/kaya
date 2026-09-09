@@ -3681,20 +3681,56 @@ impl IdentityIcon {
                         texture.height(),
                     )
                 } else {
+                    // A LEG PARSES THIS SENTENCE, so its phrase is an interface:
+                    // tools/lib/identity_phrases.py owns it and
+                    // tools/check-app-identity.py's C13 holds this arm to printing
+                    // it. Reword around it, never through it.
                     format!(
-                        "kaya decoded the declared blob to a {}x{} texture and called \
-                         gdk_toplevel_set_icon_list with it on window {} (that call \
-                         returns nothing and GDK reads no icon back, so this clause is \
-                         a record of what this process did, not of what the platform \
-                         kept)",
+                        "kaya decoded the declared blob, scaled it to at most {}px a \
+                         side, and called gdk_toplevel_set_icon_list with it on window \
+                         {} (the texture is {}x{}; that call returns nothing and GDK \
+                         reads no icon back, so this clause is a record of what this \
+                         process did, not of what the platform kept)",
+                        IDENTITY_ICON_MAX,
+                        windows(),
                         texture.width(),
                         texture.height(),
-                        windows(),
                     )
                 }
             }
         }
     }
+}
+
+/// THE LARGEST ICON X11 WILL ACTUALLY TAKE (measured 2026-09-08, the linux
+/// lane's eight x11 identity legs). GDK turns the icon list into
+/// `_NET_WM_ICON`, a CARDINAL array on the toplevel: a 1024x1024 texture is
+/// a megapixel of 32-bit words, the property never lands, and it is ABSENT
+/// with no error anywhere — the read finds no icon on any toplevel and the
+/// app wears the platform's default. The declared file is a SOURCE now
+/// (docs/packaging-plan.md P2), so this lowering scales it down exactly as a
+/// packaging step does; 128 is the largest size a titlebar, an alt-tab
+/// switcher or a taskbar draws.
+const IDENTITY_ICON_MAX: i32 = 128;
+
+/// The declared blob as a texture no larger than [`IDENTITY_ICON_MAX`] on a
+/// side. THE DECODE AND THE SCALE ARE BOTH THE PLATFORM'S: gdk-pixbuf reads
+/// the bytes and resizes them, and kaya inspects neither.
+fn identity_texture(blob: &[u8]) -> Result<gdk::Texture, glib::Error> {
+    let bytes = glib::Bytes::from(blob);
+    let texture = gdk::Texture::from_bytes(&bytes)?;
+    if texture.width() <= IDENTITY_ICON_MAX && texture.height() <= IDENTITY_ICON_MAX {
+        return Ok(texture);
+    }
+    let stream = gio::MemoryInputStream::from_bytes(&bytes);
+    let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_stream_at_scale(
+        &stream,
+        IDENTITY_ICON_MAX,
+        IDENTITY_ICON_MAX,
+        true,
+        gio::Cancellable::NONE,
+    )?;
+    Ok(gdk::Texture::for_pixbuf(&pixbuf))
 }
 
 /// Hand the declared mark to one window's `GdkToplevel`
@@ -9846,8 +9882,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.identity_icon = match &identity.icon {
                 None => IdentityIcon::Undeclared,
                 Some(blob) => {
-                    let bytes = glib::Bytes::from_owned(blob.0.clone());
-                    match gtk4::gdk::Texture::from_bytes(&bytes) {
+                    match identity_texture(&blob.0) {
                         Ok(texture) => IdentityIcon::Texture(texture),
                         Err(why) => {
                             kaya_diag!(

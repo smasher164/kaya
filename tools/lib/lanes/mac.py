@@ -315,26 +315,6 @@ RUST_GUESTS = "target/rust-guests"
 # rest stay bare executables (docs/deferred.md: an unbundled launch walks its
 # siblings, which is why the staging directory is small).
 BUNDLED_SCENES = {"notify", "tasks"}
-IDENTITY_MANIFEST = "guests/assets/identity.toml"
-
-
-def app_identity(root):
-    """The manifest's name, mark and reverse-DNS id — read, never spelled
-    (docs/tasks-s3-plan.md N4): the wrapper bundle is a BUILD, and a build
-    reads the declaration (tools/check-app-identity.py)."""
-    import tomllib
-    manifest = tomllib.loads((root / IDENTITY_MANIFEST).read_text(encoding="utf-8"))
-    ident = manifest.get("id", "")
-    if not ident or "." not in ident:
-        raise SystemExit(f"mac lane: {IDENTITY_MANIFEST} declares no reverse-DNS `id`")
-    name, icon = manifest.get("name", ""), manifest.get("icon", "")
-    if not name or not icon or not (root / icon).is_file():
-        raise SystemExit(f"mac lane: {IDENTITY_MANIFEST} must declare `name` and an `icon` that exists")
-    return name, icon, ident
-
-
-def app_id(root):
-    return app_identity(root)[2]
 
 
 def rust_guest_path(stem):
@@ -348,15 +328,15 @@ def rust_guest_path(stem):
 def stage_rust(root, stems):
     """Copy built examples into the small staging directory — ONE COPY,
     validate-mac's whole roster and run-leg's one leg — wrapping the
-    bundled scenes: Info.plist from the manifest (CFBundleIdentifier =
-    `id`, LSUIElement so the lanes stay accessory), an ad-hoc signature,
-    and LaunchServices told about the bundle, without which the centre
-    answers "Notifications are not allowed for this application"
-    (measured 2026-09-08, tools/mac/notifyprobe). A fresh inode every
+    bundled scenes THROUGH THE GENERATOR'S MAC ARM
+    (tools/lib/packaging/mac.py, docs/packaging-plan.md P4), so the
+    bundle a leg runs and a bundle a user would double-click are
+    assembled by the same lines. `accessory` is the lane's own half: the
+    guests are LSUIElement and a shipped app is not. A fresh inode every
     time, or the kernel kills the guest at exec (docs/traps.md, "Code
     Signature Invalid")."""
     import shutil
-    import subprocess
+    from packaging import mac as packaging_mac
     staging = root / RUST_GUESTS
     staging.mkdir(parents=True, exist_ok=True)
     for stem in stems:
@@ -366,58 +346,8 @@ def stage_rust(root, stems):
             dest.unlink(missing_ok=True)
             shutil.copy2(built, dest)
             continue
-        app = staging / f"{stem}.app"
-        shutil.rmtree(app, ignore_errors=True)
-        macos = app / "Contents/MacOS"
-        macos.mkdir(parents=True)
-        shutil.copy2(built, macos / stem)
-        name, icon, ident = app_identity(root)
-        resources = app / "Contents/Resources"
-        resources.mkdir()
-        # The declared mark as the bundle's icon: Notification Center and the
-        # centre's permission sheet draw THIS, not the wire's Dock icon.
-        iconset = resources / "AppIcon.iconset"
-        iconset.mkdir()
-        # The mark is 64px, so the set stops at 32x32@2x (sips refuses an
-        # icns straight from a small png; iconutil takes the set).
-        steps = [(16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
-                 (32, "icon_32x32.png"), (64, "icon_32x32@2x.png")]
-        for px, member in steps:
-            sized = subprocess.run(
-                ["sips", "-z", str(px), str(px), str(root / icon), "--out", str(iconset / member)],
-                capture_output=True, text=True, encoding="utf-8")
-            if sized.returncode != 0:
-                raise SystemExit(f"mac lane: sips could not size {icon} to {px}px: "
-                                 f"{sized.stderr.strip() or sized.stdout.strip()}")
-        icns = subprocess.run(
-            ["iconutil", "-c", "icns", str(iconset), "-o", str(resources / "AppIcon.icns")],
-            capture_output=True, text=True, encoding="utf-8")
-        shutil.rmtree(iconset)
-        if icns.returncode != 0 or not (resources / "AppIcon.icns").is_file():
-            raise SystemExit(f"mac lane: iconutil could not write the bundle icon from {icon}: "
-                             f"{icns.stderr.strip() or icns.stdout.strip()}")
-        (app / "Contents/Info.plist").write_text(
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-            '<plist version="1.0">\n<dict>\n'
-            f'  <key>CFBundleExecutable</key><string>{stem}</string>\n'
-            f'  <key>CFBundleIdentifier</key><string>{ident}</string>\n'
-            f'  <key>CFBundleName</key><string>{name}</string>\n'
-            f'  <key>CFBundleDisplayName</key><string>{name}</string>\n'
-            '  <key>CFBundleIconFile</key><string>AppIcon</string>\n'
-            '  <key>CFBundlePackageType</key><string>APPL</string>\n'
-            '  <key>CFBundleShortVersionString</key><string>0.0</string>\n'
-            '  <key>LSUIElement</key><true/>\n'
-            '</dict>\n</plist>\n',
-            encoding="utf-8")
-        for cmd in (["codesign", "--force", "--sign", "-", str(app)],
-                    ["/System/Library/Frameworks/CoreServices.framework/Frameworks/"
-                     "LaunchServices.framework/Support/lsregister", "-f", str(app)]):
-            done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-            if done.returncode != 0:
-                raise SystemExit(f"mac lane: {cmd[0]} failed on {app}: "
-                                 f"{done.stderr.strip() or done.stdout.strip()}")
+        packaging_mac.bundle(root, built, staging, stem=stem,
+                             accessory=True)
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
 

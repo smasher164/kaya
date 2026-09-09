@@ -15,6 +15,11 @@ const (
 
 	markName = "icons/kaya-mark.png"
 
+	// SCENERY, and deliberately tiny: an image widget's intrinsic size
+	// drives layout and the DECLARED mark is a user-supplied source of any
+	// size (the images/ family's README). The mark is still opened.
+	pictureName = "images/a11y-logo.png"
+
 	// 111400 bytes: a reader that truncated into a fixed buffer shows here.
 	fontName = "fonts/sora-wght.ttf"
 )
@@ -35,6 +40,8 @@ func App() *kaya.App {
 
 		mark := tx.Asset(markName)
 		defer mark.Close()
+		picture := tx.Asset(pictureName)
+		defer picture.Close()
 		font := tx.Asset(fontName)
 		defer font.Close()
 
@@ -48,12 +55,17 @@ func App() *kaya.App {
 		title := tx.Signal("assets")
 		found := tx.Signal(census)
 		// %d renders with no separator and no padding, everywhere.
-		sizes := tx.Signal(fmt.Sprintf("%s: %d bytes, %s", fontName, font.Len(), verdict))
+		present := "missing"
+		if mark.Len() > 0 {
+			present = "present"
+		}
+		sizes := tx.Signal(fmt.Sprintf("%s %s, %s: %d bytes, %s",
+			markName, present, fontName, font.Len(), verdict))
 
 		tx.Mount(tx.Column(func() {
 			tx.Label(title) // label#0
 			// THE BYTES, not the blob handle.
-			tx.Image(mark.Bytes()) // image#0
+			tx.Image(picture.Bytes()) // image#0
 			tx.Label(found)        // label#1
 			tx.Label(sizes)        // label#2
 		}))

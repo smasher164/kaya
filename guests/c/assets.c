@@ -10,20 +10,24 @@
 #include <unistd.h> /* _exit: the app thread cannot return an exit code */
 
 /* Guest-allocated ids (tools/check-c-ids.py). CREATION ORDER IS READ BY
- * THE SCRIPT: label#0 title, image#0 mark, label#1 miss, label#2 size. */
+ * THE SCRIPT: label#0 title, image#0 picture, label#1 miss, label#2 size. */
 #define SIG_TITLE 1
 #define SIG_CENSUS 2
 #define SIG_SIZES 3
 
 #define W_COLUMN 1
 #define W_TITLE 2  /* label#0 */
-#define W_MARK 3   /* image#0 */
+#define W_PICTURE 3 /* image#0 */
 #define W_CENSUS 4 /* label#1 */
 #define W_SIZES 5  /* label#2 */
 
 /* Absent, and deliberately LEGAL, so the miss is the census sentence. */
 static const char MISSING[] = "icons/nope.png";
 static const char MARK[] = "icons/kaya-mark.png";
+/* SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+ * layout and the DECLARED mark is a user-supplied source of any size
+ * (the images/ family's README). The mark is still opened. */
+static const char PICTURE[] = "images/a11y-logo.png";
 static const char FONT[] = "fonts/sora-wght.ttf";
 
 /* Packed by hand: the generated setter closes the record BEFORE the value. */
@@ -78,10 +82,14 @@ static void build_scene(void) {
     window_prop(&tx, 0, KAYA_WPROP_HEIGHT, kaya_f64(360.0));
 
     uint64_t mark = open_or_die(MARK);
+    uint64_t picture = open_or_die(PICTURE);
     uint64_t font = open_or_die(FONT);
 
     /* The registration is valid for exactly ONE submit, referenced or not. */
-    uint64_t mark_blob = kaya_asset_blob(mark);
+    uint64_t picture_blob = kaya_asset_blob(picture);
+
+    uintptr_t mark_len = 0;
+    (void)kaya_asset_bytes(mark, &mark_len);
 
     /* The pointer borrows core memory until the release: copy, then release. */
     uintptr_t font_len = 0;
@@ -97,7 +105,8 @@ static void build_scene(void) {
     char complaint[1024];
     why_not(FONT, complaint, sizeof complaint);
     char sizes[1152];
-    snprintf(sizes, sizeof sizes, "%s: %zu bytes, %s", FONT, (size_t)font_len,
+    snprintf(sizes, sizeof sizes, "%s %s, %s: %zu bytes, %s", MARK,
+             mark_len > 0 ? "present" : "missing", FONT, (size_t)font_len,
              complaint[0] == '\0' ? "no complaint" : complaint);
 
     kaya_tx_create_signal(&tx, SIG_TITLE, kaya_str("assets"));
@@ -107,15 +116,15 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_TITLE, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_TITLE, SIG_TITLE);
-    kaya_tx_create_widget(&tx, W_MARK, KAYA_KIND_IMAGE);
-    kaya_tx_set_source(&tx, W_MARK, mark_blob);
+    kaya_tx_create_widget(&tx, W_PICTURE, KAYA_KIND_IMAGE);
+    kaya_tx_set_source(&tx, W_PICTURE, picture_blob);
     kaya_tx_create_widget(&tx, W_CENSUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_CENSUS, SIG_CENSUS);
     kaya_tx_create_widget(&tx, W_SIZES, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_SIZES, SIG_SIZES);
 
     kaya_tx_add_child(&tx, W_COLUMN, W_TITLE);
-    kaya_tx_add_child(&tx, W_COLUMN, W_MARK);
+    kaya_tx_add_child(&tx, W_COLUMN, W_PICTURE);
     kaya_tx_add_child(&tx, W_COLUMN, W_CENSUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_SIZES);
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
@@ -123,6 +132,7 @@ static void build_scene(void) {
     kaya_submit(tx.buf, tx.len);
 
     kaya_asset_release(mark);
+    kaya_asset_release(picture);
     kaya_asset_release(font);
 }
 

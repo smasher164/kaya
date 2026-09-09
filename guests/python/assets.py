@@ -10,6 +10,11 @@ MISSING = "icons/nope.png"
 
 MARK = "icons/kaya-mark.png"
 
+# SCENERY, and deliberately tiny: an image widget's intrinsic size drives
+# layout and the DECLARED mark is a user-supplied source of any size
+# (the images/ family's README). The mark is still opened.
+PICTURE = "images/a11y-logo.png"
+
 # 111400 bytes: a reader that truncated into a fixed buffer shows here.
 FONT = "fonts/sora-wght.ttf"
 
@@ -22,7 +27,8 @@ def first_line(sentence):
 
 
 with app.window(title="assets", width=480.0, height=360.0):
-    with kaya.asset(MARK) as mark, kaya.asset(FONT) as font:
+    with kaya.asset(MARK) as mark, kaya.asset(PICTURE) as picture, \
+            kaya.asset(FONT) as font:
         census = first_line(kaya.asset_miss_sentence(MISSING))
 
         complaint = kaya.asset_miss_sentence(FONT)
@@ -35,9 +41,11 @@ with app.window(title="assets", width=480.0, height=360.0):
         with kaya.column():
             kaya.label("assets")  # label#0
             # THE BYTES, not the blob handle.
-            kaya.image(mark.bytes())  # image#0
+            kaya.image(picture.bytes())  # image#0
             kaya.label(census)  # label#1
             # An int renders with no separator and no padding, everywhere.
-            kaya.label(f"{FONT}: {len(font)} bytes, {verdict}")  # label#2
+            present = "present" if len(mark) > 0 else "missing"
+            kaya.label(f"{MARK} {present}, "
+                       f"{FONT}: {len(font)} bytes, {verdict}")  # label#2
 
 sys.exit(app.run())
