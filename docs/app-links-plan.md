@@ -1,7 +1,10 @@
-# App links — a URL that opens the app on the thing it names (design pass, 2026-09-09)
+# App links — a URL that opens the app on the thing it names (rulings TAKEN 2026-09-09)
 
-This is the design pass; nothing here is built. Rulings are marked
-RECOMMEND for the maintainer. The slice after S4 (docs/tasks-s4-plan.md),
+Rulings proposed and TAKEN the same day, two of them amended by the
+maintainer's questions (L1: the scheme defaults to the declared id so the
+manifest needs nothing new; L2: the app declares ROUTES on its handlers
+and the core matches — "the ultimate surface is declaring the route that
+corresponds to a window"); §4 holds the mechanics decided for the build. The slice after S4 (docs/tasks-s4-plan.md),
 proposed when the maintainer asked how "some apps will take app links into
 specific windows/activities directly" — it is S9's mechanism (a process
 the platform starts, continuing a scene) with a door every platform can
@@ -207,3 +210,66 @@ and eight copies of the sentence, check-sugar-surface's clause). A lane's
 `RELAUNCH_DOOR` entry and the scene's `relaunch` line are ONE change
 (docs/tasks-s9-plan.md §3). One matrix, one review page with the link
 opening the task on all five.
+
+## 4. Mechanics decided for the build (2026-09-09)
+
+- **The scheme defaults to the declared id.** A reverse-DNS string is a
+  valid URL scheme (RFC 3986's `ALPHA *(ALPHA / DIGIT / "+" / "-" / ".")`)
+  and unique by construction, which is what Google's own OAuth schemes
+  are; so `dev.kaya.aurora.notes://task/t1` works with no declaration, and
+  `[links] scheme = "kaya"` is the optional override. `[links] hosts`
+  stays for web links. The tasks app declares nothing — the lanes drive the
+  default. Each backend's registration is held to accepting a dotted scheme
+  (the MSIX `uap:Protocol Name` pattern is the one to measure).
+- **Routes are declared in the app and matched ONCE, in the core.** A
+  TX record `declare_link_route { route: u64, pattern: str }` carries each
+  pattern to the core; the occurrence `link_opened { route: u64, url: str,
+  params: [(name, value)] }` comes back with the captures — `route` 0 and
+  no params for a URL no route matched, which the core ANNOUNCES on stderr
+  naming the URL and the patterns it tried, the standing silent-drop rule.
+  The pattern grammar: path segments split on `/`, `{name}` captures one
+  segment, a literal segment matches itself; the string matched is
+  everything after `<scheme>://` for the app's own scheme and everything
+  after the host for a declared web host; the query's pairs join the
+  params (a capture wins a name clash), the fragment is dropped. The
+  binding sugar is `Messages::link("task/{key}", |params| Msg)` in Rust
+  and each language's idiom for the other eight; a duplicate pattern or a
+  malformed one (an empty segment, an unclosed brace) is refused at the
+  declaration with a sentence the bindings mirror.
+- **One internal door in the core.** Every backend hands a URL to
+  `crate::links::opened(url: &str)` — thread-safe, queued when no app
+  thread exists yet and delivered first (S9's early queue, one more kind)
+  — and never parses anything itself. The platform arms: the raw
+  `kAEGetURL` Apple event on macOS, `onOpenURL` on iOS, the activity's
+  intent (`onCreate`'s and `onNewIntent`'s, `setIntent` first, consumed
+  once) on Android, GApplication's `open` signal with `HANDLES_OPEN` on
+  Linux, `GetActivatedEventArgs` of kind Protocol plus the redirected
+  `Activated` event on Windows, with `FindOrRegisterForKey` on the declared
+  id and the second process exiting the moment its redirect returns.
+- **The harness.** `open_link "<url>"` asks the platform from inside the
+  process (`NSWorkspace.shared.open`, `UIApplication.open`, `startActivity`
+  with VIEW, `g_app_info_launch_default_for_uri`, `ShellExecuteW`) and
+  returns once the app has answered it (the action rule of 2026-09-06);
+  `relaunch link "<url>"` is the cold door per lane: `open` on macOS,
+  `simctl openurl` on iOS with the simulator's one-time approval alert
+  answered through the lane's driver (`sb_tap Open`, remembered per
+  device), `am start -a android.intent.action.VIEW -d` on Android,
+  `gio open` on Linux (the desktop entry with `DBusActivatable=true` AND
+  the service file staged into the leg's XDG home), and on Windows a
+  ShellExecute from the console session through schtasks with the URL
+  handed in a file rather than a `%1`. The scene, `links.steps`: act one
+  `open_link` on a task (details pushed, the title read), back, `open_link`
+  on a section (`expect_section`), then `relaunch link` on t1; act two
+  reads t1's details and its reference. No frame steps; one cut for all
+  five lanes. RELAUNCH_DOOR["links"] = "link" on every lane.
+- **The tasks app.** `link("task/{key}", …)` onto the Details push it
+  already has, an unknown key answered by Inbox with a caption sentence;
+  `link("{section}", …)` selecting the named section, an unknown name
+  dropped with the caption's sentence.
+- **Windows and Android details from the measurements.** The unpackaged
+  registration is written beside the identity key at launch and the lane
+  removes `HKCU\Software\Classes\<scheme>` itself, since the SDK's
+  unregister leaves it; the activated process inherits the launching cmd's
+  environment, so the link door's .cmd carries XDG_STATE_HOME; the Android
+  activity is `singleTask`, and its `KAYA_*` environment mapping moves out
+  of `onCreate` so a warm start still maps it.
